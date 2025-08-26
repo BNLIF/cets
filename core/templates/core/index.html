@@ -1,7 +1,12 @@
 {% extends 'core/base.html' %}
+{% load static %}
 
 {% block content %}
 <h1>Cold Electronics Tracking System</h1>
+
+<div class="my-5">
+    <img src="{% static 'core/images/ce-diag.png' %}" class="img-fluid" alt="Cold Electronics Diagram" style="width: 70%;">
+</div>
 
 <!-- 
 <div x-data="{ open: false }">

@@ -1,0 +1,51 @@
+{% extends 'core/base.html' %}
+
+{% block content %}
+<div class="container">
+    <h1 class="mt-4">Frontend ASIC: {{ fe.serial_number }}</h1>
+    <div class="card">
+        <div class="card-body">
+            <h5 class="card-title">Details</h5>
+            <p class="card-text"><strong>Status:</strong> {{ fe.status }}</p>
+            <p class="card-text"><strong>Tray ID:</strong> {{ fe.tray_id }}</p>
+            <p class="card-text"><strong>Last Update:</strong> {{ fe.last_update|date:"Y-m-d H:i:s" }}</p>
+        </div>
+    </div>
+
+    <h2 class="mt-4">RTS Test Results</h2>
+    {% if rts_data %}
+        <div class="table-responsive">
+            <table class="table table-striped table-bordered">
+                <thead class="table-dark">
+                    <tr>
+                        {% for header in headers %}
+                            <th>{{ header|title }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rts_data %}
+                        <tr>
+                            {% for key, value in row.items %}
+                                {% if key != 'filename' %}
+                                    <td>
+                                        {% if key == 'temperature' %}
+                                            <a href="{% url 'rts_file_content' serial_number=fe.serial_number filename=row.filename %}" target="_blank">{{ value }}</a>
+                                        {% else %}
+                                            {{ value }}
+                                        {% endif %}
+                                    </td>
+                                {% endif %}
+                            {% endfor %}
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="alert alert-warning" role="alert">
+            No RTS data available for this FE crate.
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
