@@ -2,7 +2,7 @@
 
 {% block content %}
 <div class="container">
-    <h1 class="mt-4">Frontend ASIC</h1>
+    <h1 class="mt-4">Frontend ASIC (LArASIC)</h1>
 
     <!-- Search Bar -->
     <div class="my-4">
@@ -10,7 +10,7 @@
             <input name="q" class="form-control me-2" type="search" placeholder="Enter search term..." value="{{ search_query }}" aria-label="Search">
             <select name="by" class="form-select me-2" style="width: auto;">
                 <option value="sn" {% if search_by == 'sn' %}selected{% endif %}>Serial Number</option>
-                <option value="tray" {% if search_by == 'tray' %}selected{% endif %}>Tray ID</option>
+                <option value="tray" {% if search_by == 'tray' %}selected{% endif %}>RTS Tray ID</option>
             </select>
             <button class="btn btn-success" type="submit">Search</button>
         </form>
@@ -22,7 +22,7 @@
                 <tr>
                     <th>Serial Number</th>
                     <th>Status</th>
-                    <th>Tray ID</th>
+                    <th>RTS Tray ID</th>
                     <th>Last Update</th>
                 </tr>
             </thead>
