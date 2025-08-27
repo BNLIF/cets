@@ -2,12 +2,15 @@
 
 {% block content %}
 <div class="container">
-    <h1 class="mt-4">Frontend ASIC: {{ fe.serial_number }}</h1>
-    <div class="card">
+    <h1 class="mt-4">{{ fe }}</h1>
+    <div class="card mt-4">
         <div class="card-body">
-            <h5 class="card-title">Details</h5>
             <p class="card-text"><strong>Status:</strong> {{ fe.status }}</p>
             <p class="card-text"><strong>Tray ID:</strong> {{ fe.tray_id }}</p>
+            {% if fe.femb %}
+            <p class="card-text"><strong>FEMB:</strong> <a href="{% url 'femb_detail' version=fe.femb.version serial_number=fe.femb.serial_number %}">{{ fe.femb.serial_number }}</a></p>
+            <p class="card-text"><strong>FEMB Position:</strong> {{ fe.femb_pos }}</p>
+            {% endif %}
             <p class="card-text"><strong>Last Update:</strong> {{ fe.last_update|date:"Y-m-d H:i:s" }}</p>
         </div>
     </div>
@@ -44,7 +47,7 @@
         </div>
     {% else %}
         <div class="alert alert-warning" role="alert">
-            No RTS data available for this FE crate.
+            No RTS data available for this Frontend ASIC.
         </div>
     {% endif %}
 </div>

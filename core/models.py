@@ -35,7 +35,9 @@ class FE(models.Model):
 
         parsed_files = []
         for filename in filelist:
-            if filename.startswith(self.serial_number) and filename.endswith(".csv"):
+            if filename.startswith(
+                self.serial_number.replace("-", "_")
+            ) and filename.endswith(".csv"):
                 try:
                     # Strip serial number and extension
                     parts_str = filename[len(self.serial_number) + 1 : -4]

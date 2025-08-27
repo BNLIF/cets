@@ -1,7 +1,7 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponse, HttpResponseNotFound
 from django.core.paginator import Paginator
-from .models import FE
+from .models import FE, ADC, COLDATA, FEMB
 from decouple import config
 import os
 
@@ -11,7 +11,9 @@ def home(request):
 
 
 def fe(request):
-    queryset = FE.objects.all().order_by("serial_number")
+    sort_by = request.GET.get('sort', 'serial_number')
+    order = request.GET.get('order', 'asc')
+    queryset = FE.objects.all()
 
     search_query = request.GET.get("q", "")
     search_by = request.GET.get("by", "sn")
@@ -21,6 +23,14 @@ def fe(request):
             return redirect("fe_detail", serial_number=search_query)
         elif search_by == "tray":
             queryset = queryset.filter(tray_id__icontains=search_query)
+        elif search_by == "femb":
+            queryset = queryset.filter(femb__serial_number__icontains=search_query)
+
+    total_count = queryset.count()
+
+    if order == 'desc':
+        sort_by = f"-{sort_by}"
+    queryset = queryset.order_by(sort_by)
 
     paginator = Paginator(queryset, 100)
     page_number = request.GET.get("page")
@@ -31,20 +41,121 @@ def fe(request):
         "page": "fe",
         "search_query": search_query,
         "search_by": search_by,
+        'sort': request.GET.get('sort', 'serial_number'),
+        'order': order,
+        'total_count': total_count,
     }
     return render(request, "core/fe.html", context)
 
 
 def adc(request):
-    return render(request, "core/adc.html", {"page": "adc"})
+    sort_by = request.GET.get('sort', 'serial_number')
+    order = request.GET.get('order', 'asc')
+    queryset = ADC.objects.all()
+
+    search_query = request.GET.get("q", "")
+    search_by = request.GET.get("by", "sn")
+
+    if search_query:
+        if search_by == "sn":
+            return redirect("adc_detail", serial_number=search_query)
+        elif search_by == "femb":
+            queryset = queryset.filter(femb__serial_number__icontains=search_query)
+
+    total_count = queryset.count()
+
+    if order == 'desc':
+        sort_by = f"-{sort_by}"
+    queryset = queryset.order_by(sort_by)
+
+    paginator = Paginator(queryset, 100)
+    page_number = request.GET.get("page")
+    page_obj = paginator.get_page(page_number)
+
+    context = {
+        "page_obj": page_obj,
+        "page": "adc",
+        "search_query": search_query,
+        "search_by": search_by,
+        'sort': request.GET.get('sort', 'serial_number'),
+        'order': order,
+        'total_count': total_count,
+    }
+    return render(request, "core/adc.html", context)
 
 
 def coldata(request):
-    return render(request, "core/coldata.html", {"page": "coldata"})
+    sort_by = request.GET.get('sort', 'serial_number')
+    order = request.GET.get('order', 'asc')
+    queryset = COLDATA.objects.all()
+
+    search_query = request.GET.get("q", "")
+    search_by = request.GET.get("by", "sn")
+
+    if search_query:
+        if search_by == "sn":
+            return redirect("coldata_detail", serial_number=search_query)
+        elif search_by == "femb":
+            queryset = queryset.filter(femb__serial_number__icontains=search_query)
+
+    total_count = queryset.count()
+
+    if order == 'desc':
+        sort_by = f"-{sort_by}"
+    queryset = queryset.order_by(sort_by)
+
+    paginator = Paginator(queryset, 100)
+    page_number = request.GET.get("page")
+    page_obj = paginator.get_page(page_number)
+
+    context = {
+        "page_obj": page_obj,
+        "page": "coldata",
+        "search_query": search_query,
+        "search_by": search_by,
+        'sort': request.GET.get('sort', 'serial_number'),
+        'order': order,
+        'total_count': total_count,
+    }
+    return render(request, "core/coldata.html", context)
 
 
 def femb(request):
-    return render(request, "core/femb.html", {"page": "femb"})
+    sort_by = request.GET.get('sort', 'serial_number')
+    order = request.GET.get('order', 'asc')
+    queryset = FEMB.objects.all()
+
+    search_query = request.GET.get("q", "")
+    search_by = request.GET.get("by", "sn")
+
+    if search_query:
+        if search_by == "sn":
+            try:
+                femb = FEMB.objects.get(serial_number=search_query)
+                return redirect("femb_detail", version=femb.version, serial_number=femb.serial_number)
+            except FEMB.DoesNotExist:
+                queryset = queryset.filter(serial_number__icontains=search_query)
+
+    total_count = queryset.count()
+
+    if order == 'desc':
+        sort_by = f"-{sort_by}"
+    queryset = queryset.order_by(sort_by)
+
+    paginator = Paginator(queryset, 100)
+    page_number = request.GET.get("page")
+    page_obj = paginator.get_page(page_number)
+
+    context = {
+        "page_obj": page_obj,
+        "page": "femb",
+        "search_query": search_query,
+        "search_by": search_by,
+        'sort': request.GET.get('sort', 'serial_number'),
+        'order': order,
+        'total_count': total_count,
+    }
+    return render(request, "core/femb.html", context)
 
 
 def cable(request):
@@ -90,6 +201,33 @@ def fe_detail(request, serial_number):
         "page": "fe",
     }
     return render(request, "core/fe_detail.html", context)
+
+
+def adc_detail(request, serial_number):
+    adc = get_object_or_404(ADC, serial_number=serial_number)
+    context = {
+        "adc": adc,
+        "page": "adc",
+    }
+    return render(request, "core/adc_detail.html", context)
+
+
+def coldata_detail(request, serial_number):
+    coldata = get_object_or_404(COLDATA, serial_number=serial_number)
+    context = {
+        "coldata": coldata,
+        "page": "coldata",
+    }
+    return render(request, "core/coldata_detail.html", context)
+
+
+def femb_detail(request, version, serial_number):
+    femb = get_object_or_404(FEMB, version=version, serial_number=serial_number)
+    context = {
+        "femb": femb,
+        "page": "femb",
+    }
+    return render(request, "core/femb_detail.html", context)
 
 
 def rts_file_content(request, serial_number, filename):

@@ -3,19 +3,40 @@ from .models import FEMB, FE, ADC, COLDATA
 
 
 class FEMBAdmin(admin.ModelAdmin):
-    list_display = ("serial_number", "status", "last_update")
+    list_display = ("serial_number", "version", "status", "last_update")
 
 
 class FEAdmin(admin.ModelAdmin):
-    list_display = ("serial_number", "status", "tray_id", "last_update", "femb")
+    list_display = (
+        "serial_number",
+        "status",
+        "tray_id",
+        "last_update",
+        "femb",
+        "femb_pos",
+    )
 
 
 class ADCAdmin(admin.ModelAdmin):
-    list_display = ("serial_number", "status", "tray_id", "last_update", "femb")
+    list_display = (
+        "serial_number",
+        "status",
+        "tray_id",
+        "last_update",
+        "femb",
+        "femb_pos",
+    )
 
 
 class COLDATAAdmin(admin.ModelAdmin):
-    list_display = ("serial_number", "status", "tray_id", "last_update", "femb")
+    list_display = (
+        "serial_number",
+        "status",
+        "tray_id",
+        "last_update",
+        "femb",
+        "femb_pos",
+    )
 
 
 # admin.site.unregister(FEMB)

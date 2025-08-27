@@ -11,19 +11,24 @@
             <select name="by" class="form-select me-2" style="width: auto;">
                 <option value="sn" {% if search_by == 'sn' %}selected{% endif %}>Serial Number</option>
                 <option value="tray" {% if search_by == 'tray' %}selected{% endif %}>RTS Tray ID</option>
+                <option value="femb" {% if search_by == 'femb' %}selected{% endif %}>FEMB SN</option>
             </select>
             <button class="btn btn-success" type="submit">Search</button>
         </form>
     </div>
 
+    <p>Total found: {{ total_count }}</p>
+
     <div class="table-responsive">
         <table class="table table-striped table-bordered">
             <thead class="table-dark">
                 <tr>
-                    <th>Serial Number</th>
-                    <th>Status</th>
-                    <th>RTS Tray ID</th>
-                    <th>Last Update</th>
+                    <th><a href="?sort=serial_number&order={% if sort == 'serial_number' and order == 'asc' %}desc{% else %}asc{% endif %}" class="text-white">Serial Number</a></th>
+                    <th><a href="?sort=status&order={% if sort == 'status' and order == 'asc' %}desc{% else %}asc{% endif %}" class="text-white">Status</a></th>
+                    <th><a href="?sort=tray_id&order={% if sort == 'tray_id' and order == 'asc' %}desc{% else %}asc{% endif %}" class="text-white">RTS Tray ID</a></th>
+                    <th><a href="?sort=femb__serial_number&order={% if sort == 'femb__serial_number' and order == 'asc' %}desc{% else %}asc{% endif %}" class="text-white">FEMB</a></th>
+                    <th><a href="?sort=femb_pos&order={% if sort == 'femb_pos' and order == 'asc' %}desc{% else %}asc{% endif %}" class="text-white">FEMB Position</a></th>
+                    <th><a href="?sort=last_update&order={% if sort == 'last_update' and order == 'asc' %}desc{% else %}asc{% endif %}" class="text-white">Last Update</a></th>
                 </tr>
             </thead>
             <tbody>
@@ -32,6 +37,14 @@
                     <td><a href="{% url 'fe_detail' serial_number=fe_object.serial_number %}">{{ fe_object.serial_number }}</a></td>
                     <td>{{ fe_object.status }}</td>
                     <td>{{ fe_object.tray_id }}</td>
+                    <td>
+                        {% if fe_object.femb %}
+                            <a href="{% url 'femb_detail' version=fe_object.femb.version serial_number=fe_object.femb.serial_number %}">{{ fe_object.femb.serial_number }}</a>
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>{{ fe_object.femb_pos|default:"-" }}</td>
                     <td>{{ fe_object.last_update|date:"Y-m-d H:i:s" }}</td>
                 </tr>
                 {% endfor %}
