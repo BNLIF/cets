@@ -32,6 +32,8 @@ ALLOWED_HOSTS = config("ALLOWED_HOSTS", cast=Csv())
 
 FORCE_SCRIPT_NAME = config("FORCE_SCRIPT_NAME", default=None)
 
+CSRF_TRUSTED_ORIGINS = ["https://www.phy.bnl.gov"]
+
 # Application definition
 
 INSTALLED_APPS = [
