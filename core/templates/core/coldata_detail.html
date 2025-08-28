@@ -2,10 +2,9 @@
 
 {% block content %}
 <div class="container">
-    <h1 class="mt-4">COLDATA: {{ coldata.serial_number }}</h1>
+    <h1 class="mt-4">{{ coldata }}</h1>
     <div class="card">
         <div class="card-body">
-            <h5 class="card-title">Details</h5>
             <p class="card-text"><strong>Status:</strong> {{ coldata.status }}</p>
             {% if coldata.femb %}
             <p class="card-text"><strong>FEMB:</strong> <a href="{% url 'femb_detail' version=coldata.femb.version serial_number=coldata.femb.serial_number %}">{{ coldata.femb.serial_number }}</a></p>

@@ -2,10 +2,9 @@
 
 {% block content %}
 <div class="container">
-    <h1 class="mt-4">FEMB: {{ femb.serial_number }}</h1>
+    <h1 class="mt-4">{{ femb }}</h1>
     <div class="card">
         <div class="card-body">
-            <h5 class="card-title">Details</h5>
             <p class="card-text"><strong>Version:</strong> {{ femb.version }}</p>
             <p class="card-text"><strong>Status:</strong> {{ femb.status }}</p>
             <p class="card-text"><strong>Last Update:</strong> {{ femb.last_update|date:"Y-m-d H:i:s" }}</p>
