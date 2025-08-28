@@ -96,5 +96,6 @@ npm-debug.log
 
 # For AI Prompting
 .prompt/
-tmp/
 GEMINI.md
+tmp/
+staticfiles/

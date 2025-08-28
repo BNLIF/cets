@@ -1,6 +1,6 @@
 # Cold Electronics Tracking System
 
-A monolithic Django project with HTMX, Alpine.js, and Tailwind CSS.
+A monolithic Django project with HTMX, Alpine.js, and Bootstrap.
 
 ## Development Setup
 
