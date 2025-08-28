@@ -30,6 +30,7 @@ DEBUG = config("DEBUG", default=False, cast=bool)
 
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", cast=Csv())
 
+FORCE_SCRIPT_NAME = config("FORCE_SCRIPT_NAME", default=None)
 
 # Application definition
 
