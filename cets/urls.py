@@ -16,14 +16,16 @@ Including another URLconf
 """
 
 from django.contrib import admin
-from django.urls import path
+from django.urls import path, include
 from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from core import views
 from django.views.generic.base import RedirectView
 from django.templatetags.static import static
+from django.contrib.auth.decorators import login_required
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("api-auth/", include("rest_framework.urls")),
     path("", views.home, name="home"),
     path("fe/", views.fe, name="fe"),
     path("fe/<str:serial_number>/", views.fe_detail, name="fe_detail"),
@@ -50,6 +52,7 @@ urlpatterns = [
         RedirectView.as_view(url=static("core/images/favicon.png"), permanent=True),
         name="favicon",
     ),
+    # path("", login_required(include("cets.urls"))),
 ]
 
 urlpatterns += staticfiles_urlpatterns()
