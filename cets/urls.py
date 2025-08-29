@@ -19,6 +19,8 @@ from django.contrib import admin
 from django.urls import path
 from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from core import views
+from django.views.generic.base import RedirectView
+from django.templatetags.static import static
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -30,13 +32,24 @@ urlpatterns = [
     path("coldata/", views.coldata, name="coldata"),
     path("coldata/<str:serial_number>/", views.coldata_detail, name="coldata_detail"),
     path("femb/", views.femb, name="femb"),
-    path("femb/<str:version>/<str:serial_number>/", views.femb_detail, name="femb_detail"),
+    path(
+        "femb/<str:version>/<str:serial_number>/", views.femb_detail, name="femb_detail"
+    ),
     path("cable/", views.cable, name="cable"),
     path("wiec/", views.wiec, name="wiec"),
     path("wib/", views.wib, name="wib"),
     path("load-more/", views.load_more, name="load-more"),
     path("api/items/", views.ItemAPIView.as_view(), name="item-api"),
-    path('fe/<str:serial_number>/rts/<str:filename>/', views.rts_file_content, name='rts_file_content'),
+    path(
+        "fe/<str:serial_number>/rts/<str:filename>/",
+        views.rts_file_content,
+        name="rts_file_content",
+    ),
+    path(
+        "favicon.ico",
+        RedirectView.as_view(url=static("core/images/favicon.png"), permanent=True),
+        name="favicon",
+    ),
 ]
 
 urlpatterns += staticfiles_urlpatterns()
