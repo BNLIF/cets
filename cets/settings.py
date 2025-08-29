@@ -64,8 +64,10 @@ MIDDLEWARE = [
     "django_htmx.middleware.HtmxMiddleware",
 ]
 
-LOGIN_URL = "/api-auth/login/"
-LOGIN_REDIRECT_URL = "/"
+LOGIN_URL = (
+    f"{FORCE_SCRIPT_NAME}/api-auth/login/" if FORCE_SCRIPT_NAME else "/api-auth/login/"
+)
+LOGIN_REDIRECT_URL = f"{FORCE_SCRIPT_NAME}/" if FORCE_SCRIPT_NAME else "/"
 
 ROOT_URLCONF = "cets.urls"
 
