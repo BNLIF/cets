@@ -24,7 +24,7 @@
                     <th><a href="?sort=serial_number&order={% if sort == 'serial_number' and order == 'asc' %}desc{% else %}asc{% endif %}" class="text-white">Serial Number</a></th>
                     <th><a href="?sort=version&order={% if sort == 'version' and order == 'asc' %}desc{% else %}asc{% endif %}" class="text-white">Version</a></th>
                     <th><a href="?sort=status&order={% if sort == 'status' and order == 'asc' %}desc{% else %}asc{% endif %}" class="text-white">Status</a></th>
-                    <th><a href="?sort=last_update&order={% if sort == 'last_update' and order == 'asc' %}desc{% else %}asc{% endif %}" class="text-white">Last Update</a></th>
+                    <th><a href="?sort=latest_test_timestamp&order={% if sort == 'latest_test_timestamp' and order == 'asc' %}desc{% else %}asc{% endif %}" class="text-white">Latest Test</a></th>
                 </tr>
             </thead>
             <tbody>
@@ -33,7 +33,7 @@
                     <td><a href="{% url 'femb_detail' version=femb_object.version serial_number=femb_object.serial_number %}">{{ femb_object.serial_number }}</a></td>
                     <td>{{ femb_object.version }}</td>
                     <td>{{ femb_object.status }}</td>
-                    <td>{{ femb_object.last_update|date:"Y-m-d H:i:s" }}</td>
+                    <td>{{ femb_object.latest_test_timestamp|date:"Y-m-d H:i:s" }}</td>
                 </tr>
                 {% endfor %}
             </tbody>

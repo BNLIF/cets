@@ -4,6 +4,7 @@ from django.core.paginator import Paginator
 from .models import FE, ADC, COLDATA, FEMB, FEMB_TEST
 from decouple import config
 import os
+from django.db.models import Subquery, OuterRef
 
 
 def home(request):
@@ -123,7 +124,11 @@ def coldata(request):
 def femb(request):
     sort_by = request.GET.get("sort", "serial_number")
     order = request.GET.get("order", "asc")
-    queryset = FEMB.objects.all()
+
+    latest_test = FEMB_TEST.objects.filter(femb=OuterRef("pk")).order_by("-timestamp")
+    queryset = FEMB.objects.annotate(
+        latest_test_timestamp=Subquery(latest_test.values("timestamp")[:1])
+    )
 
     search_query = request.GET.get("q", "")
     search_by = request.GET.get("by", "sn")
