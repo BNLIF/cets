@@ -88,3 +88,14 @@ class COLDATA(models.Model):
 
     def __str__(self):
         return f"COLDATA: {self.serial_number}"
+
+
+class FEMB_TEST(models.Model):
+    femb = models.ForeignKey(FEMB, on_delete=models.CASCADE)
+    timestamp = models.DateTimeField()
+    test_type = models.CharField(max_length=10)
+    test_env = models.CharField(max_length=10)
+    report_filename = models.CharField(max_length=400)
+
+    def __str__(self):
+        return f"Test for {self.femb} @ {self.timestamp} ({self.test_type}, {self.test_env})"
