@@ -5,6 +5,8 @@ from .models import FE, ADC, COLDATA, FEMB, FEMB_TEST
 from decouple import config
 import os
 from django.db.models import Subquery, OuterRef
+from rest_framework.permissions import IsAdminUser, AllowAny
+from django_filters.rest_framework import DjangoFilterBackend
 
 
 def home(request):
@@ -185,7 +187,8 @@ def load_more(request):
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from .serializers import ItemSerializer
+from .serializers import ItemSerializer, FEMBSerializer
+from rest_framework import viewsets
 
 
 class ItemAPIView(APIView):
@@ -256,3 +259,16 @@ def rts_file_content(request, serial_number, filename):
         return HttpResponseNotFound("<h1>File not found</h1>")
     except Exception as e:
         return HttpResponse(f"<h1>Error reading file</h1><p>{e}</p>", status=500)
+
+class FEMBViewSet(viewsets.ModelViewSet):
+    queryset = FEMB.objects.all()
+    serializer_class = FEMBSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['version', 'serial_number']
+
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            self.permission_classes = [IsAdminUser]
+        else:
+            self.permission_classes = [AllowAny]
+        return super().get_permissions()

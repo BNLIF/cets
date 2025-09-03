@@ -22,6 +22,10 @@ from core import views
 from django.views.generic.base import RedirectView
 from django.templatetags.static import static
 from django.contrib.auth.decorators import login_required
+from rest_framework.routers import DefaultRouter
+
+router = DefaultRouter()
+router.register(r'api/femb', views.FEMBViewSet, basename='femb')
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -52,6 +56,7 @@ urlpatterns = [
         RedirectView.as_view(url=static("core/images/favicon.png"), permanent=True),
         name="favicon",
     ),
+    path('', include(router.urls)),
     # path("", login_required(include("cets.urls"))),
 ]
 
