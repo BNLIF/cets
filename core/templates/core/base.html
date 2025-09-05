@@ -45,12 +45,6 @@
                         <a class="nav-link {% if page == 'femb' %}active{% endif %}" href="{% url 'femb' %}">FEMB</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link {% if page == 'cable' %}active{% endif %}" href="{% url 'cable' %}">CABLE</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if page == 'wiec' %}active{% endif %}" href="{% url 'wiec' %}">WIEC</a>
-                    </li>
-                    <li class="nav-item">
                         <a class="nav-link {% if page == 'wib' %}active{% endif %}" href="{% url 'wib' %}">WIB</a>
                     </li>
                 </ul>
@@ -90,5 +84,24 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
     <script src="https://unpkg.com/htmx.org@1.9.5"></script>
     <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <script>
+      document.addEventListener('DOMContentLoaded', function() {
+        let hash = window.location.hash;
+        if (hash) {
+          let tab = document.querySelector('.nav-tabs a[href="' + hash + '"]');
+          if (tab) {
+            new bootstrap.Tab(tab).show();
+          }
+        }
+
+        // Change hash for page-reload
+        let tabElms = document.querySelectorAll('a[data-bs-toggle="tab"]')
+        tabElms.forEach(function(tabElm) {
+          tabElm.addEventListener('shown.bs.tab', function (event) {
+            history.pushState(null, null, event.target.href)
+          })
+        })
+      });
+    </script>
 </body>
 </html>
