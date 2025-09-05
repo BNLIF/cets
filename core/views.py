@@ -7,6 +7,8 @@ import os
 from django.db.models import Subquery, OuterRef
 from rest_framework.permissions import IsAdminUser, AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
+from .serializers import FEMBSerializer
+from rest_framework import viewsets
 
 
 def home(request):
@@ -181,23 +183,6 @@ def wib(request):
     return render(request, "core/wib.html", {"page": "wib"})
 
 
-def load_more(request):
-    return HttpResponse("".join([f"<p>Item {i}</p>" for i in range(5, 10)]))
-
-
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from .serializers import ItemSerializer, FEMBSerializer
-from rest_framework import viewsets
-
-
-class ItemAPIView(APIView):
-    def get(self, request):
-        items = [{"id": i, "name": f"Item {i}"} for i in range(5)]
-        serializer = ItemSerializer(items, many=True)
-        return Response(serializer.data)
-
-
 def fe_detail(request, serial_number):
     fe = get_object_or_404(FE, serial_number=serial_number)
     rts_data = fe.rts()
@@ -260,14 +245,15 @@ def rts_file_content(request, serial_number, filename):
     except Exception as e:
         return HttpResponse(f"<h1>Error reading file</h1><p>{e}</p>", status=500)
 
+
 class FEMBViewSet(viewsets.ModelViewSet):
     queryset = FEMB.objects.all()
     serializer_class = FEMBSerializer
     filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['version', 'serial_number']
+    filterset_fields = ["version", "serial_number"]
 
     def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+        if self.action in ["create", "update", "partial_update", "destroy"]:
             self.permission_classes = [IsAdminUser]
         else:
             self.permission_classes = [AllowAny]

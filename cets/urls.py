@@ -25,7 +25,7 @@ from django.contrib.auth.decorators import login_required
 from rest_framework.routers import DefaultRouter
 
 router = DefaultRouter()
-router.register(r'api/femb', views.FEMBViewSet, basename='femb')
+router.register(r"api/femb", views.FEMBViewSet, basename="femb")
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -44,8 +44,6 @@ urlpatterns = [
     path("cable/", views.cable, name="cable"),
     path("wiec/", views.wiec, name="wiec"),
     path("wib/", views.wib, name="wib"),
-    path("load-more/", views.load_more, name="load-more"),
-    path("api/items/", views.ItemAPIView.as_view(), name="item-api"),
     path(
         "fe/<str:serial_number>/rts/<str:filename>/",
         views.rts_file_content,
@@ -56,8 +54,7 @@ urlpatterns = [
         RedirectView.as_view(url=static("core/images/favicon.png"), permanent=True),
         name="favicon",
     ),
-    path('', include(router.urls)),
-    # path("", login_required(include("cets.urls"))),
+    path("", include(router.urls)),
 ]
 
 urlpatterns += staticfiles_urlpatterns()

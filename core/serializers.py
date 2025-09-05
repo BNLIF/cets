@@ -1,13 +1,16 @@
 from rest_framework import serializers
-from .models import FEMB
+from .models import FEMB, FEMB_TEST
 
 
-class ItemSerializer(serializers.Serializer):
-    id = serializers.IntegerField()
-    name = serializers.CharField(max_length=100)
+class FEMBTestSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FEMB_TEST
+        fields = "__all__"
 
 
 class FEMBSerializer(serializers.ModelSerializer):
+    femb_test_set = FEMBTestSerializer(many=True, read_only=True)
+
     class Meta:
         model = FEMB
-        fields = '__all__'
+        fields = ["id", "version", "serial_number", "status", "femb_test_set"]
