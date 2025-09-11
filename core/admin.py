@@ -40,7 +40,7 @@ class COLDATAAdmin(admin.ModelAdmin):
 
 
 class FEMB_TESTAdmin(admin.ModelAdmin):
-    list_display = ("femb", "timestamp", "test_type", "test_env")
+    list_display = ("femb", "timestamp", "site", "test_type", "test_env", "status")
 
 
 # admin.site.unregister(FEMB)
