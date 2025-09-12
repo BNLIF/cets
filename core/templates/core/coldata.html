@@ -26,7 +26,6 @@
                     <th><a href="?sort=status&order={% if sort == 'status' and order == 'asc' %}desc{% else %}asc{% endif %}" class="text-white">Status</a></th>
                     <th><a href="?sort=femb__serial_number&order={% if sort == 'femb__serial_number' and order == 'asc' %}desc{% else %}asc{% endif %}" class="text-white">FEMB</a></th>
                     <th><a href="?sort=femb_pos&order={% if sort == 'femb_pos' and order == 'asc' %}desc{% else %}asc{% endif %}" class="text-white">FEMB Position</a></th>
-                    <th><a href="?sort=last_update&order={% if sort == 'last_update' and order == 'asc' %}desc{% else %}asc{% endif %}" class="text-white">Last Update</a></th>
                 </tr>
             </thead>
             <tbody>
@@ -42,7 +41,6 @@
                         {% endif %}
                     </td>
                     <td>{{ coldata_object.femb_pos|default:"N/A" }}</td>
-                    <td>{{ coldata_object.last_update|date:"Y-m-d H:i:s" }}</td>
                 </tr>
                 {% endfor %}
             </tbody>

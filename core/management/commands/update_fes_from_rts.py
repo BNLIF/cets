@@ -94,7 +94,7 @@ class Command(BaseCommand):
                     {
                         "serial_number": serial_number,
                         "tray_id": tray_id,
-                        "status": "testing",  # Default status
+                        "status": "rts-tested",  # Default status
                     }
                 )
             else:
@@ -130,9 +130,7 @@ class Command(BaseCommand):
                     f"  - Serial Number: {fe.serial_number}, New Tray ID: {fe.tray_id}"
                 )
 
-        confirmation = input(
-            "\nDo you want to proceed with these changes? (yes/no): "
-        )
+        confirmation = input("\nDo you want to proceed with these changes? (yes/no): ")
 
         # --- Step 5: Perform database updates ---
         if confirmation.lower() == "yes":
