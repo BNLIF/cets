@@ -16,39 +16,68 @@ def home(request):
 
 
 def fe(request):
-    sort_by = request.GET.get("sort", "serial_number")
-    order = request.GET.get("order", "asc")
-    queryset = FE.objects.all()
-
+    # Common search functionality
     search_query = request.GET.get("q", "")
     search_by = request.GET.get("by", "sn")
 
+    # Queryset for FEs with status 'on-femb'
+    on_femb_queryset = FE.objects.filter(status="on-femb")
     if search_query:
         if search_by == "sn":
-            return redirect("fe_detail", serial_number=search_query)
-        elif search_by == "tray":
-            queryset = queryset.filter(tray_id__icontains=search_query)
+            on_femb_queryset = on_femb_queryset.filter(
+                serial_number__icontains=search_query
+            )
         elif search_by == "femb":
-            queryset = queryset.filter(femb__serial_number__icontains=search_query)
+            on_femb_queryset = on_femb_queryset.filter(
+                femb__serial_number__icontains=search_query
+            )
 
-    total_count = queryset.count()
+    # Sorting for 'on-femb' table
+    sort_on_femb = request.GET.get("sort_on_femb", "serial_number")
+    order_on_femb = request.GET.get("order_on_femb", "asc")
+    if order_on_femb == "desc":
+        sort_on_femb = f"-{sort_on_femb}"
+    on_femb_queryset = on_femb_queryset.order_by(sort_on_femb)
 
-    if order == "desc":
-        sort_by = f"-{sort_by}"
-    queryset = queryset.order_by(sort_by)
+    # Pagination for 'on-femb' table
+    paginator_on_femb = Paginator(on_femb_queryset, 100)
+    page_on_femb_number = request.GET.get("page_on_femb")
+    page_on_femb_obj = paginator_on_femb.get_page(page_on_femb_number)
+    total_on_femb_count = on_femb_queryset.count()
 
-    paginator = Paginator(queryset, 100)
-    page_number = request.GET.get("page")
-    page_obj = paginator.get_page(page_number)
+    # Queryset for FEs with an RTS tray ID
+    rts_queryset = FE.objects.exclude(tray_id__isnull=True).exclude(tray_id__exact="")
+    if search_query:
+        if search_by == "sn":
+            rts_queryset = rts_queryset.filter(serial_number__icontains=search_query)
+        elif search_by == "tray":
+            rts_queryset = rts_queryset.filter(tray_id__icontains=search_query)
+
+    # Sorting for 'rts' table
+    sort_rts = request.GET.get("sort_rts", "serial_number")
+    order_rts = request.GET.get("order_rts", "asc")
+    if order_rts == "desc":
+        sort_rts = f"-{sort_rts}"
+    rts_queryset = rts_queryset.order_by(sort_rts)
+
+    # Pagination for 'rts' table
+    paginator_rts = Paginator(rts_queryset, 100)
+    page_rts_number = request.GET.get("page_rts")
+    page_rts_obj = paginator_rts.get_page(page_rts_number)
+    total_rts_count = rts_queryset.count()
 
     context = {
-        "page_obj": page_obj,
+        "page_on_femb_obj": page_on_femb_obj,
+        "total_on_femb_count": total_on_femb_count,
+        "sort_on_femb": request.GET.get("sort_on_femb", "serial_number"),
+        "order_on_femb": order_on_femb,
+        "page_rts_obj": page_rts_obj,
+        "total_rts_count": total_rts_count,
+        "sort_rts": request.GET.get("sort_rts", "serial_number"),
+        "order_rts": order_rts,
         "page": "fe",
         "search_query": search_query,
         "search_by": search_by,
-        "sort": request.GET.get("sort", "serial_number"),
-        "order": order,
-        "total_count": total_count,
     }
     return render(request, "core/fe.html", context)
 
