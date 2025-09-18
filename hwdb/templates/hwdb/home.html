@@ -1,6 +1,31 @@
 {% extends 'core/base.html' %}
 
 {% block content %}
-<h1>HWDB Home Page</h1>
-<p>This is the home page for the HWDB app.</p>
+<h1>Hardware Database Tools</h1>
+
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>System ID</th>
+            <th>Name</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for system_id_obj in system_ids %}
+        <tr>
+            <td>{{ system_id_obj.id }}</td>
+            <td>{{ system_id_obj.name }}</td>
+            <td>
+                <a href="{% url 'hwdb:subsystem_list_by_id' part1=system_id_obj.id|slice:":1" part2=system_id_obj.id|slice:"1:" %}" class="btn btn-primary btn-sm">View Subsystems</a>
+            </td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="3">No system IDs defined.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
 {% endblock %}

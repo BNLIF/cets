@@ -1,0 +1,40 @@
+{% extends 'core/base.html' %}
+
+{% block content %}
+<h1>Subsystems</h1>
+
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>Subsystem ID</th>
+            <th>Subsystem Name</th>
+            <th>Creator</th>
+            <th>Created</th>
+            <th>Comments</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for subsystem in subsystems %}
+        {% with padded_subsystem_id=subsystem.subsystem_id|stringformat:"03d" %}
+        {% with component_type_id_formatted=current_part1|add:current_part2|add:padded_subsystem_id|add:"00001" %}
+        <tr>
+            <td>
+                <a href="{% url 'hwdb:component_list' component_type_id=component_type_id_formatted %}">{{ subsystem.subsystem_id }}</a>&nbsp;&nbsp;&nbsp;
+                <a href="https://dbweb2.fnal.gov:8443/cdbdev/view/components?pa={{ component_type_id_formatted }}" target="_blank" title="View in external DB"> &#x2197;</a>
+            </td>
+            <td>{{ subsystem.subsystem_name }}</td>
+            <td>{{ subsystem.creator.name|default:"N/A" }}</td>
+            <td>{{ subsystem.created|date:"Y-m-d H:i" }}</td>
+            <td>{{ subsystem.comments|default:"N/A" }}</td>
+        </tr>
+        {% endwith %}
+        {% endwith %}
+        {% empty %}
+        <tr>
+            <td colspan="5">No subsystems found.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% endblock %}
