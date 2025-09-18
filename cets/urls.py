@@ -31,6 +31,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api-auth/", include("rest_framework.urls")),
     path("", views.home, name="home"),
+    path("hwdb/", include("hwdb.urls")),
     path("fe/", views.fe, name="fe"),
     path("fe/<str:serial_number>/", views.fe_detail, name="fe_detail"),
     path("adc/", views.adc, name="adc"),
