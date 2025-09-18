@@ -1,9 +1,12 @@
 import requests
 import os
+from decouple import config
 
 
 class FnalDbApiClient:
-    def __init__(self, base_url, token_path="/tmp/bt_u502"):
+    def __init__(self, base_url, token_path=None):
+        if token_path is None:
+            token_path = config("BEARER_TOKEN_FILE", default="/tmp/bt_u502")
         self.base_url = base_url
         self.token = self._load_token(token_path)
         self.base_headers = {
