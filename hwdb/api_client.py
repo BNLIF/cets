@@ -43,6 +43,10 @@ class FnalDbApiClient:
         endpoint = f"component-types/{component_type_id}/components"
         return self._make_request("GET", endpoint)
 
+    def get_part_types_for_subsystem(self, part1, part2, subsystem_id):
+        endpoint = f"component-types/{part1}/{part2}/{subsystem_id}"
+        return self._make_request("GET", endpoint)
+
     def get_subsystems(self, part1, part2):
         endpoint = f"subsystems/{part1}/{part2}"
         return self._make_request("GET", endpoint)

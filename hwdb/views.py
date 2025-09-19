@@ -100,3 +100,25 @@ def subsystem_list_view(request, part1=None, part2=None):
         return render(request, "hwdb/subsystem_list.html", context)
     except Exception as e:
         return render(request, "hwdb/error.html", {"error_message": str(e)})
+
+def part_type_list_view(request, part1, part2, subsystem_id):
+    api_client = FnalDbApiClient(
+        base_url="https://dbwebapi2.fnal.gov:8443/cdbdev/api/v1"
+    )
+    try:
+        raw_response = api_client.get_part_types_for_subsystem(part1, part2, subsystem_id)
+        part_types = raw_response.get("data", [])
+
+        for part_type in part_types:
+            if "created" in part_type and part_type["created"]:
+                part_type["created"] = datetime.fromisoformat(part_type["created"])
+        
+        context = {
+            'part_types': part_types,
+            'current_part1': part1,
+            'current_part2': part2,
+            'current_subsystem_id': subsystem_id,
+        }
+        return render(request, 'hwdb/part_type_list.html', context)
+    except Exception as e:
+        return render(request, 'hwdb/error.html', {'error_message': str(e)})
