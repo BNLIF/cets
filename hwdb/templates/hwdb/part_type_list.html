@@ -1,7 +1,7 @@
 {% extends 'core/base.html' %}
 
 {% block content %}
-<h1>Part Types for Subsystem {{ current_subsystem_id }} ({{ current_part1 }}/{{ current_part2 }})</h1>
+<h1>Part Types</h1>
 
 <table class="table table-striped">
     <thead>
@@ -23,7 +23,7 @@
             <td>{{ part_type.created|date:"Y-m-d H:i" }}</td>
             <td>{{ part_type.comments|default:"N/A" }}</td>
             <td>
-                <a href="{% url 'hwdb:component_list' component_type_id=part_type.part_type_id %}" class="btn btn-info btn-sm">View Components</a>&nbsp;&nbsp;&nbsp;
+                <a href="{% url 'hwdb:component_list' component_type_id=part_type.part_type_id %}" class="btn btn-info btn-sm">View Records</a>&nbsp;&nbsp;&nbsp;
                 <a href="https://dbweb2.fnal.gov:8443/cdbdev/view/components?pa={{ part_type.part_type_id }}" target="_blank" title="View in external DB"> &#x2197;</a>
             </td>
         </tr>

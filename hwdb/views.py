@@ -10,7 +10,29 @@ def home(request):
         {"id": "D081", "name": "FD1-HD TPC_Elec. and FD2-VD Bottom_Elec."},
         # Add more system IDs here as needed
     ]
-    context = {"system_ids": system_ids}
+    ce_list = [
+        {
+            "name": "FEMB",
+            "part_type_id": "D08100400001",
+        },
+        {
+            "name": "LArASIC",
+            "part_type_id": "D08100100001",
+        },
+        {
+            "name": "ColdADC",
+            "part_type_id": "D08100200001",
+        },
+        {
+            "name": "COLDATA",
+            "part_type_id": "D08100300001",
+        },
+        {
+            "name": "Cold Cable Long",
+            "part_type_id": "D08102100012",
+        },
+    ]
+    context = {"system_ids": system_ids, "ce_list": ce_list}
     return render(request, "hwdb/home.html", context)
 
 
@@ -101,24 +123,27 @@ def subsystem_list_view(request, part1=None, part2=None):
     except Exception as e:
         return render(request, "hwdb/error.html", {"error_message": str(e)})
 
+
 def part_type_list_view(request, part1, part2, subsystem_id):
     api_client = FnalDbApiClient(
         base_url="https://dbwebapi2.fnal.gov:8443/cdbdev/api/v1"
     )
     try:
-        raw_response = api_client.get_part_types_for_subsystem(part1, part2, subsystem_id)
+        raw_response = api_client.get_part_types_for_subsystem(
+            part1, part2, subsystem_id
+        )
         part_types = raw_response.get("data", [])
 
         for part_type in part_types:
             if "created" in part_type and part_type["created"]:
                 part_type["created"] = datetime.fromisoformat(part_type["created"])
-        
+
         context = {
-            'part_types': part_types,
-            'current_part1': part1,
-            'current_part2': part2,
-            'current_subsystem_id': subsystem_id,
+            "part_types": part_types,
+            "current_part1": part1,
+            "current_part2": part2,
+            "current_subsystem_id": subsystem_id,
         }
-        return render(request, 'hwdb/part_type_list.html', context)
+        return render(request, "hwdb/part_type_list.html", context)
     except Exception as e:
-        return render(request, 'hwdb/error.html', {'error_message': str(e)})
+        return render(request, "hwdb/error.html", {"error_message": str(e)})

@@ -3,6 +3,7 @@
 {% block content %}
 <h1>Hardware Database Tools</h1>
 
+<h3 class="mt-4">System Navigator</h3>
 <table class="table table-striped">
     <thead>
         <tr>
@@ -23,6 +24,28 @@
         {% empty %}
         <tr>
             <td colspan="3">No system IDs defined.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<h3 class="mt-4">CE Records in HWDB</h3>
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>Part Type ID</th>
+            <th>Name</th>
+            <th>Link</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for ce in ce_list %}
+        <tr>
+            <td>{{ce.part_type_id}}</td>
+            <td>{{ce.name}}</td>
+            <td>
+                <a href="https://dbweb2.fnal.gov:8443/cdbdev/view/components?pa={{ ce.part_type_id }}" class="btn btn-primary btn-sm" target="_blank" title="View in external DB">View Records</a>
+            </td>
         </tr>
         {% endfor %}
     </tbody>
