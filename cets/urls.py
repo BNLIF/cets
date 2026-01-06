@@ -43,6 +43,7 @@ urlpatterns = [
         "femb/<str:version>/<str:serial_number>/", views.femb_detail, name="femb_detail"
     ),
     path("cable/", views.cable, name="cable"),
+    path("cable/<str:serial_number>/", views.cable_detail, name="cable_detail"),
     path("wiec/", views.wiec, name="wiec"),
     path("wib/", views.wib, name="wib"),
     path(

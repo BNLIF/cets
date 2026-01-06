@@ -1,0 +1,48 @@
+{% extends 'core/base.html' %}
+
+{% block content %}
+<div class="container">
+    <h1 class="mt-4">Cable: {{ cable.serial_number }}</h1>
+    <div class="card">
+        <div class="card-body">
+            <p class="card-text"><strong>Serial Number:</strong> {{ cable.serial_number }}</p>
+            <p class="card-text"><strong>Batch Number:</strong> {{ cable.batch_number }}</p>
+            <p class="card-text"><strong>Status:</strong> {{ cable.status }}</p>
+            <p class="card-text"><strong>Last Update:</strong> {{ cable.last_update|date:"Y-m-d H:i:s" }}</p>
+        </div>
+    </div>
+
+    <div class="mt-4">
+        <h3>Cable Tests</h3>
+        <table class="table table-striped table-bordered">
+            <thead class="table-dark">
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Type</th>
+                    <th>Temperature</th>
+                    <th>Result</th>
+                    <th>Report</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for test in cable_tests %}
+                    <tr>
+                        <td>{{ test.timestamp|date:"Y-m-d H:i:s" }}</td>
+                        <td>{{ test.test_type }}</td>
+                        <td>{{ test.test_env }}</td>
+                        <td>{{ test.status }}</td>
+                        <td>
+                            {% if test.report_filename %}
+                                <a href="https://www.phy.bnl.gov/twister/static/cetsdata/cables/{{ test.report_filename }}" target="_blank">Link</a>
+                            {% else %}
+                                N/A
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+</div>
+{% endblock %}

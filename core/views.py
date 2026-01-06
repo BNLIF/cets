@@ -1,7 +1,7 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponse, HttpResponseNotFound
 from django.core.paginator import Paginator
-from .models import FE, ADC, COLDATA, FEMB, FEMB_TEST
+from .models import FE, ADC, COLDATA, FEMB, FEMB_TEST, CABLE, CABLE_TEST
 from decouple import config
 import os
 from django.db.models import Subquery, OuterRef
@@ -201,7 +201,61 @@ def femb(request):
 
 
 def cable(request):
-    return render(request, "core/cable.html", {"page": "cable"})
+    sort_by = request.GET.get("sort", "latest_test_timestamp")
+    order = request.GET.get("order", "desc")
+
+    latest_test = CABLE_TEST.objects.filter(cable=OuterRef("pk")).order_by("-timestamp")
+    queryset = CABLE.objects.annotate(
+        latest_test_timestamp=Subquery(latest_test.values("timestamp")[:1])
+    )
+
+    search_query = request.GET.get("q", "")
+    search_by = request.GET.get("by", "sn")
+
+    if search_query:
+        if search_by == "sn":
+            try:
+                cable = CABLE.objects.get(serial_number=search_query)
+                return redirect(
+                    "cable_detail",
+                    serial_number=cable.serial_number,
+                )
+            except CABLE.DoesNotExist:
+                queryset = queryset.filter(serial_number__icontains=search_query)
+        elif search_by == "batch":
+            queryset = queryset.filter(batch_number__icontains=search_query)
+
+    total_count = queryset.count()
+
+    if order == "desc":
+        sort_by = f"-{sort_by}"
+    queryset = queryset.order_by(sort_by)
+
+    paginator = Paginator(queryset, 100)
+    page_number = request.GET.get("page")
+    page_obj = paginator.get_page(page_number)
+
+    context = {
+        "page_obj": page_obj,
+        "page": "cable",
+        "search_query": search_query,
+        "search_by": search_by,
+        "sort": request.GET.get("sort", "serial_number"),
+        "order": order,
+        "total_count": total_count,
+    }
+    return render(request, "core/cable.html", context)
+
+
+def cable_detail(request, serial_number):
+    cable = get_object_or_404(CABLE, serial_number=serial_number)
+    cable_tests = CABLE_TEST.objects.filter(cable=cable).order_by("-timestamp")
+    context = {
+        "cable": cable,
+        "cable_tests": cable_tests,
+        "page": "cable",
+    }
+    return render(request, "core/cable_detail.html", context)
 
 
 def wiec(request):
