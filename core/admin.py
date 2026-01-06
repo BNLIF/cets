@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import FEMB, FE, ADC, COLDATA, FEMB_TEST
+from .models import FEMB, FE, ADC, COLDATA, FEMB_TEST, CABLE, CABLE_TEST
 
 
 class FEMBAdmin(admin.ModelAdmin):
@@ -43,6 +43,14 @@ class FEMB_TESTAdmin(admin.ModelAdmin):
     list_display = ("femb", "timestamp", "site", "test_type", "test_env", "status")
 
 
+class CABLEAdmin(admin.ModelAdmin):
+    list_display = ("serial_number", "batch_number", "status", "last_update")
+
+
+class CABLE_TESTAdmin(admin.ModelAdmin):
+    list_display = ("cable", "timestamp", "site", "test_type", "test_env", "status")
+
+
 # admin.site.unregister(FEMB)
 # admin.site.unregister(FE)
 admin.site.register(FEMB, FEMBAdmin)
@@ -50,6 +58,8 @@ admin.site.register(FE, FEAdmin)
 admin.site.register(ADC, ADCAdmin)
 admin.site.register(COLDATA, COLDATAAdmin)
 admin.site.register(FEMB_TEST, FEMB_TESTAdmin)
+admin.site.register(CABLE, CABLEAdmin)
+admin.site.register(CABLE_TEST, CABLE_TESTAdmin)
 
 admin.site.site_header = "CETs Admin"
 admin.site.site_title = "CETs Admin Portal"

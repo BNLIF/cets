@@ -101,3 +101,26 @@ class FEMB_TEST(models.Model):
 
     def __str__(self):
         return f"Test for {self.femb} @ {self.timestamp} ({self.test_type}, {self.test_env})"
+
+
+class CABLE(models.Model):
+    serial_number = models.CharField(max_length=20, unique=True)
+    status = models.CharField(max_length=20, default="testing")
+    batch_number = models.IntegerField(default=0)
+    last_update = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Cable: {self.serial_number}"
+
+
+class CABLE_TEST(models.Model):
+    cable = models.ForeignKey(CABLE, on_delete=models.CASCADE)
+    timestamp = models.DateTimeField()
+    test_type = models.CharField(max_length=10)
+    test_env = models.CharField(max_length=10)
+    report_filename = models.CharField(max_length=400)
+    site = models.CharField(max_length=20, default="", blank=True)
+    status = models.CharField(max_length=20, default="", blank=True)
+
+    def __str__(self):
+        return f"Test for {self.cable} @ {self.timestamp} ({self.test_type}, {self.test_env})"
