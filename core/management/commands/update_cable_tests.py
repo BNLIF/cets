@@ -141,7 +141,7 @@ class Command(BaseCommand):
             r"Report_Time_(?P<year>\d{4})_(?P<month>\d{2})(?P<day>\d{2})_"
             r"(?P<hour>\d{2})_(?P<minute>\d{2})_(?P<second>\d{2})_"
             r"CTS_(?P<test_env>LN|RT)_(?P<test_type>QC|CHK)/"
-            r"report_Cable_(?P<serial_number_file>[\w-]+)_Slot\d+_(?P<status>[PF])_.*\.html",
+            r"report_Cable_(?P<serial_number_file>[\w-]+)_Slot\d+_(?P<status>[PF]).*\.html",
             re.IGNORECASE
         )
 
@@ -153,13 +153,21 @@ class Command(BaseCommand):
             return None
 
         data = match.groupdict()
-        
-        # Verify serial numbers match (optional sanity check)
-        if data["serial_number"] != data["serial_number_file"]:
-             self.stdout.write(
-                self.style.NOTICE(f"Serial number mismatch in path: {data['serial_number']} vs {data['serial_number_file']}")
+        sn = data["serial_number"]
+        sn_file = data["serial_number_file"]
+
+        # Verify serial numbers match (allowing for common 'H' typos in filename)
+        is_match = (sn == sn_file)
+        if not is_match:
+            # Check for missing 'H' or extra 'H' typo in the filename
+            if (sn.startswith("H") and sn_file == sn[1:]) or (sn_file == "H" + sn):
+                is_match = True
+
+        if not is_match:
+            self.stdout.write(
+                self.style.NOTICE(f"Serial number mismatch in path: {sn} vs {sn_file}")
             )
-             return None
+            return None
 
         try:
             dt = datetime(
