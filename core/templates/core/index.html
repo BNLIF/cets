@@ -6,10 +6,10 @@
 
 <ul class="nav nav-tabs my-3" id="myTab" role="tablist">
   <li class="nav-item" role="presentation">
-    <a class="nav-link active" id="diagram-tab" data-bs-toggle="tab" href="#diagram" role="tab" aria-controls="diagram" aria-selected="true">Diagram</a>
+    <a class="nav-link active" id="test-units-tab" data-bs-toggle="tab" href="#test-units" role="tab" aria-controls="test-units" aria-selected="false">Test Units</a>
   </li>
   <li class="nav-item" role="presentation">
-    <a class="nav-link" id="test-units-tab" data-bs-toggle="tab" href="#test-units" role="tab" aria-controls="test-units" aria-selected="false">Test Units</a>
+    <a class="nav-link" id="diagram-tab" data-bs-toggle="tab" href="#diagram" role="tab" aria-controls="diagram" aria-selected="true">Diagram</a>
   </li>
   <li class="nav-item" role="presentation">
     <a class="nav-link" id="channel-map-tab" data-bs-toggle="tab" href="#channel-map" role="tab" aria-controls="channel-map" aria-selected="false">FEMB Channel Map</a>
@@ -19,12 +19,7 @@
   </li>
 </ul>
 <div class="tab-content" id="myTabContent">
-  <div class="tab-pane fade show active" id="diagram" role="tabpanel" aria-labelledby="diagram-tab">
-    <div class="my-5">
-        <img src="{% static 'core/images/ce-diag.png' %}" class="img-fluid" alt="Cold Electronics Diagram" style="width: 70%;">
-    </div>
-  </div>
-  <div class="tab-pane fade" id="test-units" role="tabpanel" aria-labelledby="test-units-tab">
+  <div class="tab-pane fade show active" id="test-units" role="tabpanel" aria-labelledby="test-units-tab">
     <div class="my-1">
       <table class="table" style="width: 70%;">
         <caption>Number of test units</caption>
@@ -105,9 +100,14 @@
       </table>
     </div>
   </div>
+  <div class="tab-pane fade" id="diagram" role="tabpanel" aria-labelledby="diagram-tab">
+    <div class="my-5">
+        <img src="{% static 'core/images/Diagram.png' %}" class="img-fluid" alt="Cold Electronics Diagram" style="width: 70%;">
+    </div>
+  </div>
   <div class="tab-pane fade" id="channel-map" role="tabpanel" aria-labelledby="channel-map-tab">
     <div class="my-5">
-        <img src="{% static 'core/images/femb-channel-map.png' %}" class="img-fluid" alt="FEMB Channel Map" style="width: 70%;">
+        <img src="{% static 'core/images/CE_Mapping.png' %}" class="img-fluid" alt="FEMB Channel Map" style="width: 70%;">
     </div>
   </div>
   <div class="tab-pane fade" id="datasheet" role="tabpanel" aria-labelledby="datasheet-tab">
