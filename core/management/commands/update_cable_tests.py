@@ -141,7 +141,8 @@ class Command(BaseCommand):
             r"Report_Time_(?P<year>\d{4})_(?P<month>\d{2})(?P<day>\d{2})_"
             r"(?P<hour>\d{2})_(?P<minute>\d{2})_(?P<second>\d{2})_"
             r"CTS_(?P<test_env>LN|RT)_(?P<test_type>QC|CHK)/"
-            r"report_Cable_(?P<serial_number_file>[\w-]+)_Slot\d+_(?P<status>[PF]).*\.html",
+            r"report_Cable_(?P<serial_number_file>[\w-]+)_Slot\d+"
+            r"(?:_(?P<status>[PF]))?.*\.html",
             re.IGNORECASE
         )
 
@@ -183,6 +184,12 @@ class Command(BaseCommand):
             return None
 
         status_map = {"P": "pass", "F": "fail"}
+        
+        status_code = data.get("status")
+        if status_code:
+            status_val = status_map.get(status_code.upper(), "")
+        else:
+            status_val = "pass"
 
         return {
             "timestamp": timestamp,
@@ -191,5 +198,5 @@ class Command(BaseCommand):
             "test_type": data["test_type"],
             "batch_number": int(data["batch_number"]),
             "serial_number": data["serial_number"],
-            "status": status_map.get(data["status"].upper(), ""),
+            "status": status_val,
         }
