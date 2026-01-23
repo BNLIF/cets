@@ -155,8 +155,8 @@ def coldata(request):
 
 
 def femb(request):
-    sort_by = request.GET.get("sort", "serial_number")
-    order = request.GET.get("order", "asc")
+    sort_by = request.GET.get("sort", "latest_test_timestamp")
+    order = request.GET.get("order", "desc")
 
     latest_test = FEMB_TEST.objects.filter(femb=OuterRef("pk")).order_by("-timestamp")
     queryset = FEMB.objects.annotate(
@@ -193,7 +193,7 @@ def femb(request):
         "page": "femb",
         "search_query": search_query,
         "search_by": search_by,
-        "sort": request.GET.get("sort", "serial_number"),
+        "sort": request.GET.get("sort", "latest_test_timestamp"),
         "order": order,
         "total_count": total_count,
     }
