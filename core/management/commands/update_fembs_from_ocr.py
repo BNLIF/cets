@@ -102,9 +102,11 @@ class Command(BaseCommand):
                     continue
 
                 # Check if FEMB already exists
-                if not FEMB.objects.filter(
+                femb_obj = FEMB.objects.filter(
                     serial_number=femb_serial_number, version=femb_version
-                ).exists():
+                ).first()
+
+                if not femb_obj:
                     new_fembs_to_create.append(
                         {
                             "serial_number": femb_serial_number,
@@ -113,16 +115,28 @@ class Command(BaseCommand):
                         }
                     )
 
-                    for comp in components:
-                        components_to_update.append(
-                            {
-                                "femb_serial_number": femb_serial_number,
-                                "femb_version": femb_version,
-                                "type": comp["type"],
-                                "serial_number": comp["serial_number"],
-                                "position": comp["position"],
-                            }
-                        )
+                for comp in components:
+                    # Check if this component needs to be updated or created
+                    model = {"FE": FE, "ADC": ADC, "COLDATA": COLDATA}.get(comp["type"])
+                    if model:
+                        is_already_correct = False
+                        if femb_obj:
+                            is_already_correct = model.objects.filter(
+                                serial_number=comp["serial_number"],
+                                femb=femb_obj,
+                                femb_pos=comp["position"],
+                            ).exists()
+
+                        if not is_already_correct:
+                            components_to_update.append(
+                                {
+                                    "femb_serial_number": femb_serial_number,
+                                    "femb_version": femb_version,
+                                    "type": comp["type"],
+                                    "serial_number": comp["serial_number"],
+                                    "position": comp["position"],
+                                }
+                            )
             except Exception as e:
                 self.stdout.write(
                     self.style.ERROR(f"  - Error processing file {filepath}: {e}")
