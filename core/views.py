@@ -1,7 +1,7 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponse, HttpResponseNotFound
 from django.core.paginator import Paginator
-from .models import FE, ADC, COLDATA, FEMB, FEMB_TEST, CABLE, CABLE_TEST
+from .models import FE, ADC, COLDATA, FEMB, FEMB_REPAIR, FEMB_TEST, CABLE, CABLE_TEST
 from decouple import config
 import os
 from django.db.models import Subquery, OuterRef
@@ -304,9 +304,14 @@ def coldata_detail(request, serial_number):
 def femb_detail(request, version, serial_number):
     femb = get_object_or_404(FEMB, version=version, serial_number=serial_number)
     femb_tests = FEMB_TEST.objects.filter(femb=femb).order_by("-timestamp")
+    repairs = FEMB_REPAIR.objects.filter(femb=femb).prefetch_related(
+        "removed_fes", "removed_adcs", "removed_coldatas",
+        "installed_fes", "installed_adcs", "installed_coldatas",
+    ).order_by("iteration_number")
     context = {
         "femb": femb,
         "femb_tests": femb_tests,
+        "repairs": repairs,
         "page": "femb",
     }
     return render(request, "core/femb_detail.html", context)

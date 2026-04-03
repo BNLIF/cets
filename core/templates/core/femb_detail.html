@@ -71,6 +71,70 @@
         </div>
     </div>
 
+    {% if repairs %}
+    <div class="mt-4">
+        <h3>Repair History</h3>
+        {% for repair in repairs %}
+        <div class="card mb-3">
+            <div class="card-header">
+                <strong>Repair #{{ repair.iteration_number }}</strong>
+                &mdash; {{ repair.date|date:"Y-m-d H:i" }}
+                &mdash; Operator: {{ repair.operator }}
+                {% if repair.batch_id %}&mdash; Batch: {{ repair.batch_id }}{% endif %}
+            </div>
+            <div class="card-body">
+                {% if repair.what_was_fixed %}
+                <p class="mb-2"><strong>What was fixed:</strong> {{ repair.what_was_fixed }}</p>
+                {% endif %}
+                {% if repair.comments %}
+                <p class="mb-2"><strong>Comments:</strong> {{ repair.comments }}</p>
+                {% endif %}
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6 class="text-danger">Removed Chips</h6>
+                        <table class="table table-sm table-bordered">
+                            <thead class="table-light">
+                                <tr><th>Type</th><th>Serial Number</th><th>Position</th></tr>
+                            </thead>
+                            <tbody>
+                                {% for chip in repair.removed_fes.all %}
+                                <tr><td>LArASIC</td><td><a href="{% url 'fe_detail' chip.serial_number %}">{{ chip.serial_number }}</a></td><td>{{ chip.femb_pos }}</td></tr>
+                                {% endfor %}
+                                {% for chip in repair.removed_adcs.all %}
+                                <tr><td>ColdADC</td><td><a href="{% url 'adc_detail' chip.serial_number %}">{{ chip.serial_number }}</a></td><td>{{ chip.femb_pos }}</td></tr>
+                                {% endfor %}
+                                {% for chip in repair.removed_coldatas.all %}
+                                <tr><td>COLDATA</td><td><a href="{% url 'coldata_detail' chip.serial_number %}">{{ chip.serial_number }}</a></td><td>{{ chip.femb_pos }}</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <h6 class="text-success">Installed Chips</h6>
+                        <table class="table table-sm table-bordered">
+                            <thead class="table-light">
+                                <tr><th>Type</th><th>Serial Number</th><th>Position</th></tr>
+                            </thead>
+                            <tbody>
+                                {% for chip in repair.installed_fes.all %}
+                                <tr><td>LArASIC</td><td><a href="{% url 'fe_detail' chip.serial_number %}">{{ chip.serial_number }}</a></td><td>{{ chip.femb_pos }}</td></tr>
+                                {% endfor %}
+                                {% for chip in repair.installed_adcs.all %}
+                                <tr><td>ColdADC</td><td><a href="{% url 'adc_detail' chip.serial_number %}">{{ chip.serial_number }}</a></td><td>{{ chip.femb_pos }}</td></tr>
+                                {% endfor %}
+                                {% for chip in repair.installed_coldatas.all %}
+                                <tr><td>COLDATA</td><td><a href="{% url 'coldata_detail' chip.serial_number %}">{{ chip.serial_number }}</a></td><td>{{ chip.femb_pos }}</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
     <div class="mt-4">
         <h3>FEMB Tests</h3>
         <table class="table table-striped table-bordered">
