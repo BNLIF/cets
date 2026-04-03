@@ -23,6 +23,16 @@ class FE(models.Model):
     last_update = models.DateTimeField(auto_now=True)
     femb = models.ForeignKey(FEMB, on_delete=models.CASCADE, null=True, blank=True)
     femb_pos = models.CharField(max_length=2, null=True, blank=True)  # F1-4, B1-4
+    installed_at_repair = models.ForeignKey(
+        "FEMB_REPAIR", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="installed_fes",
+        help_text="NULL = original assembly; set when installed during a repair",
+    )
+    removed_at_repair = models.ForeignKey(
+        "FEMB_REPAIR", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="removed_fes",
+        help_text="NULL = still on FEMB; set when removed during a repair",
+    )
 
     def rts(self):
         rts_dir = config("RTS_DIR")
@@ -73,6 +83,16 @@ class ADC(models.Model):
     last_update = models.DateTimeField(auto_now=True)
     femb = models.ForeignKey(FEMB, on_delete=models.CASCADE, null=True, blank=True)
     femb_pos = models.CharField(max_length=2, null=True, blank=True)  # F1-4, B1-4
+    installed_at_repair = models.ForeignKey(
+        "FEMB_REPAIR", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="installed_adcs",
+        help_text="NULL = original assembly; set when installed during a repair",
+    )
+    removed_at_repair = models.ForeignKey(
+        "FEMB_REPAIR", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="removed_adcs",
+        help_text="NULL = still on FEMB; set when removed during a repair",
+    )
 
     def __str__(self):
         return f"ColdADC: {self.serial_number}"
@@ -85,9 +105,36 @@ class COLDATA(models.Model):
     last_update = models.DateTimeField(auto_now=True)
     femb = models.ForeignKey(FEMB, on_delete=models.CASCADE, null=True, blank=True)
     femb_pos = models.CharField(max_length=2, null=True, blank=True)  # F1-2
+    installed_at_repair = models.ForeignKey(
+        "FEMB_REPAIR", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="installed_coldatas",
+        help_text="NULL = original assembly; set when installed during a repair",
+    )
+    removed_at_repair = models.ForeignKey(
+        "FEMB_REPAIR", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="removed_coldatas",
+        help_text="NULL = still on FEMB; set when removed during a repair",
+    )
 
     def __str__(self):
         return f"COLDATA: {self.serial_number}"
+
+
+class FEMB_REPAIR(models.Model):
+    femb = models.ForeignKey(FEMB, on_delete=models.CASCADE, related_name="repairs")
+    iteration_number = models.PositiveIntegerField()
+    date = models.DateTimeField()
+    operator = models.CharField(max_length=100)
+    what_was_fixed = models.TextField(blank=True, default="")
+    comments = models.TextField(blank=True, default="")
+    batch_id = models.CharField(max_length=50, blank=True, default="")
+
+    class Meta:
+        unique_together = [["femb", "iteration_number"]]
+        ordering = ["femb", "iteration_number"]
+
+    def __str__(self):
+        return f"Repair #{self.iteration_number} for {self.femb} on {self.date.date()}"
 
 
 class FEMB_TEST(models.Model):
