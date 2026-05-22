@@ -2,7 +2,8 @@ import tempfile
 import textwrap
 from pathlib import Path
 
-from django.test import SimpleTestCase
+from django.contrib.auth import get_user_model
+from django.test import SimpleTestCase, TestCase, override_settings
 
 from core.management.commands.update_fembs_from_ocr import (
     components_to_state,
@@ -10,6 +11,7 @@ from core.management.commands.update_fembs_from_ocr import (
     parse_inspection_note,
     parse_parts_file,
 )
+from core.models import CABLE, COLDATA, FEMB, ColdADC, LArASIC
 
 
 class ComponentsToStateTests(SimpleTestCase):
@@ -147,3 +149,73 @@ class ParseInspectionNoteTests(SimpleTestCase):
         note = parse_inspection_note(str(path))
         self.assertEqual(note["femb_sn"], "BNL/FEMB/IO-1865-1L/00099")
         self.assertIsNone(note["date"])
+
+
+@override_settings(ALLOWED_HOSTS=["*"])
+class ViewSmokeTests(TestCase):
+    """
+    GET each public page as an authenticated user and assert it renders.
+    Catches template errors, broken URL reverses, and missing ORM fields
+    after refactors. Does NOT assert on content — that's the job of
+    targeted view tests, not smoke tests.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.user = User.objects.create_user(username="smoketest", password="x")
+        cls.femb = FEMB.objects.create(version="IO-1865-1K", serial_number="00001")
+        cls.larasic = LArASIC.objects.create(
+            serial_number="009-00001", femb=cls.femb, femb_pos="F1", status="on-femb",
+        )
+        cls.coldadc = ColdADC.objects.create(
+            serial_number="2502-00001", femb=cls.femb, femb_pos="F1", status="on-femb",
+        )
+        cls.coldata = COLDATA.objects.create(
+            serial_number="2506-00001", femb=cls.femb, femb_pos="F1", status="on-femb",
+        )
+        cls.cable = CABLE.objects.create(serial_number="CBL-00001")
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def test_list_pages_render(self):
+        for url in [
+            "/",
+            "/larasic/",
+            "/coldadc/",
+            "/coldata/",
+            "/femb/",
+            "/cable/",
+            "/wib/",
+            "/wiec/",
+        ]:
+            with self.subTest(url=url):
+                self.assertEqual(self.client.get(url).status_code, 200)
+
+    def test_femb_detail_renders_with_chips(self):
+        # Exercises femb.larasic_set / coldadc_set / coldata_set reverse
+        # accessors and the prefetch_related on repairs.
+        url = f"/femb/{self.femb.version}/{self.femb.serial_number}/"
+        self.assertEqual(self.client.get(url).status_code, 200)
+
+    def test_chip_detail_pages_render(self):
+        cases = [
+            f"/larasic/{self.larasic.serial_number}/",
+            f"/coldadc/{self.coldadc.serial_number}/",
+            f"/coldata/{self.coldata.serial_number}/",
+            f"/cable/{self.cable.serial_number}/",
+        ]
+        for url in cases:
+            with self.subTest(url=url):
+                self.assertEqual(self.client.get(url).status_code, 200)
+
+    def test_legacy_fe_path_redirects(self):
+        r = self.client.get(f"/fe/{self.larasic.serial_number}/")
+        self.assertEqual(r.status_code, 301)
+        self.assertTrue(r["Location"].endswith(f"/larasic/{self.larasic.serial_number}/"))
+
+    def test_legacy_adc_path_redirects(self):
+        r = self.client.get(f"/adc/{self.coldadc.serial_number}/")
+        self.assertEqual(r.status_code, 301)
+        self.assertTrue(r["Location"].endswith(f"/coldadc/{self.coldadc.serial_number}/"))
