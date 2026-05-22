@@ -35,12 +35,12 @@ class LArASIC(models.Model):
     )
 
     def rts(self):
-        rts_dir = config("RTS_DIR")
-        rts_dir = os.path.join(rts_dir, self.tray_id, "results")
+        if not self.tray_id:
+            return []
+        rts_dir = os.path.join(config("RTS_DIR"), self.tray_id, "results")
         try:
             filelist = os.listdir(rts_dir)
         except FileNotFoundError:
-            print(f"Directory {rts_dir} not found.")
             return []
 
         parsed_files = []
