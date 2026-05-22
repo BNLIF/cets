@@ -37,8 +37,6 @@ urlpatterns = [
     ),
     path("cable/", views.cable, name="cable"),
     path("cable/<str:serial_number>/", views.cable_detail, name="cable_detail"),
-    path("wiec/", views.wiec, name="wiec"),
-    path("wib/", views.wib, name="wib"),
     path(
         "larasic/<str:serial_number>/rts/<str:filename>/",
         views.rts_file_content,

@@ -187,8 +187,7 @@ class ViewSmokeTests(TestCase):
             "/coldata/",
             "/femb/",
             "/cable/",
-            "/wib/",
-            "/wiec/",
+            "/reference/",
         ]:
             with self.subTest(url=url):
                 self.assertEqual(self.client.get(url).status_code, 200)

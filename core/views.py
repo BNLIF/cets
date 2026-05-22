@@ -457,14 +457,6 @@ def cable_detail(request, serial_number):
     return render(request, "core/cable_detail.html", context)
 
 
-def wiec(request):
-    return render(request, "core/wiec.html", {"page": "wiec"})
-
-
-def wib(request):
-    return render(request, "core/wib.html", {"page": "wib"})
-
-
 def larasic_detail(request, serial_number):
     larasic = get_object_or_404(LArASIC, serial_number=serial_number)
     rts_data = larasic.rts()
