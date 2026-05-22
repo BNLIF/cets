@@ -1,0 +1,20 @@
+<div class="pagination">
+    <div>Showing <span class="cell-mono">{{ start }}–{{ end }}</span> of <span class="cell-mono">{{ total }}</span></div>
+    <div class="pager">
+        {% if has_prev %}
+            <a class="pager-btn" href="{{ first_url }}" hx-get="{{ first_url }}" hx-target="#list-fragment" hx-push-url="true" hx-swap="outerHTML" title="First page" style="text-decoration: none;">«</a>
+            <a class="pager-btn" href="{{ prev_url }}" hx-get="{{ prev_url }}" hx-target="#list-fragment" hx-push-url="true" hx-swap="outerHTML" title="Previous page" style="text-decoration: none;">‹</a>
+        {% else %}
+            <button class="pager-btn" disabled>«</button>
+            <button class="pager-btn" disabled>‹</button>
+        {% endif %}
+        <span class="pager-current">{{ page_num }}/{{ num_pages }}</span>
+        {% if has_next %}
+            <a class="pager-btn" href="{{ next_url }}" hx-get="{{ next_url }}" hx-target="#list-fragment" hx-push-url="true" hx-swap="outerHTML" title="Next page" style="text-decoration: none;">›</a>
+            <a class="pager-btn" href="{{ last_url }}" hx-get="{{ last_url }}" hx-target="#list-fragment" hx-push-url="true" hx-swap="outerHTML" title="Last page" style="text-decoration: none;">»</a>
+        {% else %}
+            <button class="pager-btn" disabled>›</button>
+            <button class="pager-btn" disabled>»</button>
+        {% endif %}
+    </div>
+</div>

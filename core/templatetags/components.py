@@ -209,6 +209,104 @@ def activity_panel(items, compact=False):
     return {"items": enriched, "compact": compact}
 
 
+@register.inclusion_tag("core/components/sortable_th.html", takes_context=True)
+def sortable_th(context, key, label, current_sort, current_dir, width=None):
+    """Sortable table header cell. Clicking flips dir; switching key starts at desc.
+
+    Renders as a link that points at the current URL with sort/dir params updated.
+    Active key shows the ↑/↓ indicator. Designed to be used inside the `_femb_list_fragment.html`
+    pattern — the link's hx-* attributes pull the fragment in place.
+    """
+    is_active = key == current_sort
+    if is_active:
+        next_dir = "desc" if current_dir == "asc" else "asc"
+    else:
+        next_dir = "desc"
+    arrow = "↑" if is_active and current_dir == "asc" else "↓" if is_active else ""
+    request = context["request"]
+    params = request.GET.copy()
+    params["sort"] = key
+    params["dir"] = next_dir
+    params["page"] = "1"
+    href = f"{request.path}?{params.urlencode()}"
+    return {
+        "key": key,
+        "label": label,
+        "href": href,
+        "is_active": is_active,
+        "arrow": arrow,
+        "width": width,
+    }
+
+
+@register.inclusion_tag("core/components/filter_chip.html", takes_context=True)
+def filter_chip(context, label, param, value=None, options=None):
+    """A filter chip. `options` is a list of dicts {value, label} for a dropdown.
+
+    Active when the URL already has `?<param>=<value>`. Clicking an option
+    updates the URL and resets page=1. Clicking × on an active chip clears
+    the param.
+    """
+    request = context["request"]
+    current = request.GET.get(param, "")
+
+    def url_with(p, v):
+        params = request.GET.copy()
+        if v:
+            params[p] = v
+        else:
+            params.pop(p, None)
+        params["page"] = "1"
+        qs = params.urlencode()
+        return f"{request.path}?{qs}" if qs else request.path
+
+    return {
+        "label": label,
+        "param": param,
+        "current": current,
+        "active": bool(current),
+        "options": [
+            {"value": o["value"], "label": o["label"], "href": url_with(param, o["value"]), "is_current": o["value"] == current}
+            for o in (options or [])
+        ],
+        "clear_href": url_with(param, ""),
+    }
+
+
+@register.inclusion_tag("core/components/pagination.html", takes_context=True)
+def pagination(context, page_obj, page_size):
+    """Mono pager + 'Showing X–Y of Z' counter.
+
+    Buttons preserve the current querystring and only flip `page`. Used as
+    HTMX targets via the surrounding fragment's `hx-*` attributes.
+    """
+    request = context["request"]
+    total = page_obj.paginator.count
+    num_pages = page_obj.paginator.num_pages
+    page_num = page_obj.number
+    start = (page_num - 1) * page_size + 1 if total else 0
+    end = min(page_num * page_size, total)
+
+    def page_url(n):
+        params = request.GET.copy()
+        params["page"] = str(n)
+        return f"{request.path}?{params.urlencode()}"
+
+    return {
+        "start": start,
+        "end": end,
+        "total": total,
+        "num_pages": num_pages,
+        "page_num": page_num,
+        "has_prev": page_obj.has_previous(),
+        "has_next": page_obj.has_next(),
+        "first_url": page_url(1),
+        "prev_url": page_url(page_obj.previous_page_number()) if page_obj.has_previous() else None,
+        "next_url": page_url(page_obj.next_page_number()) if page_obj.has_next() else None,
+        "last_url": page_url(num_pages),
+    }
+
+
 def _relative_time(delta):
     """Compact relative-time string in the mono style the design uses."""
     if delta < timedelta(0):

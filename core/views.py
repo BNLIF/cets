@@ -11,7 +11,7 @@ from django.utils.html import escape
 from .models import LArASIC, ColdADC, COLDATA, FEMB, FembRepair, FembTest, CABLE, CableTest
 from . import queries
 from decouple import config
-from django.db.models import Subquery, OuterRef
+from django.db.models import Subquery, OuterRef, Q
 from rest_framework.permissions import IsAdminUser, AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from .serializers import FEMBSerializer
@@ -224,20 +224,55 @@ def coldata(request):
     return _render_paginated_list(request, queryset, "core/coldata.html", "coldata", "serial_number")
 
 
+FEMB_SORT_KEYS = {"serial_number", "version", "latest_test_timestamp"}
+FEMB_PAGE_SIZE = 12
+
+
 def femb(request):
     latest_test = FembTest.objects.filter(femb=OuterRef("pk")).order_by("-timestamp")
     queryset = FEMB.objects.annotate(
         latest_test_timestamp=Subquery(latest_test.values("timestamp")[:1])
     )
-    q = request.GET.get("q", "")
-    by = request.GET.get("by", "sn")
-    if q and by == "sn":
-        try:
-            f = FEMB.objects.get(serial_number=q)
-            return redirect("femb_detail", version=f.version, serial_number=f.serial_number)
-        except FEMB.DoesNotExist:
-            queryset = queryset.filter(serial_number__icontains=q)
-    return _render_paginated_list(request, queryset, "core/femb.html", "femb", "latest_test_timestamp", default_order="desc")
+
+    q = (request.GET.get("q") or "").strip()
+    version = (request.GET.get("version") or "").strip()
+    sort = request.GET.get("sort") or "serial_number"
+    direction = request.GET.get("dir") or "asc"
+
+    if sort not in FEMB_SORT_KEYS:
+        sort = "serial_number"
+    if direction not in {"asc", "desc"}:
+        direction = "asc"
+
+    if q:
+        queryset = queryset.filter(
+            Q(serial_number__icontains=q) | Q(version__icontains=q)
+        )
+    if version:
+        queryset = queryset.filter(version=version)
+
+    sort_field = f"-{sort}" if direction == "desc" else sort
+    # Stable secondary sort so equal keys don't shuffle between pages.
+    queryset = queryset.order_by(sort_field, "serial_number")
+
+    page_obj = Paginator(queryset, FEMB_PAGE_SIZE).get_page(request.GET.get("page"))
+
+    versions = list(FEMB.objects.values_list("version", flat=True).distinct().order_by("version"))
+
+    context = {
+        "page": "femb",
+        "page_obj": page_obj,
+        "page_size": FEMB_PAGE_SIZE,
+        "sort": sort,
+        "dir": direction,
+        "q": q,
+        "version": version,
+        "version_options": [{"value": v, "label": v} for v in versions],
+        "femb_total": FEMB.objects.count(),
+        "activity": queries.recent_activity(limit=10, target_prefix="FEMB"),
+    }
+    template = "core/_femb_list_fragment.html" if getattr(request, "htmx", False) else "core/femb.html"
+    return render(request, template, context)
 
 
 def cable(request):

@@ -1,0 +1,24 @@
+<div class="chip-wrap" style="position: relative; display: inline-block;">
+    {% if active %}
+        <span class="chip is-active" style="cursor: default;">
+            {{ label }}: <span class="cell-mono" style="font-weight: 600;">{{ current }}</span>
+            <a href="{{ clear_href }}" hx-get="{{ clear_href }}" hx-target="#list-fragment" hx-push-url="true" hx-swap="outerHTML" title="Clear filter" style="display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 3px; color: inherit; text-decoration: none; margin-left: 2px;">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </a>
+        </span>
+    {% else %}
+        <details style="position: relative;">
+            <summary class="chip" style="list-style: none;">
+                {{ label }}
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            </summary>
+            <div style="position: absolute; top: 100%; left: 0; margin-top: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow-pop); min-width: 180px; max-height: 280px; overflow-y: auto; z-index: 20; padding: 4px;">
+                {% for opt in options %}
+                <a href="{{ opt.href }}" hx-get="{{ opt.href }}" hx-target="#list-fragment" hx-push-url="true" hx-swap="outerHTML" style="display: block; padding: 6px 10px; font-family: var(--font-mono); font-size: 12px; color: var(--text-2); text-decoration: none; border-radius: 4px;" onmouseover="this.style.background='var(--bg-muted)'" onmouseout="this.style.background='transparent'">{{ opt.label }}</a>
+                {% empty %}
+                <div style="padding: 8px 10px; color: var(--text-4); font-size: 12px;">No options</div>
+                {% endfor %}
+            </div>
+        </details>
+    {% endif %}
+</div>
