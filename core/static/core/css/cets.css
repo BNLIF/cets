@@ -98,6 +98,15 @@ body {
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
 
+/* Container-style links (cards, rows, buttons, chips, nav tabs) should
+   not pick up the inline-text hover underline. */
+a.stat:hover, a.fam-stat:hover, a.link-card:hover,
+a.tl-item:hover, a.search-result:hover, a.nav-tab:hover,
+a.pager-btn:hover, a.btn:hover, a.chip:hover,
+a.user-avatar:hover {
+  text-decoration: none;
+}
+
 button { font-family: inherit; }
 
 /* === Top nav === */
@@ -297,6 +306,26 @@ button { font-family: inherit; }
   text-transform: uppercase;
   color: var(--text-4);
 }
+
+/* === User avatar (top-right) === */
+.user-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-md);
+  background: linear-gradient(135deg, var(--accent), color-mix(in oklch, var(--accent), #000 25%));
+  color: var(--text-on-accent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-decoration: none;
+  border: 1px solid color-mix(in oklch, var(--accent), #000 15%);
+  transition: transform 0.08s, box-shadow 0.12s;
+}
+.user-avatar:hover { box-shadow: var(--shadow-md); }
+.user-avatar:active { transform: translateY(0.5px); }
 
 /* === Page header === */
 .page {
