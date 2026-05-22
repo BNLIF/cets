@@ -124,6 +124,39 @@ def components_to_state(components):
     }
 
 
+def compute_repair_diff(before_components, after_components):
+    """
+    Diff two component lists (each as returned by parse_parts_file) keyed by
+    (type, position). Returns (removed_chips, added_chips); each chip is a dict
+    with keys "type", "serial_number", "position".
+
+    A chip swapped at the same position appears in BOTH lists (removed old SN +
+    added new SN). A position appearing only in `before` yields a removal; only
+    in `after` yields an addition.
+    """
+    before = components_to_state(before_components)
+    after = components_to_state(after_components)
+
+    removed_chips = []
+    added_chips = []
+
+    for key in set(before.keys()) | set(after.keys()):
+        comp_type, pos = key
+        before_sn = before.get(key)
+        after_sn = after.get(key)
+
+        if before_sn and after_sn:
+            if before_sn != after_sn:
+                removed_chips.append({"type": comp_type, "serial_number": before_sn, "position": pos})
+                added_chips.append({"type": comp_type, "serial_number": after_sn, "position": pos})
+        elif before_sn:
+            removed_chips.append({"type": comp_type, "serial_number": before_sn, "position": pos})
+        elif after_sn:
+            added_chips.append({"type": comp_type, "serial_number": after_sn, "position": pos})
+
+    return removed_chips, added_chips
+
+
 class Command(BaseCommand):
     help = (
         "Scans the FEMB_OCR_DIR to find and add new FEMB serial numbers to the database. "
@@ -299,29 +332,7 @@ class Command(BaseCommand):
                 continue
 
             _, _, before_components = parse_parts_file(predecessor_path)
-
-            # Key by (type, position) to avoid collisions between chip types
-            # that share the same numeric position label (e.g. COLDATA F1 ≠ ADC F1).
-            before = components_to_state(before_components)
-            after = components_to_state(after_components)
-
-            removed_chips = []   # {"type", "serial_number", "position"}
-            added_chips = []     # {"type", "serial_number", "position"}
-
-            all_keys = set(before.keys()) | set(after.keys())
-            for key in all_keys:
-                comp_type, pos = key
-                before_sn = before.get(key)
-                after_sn = after.get(key)
-
-                if before_sn and after_sn:
-                    if before_sn != after_sn:
-                        removed_chips.append({"type": comp_type, "serial_number": before_sn, "position": pos})
-                        added_chips.append({"type": comp_type, "serial_number": after_sn, "position": pos})
-                elif before_sn and not after_sn:
-                    removed_chips.append({"type": comp_type, "serial_number": before_sn, "position": pos})
-                elif after_sn and not before_sn:
-                    added_chips.append({"type": comp_type, "serial_number": after_sn, "position": pos})
+            removed_chips, added_chips = compute_repair_diff(before_components, after_components)
 
             repairs_to_record.append(
                 {
