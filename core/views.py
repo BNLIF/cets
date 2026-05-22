@@ -16,6 +16,30 @@ from rest_framework import viewsets
 RTS_FILENAME_RE = re.compile(r"^[A-Za-z0-9_.-]+\.csv$")
 
 
+def _render_paginated_list(request, queryset, template, page_id, default_sort, default_order="asc", per_page=100):
+    """
+    Apply sort + paginate + render to a queryset. Caller is responsible for
+    building the queryset (including any annotations and search filters)
+    and for handling search-by-SN redirects to detail pages.
+    """
+    sort = request.GET.get("sort", default_sort)
+    order = request.GET.get("order", default_order)
+    total_count = queryset.count()
+
+    sort_field = f"-{sort}" if order == "desc" else sort
+    page_obj = Paginator(queryset.order_by(sort_field), per_page).get_page(request.GET.get("page"))
+
+    return render(request, template, {
+        "page_obj": page_obj,
+        "page": page_id,
+        "sort": sort,
+        "order": order,
+        "total_count": total_count,
+        "search_query": request.GET.get("q", ""),
+        "search_by": request.GET.get("by", "sn"),
+    })
+
+
 def home(request):
     return render(request, "core/index.html", {"page": "home"})
 
@@ -88,168 +112,59 @@ def larasic(request):
 
 
 def coldadc(request):
-    sort_by = request.GET.get("sort", "serial_number")
-    order = request.GET.get("order", "asc")
     queryset = ColdADC.objects.all()
-
-    search_query = request.GET.get("q", "")
-    search_by = request.GET.get("by", "sn")
-
-    if search_query:
-        if search_by == "sn":
-            return redirect("coldadc_detail", serial_number=search_query)
-        elif search_by == "femb":
-            queryset = queryset.filter(femb__serial_number__icontains=search_query)
-
-    total_count = queryset.count()
-
-    if order == "desc":
-        sort_by = f"-{sort_by}"
-    queryset = queryset.order_by(sort_by)
-
-    paginator = Paginator(queryset, 100)
-    page_number = request.GET.get("page")
-    page_obj = paginator.get_page(page_number)
-
-    context = {
-        "page_obj": page_obj,
-        "page": "coldadc",
-        "search_query": search_query,
-        "search_by": search_by,
-        "sort": request.GET.get("sort", "serial_number"),
-        "order": order,
-        "total_count": total_count,
-    }
-    return render(request, "core/coldadc.html", context)
+    q = request.GET.get("q", "")
+    by = request.GET.get("by", "sn")
+    if q and by == "sn":
+        return redirect("coldadc_detail", serial_number=q)
+    if q and by == "femb":
+        queryset = queryset.filter(femb__serial_number__icontains=q)
+    return _render_paginated_list(request, queryset, "core/coldadc.html", "coldadc", "serial_number")
 
 
 def coldata(request):
-    sort_by = request.GET.get("sort", "serial_number")
-    order = request.GET.get("order", "asc")
     queryset = COLDATA.objects.all()
-
-    search_query = request.GET.get("q", "")
-    search_by = request.GET.get("by", "sn")
-
-    if search_query:
-        if search_by == "sn":
-            return redirect("coldata_detail", serial_number=search_query)
-        elif search_by == "femb":
-            queryset = queryset.filter(femb__serial_number__icontains=search_query)
-
-    total_count = queryset.count()
-
-    if order == "desc":
-        sort_by = f"-{sort_by}"
-    queryset = queryset.order_by(sort_by)
-
-    paginator = Paginator(queryset, 100)
-    page_number = request.GET.get("page")
-    page_obj = paginator.get_page(page_number)
-
-    context = {
-        "page_obj": page_obj,
-        "page": "coldata",
-        "search_query": search_query,
-        "search_by": search_by,
-        "sort": request.GET.get("sort", "serial_number"),
-        "order": order,
-        "total_count": total_count,
-    }
-    return render(request, "core/coldata.html", context)
+    q = request.GET.get("q", "")
+    by = request.GET.get("by", "sn")
+    if q and by == "sn":
+        return redirect("coldata_detail", serial_number=q)
+    if q and by == "femb":
+        queryset = queryset.filter(femb__serial_number__icontains=q)
+    return _render_paginated_list(request, queryset, "core/coldata.html", "coldata", "serial_number")
 
 
 def femb(request):
-    sort_by = request.GET.get("sort", "latest_test_timestamp")
-    order = request.GET.get("order", "desc")
-
     latest_test = FembTest.objects.filter(femb=OuterRef("pk")).order_by("-timestamp")
     queryset = FEMB.objects.annotate(
         latest_test_timestamp=Subquery(latest_test.values("timestamp")[:1])
     )
-
-    search_query = request.GET.get("q", "")
-    search_by = request.GET.get("by", "sn")
-
-    if search_query:
-        if search_by == "sn":
-            try:
-                femb = FEMB.objects.get(serial_number=search_query)
-                return redirect(
-                    "femb_detail",
-                    version=femb.version,
-                    serial_number=femb.serial_number,
-                )
-            except FEMB.DoesNotExist:
-                queryset = queryset.filter(serial_number__icontains=search_query)
-
-    total_count = queryset.count()
-
-    if order == "desc":
-        sort_by = f"-{sort_by}"
-    queryset = queryset.order_by(sort_by)
-
-    paginator = Paginator(queryset, 100)
-    page_number = request.GET.get("page")
-    page_obj = paginator.get_page(page_number)
-
-    context = {
-        "page_obj": page_obj,
-        "page": "femb",
-        "search_query": search_query,
-        "search_by": search_by,
-        "sort": request.GET.get("sort", "latest_test_timestamp"),
-        "order": order,
-        "total_count": total_count,
-    }
-    return render(request, "core/femb.html", context)
+    q = request.GET.get("q", "")
+    by = request.GET.get("by", "sn")
+    if q and by == "sn":
+        try:
+            f = FEMB.objects.get(serial_number=q)
+            return redirect("femb_detail", version=f.version, serial_number=f.serial_number)
+        except FEMB.DoesNotExist:
+            queryset = queryset.filter(serial_number__icontains=q)
+    return _render_paginated_list(request, queryset, "core/femb.html", "femb", "latest_test_timestamp", default_order="desc")
 
 
 def cable(request):
-    sort_by = request.GET.get("sort", "latest_test_timestamp")
-    order = request.GET.get("order", "desc")
-
     latest_test = CableTest.objects.filter(cable=OuterRef("pk")).order_by("-timestamp")
     queryset = CABLE.objects.annotate(
         latest_test_timestamp=Subquery(latest_test.values("timestamp")[:1])
     )
-
-    search_query = request.GET.get("q", "")
-    search_by = request.GET.get("by", "sn")
-
-    if search_query:
-        if search_by == "sn":
-            try:
-                cable = CABLE.objects.get(serial_number=search_query)
-                return redirect(
-                    "cable_detail",
-                    serial_number=cable.serial_number,
-                )
-            except CABLE.DoesNotExist:
-                queryset = queryset.filter(serial_number__icontains=search_query)
-        elif search_by == "batch":
-            queryset = queryset.filter(batch_number__icontains=search_query)
-
-    total_count = queryset.count()
-
-    if order == "desc":
-        sort_by = f"-{sort_by}"
-    queryset = queryset.order_by(sort_by)
-
-    paginator = Paginator(queryset, 100)
-    page_number = request.GET.get("page")
-    page_obj = paginator.get_page(page_number)
-
-    context = {
-        "page_obj": page_obj,
-        "page": "cable",
-        "search_query": search_query,
-        "search_by": search_by,
-        "sort": request.GET.get("sort", "serial_number"),
-        "order": order,
-        "total_count": total_count,
-    }
-    return render(request, "core/cable.html", context)
+    q = request.GET.get("q", "")
+    by = request.GET.get("by", "sn")
+    if q and by == "sn":
+        try:
+            c = CABLE.objects.get(serial_number=q)
+            return redirect("cable_detail", serial_number=c.serial_number)
+        except CABLE.DoesNotExist:
+            queryset = queryset.filter(serial_number__icontains=q)
+    elif q and by == "batch":
+        queryset = queryset.filter(batch_number__icontains=q)
+    return _render_paginated_list(request, queryset, "core/cable.html", "cable", "latest_test_timestamp", default_order="desc")
 
 
 def cable_detail(request, serial_number):
