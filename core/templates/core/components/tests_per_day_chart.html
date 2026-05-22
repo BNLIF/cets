@@ -1,3 +1,6 @@
+{% if total == 0 %}
+<div style="padding: 48px 0; text-align: center; color: var(--text-4); font-family: var(--font-mono); font-size: 12px;">No tests run in this window.</div>
+{% else %}
 <svg viewBox="0 0 {{ w }} {{ h|add:30 }}" style="width: 100%; height: auto; display: block;" preserveAspectRatio="none">
     {% for g in grid %}
     <g>
@@ -26,3 +29,4 @@
         <div style="color: var(--text-2); font-family: var(--font-mono); font-size: 13px; margin-top: 4px;">{{ daily_avg }} / day</div>
     </div>
 </div>
+{% endif %}

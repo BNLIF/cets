@@ -24,7 +24,14 @@
 <div class="dash-grid">
     <div class="panel">
         <div class="panel-head">
-            <div class="panel-title">Tests run per day · last 90 days</div>
+            <div class="panel-title">Tests run per day · {{ chart_window }}</div>
+            <div style="display: flex; gap: 4px;">
+                {% for key, _ in chart_windows %}
+                <a class="btn btn-sm btn-ghost"
+                   href="?window={{ key }}"
+                   {% if key == chart_window %}style="background: var(--bg-muted); color: var(--text);"{% endif %}>{{ key }}</a>
+                {% endfor %}
+            </div>
         </div>
         <div class="panel-body padded">
             {% tests_per_day_chart tests_per_day %}

@@ -115,12 +115,20 @@ def home(request):
          "total": cable_qs.count(), "tested": cable_tested, "href": reverse("cable")},
     ]
 
+    window_param = request.GET.get("window")
+    window_keys = {k for k, _ in queries.CHART_WINDOWS}
+    if window_param not in window_keys:
+        window_param = queries.default_chart_window()
+    window_days = queries.chart_window_days(window_param)
+
     context = {
         "page": "home",
         "femb_total": femb_total,
         "stat_cards": stat_cards,
         "families": families,
-        "tests_per_day": queries.tests_per_day(days=90),
+        "tests_per_day": queries.tests_per_day(days=window_days),
+        "chart_window": window_param,
+        "chart_windows": queries.CHART_WINDOWS,
         "activity": queries.recent_activity(limit=10),
     }
     return render(request, "core/index.html", context)

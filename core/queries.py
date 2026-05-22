@@ -4,12 +4,63 @@ The activity feed is the prime example: it unifies FembTest, FembRepair, and
 CableTest into one timeline without a dedicated audit-log table.
 """
 from datetime import timedelta
-from django.db.models import Count
+from django.db.models import Count, Max
 from django.db.models.functions import TruncDate
 from django.urls import reverse
 from django.utils import timezone
 
 from .models import CableTest, FembRepair, FembTest
+
+
+# Ordered shortest → longest so smart-default picks the tightest window
+# containing data. "all" is a sentinel resolved to the range from the
+# earliest test to today.
+CHART_WINDOWS = [
+    ("7d", 7),
+    ("30d", 30),
+    ("90d", 90),
+    ("1y", 365),
+    ("all", None),
+]
+
+
+def chart_window_days(window_key):
+    """Resolve a window key (e.g. '30d', 'all') to a number of days.
+
+    For 'all', this is the span from the earliest test to today (with a
+    floor of 30 days so the chart isn't degenerate when data is sparse).
+    Unknown keys fall back to 90.
+    """
+    by_key = dict(CHART_WINDOWS)
+    if window_key not in by_key:
+        return 90
+    days = by_key[window_key]
+    if days is not None:
+        return days
+    earliest_femb = FembTest.objects.order_by("timestamp").values_list("timestamp", flat=True).first()
+    earliest_cable = CableTest.objects.order_by("timestamp").values_list("timestamp", flat=True).first()
+    candidates = [t for t in (earliest_femb, earliest_cable) if t]
+    if not candidates:
+        return 30
+    span = (timezone.now() - min(candidates)).days + 1
+    return max(30, span)
+
+
+def default_chart_window():
+    """Smallest window in CHART_WINDOWS containing the most recent test.
+
+    Falls back to '90d' if there are no tests anywhere.
+    """
+    latest_femb = FembTest.objects.aggregate(m=Max("timestamp"))["m"]
+    latest_cable = CableTest.objects.aggregate(m=Max("timestamp"))["m"]
+    candidates = [t for t in (latest_femb, latest_cable) if t]
+    if not candidates:
+        return "90d"
+    age_days = (timezone.now() - max(candidates)).days
+    for key, days in CHART_WINDOWS:
+        if days is None or age_days <= days:
+            return key
+    return "all"
 
 
 def _kind_from_status(status):
