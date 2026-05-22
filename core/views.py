@@ -1,14 +1,19 @@
+import re
+from pathlib import Path
+
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponse, HttpResponseNotFound
 from django.core.paginator import Paginator
+from django.utils.html import escape
 from .models import FE, ADC, COLDATA, FEMB, FEMB_REPAIR, FEMB_TEST, CABLE, CABLE_TEST
 from decouple import config
-import os
 from django.db.models import Subquery, OuterRef
 from rest_framework.permissions import IsAdminUser, AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from .serializers import FEMBSerializer
 from rest_framework import viewsets
+
+RTS_FILENAME_RE = re.compile(r"^[A-Za-z0-9_.-]+\.csv$")
 
 
 def home(request):
@@ -318,20 +323,20 @@ def femb_detail(request, version, serial_number):
 
 
 def rts_file_content(request, serial_number, filename):
-    fe = get_object_or_404(FE, serial_number=serial_number)
-    tray_id = fe.tray_id
+    if not RTS_FILENAME_RE.match(filename):
+        return HttpResponseNotFound("<h1>File not found</h1>")
 
-    rts_dir = config("RTS_DIR")
-    file_path = os.path.join(rts_dir, tray_id, "results", filename)
+    fe = get_object_or_404(FE, serial_number=serial_number)
+    base = (Path(config("RTS_DIR")) / fe.tray_id / "results").resolve()
+    candidate = (base / filename).resolve()
+    if not candidate.is_relative_to(base):
+        return HttpResponseNotFound("<h1>File not found</h1>")
 
     try:
-        with open(file_path, "r") as f:
-            content = f.read()
-        return HttpResponse(f"<pre>{content}</pre>")
-    except FileNotFoundError:
+        content = candidate.read_text()
+    except (FileNotFoundError, OSError):
         return HttpResponseNotFound("<h1>File not found</h1>")
-    except Exception as e:
-        return HttpResponse(f"<h1>Error reading file</h1><p>{e}</p>", status=500)
+    return HttpResponse(f"<pre>{escape(content)}</pre>")
 
 
 class FEMBViewSet(viewsets.ModelViewSet):

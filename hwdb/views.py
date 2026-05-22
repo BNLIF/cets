@@ -1,8 +1,12 @@
-from django.shortcuts import render
-from .api_client import FnalDbApiClient
-import json
-from urllib.parse import urlparse, parse_qs
+import logging
 from datetime import datetime
+
+from django.shortcuts import render
+
+from .api_client import FnalDbApiClient
+
+logger = logging.getLogger(__name__)
+GENERIC_ERROR = "Failed to fetch data from the Hardware Database."
 
 
 def home(request):
@@ -89,8 +93,9 @@ def component_list_view(request, component_type_id=None):
             "current_component_type_id": component_type_id,
         }
         return render(request, "hwdb/component_list.html", context)
-    except Exception as e:
-        return render(request, "hwdb/error.html", {"error_message": str(e)})
+    except Exception:
+        logger.exception("HWDB API call failed")
+        return render(request, "hwdb/error.html", {"error_message": GENERIC_ERROR})
 
 
 def subsystem_list_view(request, part1=None, part2=None):
@@ -120,8 +125,9 @@ def subsystem_list_view(request, part1=None, part2=None):
             "current_part2": part2,
         }
         return render(request, "hwdb/subsystem_list.html", context)
-    except Exception as e:
-        return render(request, "hwdb/error.html", {"error_message": str(e)})
+    except Exception:
+        logger.exception("HWDB API call failed")
+        return render(request, "hwdb/error.html", {"error_message": GENERIC_ERROR})
 
 
 def part_type_list_view(request, part1, part2, subsystem_id):
@@ -145,5 +151,6 @@ def part_type_list_view(request, part1, part2, subsystem_id):
             "current_subsystem_id": subsystem_id,
         }
         return render(request, "hwdb/part_type_list.html", context)
-    except Exception as e:
-        return render(request, "hwdb/error.html", {"error_message": str(e)})
+    except Exception:
+        logger.exception("HWDB API call failed")
+        return render(request, "hwdb/error.html", {"error_message": GENERIC_ERROR})

@@ -1,6 +1,10 @@
-import requests
+import logging
 import os
+
+import requests
 from decouple import config
+
+logger = logging.getLogger(__name__)
 
 
 class FnalDbApiClient:
@@ -26,17 +30,12 @@ class FnalDbApiClient:
         if method in ["POST", "PATCH"]:
             request_headers["Content-Type"] = "application/json"
 
-        # print(f"Making {method} request to: {url}")
-        # print(f"Headers: {request_headers}")
-        if data:
-            print(f"Data: {data}")
         try:
             response = requests.request(method, url, headers=request_headers, json=data)
-            response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
+            response.raise_for_status()
             return response.json()
-        except requests.exceptions.RequestException as e:
-            print(f"API request failed: {e}")
-            # Handle specific errors or re-raise
+        except requests.exceptions.RequestException:
+            logger.exception("API request to %s failed", url)
             raise
 
     def get_component_types(self, component_type_id):
