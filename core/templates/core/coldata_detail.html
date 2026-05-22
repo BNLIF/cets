@@ -13,5 +13,14 @@
             <p class="card-text"><strong>Last Update:</strong> {{ coldata.last_update|date:"Y-m-d H:i:s" }}</p>
         </div>
     </div>
+
+    {% if coldata.removed_at_repair %}
+    <div class="alert alert-warning mt-3" role="alert">
+        Removed from FEMB
+        <a href="{% url 'femb_detail' version=coldata.removed_at_repair.femb.version serial_number=coldata.removed_at_repair.femb.serial_number %}">{{ coldata.removed_at_repair.femb.serial_number }}</a>
+        during repair #{{ coldata.removed_at_repair.iteration_number }}
+        on {{ coldata.removed_at_repair.date|date:"Y-m-d" }}.
+    </div>
+    {% endif %}
 </div>
 {% endblock %}

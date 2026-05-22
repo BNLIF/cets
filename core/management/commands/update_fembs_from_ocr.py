@@ -323,10 +323,22 @@ class Command(BaseCommand):
                 predecessor_path = repair_file_by_femb_iter.get((femb_dir, iteration_number - 1))
 
             if not predecessor_path:
+                if iteration_number == 1:
+                    explanation = (
+                        f"Cannot find the original assembly file for "
+                        f"{femb_version}/{femb_sn}. Ensure femb_parts_{femb_sn}.txt "
+                        f"exists in this FEMB's pre-repair batch directory and re-run."
+                    )
+                else:
+                    explanation = (
+                        f"Cannot find the repair_{iteration_number - 1} file "
+                        f"for {femb_version}/{femb_sn}. Repair iterations must be "
+                        f"loaded in order; ensure repair_{iteration_number - 1}/ "
+                        f"exists alongside repair_{iteration_number}/."
+                    )
                 self.stdout.write(
                     self.style.WARNING(
-                        f"  - No predecessor file found for repair #{iteration_number} of "
-                        f"{femb_version}/{femb_sn}. Skipping."
+                        f"  - Skipping repair #{iteration_number}: {explanation}"
                     )
                 )
                 continue

@@ -13,5 +13,14 @@
             <p class="card-text"><strong>Last Update:</strong> {{ coldadc.last_update|date:"Y-m-d H:i:s" }}</p>
         </div>
     </div>
+
+    {% if coldadc.removed_at_repair %}
+    <div class="alert alert-warning mt-3" role="alert">
+        Removed from FEMB
+        <a href="{% url 'femb_detail' version=coldadc.removed_at_repair.femb.version serial_number=coldadc.removed_at_repair.femb.serial_number %}">{{ coldadc.removed_at_repair.femb.serial_number }}</a>
+        during repair #{{ coldadc.removed_at_repair.iteration_number }}
+        on {{ coldadc.removed_at_repair.date|date:"Y-m-d" }}.
+    </div>
+    {% endif %}
 </div>
 {% endblock %}

@@ -6,7 +6,9 @@
     <div class="card mt-4">
         <div class="card-body">
             <p class="card-text"><strong>Status:</strong> {{ larasic.status }}</p>
+            {% if larasic.tray_id %}
             <p class="card-text"><strong>Tray ID:</strong> {{ larasic.tray_id }}</p>
+            {% endif %}
             {% if larasic.femb %}
             <p class="card-text"><strong>FEMB:</strong> <a href="{% url 'femb_detail' version=larasic.femb.version serial_number=larasic.femb.serial_number %}">{{ larasic.femb.serial_number }}</a></p>
             <p class="card-text"><strong>FEMB Position:</strong> {{ larasic.femb_pos }}</p>
@@ -14,6 +16,15 @@
             <p class="card-text"><strong>Last Update:</strong> {{ larasic.last_update|date:"Y-m-d H:i:s" }}</p>
         </div>
     </div>
+
+    {% if larasic.removed_at_repair %}
+    <div class="alert alert-warning mt-3" role="alert">
+        Removed from FEMB
+        <a href="{% url 'femb_detail' version=larasic.removed_at_repair.femb.version serial_number=larasic.removed_at_repair.femb.serial_number %}">{{ larasic.removed_at_repair.femb.serial_number }}</a>
+        during repair #{{ larasic.removed_at_repair.iteration_number }}
+        on {{ larasic.removed_at_repair.date|date:"Y-m-d" }}.
+    </div>
+    {% endif %}
 
     <h2 class="mt-4">RTS Test Results</h2>
     {% if rts_data %}
