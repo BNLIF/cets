@@ -1,0 +1,13 @@
+{% load components %}
+<div class="panel" style="margin-bottom: 32px;">
+    <div class="panel-body padded">
+        <dl class="info-grid">
+            {% for cell in cells %}
+            <div>
+                <dt>{{ cell.label }}</dt>
+                <dd>{% if cell.is_pill %}{% pill cell.value %}{% else %}<span class="cell-mono">{{ cell.value }}</span>{% endif %}</dd>
+            </div>
+            {% endfor %}
+        </dl>
+    </div>
+</div>

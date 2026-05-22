@@ -1,0 +1,69 @@
+{% load components %}
+<div class="panel repair-card">
+    <div class="repair-head">
+        <span class="repair-num">Repair #{{ repair.iteration_number }}</span>
+        <span class="repair-meta">{{ repair.date|date:"Y-m-d H:i" }}</span>
+        <span class="repair-meta">Operator <strong>{{ repair.operator }}</strong></span>
+        {% if repair.batch_id %}<span class="repair-meta">Batch <strong class="cell-mono">{{ repair.batch_id }}</strong></span>{% endif %}
+    </div>
+    <div class="repair-body">
+        {% if repair.what_was_fixed %}
+        <div class="repair-fix">
+            <div class="kv-label">What was fixed</div>
+            <div class="kv-value">{{ repair.what_was_fixed }}</div>
+        </div>
+        {% endif %}
+        {% if repair.comments %}
+        <div class="repair-fix">
+            <div class="kv-label">Comments</div>
+            <div class="kv-value">{{ repair.comments }}</div>
+        </div>
+        {% endif %}
+        <div class="repair-cols">
+            <div>
+                <div class="repair-col-title" style="color: var(--status-fail);">
+                    <span style="display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 4px; background: color-mix(in oklch, var(--status-fail) 15%, white); color: var(--status-fail); font-weight: 700; font-family: var(--font-mono); font-size: 11px; margin-right: 6px; vertical-align: middle;">−</span>
+                    Removed chips
+                </div>
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead><tr><th>Type</th><th>Serial number</th><th style="width: 100px;">Position</th></tr></thead>
+                        <tbody>
+                            {% for kind, chip in removed %}
+                            <tr style="cursor: default;">
+                                <td class="cell-mono">{{ kind }}</td>
+                                <td><a href="{% if kind == 'LArASIC' %}{% url 'larasic_detail' chip.serial_number %}{% elif kind == 'ColdADC' %}{% url 'coldadc_detail' chip.serial_number %}{% else %}{% url 'coldata_detail' chip.serial_number %}{% endif %}" class="cell-mono" style="color: var(--accent); font-weight: 500;">{{ chip.serial_number }}</a></td>
+                                <td>{% position_tag chip.femb_pos %}</td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="3" class="cell-muted" style="padding: 14px var(--cell-px);">—</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div>
+                <div class="repair-col-title" style="color: var(--status-pass);">
+                    <span style="display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 4px; background: color-mix(in oklch, var(--status-pass) 15%, white); color: var(--status-pass); font-weight: 700; font-family: var(--font-mono); font-size: 11px; margin-right: 6px; vertical-align: middle;">+</span>
+                    Installed chips
+                </div>
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead><tr><th>Type</th><th>Serial number</th><th style="width: 100px;">Position</th></tr></thead>
+                        <tbody>
+                            {% for kind, chip in installed %}
+                            <tr style="cursor: default;">
+                                <td class="cell-mono">{{ kind }}</td>
+                                <td><a href="{% if kind == 'LArASIC' %}{% url 'larasic_detail' chip.serial_number %}{% elif kind == 'ColdADC' %}{% url 'coldadc_detail' chip.serial_number %}{% else %}{% url 'coldata_detail' chip.serial_number %}{% endif %}" class="cell-mono" style="color: var(--accent); font-weight: 500;">{{ chip.serial_number }}</a></td>
+                                <td>{% position_tag chip.femb_pos %}</td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="3" class="cell-muted" style="padding: 14px var(--cell-px);">—</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

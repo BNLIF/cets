@@ -1,0 +1,1 @@
+<nav class="crumbs">{% for item in items %}{% if not forloop.first %}<span class="crumbs-sep">/</span>{% endif %}{% if item.href %}<a href="{{ item.href }}">{{ item.label }}</a>{% else %}<span>{{ item.label }}</span>{% endif %}{% endfor %}</nav>

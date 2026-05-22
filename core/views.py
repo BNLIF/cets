@@ -228,10 +228,22 @@ def femb_detail(request, version, serial_number):
         "removed_larasics", "removed_coldadcs", "removed_coldatas",
         "installed_larasics", "installed_coldadcs", "installed_coldatas",
     ).order_by("iteration_number")
+    larasics = femb.larasic_set.filter(removed_at_repair__isnull=True).order_by("femb_pos")
+    coldadcs = femb.coldadc_set.filter(removed_at_repair__isnull=True).order_by("femb_pos")
+    coldatas = femb.coldata_set.filter(removed_at_repair__isnull=True).order_by("femb_pos")
+    info_cells = [
+        {"label": "VERSION", "value": femb.version, "is_pill": False},
+        {"label": "STATUS", "value": femb.status, "is_pill": True},
+        {"label": "LAST UPDATE", "value": femb.last_update.strftime("%Y-%m-%d %H:%M:%S"), "is_pill": False},
+    ]
     context = {
         "femb": femb,
         "femb_tests": femb_tests,
         "repairs": repairs,
+        "larasics": larasics,
+        "coldadcs": coldadcs,
+        "coldatas": coldatas,
+        "info_cells": info_cells,
         "page": "femb",
     }
     return render(request, "core/femb_detail.html", context)
