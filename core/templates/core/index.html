@@ -1,172 +1,46 @@
 {% extends 'core/base.html' %}
-{% load static %}
+{% load components %}
+
+{% block title %}CETS — Cold electronics overview{% endblock %}
 
 {% block content %}
-<h1>Cold Electronics Tracking System</h1>
-
-<ul class="nav nav-tabs my-3" id="myTab" role="tablist">
-  <li class="nav-item" role="presentation">
-    <a class="nav-link active" id="test-units-tab" data-bs-toggle="tab" href="#test-units" role="tab" aria-controls="test-units" aria-selected="false">Test Units</a>
-  </li>
-  <li class="nav-item" role="presentation">
-    <a class="nav-link" id="diagram-tab" data-bs-toggle="tab" href="#diagram" role="tab" aria-controls="diagram" aria-selected="true">Diagram</a>
-  </li>
-  <li class="nav-item" role="presentation">
-    <a class="nav-link" id="channel-map-tab" data-bs-toggle="tab" href="#channel-map" role="tab" aria-controls="channel-map" aria-selected="false">FEMB Channel Map</a>
-  </li>
-  <li class="nav-item" role="presentation">
-    <a class="nav-link" id="datasheet-tab" data-bs-toggle="tab" href="#datasheet" role="tab" aria-controls="datasheet" aria-selected="false">Data Sheet</a>
-  </li>
-  <li class="nav-item" role="presentation">
-    <a class="nav-link" id="documents-tab" data-bs-toggle="tab" href="#documents" role="tab" aria-controls="documents" aria-selected="false">Documents</a>
-  </li>
-</ul>
-<div class="tab-content" id="myTabContent">
-  <div class="tab-pane fade show active" id="test-units" role="tabpanel" aria-labelledby="test-units-tab">
-    <div class="my-1">
-      <table class="table" style="width: 70%;">
-        <caption>Number of test units</caption>
-        <thead>
-          <tr>
-            <th scope="col"></th>
-            <th scope="col">FD-HD</th>
-            <th scope="col">FD-VD</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <th scope="row">Anode unit</th>
-            <td>150 APA</td>
-            <td>80 CRP</td>
-          </tr>
-          <tr>
-            <th scope="row">Readout channel</th>
-            <td>384,000</td>
-            <td>245,760</td>
-          </tr>
-          <tr>
-            <th scope="row">LArASIC</th>
-            <td>24,000</td>
-            <td>15,360</td>
-          </tr>
-          <tr>
-            <th scope="row">ColdADC</th>
-            <td>24,000</td>
-            <td>15,360</td>
-          </tr>
-          <tr>
-            <th scope="row">COLDATA</th>
-            <td>6,000</td>
-            <td>3,840</td>
-          </tr>
-          <tr>
-            <th scope="row">FEMB</th>
-            <td>3,000</td>
-            <td>1,920</td>
-          </tr>
-          <tr>
-            <th scope="row">Cold cable bundle</th>
-            <td>150</td>
-            <td>80</td>
-          </tr>
-          <tr>
-            <th scope="row">Feedthrough</th>
-            <td>75</td>
-            <td>40</td>
-          </tr>
-          <tr>
-            <th scope="row">CE flange</th>
-            <td>150</td>
-            <td>80</td>
-          </tr>
-          <tr>
-            <th scope="row">WIEC</th>
-            <td>150</td>
-            <td>80</td>
-          </tr>
-          <tr>
-            <th scope="row">WIB</th>
-            <td>750</td>
-            <td>480</td>
-          </tr>
-          <tr>
-            <th scope="row">PTC</th>
-            <td>150</td>
-            <td>80</td>
-          </tr>
-          <tr>
-            <th scope="row">PTB</th>
-            <td>150</td>
-            <td>80</td>
-          </tr>
-        </tbody>
-      </table>
+<div class="page-head">
+    <div>
+        {% crumbs "CETS" "Overview" %}
+        <h1 class="page-title">Cold electronics overview</h1>
+        <div class="page-subtitle">Tracking {{ femb_total }} FEMBs · drawn from the live CETS database</div>
     </div>
-  </div>
-  <div class="tab-pane fade" id="diagram" role="tabpanel" aria-labelledby="diagram-tab">
-    <div class="my-5">
-        <img src="{% static 'core/images/Diagram.png' %}" class="img-fluid" alt="Cold Electronics Diagram" style="width: 70%;">
+    <div class="page-head-actions">
+        <a class="btn btn-ghost" href="{% url 'reference' %}">Reference</a>
     </div>
-  </div>
-  <div class="tab-pane fade" id="channel-map" role="tabpanel" aria-labelledby="channel-map-tab">
-    <div class="my-5">
-        <img src="{% static 'core/images/CE_Mapping.png' %}" class="img-fluid" alt="FEMB Channel Map" style="width: 70%;">
-    </div>
-  </div>
-  <div class="tab-pane fade" id="datasheet" role="tabpanel" aria-labelledby="datasheet-tab">
-    <div class="my-1">
-      <table class="table" style="width: 70%;">
-        <thead>
-          <tr>
-            <th scope="col"></th>
-            <th scope="col">Version</th>
-            <th scope="col">File</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <th scope="row">LArASIC</th>
-            <td>P5</td>
-            <td><a href="https://www.phy.bnl.gov/twister/static/cetsdata/datasheets/LArASIC_P5.pdf" target="_blank">PDF</a></td>
-          </tr>
-          <tr>
-            <th scope="row">ColdADC</th>
-            <td>P2</td>
-            <td><a href="https://www.phy.bnl.gov/twister/static/cetsdata/datasheets/ColdADC_P2.pdf" target="_blank">PDF</a></td>
-          </tr>
-          <tr>
-            <th scope="row">COLDATA</th>
-            <td>P3_P4/E4</td>
-            <td><a href="https://www.phy.bnl.gov/twister/static/cetsdata/datasheets/COLDATA_P3_P4_E4.pdf" target="_blank">PDF</a></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-  <div class="tab-pane fade" id="documents" role="tabpanel" aria-labelledby="documents-tab">
-    <div class="my-1">
-      <table class="table" style="width: 70%;">
-        <thead>
-          <tr>
-            <th scope="col">Description</th>
-            <th scope="col">Type</th>
-            <th scope="col">Author</th>
-            <th scope="col">Date</th>
-            <th scope="col">File</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>CE Production Overview</td>
-            <td>Poster</td>
-            <td>Xuyang Ning</td>
-            <td>2025 Oct.</td>
-            <td><a href="https://www.phy.bnl.gov/twister/static/cetsdata/documents/Poster_For_CPAD2025_v3_3.pdf" target="_blank">PDF</a></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
 </div>
 
+<div class="stats">
+    {% for card in stat_cards %}
+        {% stat_card name=card.name description=card.description numbers=card.numbers this_month=card.this_month href=card.href %}
+    {% endfor %}
+</div>
+
+<div class="dash-grid">
+    <div class="panel">
+        <div class="panel-head">
+            <div class="panel-title">Tests run per day · last 90 days</div>
+        </div>
+        <div class="panel-body padded">
+            {% tests_per_day_chart tests_per_day %}
+        </div>
+        <div style="border-top: 1px solid var(--border);">
+            <div class="panel-head" style="background: transparent; border-bottom: 0;">
+                <div class="panel-title">By component family</div>
+            </div>
+            <div style="padding: 0 20px 18px;">
+                {% family_breakdown families %}
+            </div>
+        </div>
+    </div>
+
+    <div>
+        {% activity_panel activity %}
+    </div>
+</div>
 {% endblock %}

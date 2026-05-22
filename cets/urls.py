@@ -22,6 +22,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api-auth/", include("rest_framework.urls")),
     path("", views.home, name="home"),
+    path("reference/", views.reference, name="reference"),
     path("hwdb/", include("hwdb.urls")),
     path("larasic/", views.larasic, name="larasic"),
     path("larasic/<str:serial_number>/", views.larasic_detail, name="larasic_detail"),

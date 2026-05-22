@@ -1,11 +1,15 @@
 import re
+from datetime import timedelta
 from pathlib import Path
 
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponse, HttpResponseNotFound
 from django.core.paginator import Paginator
+from django.urls import reverse
+from django.utils import timezone
 from django.utils.html import escape
 from .models import LArASIC, ColdADC, COLDATA, FEMB, FembRepair, FembTest, CABLE, CableTest
+from . import queries
 from decouple import config
 from django.db.models import Subquery, OuterRef
 from rest_framework.permissions import IsAdminUser, AllowAny
@@ -41,7 +45,94 @@ def _render_paginated_list(request, queryset, template, page_id, default_sort, d
 
 
 def home(request):
-    return render(request, "core/index.html", {"page": "home"})
+    now = timezone.now()
+    month_ago = now - timedelta(days=30)
+
+    femb_qs = FEMB.objects.all()
+    larasic_qs = LArASIC.objects.all()
+    coldadc_qs = ColdADC.objects.all()
+    coldata_qs = COLDATA.objects.all()
+    cable_qs = CABLE.objects.all()
+
+    femb_total = femb_qs.count()
+    qc_run = FembTest.objects.count()
+    # "Cold tested · LN": components installed on a FEMB that has at least one LN test.
+    larasic_cold = larasic_qs.filter(femb__fembtest__test_env="LN").distinct().count()
+    coldadc_cold = coldadc_qs.filter(femb__fembtest__test_env="LN").distinct().count()
+    coldata_cold = coldata_qs.filter(femb__fembtest__test_env="LN").distinct().count()
+    cable_tested = cable_qs.filter(cabletest__isnull=False).distinct().count()
+
+    stat_cards = [
+        {
+            "name": "FEMB", "description": "Frontend Motherboard",
+            "href": reverse("femb"),
+            "this_month": FEMB.objects.filter(last_update__gte=month_ago).count(),
+            "numbers": [
+                {"value": femb_total, "label": "FEMBs tracked"},
+                {"value": qc_run, "label": "QC tests run", "accent": True},
+            ],
+        },
+        {
+            "name": "LArASIC", "description": "16-ch front-end ASIC",
+            "href": reverse("larasic"),
+            "this_month": larasic_qs.filter(last_update__gte=month_ago).count(),
+            "numbers": [
+                {"value": larasic_qs.count(), "label": "Total tracked"},
+                {"value": larasic_cold, "label": "Cold tested · LN", "cold": True},
+            ],
+        },
+        {
+            "name": "ColdADC", "description": "12-bit cold ADC",
+            "href": reverse("coldadc"),
+            "this_month": coldadc_qs.filter(last_update__gte=month_ago).count(),
+            "numbers": [
+                {"value": coldadc_qs.count(), "label": "Total tracked"},
+                {"value": coldadc_cold, "label": "Cold tested · LN", "cold": True},
+            ],
+        },
+        {
+            "name": "COLDATA", "description": "Serializer / control",
+            "href": reverse("coldata"),
+            "this_month": coldata_qs.filter(last_update__gte=month_ago).count(),
+            "numbers": [
+                {"value": coldata_qs.count(), "label": "Total tracked"},
+                {"value": coldata_cold, "label": "Cold tested · LN", "cold": True},
+            ],
+        },
+    ]
+
+    families = [
+        {"name": "LArASIC", "kind": "16-ch front-end ASIC",
+         "total": larasic_qs.count(), "tested": larasic_cold, "href": reverse("larasic")},
+        {"name": "ColdADC", "kind": "12-bit cold ADC",
+         "total": coldadc_qs.count(), "tested": coldadc_cold, "href": reverse("coldadc")},
+        {"name": "COLDATA", "kind": "Serializer / control",
+         "total": coldata_qs.count(), "tested": coldata_cold, "href": reverse("coldata")},
+        {"name": "FEMB", "kind": "Frontend Motherboard",
+         "total": femb_total, "tested": FembTest.objects.values("femb").distinct().count(),
+         "href": reverse("femb")},
+        {"name": "Cable", "kind": "Cold flex cabling",
+         "total": cable_qs.count(), "tested": cable_tested, "href": reverse("cable")},
+    ]
+
+    context = {
+        "page": "home",
+        "femb_total": femb_total,
+        "stat_cards": stat_cards,
+        "families": families,
+        "tests_per_day": queries.tests_per_day(days=90),
+        "activity": queries.recent_activity(limit=10),
+    }
+    return render(request, "core/index.html", context)
+
+
+def reference(request):
+    """Catch-all reference page: planning targets, diagrams, datasheets, documents.
+
+    Lives here so the dashboard can stay focused; the old home page content
+    moved here when the dashboard was redesigned.
+    """
+    return render(request, "core/reference.html", {"page": "reference"})
 
 
 def larasic(request):

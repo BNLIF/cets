@@ -1,0 +1,22 @@
+<a class="stat fam-stat" href="{{ href|default:'#' }}">
+    <div class="fam-stat-head">
+        <div>
+            <div class="fam-stat-name">{{ name }}</div>
+            <div class="fam-stat-desc">{{ description }}</div>
+        </div>
+        <svg class="fam-stat-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+    </div>
+    <div class="fam-stat-numbers">
+        {% for n in numbers %}
+        <div class="fam-stat-num">
+            <div class="fam-stat-value{% if n.cold %} fam-stat-cold{% endif %}{% if n.accent %} fam-stat-accent{% endif %}">{{ n.value }}{% if n.cold %}<span class="fam-stat-snowflake">❄</span>{% endif %}</div>
+            <div class="fam-stat-num-label">{{ n.label }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% if this_month is not None %}
+    <div class="fam-stat-foot">
+        <span class="stat-delta up">+{{ this_month }}</span> tested this month
+    </div>
+    {% endif %}
+</a>

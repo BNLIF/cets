@@ -1,0 +1,97 @@
+{% extends 'core/base.html' %}
+{% load static %}
+{% load components %}
+
+{% block title %}Reference — CETS{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div>
+        {% crumbs "CETS" "/" "Reference" %}
+        <h1 class="page-title">Reference</h1>
+        <div class="page-subtitle">Planning targets, schematics, datasheets, and supporting documents</div>
+    </div>
+</div>
+
+<section style="margin-bottom: 40px;">
+    <h2 class="section-title">Number of test units</h2>
+    <div class="table-wrap" style="max-width: 640px;">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th></th>
+                    <th>FD-HD</th>
+                    <th>FD-VD</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr style="cursor: default;"><td>Anode unit</td><td class="cell-mono">150 APA</td><td class="cell-mono">80 CRP</td></tr>
+                <tr style="cursor: default;"><td>Readout channel</td><td class="cell-mono">384,000</td><td class="cell-mono">245,760</td></tr>
+                <tr style="cursor: default;"><td>LArASIC</td><td class="cell-mono">24,000</td><td class="cell-mono">15,360</td></tr>
+                <tr style="cursor: default;"><td>ColdADC</td><td class="cell-mono">24,000</td><td class="cell-mono">15,360</td></tr>
+                <tr style="cursor: default;"><td>COLDATA</td><td class="cell-mono">6,000</td><td class="cell-mono">3,840</td></tr>
+                <tr style="cursor: default;"><td>FEMB</td><td class="cell-mono">3,000</td><td class="cell-mono">1,920</td></tr>
+                <tr style="cursor: default;"><td>Cold cable bundle</td><td class="cell-mono">150</td><td class="cell-mono">80</td></tr>
+                <tr style="cursor: default;"><td>Feedthrough</td><td class="cell-mono">75</td><td class="cell-mono">40</td></tr>
+                <tr style="cursor: default;"><td>CE flange</td><td class="cell-mono">150</td><td class="cell-mono">80</td></tr>
+                <tr style="cursor: default;"><td>WIEC</td><td class="cell-mono">150</td><td class="cell-mono">80</td></tr>
+                <tr style="cursor: default;"><td>WIB</td><td class="cell-mono">750</td><td class="cell-mono">480</td></tr>
+                <tr style="cursor: default;"><td>PTC</td><td class="cell-mono">150</td><td class="cell-mono">80</td></tr>
+                <tr style="cursor: default;"><td>PTB</td><td class="cell-mono">150</td><td class="cell-mono">80</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section style="margin-bottom: 40px;">
+    <h2 class="section-title">Cold electronics diagram</h2>
+    <img src="{% static 'core/images/Diagram.png' %}" alt="Cold Electronics Diagram" style="max-width: 720px; width: 100%; border: 1px solid var(--border); border-radius: var(--r-lg);">
+</section>
+
+<section style="margin-bottom: 40px;">
+    <h2 class="section-title">FEMB channel map</h2>
+    <img src="{% static 'core/images/CE_Mapping.png' %}" alt="FEMB Channel Map" style="max-width: 720px; width: 100%; border: 1px solid var(--border); border-radius: var(--r-lg);">
+</section>
+
+<section style="margin-bottom: 40px;">
+    <h2 class="section-title">Datasheets</h2>
+    <div class="table-wrap" style="max-width: 640px;">
+        <table class="table">
+            <thead><tr><th></th><th>Version</th><th>File</th></tr></thead>
+            <tbody>
+                <tr style="cursor: default;"><td>LArASIC</td><td class="cell-mono">P5</td><td><a href="https://www.phy.bnl.gov/twister/static/cetsdata/datasheets/LArASIC_P5.pdf" target="_blank" rel="noopener" class="cell-mono">PDF ↗</a></td></tr>
+                <tr style="cursor: default;"><td>ColdADC</td><td class="cell-mono">P2</td><td><a href="https://www.phy.bnl.gov/twister/static/cetsdata/datasheets/ColdADC_P2.pdf" target="_blank" rel="noopener" class="cell-mono">PDF ↗</a></td></tr>
+                <tr style="cursor: default;"><td>COLDATA</td><td class="cell-mono">P3_P4/E4</td><td><a href="https://www.phy.bnl.gov/twister/static/cetsdata/datasheets/COLDATA_P3_P4_E4.pdf" target="_blank" rel="noopener" class="cell-mono">PDF ↗</a></td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section style="margin-bottom: 40px;">
+    <h2 class="section-title">Documents</h2>
+    <div class="table-wrap" style="max-width: 920px;">
+        <table class="table">
+            <thead>
+                <tr><th>Description</th><th>Type</th><th>Author</th><th>Date</th><th>File</th></tr>
+            </thead>
+            <tbody>
+                <tr style="cursor: default;">
+                    <td>CE Production Overview</td>
+                    <td class="cell-mono">Poster</td>
+                    <td>Xuyang Ning</td>
+                    <td class="cell-mono">2025-10</td>
+                    <td><a href="https://www.phy.bnl.gov/twister/static/cetsdata/documents/Poster_For_CPAD2025_v3_3.pdf" target="_blank" rel="noopener" class="cell-mono">PDF ↗</a></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section style="margin-bottom: 40px;">
+    <h2 class="section-title">External resources</h2>
+    <ul style="list-style: none; padding: 0; font-family: var(--font-mono); font-size: 13px;">
+        <li style="padding: 6px 0;"><a href="https://dbweb2.fnal.gov:8443/cdbdev" target="_blank" rel="noopener">Hardware Database @ FNAL ↗</a></li>
+        <li style="padding: 6px 0;"><a href="https://edms.cern.ch/document/2815079" target="_blank" rel="noopener">QC Documents (CERN EDMS) ↗</a></li>
+    </ul>
+</section>
+{% endblock %}

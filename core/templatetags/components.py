@@ -3,7 +3,10 @@
 Each tag pairs with a partial under `core/templates/core/components/`.
 Specs come from `.idea/design/handoff_1/`.
 """
+from datetime import timedelta
+
 from django import template
+from django.utils import timezone
 
 register = template.Library()
 
@@ -109,3 +112,118 @@ def repair_card(repair):
         + [("COLDATA", c) for c in repair.installed_coldatas.all()]
     )
     return {"repair": repair, "removed": removed, "installed": installed}
+
+
+@register.inclusion_tag("core/components/stat_card.html")
+def stat_card(name, description, numbers, this_month=None, href=None):
+    """Family stat card for the dashboard 4-up row.
+
+    `numbers` is a list of {"value", "label", "accent": bool, "cold": bool}.
+    `cold` numbers use the LN blue treatment with a ❄ glyph; `accent` uses
+    the accent color (e.g. the QC tests count on the FEMB card).
+    """
+    return {
+        "name": name,
+        "description": description,
+        "numbers": numbers,
+        "this_month": this_month,
+        "href": href,
+    }
+
+
+@register.inclusion_tag("core/components/family_breakdown.html")
+def family_breakdown(families):
+    """2-column grid of mini family progress cards.
+
+    `families` is a list of {"name", "kind", "total", "tested", "href"}.
+    """
+    rows = []
+    for f in families:
+        total = f["total"] or 0
+        tested = f["tested"] or 0
+        pct = round(tested / total * 100) if total else 0
+        rows.append({**f, "pct": pct, "pending": max(total - tested, 0)})
+    return {"families": rows}
+
+
+@register.inclusion_tag("core/components/tests_per_day_chart.html")
+def tests_per_day_chart(days):
+    """90-bar SVG of tests/day. `days` is the output of queries.tests_per_day().
+
+    Most recent 7 days render in solid accent; earlier days in a lighter
+    accent mix. Y-axis grid lines at 25/50/75/100% of the visible max.
+    """
+    counts = [d["count"] for d in days]
+    if not counts:
+        counts = [0]
+    vmax = max(counts) or 1
+    n = len(days)
+    chart_w = 720
+    chart_h = 200
+    x_step = chart_w / n
+    bar_w = max(2, x_step - 2)
+    # Render recent_threshold = last 7 days
+    bars = []
+    for i, d in enumerate(days):
+        bh = (d["count"] / vmax) * (chart_h - 20)
+        bars.append({
+            "x": round(i * x_step + 1, 2),
+            "y": round(chart_h - bh, 2),
+            "w": round(bar_w, 2),
+            "h": round(bh, 2),
+            "recent": i >= n - 7,
+            "count": d["count"],
+            "date": d["date"],
+        })
+    grid = [
+        {"y": round(chart_h - chart_h * g, 2), "label": round(vmax * g)}
+        for g in (0.25, 0.5, 0.75, 1.0)
+    ]
+    total = sum(counts)
+    daily_avg = round(total / n, 1) if n else 0
+    return {
+        "bars": bars,
+        "grid": grid,
+        "w": chart_w,
+        "h": chart_h,
+        "first_label": days[0]["date"].strftime("%b %d") if days else "",
+        "mid_label": days[n // 2]["date"].strftime("%b %d") if days else "",
+        "last_label": days[-1]["date"].strftime("%b %d") if days else "",
+        "total": total,
+        "daily_avg": daily_avg,
+    }
+
+
+@register.inclusion_tag("core/components/activity_panel.html")
+def activity_panel(items, compact=False):
+    """Recent-activity panel: title + list of activity rows.
+
+    `items` is the output of queries.recent_activity(). `compact=True`
+    hides the per-row note (used by list-page sidebars per the spec).
+    """
+    now = timezone.now()
+    enriched = [
+        {**a, "relative": _relative_time(now - a["timestamp"])}
+        for a in items
+    ]
+    return {"items": enriched, "compact": compact}
+
+
+def _relative_time(delta):
+    """Compact relative-time string in the mono style the design uses."""
+    if delta < timedelta(0):
+        return "just now"
+    sec = int(delta.total_seconds())
+    if sec < 60:
+        return f"{sec}s"
+    if sec < 3600:
+        return f"{sec // 60}m"
+    if sec < 86400:
+        return f"{sec // 3600}h"
+    if sec < 86400 * 7:
+        return f"{sec // 86400}d"
+    if sec < 86400 * 30:
+        return f"{sec // (86400 * 7)}w"
+    if sec < 86400 * 365:
+        return f"{sec // (86400 * 30)}mo"
+    return f"{sec // (86400 * 365)}y"
