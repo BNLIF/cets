@@ -1,5 +1,33 @@
 {% load components %}
 <div id="list-fragment">
+    <div class="filterbar">
+        <div class="filter-search">
+            <svg class="filter-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+            <input
+                id="list-search-input"
+                hx-preserve="true"
+                type="search"
+                name="q"
+                value="{{ q }}"
+                placeholder="Search by serial, FEMB, or tray…"
+                hx-get="{{ request.path }}"
+                hx-target="#list-fragment"
+                hx-swap="outerHTML"
+                hx-push-url="true"
+                hx-trigger="keyup changed delay:250ms, search"
+                hx-include="[name=femb], [name=tray]"
+            >
+        </div>
+        {% filter_chip label="FEMB" param="femb" options=femb_options %}
+        {% filter_chip label="Tray" param="tray" options=tray_options %}
+        <button class="chip" type="button" disabled title="More filters coming soon">+ Add filter</button>
+        <div style="margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--text-3);">
+            {{ page_obj.paginator.count }} of {{ total_count }}
+        </div>
+        <input type="hidden" name="femb" value="{{ active_filters.femb|default:'' }}">
+        <input type="hidden" name="tray" value="{{ active_filters.tray|default:'' }}">
+    </div>
+
     <div class="table-wrap">
         <table class="table">
             <thead>

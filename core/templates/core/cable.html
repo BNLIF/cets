@@ -14,30 +14,6 @@
 
 <div class="list-grid">
     <div>
-        <div class="filterbar">
-            <div class="filter-search">
-                <svg class="filter-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
-                <input
-                    type="search"
-                    name="q"
-                    value="{{ q }}"
-                    placeholder="Search by serial…"
-                    hx-get="{{ request.path }}"
-                    hx-target="#list-fragment"
-                    hx-swap="outerHTML"
-                    hx-push-url="true"
-                    hx-trigger="keyup changed delay:250ms, search"
-                    hx-include="[name=batch]"
-                >
-            </div>
-            {% filter_chip label="Batch" param="batch" options=batch_options %}
-            <button class="chip" type="button" disabled title="More filters coming soon">+ Add filter</button>
-            <div style="margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--text-3);">
-                {{ page_obj.paginator.count }} of {{ total_count }}
-            </div>
-            <input type="hidden" name="batch" value="{{ active_filters.batch|default:'' }}">
-        </div>
-
         {% include 'core/_cable_list_fragment.html' %}
     </div>
 
