@@ -273,6 +273,44 @@ def filter_chip(context, label, param, value=None, options=None):
     }
 
 
+@register.inclusion_tag("core/components/date_range_chip.html", takes_context=True)
+def date_range_chip(context, since, until, label="Date range"):
+    """Date range filter chip with two <input type="date"> fields.
+
+    URL params: ?since=YYYY-MM-DD&until=YYYY-MM-DD. The chip renders as
+    an active pill (with × clear) when either bound is set, or a
+    <details> dropdown containing a small form when neither is set.
+    The dropdown's form fires hx-get to the current path so the swap
+    target picks it up.
+    """
+    request = context["request"]
+    active = bool(since or until)
+
+    params = request.GET.copy()
+    params.pop("since", None)
+    params.pop("until", None)
+    params["page"] = "1"
+    clear_qs = params.urlencode()
+    clear_href = f"{request.path}?{clear_qs}" if clear_qs else request.path
+
+    if since and until:
+        display = f"{since} → {until}"
+    elif since:
+        display = f"since {since}"
+    else:
+        display = f"until {until}" if until else ""
+
+    return {
+        "label": label,
+        "active": active,
+        "since": since,
+        "until": until,
+        "display": display,
+        "clear_href": clear_href,
+        "form_path": request.path,
+    }
+
+
 @register.inclusion_tag("core/components/pagination.html", takes_context=True)
 def pagination(context, page_obj, page_size):
     """Mono pager + 'Showing X–Y of Z' counter.

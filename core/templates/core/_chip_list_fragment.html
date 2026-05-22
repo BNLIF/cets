@@ -20,7 +20,7 @@
         </div>
         {% filter_chip label="FEMB" param="femb" options=femb_options %}
         {% filter_chip label="Tray" param="tray" options=tray_options %}
-        <button class="chip" type="button" disabled title="More filters coming soon">+ Add filter</button>
+        {% date_range_chip since until label="Last update" %}
         <div style="margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--text-3);">
             {{ page_obj.paginator.count }} of {{ total_count }}
         </div>

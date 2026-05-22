@@ -1,0 +1,36 @@
+{% if active %}
+    <span class="chip is-active" style="cursor: default;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+        {{ label }}: <span class="cell-mono" style="font-weight: 600;">{{ display }}</span>
+        <a href="{{ clear_href }}" hx-get="{{ clear_href }}" hx-target="#list-fragment" hx-push-url="true" hx-swap="outerHTML" title="Clear filter" style="display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 3px; color: inherit; text-decoration: none; margin-left: 2px;">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </a>
+    </span>
+{% else %}
+    <details style="position: relative;">
+        <summary class="chip" style="list-style: none;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+            {{ label }}
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </summary>
+        <form
+            hx-get="{{ form_path }}"
+            hx-target="#list-fragment"
+            hx-swap="outerHTML"
+            hx-push-url="true"
+            hx-include="[name=version], [name=femb], [name=tray], [name=batch]"
+            style="position: absolute; top: 100%; left: 0; margin-top: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow-pop); z-index: 20; padding: 10px; min-width: 240px; display: flex; flex-direction: column; gap: 8px;"
+        >
+            <label style="display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--text-3);">
+                <span style="width: 40px;">From</span>
+                <input type="date" name="since" value="{{ since }}" style="flex: 1; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--r-md); font-family: inherit; font-size: 12px; color: var(--text);">
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--text-3);">
+                <span style="width: 40px;">To</span>
+                <input type="date" name="until" value="{{ until }}" style="flex: 1; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--r-md); font-family: inherit; font-size: 12px; color: var(--text);">
+            </label>
+            <input type="hidden" name="page" value="1">
+            <button type="submit" class="btn btn-sm btn-primary" style="margin-top: 2px;">Apply</button>
+        </form>
+    </details>
+{% endif %}

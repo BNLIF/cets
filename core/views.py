@@ -1,5 +1,5 @@
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from django.shortcuts import render, get_object_or_404, redirect
@@ -238,6 +238,7 @@ def larasic(request):
         default_sort="serial_number",
         search_fields=("serial_number", "femb__serial_number", "tray_id"),
         filter_specs=(("femb", "femb__serial_number"), ("tray", "tray_id")),
+        date_range_field="last_update",
         extra_context={
             "family_label": "LArASIC",
             "family_title": "Frontend ASICs",
@@ -261,6 +262,7 @@ def coldadc(request):
         default_sort="serial_number",
         search_fields=("serial_number", "femb__serial_number", "tray_id"),
         filter_specs=(("femb", "femb__serial_number"), ("tray", "tray_id")),
+        date_range_field="last_update",
         extra_context={
             "family_label": "ColdADC",
             "family_title": "Cold ADCs",
@@ -284,6 +286,7 @@ def coldata(request):
         default_sort="serial_number",
         search_fields=("serial_number", "femb__serial_number", "tray_id"),
         filter_specs=(("femb", "femb__serial_number"), ("tray", "tray_id")),
+        date_range_field="last_update",
         extra_context={
             "family_label": "COLDATA",
             "family_title": "COLDATA",
@@ -301,6 +304,16 @@ FEMB_PAGE_SIZE = 12
 FAMILY_PAGE_SIZE = 25
 
 
+def _parse_date_param(value):
+    """Parse a YYYY-MM-DD URL param. Returns a date or None for empty/invalid."""
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value.strip(), "%Y-%m-%d").date()
+    except (ValueError, AttributeError):
+        return None
+
+
 def _family_list_response(
     request,
     *,
@@ -313,6 +326,7 @@ def _family_list_response(
     default_dir="asc",
     search_fields=(),
     filter_specs=(),
+    date_range_field=None,
     page_size=FAMILY_PAGE_SIZE,
     extra_context=None,
     activity_prefix=None,
@@ -345,6 +359,16 @@ def _family_list_response(
             queryset = queryset.filter(**{field: value})
             active_filters[param] = value
 
+    since = ""
+    until = ""
+    if date_range_field:
+        since = _parse_date_param(request.GET.get("since"))
+        until = _parse_date_param(request.GET.get("until"))
+        if since:
+            queryset = queryset.filter(**{f"{date_range_field}__date__gte": since})
+        if until:
+            queryset = queryset.filter(**{f"{date_range_field}__date__lte": until})
+
     sort_field = f"-{sort}" if direction == "desc" else sort
     queryset = queryset.order_by(sort_field, "serial_number")
 
@@ -358,6 +382,8 @@ def _family_list_response(
         "dir": direction,
         "q": q,
         "active_filters": active_filters,
+        "since": since.isoformat() if since else "",
+        "until": until.isoformat() if until else "",
     }
     context["activity"] = queries.recent_activity(limit=10, target_prefix=activity_prefix)
     if extra_context:
@@ -390,6 +416,13 @@ def femb(request):
     if version:
         queryset = queryset.filter(version=version)
 
+    since = _parse_date_param(request.GET.get("since"))
+    until = _parse_date_param(request.GET.get("until"))
+    if since:
+        queryset = queryset.filter(latest_test_timestamp__date__gte=since)
+    if until:
+        queryset = queryset.filter(latest_test_timestamp__date__lte=until)
+
     sort_field = f"-{sort}" if direction == "desc" else sort
     # Stable secondary sort so equal keys don't shuffle between pages.
     queryset = queryset.order_by(sort_field, "serial_number")
@@ -406,6 +439,8 @@ def femb(request):
         "dir": direction,
         "q": q,
         "version": version,
+        "since": since.isoformat() if since else "",
+        "until": until.isoformat() if until else "",
         "version_options": [{"value": v, "label": v} for v in versions],
         "femb_total": FEMB.objects.count(),
         "activity": queries.recent_activity(limit=10, target_prefix="FEMB"),
@@ -435,6 +470,7 @@ def cable(request):
         default_sort="serial_number",
         search_fields=("serial_number",),
         filter_specs=(("batch", "batch_number"),),
+        date_range_field="latest_test_timestamp",
         activity_prefix="Cable",
         extra_context={
             "family_label": "Cable",
