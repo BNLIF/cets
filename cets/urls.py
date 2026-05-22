@@ -23,6 +23,7 @@ urlpatterns = [
     path("api-auth/", include("rest_framework.urls")),
     path("", views.home, name="home"),
     path("reference/", views.reference, name="reference"),
+    path("search/typeahead/", views.search_typeahead, name="search_typeahead"),
     path("hwdb/", include("hwdb.urls")),
     path("larasic/", views.larasic, name="larasic"),
     path("larasic/<str:serial_number>/", views.larasic_detail, name="larasic_detail"),

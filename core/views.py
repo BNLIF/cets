@@ -135,6 +135,70 @@ def reference(request):
     return render(request, "core/reference.html", {"page": "reference"})
 
 
+_TYPEAHEAD_PER_FAMILY = 6
+
+
+def search_typeahead(request):
+    """HTMX live-search across all component families.
+
+    Empty `q` returns an empty fragment so the dropdown stays hidden.
+    Otherwise: substring-match `serial_number` on FEMB, LArASIC, ColdADC,
+    COLDATA, CABLE — up to ~6 per family. The dropdown groups results by
+    family and each row links to that detail page.
+    """
+    q = (request.GET.get("q") or "").strip()
+    if not q:
+        return render(request, "core/_search_typeahead.html", {"groups": [], "q": q})
+
+    n = _TYPEAHEAD_PER_FAMILY
+    groups = [
+        {
+            "family": "FEMB",
+            "items": [
+                {"serial": f"{f.version}/{f.serial_number}",
+                 "url": reverse("femb_detail", args=[f.version, f.serial_number])}
+                for f in FEMB.objects.filter(
+                    Q(serial_number__icontains=q) | Q(version__icontains=q)
+                ).order_by("version", "serial_number")[:n]
+            ],
+        },
+        {
+            "family": "LArASIC",
+            "items": [
+                {"serial": c.serial_number,
+                 "url": reverse("larasic_detail", args=[c.serial_number])}
+                for c in LArASIC.objects.filter(serial_number__icontains=q).order_by("serial_number")[:n]
+            ],
+        },
+        {
+            "family": "ColdADC",
+            "items": [
+                {"serial": c.serial_number,
+                 "url": reverse("coldadc_detail", args=[c.serial_number])}
+                for c in ColdADC.objects.filter(serial_number__icontains=q).order_by("serial_number")[:n]
+            ],
+        },
+        {
+            "family": "COLDATA",
+            "items": [
+                {"serial": c.serial_number,
+                 "url": reverse("coldata_detail", args=[c.serial_number])}
+                for c in COLDATA.objects.filter(serial_number__icontains=q).order_by("serial_number")[:n]
+            ],
+        },
+        {
+            "family": "Cable",
+            "items": [
+                {"serial": c.serial_number,
+                 "url": reverse("cable_detail", args=[c.serial_number])}
+                for c in CABLE.objects.filter(serial_number__icontains=q).order_by("serial_number")[:n]
+            ],
+        },
+    ]
+    groups = [g for g in groups if g["items"]]
+    return render(request, "core/_search_typeahead.html", {"groups": groups, "q": q})
+
+
 def larasic(request):
     # Common search functionality
     search_query = request.GET.get("q", "")
