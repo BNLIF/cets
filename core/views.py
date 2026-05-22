@@ -199,97 +199,172 @@ def search_typeahead(request):
     return render(request, "core/_search_typeahead.html", {"groups": groups, "q": q})
 
 
+_CHIP_SORT_KEYS = {"serial_number", "femb__serial_number", "femb_pos", "tray_id", "last_update"}
+
+
+def _femb_options():
+    """Dropdown options for the FEMB filter chip on chip-family lists.
+
+    Returns one entry per (version, serial_number) pair so a chip installed
+    on a colliding-serial FEMB is unambiguous when filtered.
+    """
+    return [
+        {"value": f.serial_number, "label": f"{f.version}/{f.serial_number}"}
+        for f in FEMB.objects.order_by("version", "serial_number")
+    ]
+
+
+def _tray_options(model):
+    """Dropdown options for the Tray filter chip; one entry per non-empty tray_id."""
+    trays = (
+        model.objects
+        .exclude(tray_id__isnull=True)
+        .exclude(tray_id__exact="")
+        .values_list("tray_id", flat=True)
+        .distinct()
+        .order_by("tray_id")
+    )
+    return [{"value": t, "label": t} for t in trays]
+
+
 def larasic(request):
-    # Common search functionality
-    search_query = request.GET.get("q", "")
-    search_by = request.GET.get("by", "sn")
-
-    # Queryset for LArASICs with status 'on-femb'
-    on_femb_queryset = LArASIC.objects.filter(status="on-femb")
-    if search_query:
-        if search_by == "sn":
-            on_femb_queryset = on_femb_queryset.filter(
-                serial_number__icontains=search_query
-            )
-        elif search_by == "femb":
-            on_femb_queryset = on_femb_queryset.filter(
-                femb__serial_number__icontains=search_query
-            )
-
-    # Sorting for 'on-femb' table
-    sort_on_femb = request.GET.get("sort_on_femb", "serial_number")
-    order_on_femb = request.GET.get("order_on_femb", "asc")
-    if order_on_femb == "desc":
-        sort_on_femb = f"-{sort_on_femb}"
-    on_femb_queryset = on_femb_queryset.order_by(sort_on_femb)
-
-    # Pagination for 'on-femb' table
-    paginator_on_femb = Paginator(on_femb_queryset, 100)
-    page_on_femb_number = request.GET.get("page_on_femb")
-    page_on_femb_obj = paginator_on_femb.get_page(page_on_femb_number)
-    total_on_femb_count = on_femb_queryset.count()
-
-    # Queryset for LArASICs with an RTS tray ID
-    rts_queryset = LArASIC.objects.exclude(tray_id__isnull=True).exclude(tray_id__exact="")
-    if search_query:
-        if search_by == "sn":
-            rts_queryset = rts_queryset.filter(serial_number__icontains=search_query)
-        elif search_by == "tray":
-            rts_queryset = rts_queryset.filter(tray_id__icontains=search_query)
-
-    # Sorting for 'rts' table
-    sort_rts = request.GET.get("sort_rts", "serial_number")
-    order_rts = request.GET.get("order_rts", "asc")
-    if order_rts == "desc":
-        sort_rts = f"-{sort_rts}"
-    rts_queryset = rts_queryset.order_by(sort_rts)
-
-    # Pagination for 'rts' table
-    paginator_rts = Paginator(rts_queryset, 100)
-    page_rts_number = request.GET.get("page_rts")
-    page_rts_obj = paginator_rts.get_page(page_rts_number)
-    total_rts_count = rts_queryset.count()
-
-    context = {
-        "page_on_femb_obj": page_on_femb_obj,
-        "total_on_femb_count": total_on_femb_count,
-        "sort_on_femb": request.GET.get("sort_on_femb", "serial_number"),
-        "order_on_femb": order_on_femb,
-        "page_rts_obj": page_rts_obj,
-        "total_rts_count": total_rts_count,
-        "sort_rts": request.GET.get("sort_rts", "serial_number"),
-        "order_rts": order_rts,
-        "page": "larasic",
-        "search_query": search_query,
-        "search_by": search_by,
-    }
-    return render(request, "core/larasic.html", context)
+    return _family_list_response(
+        request,
+        queryset=LArASIC.objects.select_related("femb"),
+        sort_keys=_CHIP_SORT_KEYS,
+        page_id="larasic",
+        full_template="core/_chip_list_page.html",
+        fragment_template="core/_chip_list_fragment.html",
+        default_sort="serial_number",
+        search_fields=("serial_number", "femb__serial_number", "tray_id"),
+        filter_specs=(("femb", "femb__serial_number"), ("tray", "tray_id")),
+        extra_context={
+            "family_label": "LArASIC",
+            "family_title": "Frontend ASICs",
+            "family_subtitle": "16-channel cold front-end ASICs",
+            "total_count": LArASIC.objects.count(),
+            "femb_options": _femb_options(),
+            "tray_options": _tray_options(LArASIC),
+            "detail_url_name": "larasic_detail",
+        },
+    )
 
 
 def coldadc(request):
-    queryset = ColdADC.objects.all()
-    q = request.GET.get("q", "")
-    by = request.GET.get("by", "sn")
-    if q and by == "sn":
-        return redirect("coldadc_detail", serial_number=q)
-    if q and by == "femb":
-        queryset = queryset.filter(femb__serial_number__icontains=q)
-    return _render_paginated_list(request, queryset, "core/coldadc.html", "coldadc", "serial_number")
+    return _family_list_response(
+        request,
+        queryset=ColdADC.objects.select_related("femb"),
+        sort_keys=_CHIP_SORT_KEYS,
+        page_id="coldadc",
+        full_template="core/_chip_list_page.html",
+        fragment_template="core/_chip_list_fragment.html",
+        default_sort="serial_number",
+        search_fields=("serial_number", "femb__serial_number", "tray_id"),
+        filter_specs=(("femb", "femb__serial_number"), ("tray", "tray_id")),
+        extra_context={
+            "family_label": "ColdADC",
+            "family_title": "Cold ADCs",
+            "family_subtitle": "12-bit cold ADCs",
+            "total_count": ColdADC.objects.count(),
+            "femb_options": _femb_options(),
+            "tray_options": _tray_options(ColdADC),
+            "detail_url_name": "coldadc_detail",
+        },
+    )
 
 
 def coldata(request):
-    queryset = COLDATA.objects.all()
-    q = request.GET.get("q", "")
-    by = request.GET.get("by", "sn")
-    if q and by == "sn":
-        return redirect("coldata_detail", serial_number=q)
-    if q and by == "femb":
-        queryset = queryset.filter(femb__serial_number__icontains=q)
-    return _render_paginated_list(request, queryset, "core/coldata.html", "coldata", "serial_number")
+    return _family_list_response(
+        request,
+        queryset=COLDATA.objects.select_related("femb"),
+        sort_keys=_CHIP_SORT_KEYS,
+        page_id="coldata",
+        full_template="core/_chip_list_page.html",
+        fragment_template="core/_chip_list_fragment.html",
+        default_sort="serial_number",
+        search_fields=("serial_number", "femb__serial_number", "tray_id"),
+        filter_specs=(("femb", "femb__serial_number"), ("tray", "tray_id")),
+        extra_context={
+            "family_label": "COLDATA",
+            "family_title": "COLDATA",
+            "family_subtitle": "Serializer / control chips",
+            "total_count": COLDATA.objects.count(),
+            "femb_options": _femb_options(),
+            "tray_options": _tray_options(COLDATA),
+            "detail_url_name": "coldata_detail",
+        },
+    )
 
 
 FEMB_SORT_KEYS = {"serial_number", "version", "latest_test_timestamp"}
 FEMB_PAGE_SIZE = 12
+FAMILY_PAGE_SIZE = 25
+
+
+def _family_list_response(
+    request,
+    *,
+    queryset,
+    sort_keys,
+    page_id,
+    full_template,
+    fragment_template,
+    default_sort,
+    default_dir="asc",
+    search_fields=(),
+    filter_specs=(),
+    page_size=FAMILY_PAGE_SIZE,
+    extra_context=None,
+    activity_prefix=None,
+):
+    """Shared scaffolding for family list pages (LArASIC, ColdADC, COLDATA, Cable).
+
+    `search_fields`: tuple of model field paths that ?q= matches via icontains (OR).
+    `filter_specs`: tuple of (param_name, model_field_path) — exact-match chips.
+    Switches between fragment and full templates based on `request.htmx`.
+    """
+    q = (request.GET.get("q") or "").strip()
+    sort = request.GET.get("sort") or default_sort
+    direction = request.GET.get("dir") or default_dir
+
+    if sort not in sort_keys:
+        sort = default_sort
+    if direction not in {"asc", "desc"}:
+        direction = default_dir
+
+    if q and search_fields:
+        condition = Q()
+        for field in search_fields:
+            condition |= Q(**{f"{field}__icontains": q})
+        queryset = queryset.filter(condition)
+
+    active_filters = {}
+    for param, field in filter_specs:
+        value = (request.GET.get(param) or "").strip()
+        if value:
+            queryset = queryset.filter(**{field: value})
+            active_filters[param] = value
+
+    sort_field = f"-{sort}" if direction == "desc" else sort
+    queryset = queryset.order_by(sort_field, "serial_number")
+
+    page_obj = Paginator(queryset, page_size).get_page(request.GET.get("page"))
+
+    context = {
+        "page": page_id,
+        "page_obj": page_obj,
+        "page_size": page_size,
+        "sort": sort,
+        "dir": direction,
+        "q": q,
+        "active_filters": active_filters,
+    }
+    context["activity"] = queries.recent_activity(limit=10, target_prefix=activity_prefix)
+    if extra_context:
+        context.update(extra_context)
+
+    template = fragment_template if getattr(request, "htmx", False) else full_template
+    return render(request, template, context)
 
 
 def femb(request):
@@ -339,22 +414,36 @@ def femb(request):
     return render(request, template, context)
 
 
+_CABLE_SORT_KEYS = {"serial_number", "batch_number", "latest_test_timestamp"}
+
+
 def cable(request):
     latest_test = CableTest.objects.filter(cable=OuterRef("pk")).order_by("-timestamp")
     queryset = CABLE.objects.annotate(
         latest_test_timestamp=Subquery(latest_test.values("timestamp")[:1])
     )
-    q = request.GET.get("q", "")
-    by = request.GET.get("by", "sn")
-    if q and by == "sn":
-        try:
-            c = CABLE.objects.get(serial_number=q)
-            return redirect("cable_detail", serial_number=c.serial_number)
-        except CABLE.DoesNotExist:
-            queryset = queryset.filter(serial_number__icontains=q)
-    elif q and by == "batch":
-        queryset = queryset.filter(batch_number__icontains=q)
-    return _render_paginated_list(request, queryset, "core/cable.html", "cable", "latest_test_timestamp", default_order="desc")
+    batches = list(
+        CABLE.objects.values_list("batch_number", flat=True).distinct().order_by("batch_number")
+    )
+    return _family_list_response(
+        request,
+        queryset=queryset,
+        sort_keys=_CABLE_SORT_KEYS,
+        page_id="cable",
+        full_template="core/cable.html",
+        fragment_template="core/_cable_list_fragment.html",
+        default_sort="serial_number",
+        search_fields=("serial_number",),
+        filter_specs=(("batch", "batch_number"),),
+        activity_prefix="Cable",
+        extra_context={
+            "family_label": "Cable",
+            "family_title": "Cold cables",
+            "family_subtitle": "Cold flex cabling",
+            "total_count": CABLE.objects.count(),
+            "batch_options": [{"value": str(b), "label": f"Batch {b}"} for b in batches],
+        },
+    )
 
 
 def cable_detail(request, serial_number):

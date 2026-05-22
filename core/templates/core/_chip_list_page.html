@@ -1,12 +1,12 @@
 {% extends 'core/base.html' %}
 {% load components %}
 
-{% block title %}Cable — CETS{% endblock %}
+{% block title %}{{ family_label }} — CETS{% endblock %}
 
 {% block content %}
 <div class="page-head">
     <div>
-        {% crumbs "CETS" "/" "Cable" %}
+        {% crumbs "CETS" "/" family_label %}
         <h1 class="page-title">{{ family_title }}</h1>
         <div class="page-subtitle">{{ family_subtitle }} · {{ total_count }} tracked</div>
     </div>
@@ -21,24 +21,26 @@
                     type="search"
                     name="q"
                     value="{{ q }}"
-                    placeholder="Search by serial…"
+                    placeholder="Search by serial, FEMB, or tray…"
                     hx-get="{{ request.path }}"
                     hx-target="#list-fragment"
                     hx-swap="outerHTML"
                     hx-push-url="true"
                     hx-trigger="keyup changed delay:250ms, search"
-                    hx-include="[name=batch]"
+                    hx-include="[name=femb], [name=tray]"
                 >
             </div>
-            {% filter_chip label="Batch" param="batch" options=batch_options %}
+            {% filter_chip label="FEMB" param="femb" options=femb_options %}
+            {% filter_chip label="Tray" param="tray" options=tray_options %}
             <button class="chip" type="button" disabled title="More filters coming soon">+ Add filter</button>
             <div style="margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--text-3);">
                 {{ page_obj.paginator.count }} of {{ total_count }}
             </div>
-            <input type="hidden" name="batch" value="{{ active_filters.batch|default:'' }}">
+            <input type="hidden" name="femb" value="{{ active_filters.femb|default:'' }}">
+            <input type="hidden" name="tray" value="{{ active_filters.tray|default:'' }}">
         </div>
 
-        {% include 'core/_cable_list_fragment.html' %}
+        {% include 'core/_chip_list_fragment.html' %}
     </div>
 
     <aside class="list-aside">

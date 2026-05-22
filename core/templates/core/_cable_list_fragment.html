@@ -1,0 +1,26 @@
+{% load components %}
+<div id="list-fragment">
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
+                <tr>
+                    {% sortable_th key="serial_number" label="Serial number" current_sort=sort current_dir=dir %}
+                    {% sortable_th key="batch_number" label="Batch" current_sort=sort current_dir=dir width="120px" %}
+                    {% sortable_th key="latest_test_timestamp" label="Latest test" current_sort=sort current_dir=dir %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for cable in page_obj %}
+                <tr onclick="window.location='{% url 'cable_detail' cable.serial_number %}'">
+                    <td><a href="{% url 'cable_detail' cable.serial_number %}" class="cell-mono" style="color: var(--accent); font-weight: 500;" onclick="event.stopPropagation()">{{ cable.serial_number }}</a></td>
+                    <td class="cell-mono">{{ cable.batch_number }}</td>
+                    <td class="cell-mono cell-muted">{{ cable.latest_test_timestamp|date:"Y-m-d H:i"|default:"—" }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="3" class="cell-muted" style="text-align: center; padding: 36px;">No cables match the current filters.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% pagination page_obj page_size %}
+</div>

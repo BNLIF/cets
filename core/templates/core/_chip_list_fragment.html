@@ -1,0 +1,30 @@
+{% load components %}
+<div id="list-fragment">
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
+                <tr>
+                    {% sortable_th key="serial_number" label="Serial number" current_sort=sort current_dir=dir %}
+                    {% sortable_th key="femb__serial_number" label="FEMB" current_sort=sort current_dir=dir %}
+                    {% sortable_th key="femb_pos" label="Position" current_sort=sort current_dir=dir width="110px" %}
+                    {% sortable_th key="tray_id" label="Tray ID" current_sort=sort current_dir=dir %}
+                    {% sortable_th key="last_update" label="Last update" current_sort=sort current_dir=dir %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for chip in page_obj %}
+                <tr onclick="window.location='{% url detail_url_name chip.serial_number %}'">
+                    <td><a href="{% url detail_url_name chip.serial_number %}" class="cell-mono" style="color: var(--accent); font-weight: 500;" onclick="event.stopPropagation()">{{ chip.serial_number }}</a></td>
+                    <td>{% if chip.femb %}<a href="{% url 'femb_detail' version=chip.femb.version serial_number=chip.femb.serial_number %}" class="cell-mono" onclick="event.stopPropagation()" style="color: var(--text-2);">{{ chip.femb.version }}/{{ chip.femb.serial_number }}</a>{% else %}<span class="cell-muted">—</span>{% endif %}</td>
+                    <td>{% position_tag chip.femb_pos %}</td>
+                    <td class="cell-mono">{% if chip.tray_id %}{{ chip.tray_id }}{% else %}<span class="cell-muted">—</span>{% endif %}</td>
+                    <td class="cell-mono cell-muted">{{ chip.last_update|date:"Y-m-d H:i" }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="5" class="cell-muted" style="text-align: center; padding: 36px;">No {{ family_label }} chips match the current filters.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% pagination page_obj page_size %}
+</div>
