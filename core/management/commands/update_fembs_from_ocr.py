@@ -4,10 +4,10 @@ from datetime import datetime, timezone
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from decouple import config
-from core.models import FEMB, FE, ADC, COLDATA, FEMB_REPAIR
+from core.models import FEMB, LArASIC, ColdADC, COLDATA, FembRepair
 
 
-COMPONENT_MODELS = {"FE": FE, "ADC": ADC, "COLDATA": COLDATA}
+COMPONENT_MODELS = {"LArASIC": LArASIC, "ColdADC": ColdADC, "COLDATA": COLDATA}
 
 
 def parse_parts_file(filepath):
@@ -42,9 +42,9 @@ def parse_parts_file(filepath):
         else:
             comp_type = ""
             if "LArASIC" in raw_type or "FE" in raw_type:
-                comp_type = "FE"
+                comp_type = "LArASIC"
             elif "ColdADC" in raw_type or "ADC" in raw_type:
-                comp_type = "ADC"
+                comp_type = "ColdADC"
             elif "COLDATA" in raw_type:
                 comp_type = "COLDATA"
 
@@ -307,7 +307,7 @@ class Command(BaseCommand):
                 continue
 
             # Skip if this repair is already recorded
-            if FEMB_REPAIR.objects.filter(femb=femb_obj, iteration_number=iteration_number).exists():
+            if FembRepair.objects.filter(femb=femb_obj, iteration_number=iteration_number).exists():
                 self.stdout.write(
                     f"  - Repair #{iteration_number} for FEMB {femb_sn} already recorded. Skipping."
                 )
@@ -459,7 +459,7 @@ class Command(BaseCommand):
                 # --- repair records ---
                 for r in repairs_to_record:
                     note = r["note"]
-                    repair_obj = FEMB_REPAIR.objects.create(
+                    repair_obj = FembRepair.objects.create(
                         femb=r["femb_obj"],
                         iteration_number=r["iteration_number"],
                         date=note["date"] or datetime.now(tz=timezone.utc),

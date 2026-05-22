@@ -1,41 +1,32 @@
-"""
-URL configuration for cets project.
-
-The `urlpatterns` list routes URLs to views. For more information please see:
-    https://docs.djangoproject.com/en/5.2/topics/http/urls/
-Examples:
-Function views
-    1. Add an import:  from my_app import views
-    2. Add a URL to urlpatterns:  path('', views.home, name='home')
-Class-based views
-    1. Add an import:  from other_app.views import Home
-    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
-Including another URLconf
-    1. Import the include() function: from django.urls import include, path
-    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
-"""
-
 from django.contrib import admin
-from django.urls import path, include
+from django.http import HttpResponsePermanentRedirect
+from django.urls import path, include, re_path, reverse
 from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from core import views
 from django.views.generic.base import RedirectView
 from django.templatetags.static import static
-from django.contrib.auth.decorators import login_required
 from rest_framework.routers import DefaultRouter
 
 router = DefaultRouter()
 router.register(r"api/femb", views.FEMBViewSet, basename="femb")
+
+
+def _legacy_redirect(name):
+    """Redirect /fe/<rest> → /larasic/<rest> (etc.) honoring FORCE_SCRIPT_NAME."""
+    def view(request, rest=""):
+        base = reverse(name)  # includes FORCE_SCRIPT_NAME prefix and trailing slash
+        return HttpResponsePermanentRedirect(f"{base}{rest}")
+    return view
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api-auth/", include("rest_framework.urls")),
     path("", views.home, name="home"),
     path("hwdb/", include("hwdb.urls")),
-    path("fe/", views.fe, name="fe"),
-    path("fe/<str:serial_number>/", views.fe_detail, name="fe_detail"),
-    path("adc/", views.adc, name="adc"),
-    path("adc/<str:serial_number>/", views.adc_detail, name="adc_detail"),
+    path("larasic/", views.larasic, name="larasic"),
+    path("larasic/<str:serial_number>/", views.larasic_detail, name="larasic_detail"),
+    path("coldadc/", views.coldadc, name="coldadc"),
+    path("coldadc/<str:serial_number>/", views.coldadc_detail, name="coldadc_detail"),
     path("coldata/", views.coldata, name="coldata"),
     path("coldata/<str:serial_number>/", views.coldata_detail, name="coldata_detail"),
     path("femb/", views.femb, name="femb"),
@@ -47,10 +38,14 @@ urlpatterns = [
     path("wiec/", views.wiec, name="wiec"),
     path("wib/", views.wib, name="wib"),
     path(
-        "fe/<str:serial_number>/rts/<str:filename>/",
+        "larasic/<str:serial_number>/rts/<str:filename>/",
         views.rts_file_content,
         name="rts_file_content",
     ),
+    # Backward-compat redirects from pre-rename URL paths. Safe to drop after
+    # the team has had a chance to update bookmarks.
+    re_path(r"^fe/(?P<rest>.*)$", _legacy_redirect("larasic")),
+    re_path(r"^adc/(?P<rest>.*)$", _legacy_redirect("coldadc")),
     path(
         "favicon.ico",
         RedirectView.as_view(url=static("core/images/favicon.png"), permanent=True),

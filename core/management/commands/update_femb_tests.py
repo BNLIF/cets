@@ -9,7 +9,7 @@ from django.db import transaction
 from pathlib import Path
 from django.utils import timezone
 
-from core.models import FEMB, FEMB_TEST
+from core.models import FEMB, FembTest
 
 
 class Command(BaseCommand):
@@ -83,11 +83,11 @@ class Command(BaseCommand):
                 if created:
                     self.stdout.write(f"Created new FEMB: {femb}")
 
-                if not FEMB_TEST.objects.filter(
+                if not FembTest.objects.filter(
                     femb=femb, timestamp=test_data["timestamp"]
                 ).exists():
                     new_tests.append(
-                        FEMB_TEST(
+                        FembTest(
                             femb=femb,
                             timestamp=test_data["timestamp"],
                             test_type=test_data["test_type"],
@@ -118,7 +118,7 @@ class Command(BaseCommand):
                 return
 
         with transaction.atomic():
-            FEMB_TEST.objects.bulk_create(new_tests)
+            FembTest.objects.bulk_create(new_tests)
 
         touch_file.touch()
         self.stdout.write(

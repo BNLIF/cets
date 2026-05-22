@@ -1,0 +1,17 @@
+{% extends 'core/base.html' %}
+
+{% block content %}
+<div class="container">
+    <h1 class="mt-4">{{ coldadc }}</h1>
+    <div class="card">
+        <div class="card-body">
+            <p class="card-text"><strong>Status:</strong> {{ coldadc.status }}</p>
+            {% if coldadc.femb %}
+            <p class="card-text"><strong>FEMB:</strong> <a href="{% url 'femb_detail' version=coldadc.femb.version serial_number=coldadc.femb.serial_number %}">{{ coldadc.femb.serial_number }}</a></p>
+            <p class="card-text"><strong>FEMB Position:</strong> {{ coldadc.femb_pos }}</p>
+            {% endif %}
+            <p class="card-text"><strong>Last Update:</strong> {{ coldadc.last_update|date:"Y-m-d H:i:s" }}</p>
+        </div>
+    </div>
+</div>
+{% endblock %}

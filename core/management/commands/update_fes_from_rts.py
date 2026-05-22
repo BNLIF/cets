@@ -2,11 +2,11 @@ import os
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from decouple import config
-from core.models import FE
+from core.models import LArASIC
 
 
 class Command(BaseCommand):
-    help = "Scans the RTS_DIR to find and add new FE serial numbers to the database."
+    help = "Scans the RTS_DIR to find and add new LArASIC serial numbers to the database."
 
     def handle(self, *args, **options):
         try:
@@ -30,8 +30,8 @@ class Command(BaseCommand):
         except OSError as e:
             raise CommandError(f"Could not read directories in '{rts_dir}'. Error: {e}")
 
-        # --- Step 1: Parse all files and collect FE data without DB queries ---
-        all_found_fes = {}
+        # --- Step 1: Parse all files and collect chip data without DB queries ---
+        all_found_chips = {}
         for tray_id in tray_dirs:
             results_path = os.path.join(rts_dir, tray_id, "results")
             if not os.path.isdir(results_path):
@@ -69,28 +69,28 @@ class Command(BaseCommand):
                         serial_number = "_".join(parts[:timestamp_part_index]).replace(
                             "_", "-"
                         )
-                        all_found_fes[serial_number] = tray_id
+                        all_found_chips[serial_number] = tray_id
                 except Exception:
                     # Ignore files with unexpected format
                     pass
 
-        # --- Step 2: Query database for existing FEs ---
-        all_serial_numbers = list(all_found_fes.keys())
+        # --- Step 2: Query database for existing LArASICs ---
+        all_serial_numbers = list(all_found_chips.keys())
         if not all_serial_numbers:
-            self.stdout.write(self.style.SUCCESS("No valid FE files found to process."))
+            self.stdout.write(self.style.SUCCESS("No valid LArASIC files found to process."))
             return
 
-        existing_fes_dict = FE.objects.filter(
+        existing_chips_dict = LArASIC.objects.filter(
             serial_number__in=all_serial_numbers
         ).in_bulk(field_name="serial_number")
 
-        # --- Step 3: Determine new FEs to create and existing FEs to update ---
-        fes_to_create_data = []
-        fes_to_update_objects = []
+        # --- Step 3: Determine new LArASICs to create and existing ones to update ---
+        chips_to_create_data = []
+        chips_to_update_objects = []
 
-        for serial_number, tray_id in all_found_fes.items():
-            if serial_number not in existing_fes_dict:
-                fes_to_create_data.append(
+        for serial_number, tray_id in all_found_chips.items():
+            if serial_number not in existing_chips_dict:
+                chips_to_create_data.append(
                     {
                         "serial_number": serial_number,
                         "tray_id": tray_id,
@@ -98,36 +98,36 @@ class Command(BaseCommand):
                     }
                 )
             else:
-                fe = existing_fes_dict[serial_number]
-                if fe.status == "on-femb" and fe.tray_id != tray_id:
-                    fe.tray_id = tray_id
-                    fes_to_update_objects.append(fe)
+                chip = existing_chips_dict[serial_number]
+                if chip.status == "on-femb" and chip.tray_id != tray_id:
+                    chip.tray_id = tray_id
+                    chips_to_update_objects.append(chip)
 
-        if not fes_to_create_data and not fes_to_update_objects:
+        if not chips_to_create_data and not chips_to_update_objects:
             self.stdout.write(
                 self.style.SUCCESS(
-                    "\nDatabase is already up-to-date. No new or updatable FEs found."
+                    "\nDatabase is already up-to-date. No new or updatable LArASICs found."
                 )
             )
             return
 
         # --- Step 4: Display summary and ask for confirmation ---
         self.stdout.write("\n--- Summary of Changes ---")
-        if fes_to_create_data:
+        if chips_to_create_data:
             self.stdout.write(
-                f"\nFound {len(fes_to_create_data)} new FE objects to be added:"
+                f"\nFound {len(chips_to_create_data)} new LArASIC objects to be added:"
             )
-            for fe_data in fes_to_create_data:
+            for chip_data in chips_to_create_data:
                 self.stdout.write(
-                    f"  - Serial Number: {fe_data['serial_number']}, Tray ID: {fe_data['tray_id']}"
+                    f"  - Serial Number: {chip_data['serial_number']}, Tray ID: {chip_data['tray_id']}"
                 )
-        if fes_to_update_objects:
+        if chips_to_update_objects:
             self.stdout.write(
-                f"\nFound {len(fes_to_update_objects)} FE objects to be updated:"
+                f"\nFound {len(chips_to_update_objects)} LArASIC objects to be updated:"
             )
-            for fe in fes_to_update_objects:
+            for chip in chips_to_update_objects:
                 self.stdout.write(
-                    f"  - Serial Number: {fe.serial_number}, New Tray ID: {fe.tray_id}"
+                    f"  - Serial Number: {chip.serial_number}, New Tray ID: {chip.tray_id}"
                 )
 
         confirmation = input("\nDo you want to proceed with these changes? (yes/no): ")
@@ -136,14 +136,14 @@ class Command(BaseCommand):
         if confirmation.lower() == "yes":
             try:
                 with transaction.atomic():
-                    if fes_to_create_data:
-                        FE.objects.bulk_create(
-                            [FE(**data) for data in fes_to_create_data],
+                    if chips_to_create_data:
+                        LArASIC.objects.bulk_create(
+                            [LArASIC(**data) for data in chips_to_create_data],
                             ignore_conflicts=True,
                         )
 
-                    if fes_to_update_objects:
-                        FE.objects.bulk_update(fes_to_update_objects, ["tray_id"])
+                    if chips_to_update_objects:
+                        LArASIC.objects.bulk_update(chips_to_update_objects, ["tray_id"])
 
                 self.stdout.write(
                     self.style.SUCCESS(f"\nSuccessfully updated the database.")

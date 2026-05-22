@@ -22,10 +22,10 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {% for fe in femb.fe_set.all %}
+                    {% for larasic in femb.larasic_set.all %}
                         <tr>
-                            <td><a href="{% url 'fe_detail' fe.serial_number %}">{{ fe.serial_number }}</a></td>
-                            <td>{{ fe.femb_pos }}</td>
+                            <td><a href="{% url 'larasic_detail' larasic.serial_number %}">{{ larasic.serial_number }}</a></td>
+                            <td>{{ larasic.femb_pos }}</td>
                         </tr>
                     {% endfor %}
                 </tbody>
@@ -41,10 +41,10 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {% for adc in femb.adc_set.all %}
+                    {% for coldadc in femb.coldadc_set.all %}
                         <tr>
-                            <td><a href="{% url 'adc_detail' adc.serial_number %}">{{ adc.serial_number }}</a></td>
-                            <td>{{ adc.femb_pos }}</td>
+                            <td><a href="{% url 'coldadc_detail' coldadc.serial_number %}">{{ coldadc.serial_number }}</a></td>
+                            <td>{{ coldadc.femb_pos }}</td>
                         </tr>
                     {% endfor %}
                 </tbody>
@@ -97,11 +97,11 @@
                                 <tr><th>Type</th><th>Serial Number</th><th>Position</th></tr>
                             </thead>
                             <tbody>
-                                {% for chip in repair.removed_fes.all %}
-                                <tr><td>LArASIC</td><td><a href="{% url 'fe_detail' chip.serial_number %}">{{ chip.serial_number }}</a></td><td>{{ chip.femb_pos }}</td></tr>
+                                {% for chip in repair.removed_larasics.all %}
+                                <tr><td>LArASIC</td><td><a href="{% url 'larasic_detail' chip.serial_number %}">{{ chip.serial_number }}</a></td><td>{{ chip.femb_pos }}</td></tr>
                                 {% endfor %}
-                                {% for chip in repair.removed_adcs.all %}
-                                <tr><td>ColdADC</td><td><a href="{% url 'adc_detail' chip.serial_number %}">{{ chip.serial_number }}</a></td><td>{{ chip.femb_pos }}</td></tr>
+                                {% for chip in repair.removed_coldadcs.all %}
+                                <tr><td>ColdADC</td><td><a href="{% url 'coldadc_detail' chip.serial_number %}">{{ chip.serial_number }}</a></td><td>{{ chip.femb_pos }}</td></tr>
                                 {% endfor %}
                                 {% for chip in repair.removed_coldatas.all %}
                                 <tr><td>COLDATA</td><td><a href="{% url 'coldata_detail' chip.serial_number %}">{{ chip.serial_number }}</a></td><td>{{ chip.femb_pos }}</td></tr>
@@ -116,11 +116,11 @@
                                 <tr><th>Type</th><th>Serial Number</th><th>Position</th></tr>
                             </thead>
                             <tbody>
-                                {% for chip in repair.installed_fes.all %}
-                                <tr><td>LArASIC</td><td><a href="{% url 'fe_detail' chip.serial_number %}">{{ chip.serial_number }}</a></td><td>{{ chip.femb_pos }}</td></tr>
+                                {% for chip in repair.installed_larasics.all %}
+                                <tr><td>LArASIC</td><td><a href="{% url 'larasic_detail' chip.serial_number %}">{{ chip.serial_number }}</a></td><td>{{ chip.femb_pos }}</td></tr>
                                 {% endfor %}
-                                {% for chip in repair.installed_adcs.all %}
-                                <tr><td>ColdADC</td><td><a href="{% url 'adc_detail' chip.serial_number %}">{{ chip.serial_number }}</a></td><td>{{ chip.femb_pos }}</td></tr>
+                                {% for chip in repair.installed_coldadcs.all %}
+                                <tr><td>ColdADC</td><td><a href="{% url 'coldadc_detail' chip.serial_number %}">{{ chip.serial_number }}</a></td><td>{{ chip.femb_pos }}</td></tr>
                                 {% endfor %}
                                 {% for chip in repair.installed_coldatas.all %}
                                 <tr><td>COLDATA</td><td><a href="{% url 'coldata_detail' chip.serial_number %}">{{ chip.serial_number }}</a></td><td>{{ chip.femb_pos }}</td></tr>

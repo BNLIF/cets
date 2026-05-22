@@ -15,27 +15,27 @@ from core.management.commands.update_fembs_from_ocr import (
 class ComponentsToStateTests(SimpleTestCase):
     def test_keys_by_type_and_position(self):
         components = [
-            {"type": "FE", "serial_number": "FE-1", "position": "F1"},
-            {"type": "ADC", "serial_number": "ADC-1", "position": "F1"},
+            {"type": "LArASIC", "serial_number": "FE-1", "position": "F1"},
+            {"type": "ColdADC", "serial_number": "ADC-1", "position": "F1"},
             {"type": "COLDATA", "serial_number": "CD-1", "position": "F1"},
         ]
         state = components_to_state(components)
         # Same position label must NOT collide across chip types.
-        self.assertEqual(state[("FE", "F1")], "FE-1")
-        self.assertEqual(state[("ADC", "F1")], "ADC-1")
+        self.assertEqual(state[("LArASIC", "F1")], "FE-1")
+        self.assertEqual(state[("ColdADC", "F1")], "ADC-1")
         self.assertEqual(state[("COLDATA", "F1")], "CD-1")
 
     def test_drops_components_with_blank_position(self):
         components = [
-            {"type": "FE", "serial_number": "FE-1", "position": ""},
-            {"type": "FE", "serial_number": "FE-2", "position": "F1"},
+            {"type": "LArASIC", "serial_number": "FE-1", "position": ""},
+            {"type": "LArASIC", "serial_number": "FE-2", "position": "F1"},
         ]
-        self.assertEqual(components_to_state(components), {("FE", "F1"): "FE-2"})
+        self.assertEqual(components_to_state(components), {("LArASIC", "F1"): "FE-2"})
 
 
 class ComputeRepairDiffTests(SimpleTestCase):
     def _fe(self, sn, pos):
-        return {"type": "FE", "serial_number": sn, "position": pos}
+        return {"type": "LArASIC", "serial_number": sn, "position": pos}
 
     def test_no_change(self):
         before = [self._fe("FE-A", "F1"), self._fe("FE-B", "F2")]
@@ -65,10 +65,10 @@ class ComputeRepairDiffTests(SimpleTestCase):
         self.assertEqual(added, [self._fe("FE-NEW", "F1")])
 
     def test_same_position_label_different_chip_types_do_not_collide(self):
-        # FE at F1 swapped, ADC at F1 unchanged — must not report the ADC as
-        # removed just because an FE shares its position label.
-        before = [self._fe("FE-OLD", "F1"), {"type": "ADC", "serial_number": "ADC-1", "position": "F1"}]
-        after = [self._fe("FE-NEW", "F1"), {"type": "ADC", "serial_number": "ADC-1", "position": "F1"}]
+        # LArASIC at F1 swapped, ColdADC at F1 unchanged — must not report the
+        # ColdADC as removed just because a LArASIC shares its position label.
+        before = [self._fe("FE-OLD", "F1"), {"type": "ColdADC", "serial_number": "ADC-1", "position": "F1"}]
+        after = [self._fe("FE-NEW", "F1"), {"type": "ColdADC", "serial_number": "ADC-1", "position": "F1"}]
         removed, added = compute_repair_diff(before, after)
         self.assertEqual(removed, [self._fe("FE-OLD", "F1")])
         self.assertEqual(added, [self._fe("FE-NEW", "F1")])
@@ -93,9 +93,9 @@ class ParsePartsFileTests(SimpleTestCase):
         self.assertEqual(version, "IO-1865-1K")
         self.assertEqual(sn, "00016")
         self.assertIn({"type": "COLDATA", "serial_number": "2506-03219", "position": "F1"}, components)
-        self.assertIn({"type": "ADC", "serial_number": "2502-18564", "position": "F1"}, components)
-        self.assertIn({"type": "FE", "serial_number": "009-05061", "position": "F1"}, components)
-        self.assertIn({"type": "FE", "serial_number": "009-06576", "position": "B4"}, components)
+        self.assertIn({"type": "ColdADC", "serial_number": "2502-18564", "position": "F1"}, components)
+        self.assertIn({"type": "LArASIC", "serial_number": "009-05061", "position": "F1"}, components)
+        self.assertIn({"type": "LArASIC", "serial_number": "009-06576", "position": "B4"}, components)
         self.assertEqual(len(components), 4)
 
     def test_missing_femb_header_returns_empty(self):

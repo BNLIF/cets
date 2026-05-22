@@ -9,7 +9,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from core.models import CABLE, CABLE_TEST
+from core.models import CABLE, CableTest
 
 
 class Command(BaseCommand):
@@ -85,12 +85,12 @@ class Command(BaseCommand):
                 if created:
                     self.stdout.write(f"Created new CABLE: {cable}")
 
-                if not CABLE_TEST.objects.filter(
+                if not CableTest.objects.filter(
                     cable=cable,
                     timestamp=test_data["timestamp"]
                 ).exists():
                     new_tests.append(
-                        CABLE_TEST(
+                        CableTest(
                             cable=cable,
                             timestamp=test_data["timestamp"],
                             test_type=test_data["test_type"],
@@ -121,7 +121,7 @@ class Command(BaseCommand):
                 return
 
         with transaction.atomic():
-            CABLE_TEST.objects.bulk_create(new_tests)
+            CableTest.objects.bulk_create(new_tests)
 
         touch_file.touch()
         self.stdout.write(

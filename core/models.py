@@ -16,7 +16,7 @@ class FEMB(models.Model):
         return f"FEMB: {self.version}/{self.serial_number}"
 
 
-class FE(models.Model):
+class LArASIC(models.Model):
     serial_number = models.CharField(max_length=20, unique=True)
     status = models.CharField(max_length=20, default="testing")
     tray_id = models.CharField(max_length=20)
@@ -24,13 +24,13 @@ class FE(models.Model):
     femb = models.ForeignKey(FEMB, on_delete=models.CASCADE, null=True, blank=True)
     femb_pos = models.CharField(max_length=2, null=True, blank=True)  # F1-4, B1-4
     installed_at_repair = models.ForeignKey(
-        "FEMB_REPAIR", on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="installed_fes",
+        "FembRepair", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="installed_larasics",
         help_text="NULL = original assembly; set when installed during a repair",
     )
     removed_at_repair = models.ForeignKey(
-        "FEMB_REPAIR", on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="removed_fes",
+        "FembRepair", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="removed_larasics",
         help_text="NULL = still on FEMB; set when removed during a repair",
     )
 
@@ -76,7 +76,7 @@ class FE(models.Model):
         return f"LArASIC: {self.serial_number}"
 
 
-class ADC(models.Model):
+class ColdADC(models.Model):
     serial_number = models.CharField(max_length=20, unique=True)
     status = models.CharField(max_length=20, default="testing")
     tray_id = models.CharField(max_length=20, null=True, blank=True)
@@ -84,13 +84,13 @@ class ADC(models.Model):
     femb = models.ForeignKey(FEMB, on_delete=models.CASCADE, null=True, blank=True)
     femb_pos = models.CharField(max_length=2, null=True, blank=True)  # F1-4, B1-4
     installed_at_repair = models.ForeignKey(
-        "FEMB_REPAIR", on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="installed_adcs",
+        "FembRepair", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="installed_coldadcs",
         help_text="NULL = original assembly; set when installed during a repair",
     )
     removed_at_repair = models.ForeignKey(
-        "FEMB_REPAIR", on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="removed_adcs",
+        "FembRepair", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="removed_coldadcs",
         help_text="NULL = still on FEMB; set when removed during a repair",
     )
 
@@ -106,12 +106,12 @@ class COLDATA(models.Model):
     femb = models.ForeignKey(FEMB, on_delete=models.CASCADE, null=True, blank=True)
     femb_pos = models.CharField(max_length=2, null=True, blank=True)  # F1-2
     installed_at_repair = models.ForeignKey(
-        "FEMB_REPAIR", on_delete=models.SET_NULL, null=True, blank=True,
+        "FembRepair", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="installed_coldatas",
         help_text="NULL = original assembly; set when installed during a repair",
     )
     removed_at_repair = models.ForeignKey(
-        "FEMB_REPAIR", on_delete=models.SET_NULL, null=True, blank=True,
+        "FembRepair", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="removed_coldatas",
         help_text="NULL = still on FEMB; set when removed during a repair",
     )
@@ -120,7 +120,7 @@ class COLDATA(models.Model):
         return f"COLDATA: {self.serial_number}"
 
 
-class FEMB_REPAIR(models.Model):
+class FembRepair(models.Model):
     femb = models.ForeignKey(FEMB, on_delete=models.CASCADE, related_name="repairs")
     iteration_number = models.PositiveIntegerField()
     date = models.DateTimeField()
@@ -137,7 +137,7 @@ class FEMB_REPAIR(models.Model):
         return f"Repair #{self.iteration_number} for {self.femb} on {self.date.date()}"
 
 
-class FEMB_TEST(models.Model):
+class FembTest(models.Model):
     femb = models.ForeignKey(FEMB, on_delete=models.CASCADE)
     timestamp = models.DateTimeField()
     test_type = models.CharField(max_length=10)
@@ -160,7 +160,7 @@ class CABLE(models.Model):
         return f"Cable: {self.serial_number}"
 
 
-class CABLE_TEST(models.Model):
+class CableTest(models.Model):
     cable = models.ForeignKey(CABLE, on_delete=models.CASCADE)
     timestamp = models.DateTimeField()
     test_type = models.CharField(max_length=10)

@@ -1,12 +1,12 @@
 from django.contrib import admin
-from .models import FEMB, FE, ADC, COLDATA, FEMB_REPAIR, FEMB_TEST, CABLE, CABLE_TEST
+from .models import FEMB, LArASIC, ColdADC, COLDATA, FembRepair, FembTest, CABLE, CableTest
 
 
 class FEMBAdmin(admin.ModelAdmin):
     list_display = ("serial_number", "version", "status", "last_update")
 
 
-class FEAdmin(admin.ModelAdmin):
+class LArASICAdmin(admin.ModelAdmin):
     list_display = (
         "serial_number",
         "status",
@@ -17,7 +17,7 @@ class FEAdmin(admin.ModelAdmin):
     )
 
 
-class ADCAdmin(admin.ModelAdmin):
+class ColdADCAdmin(admin.ModelAdmin):
     list_display = (
         "serial_number",
         "status",
@@ -39,13 +39,13 @@ class COLDATAAdmin(admin.ModelAdmin):
     )
 
 
-class FEMB_REPAIRAdmin(admin.ModelAdmin):
+class FembRepairAdmin(admin.ModelAdmin):
     list_display = ("femb", "iteration_number", "date", "operator", "batch_id", "what_was_fixed")
     list_filter = ("femb__version",)
     search_fields = ("femb__serial_number", "operator", "batch_id")
 
 
-class FEMB_TESTAdmin(admin.ModelAdmin):
+class FembTestAdmin(admin.ModelAdmin):
     list_display = ("femb", "timestamp", "site", "test_type", "test_env", "status")
 
 
@@ -53,20 +53,18 @@ class CABLEAdmin(admin.ModelAdmin):
     list_display = ("serial_number", "batch_number", "status", "last_update")
 
 
-class CABLE_TESTAdmin(admin.ModelAdmin):
+class CableTestAdmin(admin.ModelAdmin):
     list_display = ("cable", "timestamp", "site", "test_type", "test_env", "status")
 
 
-# admin.site.unregister(FEMB)
-# admin.site.unregister(FE)
 admin.site.register(FEMB, FEMBAdmin)
-admin.site.register(FE, FEAdmin)
-admin.site.register(ADC, ADCAdmin)
+admin.site.register(LArASIC, LArASICAdmin)
+admin.site.register(ColdADC, ColdADCAdmin)
 admin.site.register(COLDATA, COLDATAAdmin)
-admin.site.register(FEMB_REPAIR, FEMB_REPAIRAdmin)
-admin.site.register(FEMB_TEST, FEMB_TESTAdmin)
+admin.site.register(FembRepair, FembRepairAdmin)
+admin.site.register(FembTest, FembTestAdmin)
 admin.site.register(CABLE, CABLEAdmin)
-admin.site.register(CABLE_TEST, CABLE_TESTAdmin)
+admin.site.register(CableTest, CableTestAdmin)
 
 admin.site.site_header = "CETs Admin"
 admin.site.site_title = "CETs Admin Portal"

@@ -6,7 +6,7 @@
 
     <!-- Search Bar -->
     <div class="my-4">
-        <form id="adc-search-form" class="d-flex" method="GET" action="{% url 'adc' %}">
+        <form id="coldadc-search-form" class="d-flex" method="GET" action="{% url 'coldadc' %}">
             <input name="q" class="form-control me-2" type="search" placeholder="Enter search term..." value="{{ search_query }}" aria-label="Search">
             <select name="by" class="form-select me-2" style="width: auto;">
                 <option value="sn" {% if search_by == 'sn' %}selected{% endif %}>Serial Number</option>
@@ -57,18 +57,18 @@
                 </tr>
             </thead>
             <tbody>
-                {% for adc_object in page_obj %}
+                {% for coldadc_object in page_obj %}
                 <tr>
-                    <td><a href="{% url 'adc_detail' serial_number=adc_object.serial_number %}">{{ adc_object.serial_number }}</a></td>
-                    <td>{{ adc_object.status }}</td>
+                    <td><a href="{% url 'coldadc_detail' serial_number=coldadc_object.serial_number %}">{{ coldadc_object.serial_number }}</a></td>
+                    <td>{{ coldadc_object.status }}</td>
                     <td>
-                        {% if adc_object.femb %}
-                            <a href="{% url 'femb_detail' version=adc_object.femb.version serial_number=adc_object.femb.serial_number %}">{{ adc_object.femb.serial_number }}</a>
+                        {% if coldadc_object.femb %}
+                            <a href="{% url 'femb_detail' version=coldadc_object.femb.version serial_number=coldadc_object.femb.serial_number %}">{{ coldadc_object.femb.serial_number }}</a>
                         {% else %}
                             N/A
                         {% endif %}
                     </td>
-                    <td>{{ adc_object.femb_pos|default:"N/A" }}</td>
+                    <td>{{ coldadc_object.femb_pos|default:"N/A" }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
