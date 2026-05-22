@@ -38,58 +38,52 @@ The application will be available at `http://127.0.0.1:8000/`.
 
 ## Deployment
 
-These instructions are for deploying the application on a server using Apache.
+The production deployment at BNL runs gunicorn under systemd, fronted by Apache as a reverse proxy.
 
-### Apache Setup
+### Gunicorn systemd unit
 
-1.  **Install Apache and mod_wsgi:**
-    ```bash
-    # On Debian/Ubuntu
-    sudo apt-get update
-    sudo apt-get install apache2 libapache2-mod-wsgi-py3
+Example `/etc/systemd/system/cets.service`:
 
-    # On RHEL/CentOS
-    sudo yum install httpd mod_wsgi
-    ```
+```ini
+[Unit]
+Description=gunicorn daemon for cets
+After=network.target
 
-2.  **Configure Apache:**
-    *   Create a new configuration file for your site in `/etc/apache2/sites-available/cets.conf` (Debian/Ubuntu) or `/etc/httpd/conf.d/cets.conf` (RHEL/CentOS).
-    *   Add the following content to the file, replacing the placeholders with your actual paths and domain name:
+[Service]
+User=www-data
+Group=www-data
+RuntimeDirectory=cets
+WorkingDirectory=/path/to/cets
+ExecStart=/path/to/cets/venv/bin/gunicorn \
+          --access-logfile /path/to/cets/tmp/gunicorn.log \
+          --workers 3 \
+          --bind unix:/run/cets/cets.sock \
+          cets.wsgi:application
 
-    ```apache
-    <VirtualHost *:80>
-        ServerName your_domain.com
-        ServerAlias www.your_domain.com
+[Install]
+WantedBy=multi-user.target
+```
 
-        Alias /static/ /path/to/your/project/static/
-        <Directory /path/to/your/project/static>
-            Require all granted
-        </Directory>
+### Apache reverse proxy
 
-        <Directory /path/to/your/project/cets>
-            <Files wsgi.py>
-                Require all granted
-            </Files>
-        </Directory>
+Inside the SSL `<VirtualHost>`:
 
-        WSGIDaemonProcess cets python-home=/path/to/your/project/venv python-path=/path/to/your/project
-        WSGIProcessGroup cets
-        WSGIScriptAlias / /path/to/your/project/cets/wsgi.py
-    </VirtualHost>
-    ```
+```apache
+ProxyPass        /cets/ unix:/run/cets/cets.sock|http://localhost/
+ProxyPassReverse /cets/ http://localhost/
+RequestHeader set X-Forwarded-Proto "https"
+```
 
-3.  **Enable the site and restart Apache:**
-    ```bash
-    # On Debian/Ubuntu
-    sudo a2ensite cets.conf
-    sudo systemctl restart apache2
+Set `FORCE_SCRIPT_NAME=/cets` in `.env` so Django generates URLs under the prefix.
 
-    # On RHEL/CentOS
-    sudo systemctl restart httpd
-    ```
+### Deploy ritual
 
-4.  **Collect Static Files:**
-    Before starting the server, you need to collect all static files into a single directory.
-    ```bash
-    python manage.py collectstatic
-    ```
+On the server, after pushing to `main`:
+
+```bash
+git pull
+pip install -r requirements.txt
+python manage.py migrate
+echo yes | python manage.py collectstatic
+sudo systemctl restart cets.service
+```

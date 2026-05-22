@@ -74,7 +74,6 @@ def component_list_view(request, component_type_id=None):
         current_page = pagination_data.get("page", 1)
         page_size = pagination_data.get("page_size", 100)
         total_pages = pagination_data.get("pages", 1)
-        total_items = pagination_data.get("total", 0)
 
         next_page = current_page + 1 if current_page < total_pages else None
         prev_page = current_page - 1 if current_page > 1 else None

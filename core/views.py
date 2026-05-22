@@ -17,7 +17,7 @@ RTS_FILENAME_RE = re.compile(r"^[A-Za-z0-9_.-]+\.csv$")
 
 
 def home(request):
-    return render(request, "core/index.html", {"items": range(5), "page": "home"})
+    return render(request, "core/index.html", {"page": "home"})
 
 
 def fe(request):
