@@ -25,6 +25,7 @@ from pathlib import Path
 from decouple import config
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.db.models import Max
 
 from core.models import LArASIC
 
@@ -96,13 +97,15 @@ class BatchScan:
     valid_session_count: int = 0
 
 
-def scan_batch(batch_dir: Path) -> BatchScan:
+def scan_batch(batch_dir: Path, cutoff: datetime | None = None) -> BatchScan:
     batch = BatchScan(batch_id=batch_dir.name)
     for session in batch_dir.iterdir():
         if not session.is_dir():
             continue
         ts = parse_time_folder(session.name)
         if ts is None:
+            continue
+        if cutoff is not None and ts <= cutoff:
             continue
         try:
             sub_names = [s.name for s in session.iterdir() if s.is_dir()]
@@ -164,6 +167,16 @@ class Command(BaseCommand):
             action="store_true",
             help="Skip the interactive prompt and write directly.",
         )
+        parser.add_argument(
+            "--since-db",
+            action="store_true",
+            help=(
+                "Incremental mode: skip batch folders whose mtime is not newer "
+                "than max(warm_tested_at, cold_tested_at) in the DB, and skip "
+                "sessions whose Time_ name is not newer than that cutoff. "
+                "Intended for the daily cron."
+            ),
+        )
 
     def handle(self, *args, **options):
         data_dir: Path = options["data_dir"] or Path(self._rts_dir())
@@ -172,12 +185,41 @@ class Command(BaseCommand):
 
         batch_filter = options["batch"]
         commit_flag: bool = options["commit"]
+        since_db: bool = options["since_db"]
 
-        batch_dirs = sorted(
-            d for d in data_dir.iterdir()
-            if d.is_dir() and BATCH_RE.match(d.name)
-            and (batch_filter is None or d.name == batch_filter)
-        )
+        cutoff_dt: datetime | None = None
+        if since_db:
+            agg = LArASIC.objects.aggregate(
+                w=Max("warm_tested_at"), c=Max("cold_tested_at")
+            )
+            candidates = [v for v in (agg["w"], agg["c"]) if v is not None]
+            if candidates:
+                cutoff_dt = max(candidates)
+                self.stdout.write(
+                    f"Incremental mode: cutoff = {cutoff_dt.isoformat()}"
+                )
+            else:
+                self.stdout.write("Incremental mode: DB has no timestamps; full scan.")
+        cutoff_epoch = cutoff_dt.timestamp() if cutoff_dt else None
+
+        batch_dirs: list[Path] = []
+        skipped_by_mtime = 0
+        with os.scandir(data_dir) as it:
+            for entry in it:
+                if not entry.is_dir() or not BATCH_RE.match(entry.name):
+                    continue
+                if batch_filter is not None and entry.name != batch_filter:
+                    continue
+                if cutoff_epoch is not None and entry.stat().st_mtime <= cutoff_epoch:
+                    skipped_by_mtime += 1
+                    continue
+                batch_dirs.append(Path(entry.path))
+        batch_dirs.sort()
+        if cutoff_epoch is not None:
+            self.stdout.write(
+                f"Incremental mode: {skipped_by_mtime} batch folder(s) "
+                f"unchanged since cutoff; {len(batch_dirs)} to scan."
+            )
         if batch_filter and not batch_dirs:
             raise CommandError(f"batch {batch_filter} not found under {data_dir}")
 
@@ -189,7 +231,7 @@ class Command(BaseCommand):
 
         total = len(batch_dirs)
         for i, batch_dir in enumerate(batch_dirs, start=1):
-            batch = scan_batch(batch_dir)
+            batch = scan_batch(batch_dir, cutoff=cutoff_dt)
             warm_str = batch.warm_date.strftime("%Y-%m-%d") if batch.warm_date else "-"
             cold_str = batch.cold_date.strftime("%Y-%m-%d") if batch.cold_date else "-"
             tag = ""
