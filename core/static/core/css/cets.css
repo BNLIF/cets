@@ -795,7 +795,7 @@ button { font-family: inherit; }
 /* Dashboard layout */
 .dash-grid {
   display: grid;
-  grid-template-columns: 1.4fr 1fr;
+  grid-template-columns: minmax(0, 3fr) minmax(220px, 1fr);
   gap: 24px;
   align-items: start;
 }

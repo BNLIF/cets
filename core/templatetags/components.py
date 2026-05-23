@@ -131,69 +131,6 @@ def stat_card(name, description, numbers, this_month=None, href=None):
     }
 
 
-@register.inclusion_tag("core/components/family_breakdown.html")
-def family_breakdown(families):
-    """2-column grid of mini family progress cards.
-
-    `families` is a list of {"name", "kind", "total", "tested", "href"}.
-    """
-    rows = []
-    for f in families:
-        total = f["total"] or 0
-        tested = f["tested"] or 0
-        pct = round(tested / total * 100) if total else 0
-        rows.append({**f, "pct": pct, "pending": max(total - tested, 0)})
-    return {"families": rows}
-
-
-@register.inclusion_tag("core/components/tests_per_day_chart.html")
-def tests_per_day_chart(days):
-    """90-bar SVG of tests/day. `days` is the output of queries.tests_per_day().
-
-    Most recent 7 days render in solid accent; earlier days in a lighter
-    accent mix. Y-axis grid lines at 25/50/75/100% of the visible max.
-    """
-    counts = [d["count"] for d in days]
-    if not counts:
-        counts = [0]
-    vmax = max(counts) or 1
-    n = len(days)
-    chart_w = 720
-    chart_h = 200
-    x_step = chart_w / n
-    bar_w = max(2, x_step - 2)
-    # Render recent_threshold = last 7 days
-    bars = []
-    for i, d in enumerate(days):
-        bh = (d["count"] / vmax) * (chart_h - 20)
-        bars.append({
-            "x": round(i * x_step + 1, 2),
-            "y": round(chart_h - bh, 2),
-            "w": round(bar_w, 2),
-            "h": round(bh, 2),
-            "recent": i >= n - 7,
-            "count": d["count"],
-            "date": d["date"],
-        })
-    grid = [
-        {"y": round(chart_h - chart_h * g, 2), "label": round(vmax * g)}
-        for g in (0.25, 0.5, 0.75, 1.0)
-    ]
-    total = sum(counts)
-    daily_avg = round(total / n, 1) if n else 0
-    return {
-        "bars": bars,
-        "grid": grid,
-        "w": chart_w,
-        "h": chart_h,
-        "first_label": days[0]["date"].strftime("%b %d") if days else "",
-        "mid_label": days[n // 2]["date"].strftime("%b %d") if days else "",
-        "last_label": days[-1]["date"].strftime("%b %d") if days else "",
-        "total": total,
-        "daily_avg": daily_avg,
-    }
-
-
 @register.inclusion_tag("core/components/activity_panel.html")
 def activity_panel(items, compact=False):
     """Recent-activity panel: title + list of activity rows.

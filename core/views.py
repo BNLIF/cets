@@ -56,11 +56,12 @@ def home(request):
 
     femb_total = femb_qs.count()
     qc_run = FembTest.objects.count()
-    # "Cold tested · LN": components installed on a FEMB that has at least one LN test.
-    larasic_cold = larasic_qs.filter(femb__fembtest__test_env="LN").distinct().count()
+    larasic_warm = larasic_qs.filter(warm_tested_at__isnull=False).count()
+    larasic_cold = larasic_qs.filter(cold_tested_at__isnull=False).count()
+    # ColdADC / COLDATA have no per-chip test dates yet; keep the FEMB-LN
+    # derivation until a future per-chip ingest replaces it.
     coldadc_cold = coldadc_qs.filter(femb__fembtest__test_env="LN").distinct().count()
     coldata_cold = coldata_qs.filter(femb__fembtest__test_env="LN").distinct().count()
-    cable_tested = cable_qs.filter(cabletest__isnull=False).distinct().count()
 
     stat_cards = [
         {
@@ -75,10 +76,10 @@ def home(request):
         {
             "name": "LArASIC", "description": "16-ch front-end ASIC",
             "href": reverse("larasic"),
-            "this_month": larasic_qs.filter(last_update__gte=month_ago).count(),
+            "this_month": larasic_qs.filter(warm_tested_at__gte=month_ago).count(),
             "numbers": [
-                {"value": larasic_qs.count(), "label": "Total tracked"},
-                {"value": larasic_cold, "label": "Cold tested · LN", "cold": True},
+                {"value": larasic_warm, "label": "RTS warm-tested"},
+                {"value": larasic_cold, "label": "RTS cold-tested", "cold": True},
             ],
         },
         {
@@ -101,34 +102,42 @@ def home(request):
         },
     ]
 
-    families = [
-        {"name": "LArASIC", "kind": "16-ch front-end ASIC",
-         "total": larasic_qs.count(), "tested": larasic_cold, "href": reverse("larasic")},
-        {"name": "ColdADC", "kind": "12-bit cold ADC",
-         "total": coldadc_qs.count(), "tested": coldadc_cold, "href": reverse("coldadc")},
-        {"name": "COLDATA", "kind": "Serializer / control",
-         "total": coldata_qs.count(), "tested": coldata_cold, "href": reverse("coldata")},
-        {"name": "FEMB", "kind": "Frontend Motherboard",
-         "total": femb_total, "tested": FembTest.objects.values("femb").distinct().count(),
-         "href": reverse("femb")},
-        {"name": "Cable", "kind": "Cold flex cabling",
-         "total": cable_qs.count(), "tested": cable_tested, "href": reverse("cable")},
-    ]
+    def _to_rgba(hex_color, a):
+        h = hex_color.lstrip("#")
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return f"rgba({r},{g},{b},{a})"
 
-    window_param = request.GET.get("window")
-    window_keys = {k for k, _ in queries.CHART_WINDOWS}
-    if window_param not in window_keys:
-        window_param = queries.default_chart_window()
-    window_days = queries.chart_window_days(window_param)
+    def _chart_config(slug, name, subtitle, href, data):
+        months = data["months"]
+        bar_ds, line_ds = [], []
+        for s in data["series"]:
+            color = s["color"]
+            bar_ds.append({"label": s["name"], "data": s["monthly"], "backgroundColor": color})
+            line_ds.append({
+                "label": s["name"], "data": s["cumulative"],
+                "borderColor": color, "backgroundColor": _to_rgba(color, 0.15),
+                "tension": 0.2, "fill": True,
+            })
+        return {
+            "slug": slug, "name": name, "subtitle": subtitle, "href": href,
+            "labels": months, "bar_datasets": bar_ds, "line_datasets": line_ds,
+            "empty": not months,
+        }
+
+    progress_charts = [
+        _chart_config("larasic", "LArASIC", "RTS warm / cold tests per month",
+                      reverse("larasic"), queries.larasic_progress_monthly()),
+        _chart_config("femb", "FEMB", "Unique FEMBs tested per month",
+                      reverse("femb"), queries.femb_progress_monthly()),
+        _chart_config("cable", "Cable", "Unique cables tested per month",
+                      reverse("cable"), queries.cable_progress_monthly()),
+    ]
 
     context = {
         "page": "home",
         "femb_total": femb_total,
         "stat_cards": stat_cards,
-        "families": families,
-        "tests_per_day": queries.tests_per_day(days=window_days),
-        "chart_window": window_param,
-        "chart_windows": queries.CHART_WINDOWS,
+        "progress_charts": progress_charts,
         "activity": queries.recent_activity(limit=10),
     }
     return render(request, "core/index.html", context)
