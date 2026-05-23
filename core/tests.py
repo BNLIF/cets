@@ -1,8 +1,11 @@
 import tempfile
 import textwrap
+from datetime import datetime, timezone
+from io import StringIO
 from pathlib import Path
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase, override_settings
 
 from core.management.commands.update_fembs_from_ocr import (
@@ -10,6 +13,11 @@ from core.management.commands.update_fembs_from_ocr import (
     compute_repair_diff,
     parse_inspection_note,
     parse_parts_file,
+)
+from core.management.commands.update_larasics_from_rts import (
+    parse_sn_folder,
+    parse_time_folder,
+    scan_batch,
 )
 from core.models import CABLE, COLDATA, FEMB, ColdADC, LArASIC
 
@@ -218,3 +226,300 @@ class ViewSmokeTests(TestCase):
         r = self.client.get(f"/adc/{self.coldadc.serial_number}/")
         self.assertEqual(r.status_code, 301)
         self.assertTrue(r["Location"].endswith(f"/coldadc/{self.coldadc.serial_number}/"))
+
+
+def _mkrts(tmp: Path, tree: dict) -> Path:
+    """Materialize an RTS fixture tree from a nested dict of folder names.
+
+    tree = {
+        "B002T0001": {
+            "Time_20250813095435": ["RT_FE_002004605_..._002004616", "LN_FE_..."],
+            ...
+        },
+        ...
+    }
+    """
+    for batch_name, sessions in tree.items():
+        batch = tmp / batch_name
+        batch.mkdir()
+        for session_name, subs in sessions.items():
+            session = batch / session_name
+            session.mkdir()
+            for sub in subs:
+                (session / sub).mkdir()
+    return tmp
+
+
+class ParseTimeFolderTests(SimpleTestCase):
+    def test_valid_timestamp(self):
+        dt = parse_time_folder("Time_20250813095435")
+        self.assertEqual(dt, datetime(2025, 8, 13, 9, 54, 35, tzinfo=timezone.utc))
+
+    def test_with_dut_suffix(self):
+        dt = parse_time_folder("Time_20250813095435_DUT_0000_1001_2002")
+        self.assertEqual(dt, datetime(2025, 8, 13, 9, 54, 35, tzinfo=timezone.utc))
+
+    def test_invalid(self):
+        self.assertIsNone(parse_time_folder("notatime"))
+        self.assertIsNone(parse_time_folder("Time_99999999999999"))
+
+
+class ParseSnFolderTests(SimpleTestCase):
+    def test_full_8_chips(self):
+        sns = parse_sn_folder(
+            "RT_FE_002004605_002004606_002004607_002004608_"
+            "002004613_002004614_002004615_002004616",
+            "RT_FE_",
+        )
+        self.assertEqual(len(sns), 8)
+        self.assertEqual(sns[0], "002-04605")
+        self.assertEqual(sns[-1], "002-04616")
+
+    def test_partial_tray(self):
+        sns = parse_sn_folder("RT_FE_002004605_002004606_002004607_002004608_002004613", "RT_FE_")
+        self.assertEqual(sns, ["002-04605", "002-04606", "002-04607", "002-04608", "002-04613"])
+
+    def test_garbage_returns_empty(self):
+        # No digits at all
+        self.assertEqual(parse_sn_folder("RT_FE_XXX_YYY", "RT_FE_"), [])
+        # Wrong-length numbers
+        self.assertEqual(parse_sn_folder("RT_FE_12345", "RT_FE_"), [])
+
+    def test_wrong_prefix(self):
+        self.assertEqual(parse_sn_folder("LN_FE_002004605", "RT_FE_"), [])
+
+
+class ScanBatchTests(SimpleTestCase):
+    def test_happy_path_warm_and_cold(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _mkrts(Path(td), {
+                "B002T0001": {
+                    "Time_20250813095435_DUT_0000": [
+                        "RT_FE_002004605_002004606_002004607_002004608_"
+                        "002004613_002004614_002004615_002004616",
+                        "LN_FE_002004605_002004606_002004607_002004608_"
+                        "002004613_002004614_002004615_002004616",
+                    ],
+                },
+            })
+            batch = scan_batch(root / "B002T0001")
+            self.assertEqual(batch.batch_id, "B002T0001")
+            self.assertEqual(len(batch.chips), 8)
+            chip = batch.chips["002-04605"]
+            self.assertEqual(chip.warm_ts, datetime(2025, 8, 13, 9, 54, 35, tzinfo=timezone.utc))
+            self.assertEqual(chip.cold_ts, datetime(2025, 8, 13, 9, 54, 35, tzinfo=timezone.utc))
+            self.assertEqual(chip.warm_batch_id, "B002T0001")
+            self.assertEqual(batch.skipped_folders, [])
+
+    def test_aborted_session_ignored(self):
+        # Session has only LN_FE_ (no RT_) — ADR-0004 says skip wholesale.
+        with tempfile.TemporaryDirectory() as td:
+            root = _mkrts(Path(td), {
+                "B002T0001": {
+                    "Time_20250813095435": [
+                        "LN_FE_999999999_999999999_999999999",  # garbage SNs in aborted session
+                    ],
+                },
+            })
+            batch = scan_batch(root / "B002T0001")
+            self.assertEqual(batch.chips, {})
+            self.assertEqual(batch.valid_session_count, 0)
+            self.assertIsNone(batch.warm_date)
+
+    def test_partial_tray_warm_only(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _mkrts(Path(td), {
+                "B005T0017": {
+                    "Time_20250915120000": [
+                        "RT_FE_002004605_002004606_002004607_002004608_002004613",
+                    ],
+                },
+            })
+            batch = scan_batch(root / "B005T0017")
+            self.assertEqual(len(batch.chips), 5)
+            self.assertIsNone(batch.cold_date)
+            self.assertIsNotNone(batch.warm_date)
+
+    def test_retested_chip_within_batch_latest_wins(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _mkrts(Path(td), {
+                "B002T0001": {
+                    "Time_20250813095435": [
+                        "RT_FE_002004605_002004606",
+                    ],
+                    "Time_20250920120000": [
+                        "RT_FE_002004605",  # re-tested
+                    ],
+                },
+            })
+            batch = scan_batch(root / "B002T0001")
+            chip = batch.chips["002-04605"]
+            self.assertEqual(chip.warm_ts, datetime(2025, 9, 20, 12, 0, 0, tzinfo=timezone.utc))
+            # The other chip stays at the earlier time.
+            self.assertEqual(
+                batch.chips["002-04606"].warm_ts,
+                datetime(2025, 8, 13, 9, 54, 35, tzinfo=timezone.utc),
+            )
+
+    def test_garbage_folder_skipped_and_recorded(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _mkrts(Path(td), {
+                "B002T0001": {
+                    "Time_20250813095435": [
+                        "RT_FE_002004605",       # valid: provides RT_ presence + 1 chip
+                        "RT_FE_XXX_YYY",          # garbage: zero valid SNs
+                    ],
+                },
+            })
+            batch = scan_batch(root / "B002T0001")
+            self.assertEqual(set(batch.chips.keys()), {"002-04605"})
+            self.assertEqual(len(batch.skipped_folders), 1)
+            self.assertIn("RT_FE_XXX_YYY", batch.skipped_folders[0])
+
+
+class UpdateLArasicsFromRtsCommandTests(TestCase):
+    def _run(self, data_dir: Path, **kwargs) -> str:
+        out = StringIO()
+        call_command(
+            "update_larasics_from_rts",
+            "--data-dir", str(data_dir),
+            "--commit",
+            stdout=out,
+            **kwargs,
+        )
+        return out.getvalue()
+
+    def test_inserts_new_chips(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _mkrts(Path(td), {
+                "B002T0001": {
+                    "Time_20250813095435": [
+                        "RT_FE_002004605_002004606",
+                        "LN_FE_002004605_002004606",
+                    ],
+                },
+            })
+            self._run(root)
+        self.assertEqual(LArASIC.objects.count(), 2)
+        c = LArASIC.objects.get(serial_number="002-04605")
+        self.assertEqual(c.status, "rts-tested")
+        self.assertEqual(c.tray_id, "B002T0001")
+        self.assertIsNotNone(c.warm_tested_at)
+        self.assertIsNotNone(c.cold_tested_at)
+
+    def test_dry_run_makes_no_writes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _mkrts(Path(td), {
+                "B002T0001": {
+                    "Time_20250813095435": ["RT_FE_002004605"],
+                },
+            })
+            # Provide "no" to the prompt by patching builtins.input.
+            import builtins
+            orig_input = builtins.input
+            builtins.input = lambda *a, **kw: "no"
+            try:
+                out = StringIO()
+                call_command(
+                    "update_larasics_from_rts",
+                    "--data-dir", str(root),
+                    stdout=out,
+                )
+            finally:
+                builtins.input = orig_input
+        self.assertEqual(LArASIC.objects.count(), 0)
+
+    def test_existing_on_femb_chip_keeps_status(self):
+        femb = FEMB.objects.create(version="IO-1865-1K", serial_number="00001")
+        LArASIC.objects.create(
+            serial_number="002-04605", status="on-femb", femb=femb, femb_pos="F1",
+        )
+        with tempfile.TemporaryDirectory() as td:
+            root = _mkrts(Path(td), {
+                "B002T0001": {
+                    "Time_20250813095435": ["RT_FE_002004605"],
+                },
+            })
+            self._run(root)
+        c = LArASIC.objects.get(serial_number="002-04605")
+        self.assertEqual(c.status, "on-femb")
+        self.assertEqual(c.tray_id, "B002T0001")
+        self.assertIsNotNone(c.warm_tested_at)
+
+    def test_existing_non_on_femb_chip_status_becomes_rts_tested(self):
+        LArASIC.objects.create(serial_number="002-04605", status="testing")
+        with tempfile.TemporaryDirectory() as td:
+            root = _mkrts(Path(td), {
+                "B002T0001": {
+                    "Time_20250813095435": ["RT_FE_002004605"],
+                },
+            })
+            self._run(root)
+        c = LArASIC.objects.get(serial_number="002-04605")
+        self.assertEqual(c.status, "rts-tested")
+        self.assertEqual(c.tray_id, "B002T0001")
+
+    def test_chip_in_multiple_batches_latest_warm_wins_tray_id(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _mkrts(Path(td), {
+                "B001T0001": {
+                    "Time_20250101000000": ["RT_FE_002004605"],
+                },
+                "B009T0099": {
+                    "Time_20251231000000": ["RT_FE_002004605"],
+                },
+            })
+            self._run(root)
+        c = LArASIC.objects.get(serial_number="002-04605")
+        self.assertEqual(c.tray_id, "B009T0099")
+        self.assertEqual(
+            c.warm_tested_at,
+            datetime(2025, 12, 31, 0, 0, 0, tzinfo=timezone.utc),
+        )
+
+    def test_pre_cutoff_batch_is_skipped_on_import(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _mkrts(Path(td), {
+                "B010T0001": {  # 2024 batch (test chips)
+                    "Time_20240711102529": [
+                        "RT_FE_002010000_002020000_002030000_002040000_"
+                        "002050000_002060000_002070000_002080000",
+                    ],
+                },
+                "B005T0001": {  # post-cutoff batch
+                    "Time_20251231000000": ["RT_FE_002004605"],
+                },
+            })
+            self._run(root)
+        sns = set(LArASIC.objects.values_list("serial_number", flat=True))
+        self.assertEqual(sns, {"002-04605"})  # dummies excluded
+
+    def test_existing_pre_cutoff_chip_is_deleted_unless_on_femb(self):
+        LArASIC.objects.create(
+            serial_number="002-10000", status="rts-tested",
+            warm_tested_at=datetime(2024, 9, 4, tzinfo=timezone.utc),
+        )
+        femb = FEMB.objects.create(version="IO-1865-1K", serial_number="00001")
+        LArASIC.objects.create(
+            serial_number="002-20000", status="on-femb",
+            femb=femb, femb_pos="F1",
+            warm_tested_at=datetime(2024, 9, 4, tzinfo=timezone.utc),
+        )
+        with tempfile.TemporaryDirectory() as td:
+            root = _mkrts(Path(td), {
+                "B005T0001": {"Time_20251231000000": ["RT_FE_002004605"]},
+            })
+            self._run(root)
+        sns = set(LArASIC.objects.values_list("serial_number", flat=True))
+        # 002-10000 deleted; on-femb 002-20000 retained.
+        self.assertEqual(sns, {"002-04605", "002-20000"})
+
+    def test_batch_filter_restricts_scan(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _mkrts(Path(td), {
+                "B001T0001": {"Time_20250101000000": ["RT_FE_002004605"]},
+                "B009T0099": {"Time_20251231000000": ["RT_FE_002004606"]},
+            })
+            self._run(root, batch="B009T0099")
+        sns = set(LArASIC.objects.values_list("serial_number", flat=True))
+        self.assertEqual(sns, {"002-04606"})

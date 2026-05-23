@@ -18,8 +18,10 @@ class FEMB(models.Model):
 
 class LArASIC(models.Model):
     serial_number = models.CharField(max_length=20, unique=True)
-    status = models.CharField(max_length=20, default="testing")
+    status = models.CharField(max_length=20, default="rts-tested")
     tray_id = models.CharField(max_length=20, blank=True, default="")
+    warm_tested_at = models.DateTimeField(null=True, blank=True)
+    cold_tested_at = models.DateTimeField(null=True, blank=True)
     last_update = models.DateTimeField(auto_now=True)
     femb = models.ForeignKey(FEMB, on_delete=models.CASCADE, null=True, blank=True)
     femb_pos = models.CharField(max_length=2, null=True, blank=True)  # F1-4, B1-4
