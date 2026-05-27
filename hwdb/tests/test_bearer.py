@@ -96,7 +96,7 @@ class WithFnalBearerDecoratorTest(TestCase):
     def setUp(self):
         user = get_user_model().objects.create_user("guest", password="x")
         self.client.force_login(user)
-        self.url = reverse("hwdb:subsystem_list")
+        self.url = reverse("hwdb:component_list_default")
 
     def test_no_link_redirects_to_link_with_next(self):
         with mock.patch("hwdb.views.mint_for", side_effect=FnalLinkRequired()):
@@ -113,9 +113,9 @@ class WithFnalBearerDecoratorTest(TestCase):
 
     def test_linked_user_gets_data(self):
         with mock.patch("hwdb.views.mint_for", return_value="bearer123"), mock.patch(
-            "hwdb.api_client.FnalDbApiClient.get_subsystems",
-            return_value={"data": []},
+            "hwdb.api_client.FnalDbApiClient._make_request",
+            return_value={"component_type": {"name": "FEMB"}, "data": [], "pagination": {}},
         ):
             resp = self.client.get(self.url)
         self.assertEqual(resp.status_code, 200)
-        self.assertTemplateUsed(resp, "hwdb/subsystem_list.html")
+        self.assertTemplateUsed(resp, "hwdb/component_list.html")

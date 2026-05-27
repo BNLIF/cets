@@ -1,37 +1,43 @@
 {% extends 'core/base.html' %}
+{% load components %}
+
+{% block title %}CETS — HWDB subsystems{% endblock %}
 
 {% block content %}
-<h1>Subsystems</h1>
+<div class="page-head">
+    <div>
+        {% crumbs "CETS" "Hardware Database" "Subsystems" %}
+        <h1 class="page-title">Subsystems</h1>
+        <div class="page-subtitle">{{ current_part1 }}{{ current_part2 }} · raw HWDB structure</div>
+    </div>
+</div>
 
-<table class="table table-striped">
-    <thead>
-        <tr>
-            <th>Subsystem ID</th>
-            <th>Subsystem Name</th>
-            <th>Creator</th>
-            <th>Created</th>
-            <th>Comments</th>
-            <th>Actions</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for subsystem in subsystems %}
-        <tr>
-            <td>{{ subsystem.subsystem_id }}</td>
-            <td>{{ subsystem.subsystem_name }}</td>
-            <td>{{ subsystem.creator.name|default:"N/A" }}</td>
-            <td>{{ subsystem.created|date:"Y-m-d H:i" }}</td>
-            <td>{{ subsystem.comments|default:"N/A" }}</td>
-            <td>
-                <a href="{% url 'hwdb:part_type_list' part1=current_part1 part2=current_part2 subsystem_id=subsystem.subsystem_id %}" class="btn btn-info btn-sm">View Part Types</a>
-            </td>
-        </tr>
-        {% empty %}
-        <tr>
-            <td colspan="6">No subsystems found.</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-
+<div class="table-wrap">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Subsystem ID</th>
+                <th>Name</th>
+                <th>Creator</th>
+                <th>Created</th>
+                <th>Comments</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for subsystem in subsystems %}
+            <tr>
+                <td class="cell-mono">{{ subsystem.subsystem_id }}</td>
+                <td>{{ subsystem.subsystem_name }}</td>
+                <td>{{ subsystem.creator.name|default:"—" }}</td>
+                <td class="cell-mono cell-muted">{{ subsystem.created|date:"Y-m-d H:i" }}</td>
+                <td class="cell-muted">{{ subsystem.comments|default:"—" }}</td>
+                <td><a class="btn btn-ghost btn-sm" href="{% url 'hwdb:part_type_list' part1=current_part1 part2=current_part2 subsystem_id=subsystem.subsystem_id %}">Part types</a></td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6" class="cell-muted" style="text-align: center; padding: 36px;">No subsystems found.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
 {% endblock %}

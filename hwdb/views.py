@@ -23,35 +23,26 @@ FNAL_UNAVAILABLE = "FNAL authentication service is unavailable. Please try again
 DEVICE_FLOW_LIFETIME = timedelta(minutes=10)
 
 
+# Component types in the HWDB section landing. Only LArASIC is wired up so
+# far; the rest are shown as "coming soon" until their Display/Compare lands.
+COMPONENT_TYPES = [
+    {"name": "LArASIC", "part_type_id": "D08100100001", "active": True},
+    {"name": "ColdADC", "part_type_id": "D08100200001", "active": False},
+    {"name": "COLDATA", "part_type_id": "D08100300001", "active": False},
+    {"name": "FEMB", "part_type_id": "D08100400001", "active": False},
+    {"name": "Cable", "part_type_id": "D08102100012", "active": False},
+]
+
+
 def home(request):
-    system_ids = [
-        {"id": "D081", "name": "FD1-HD TPC_Elec. and FD2-VD Bottom_Elec."},
-        # Add more system IDs here as needed
-    ]
-    ce_list = [
-        {
-            "name": "FEMB",
-            "part_type_id": "D08100400001",
-        },
-        {
-            "name": "LArASIC",
-            "part_type_id": "D08100100001",
-        },
-        {
-            "name": "ColdADC",
-            "part_type_id": "D08100200001",
-        },
-        {
-            "name": "COLDATA",
-            "part_type_id": "D08100300001",
-        },
-        {
-            "name": "Cold Cable Long",
-            "part_type_id": "D08102100012",
-        },
-    ]
-    context = {"system_ids": system_ids, "ce_list": ce_list}
-    return render(request, "hwdb/home.html", context)
+    """HWDB section landing: a card per component type.
+
+    Static (no HWDB API call), so it is not FNAL-gated — a logged-in user can
+    see what the section offers; the per-type Display view does the gating.
+    """
+    return render(
+        request, "hwdb/home.html", {"component_types": COMPONENT_TYPES, "page": "hwdb"}
+    )
 
 
 def _safe_next(request, default):
@@ -202,6 +193,7 @@ def component_list_view(request, bearer, component_type_id=None):
             "last_page": last_page,
             "page_size": page_size,
             "current_component_type_id": component_type_id,
+            "page": "hwdb",
         }
         return render(request, "hwdb/component_list.html", context)
     except Exception:
@@ -209,30 +201,26 @@ def component_list_view(request, bearer, component_type_id=None):
         return render(request, "hwdb/error.html", {"error_message": GENERIC_ERROR})
 
 
+# Generic HWDB tree browse (subsystems -> part types -> components). Demoted
+# from primary nav to the landing's "More" card in #13, but still useful for
+# poking around the raw HWDB structure.
 @with_fnal_bearer
 def subsystem_list_view(request, bearer, part1=None, part2=None):
     api_client = FnalDbApiClient(settings.HWDB_API_BASE_URL, bearer)
-
-    if not part1:
-        part1 = "D"  # Default part1
-    if not part2:
-        part2 = "081"  # Default part2
-
+    part1 = part1 or "D"
+    part2 = part2 or "081"
     try:
         raw_response = api_client.get_subsystems(part1, part2)
         subsystems = raw_response.get("data", [])
-
         for subsystem in subsystems:
-            if "created" in subsystem and subsystem["created"]:
+            if subsystem.get("created"):
                 subsystem["created"] = datetime.fromisoformat(subsystem["created"])
-
-        # Sort subsystems by subsystem_id
         subsystems.sort(key=lambda x: x.get("subsystem_id", 0))
-
         context = {
             "subsystems": subsystems,
             "current_part1": part1,
             "current_part2": part2,
+            "page": "hwdb",
         }
         return render(request, "hwdb/subsystem_list.html", context)
     except Exception:
@@ -244,20 +232,17 @@ def subsystem_list_view(request, bearer, part1=None, part2=None):
 def part_type_list_view(request, bearer, part1, part2, subsystem_id):
     api_client = FnalDbApiClient(settings.HWDB_API_BASE_URL, bearer)
     try:
-        raw_response = api_client.get_part_types_for_subsystem(
-            part1, part2, subsystem_id
-        )
+        raw_response = api_client.get_part_types_for_subsystem(part1, part2, subsystem_id)
         part_types = raw_response.get("data", [])
-
         for part_type in part_types:
-            if "created" in part_type and part_type["created"]:
+            if part_type.get("created"):
                 part_type["created"] = datetime.fromisoformat(part_type["created"])
-
         context = {
             "part_types": part_types,
             "current_part1": part1,
             "current_part2": part2,
             "current_subsystem_id": subsystem_id,
+            "page": "hwdb",
         }
         return render(request, "hwdb/part_type_list.html", context)
     except Exception:
