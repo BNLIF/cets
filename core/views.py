@@ -252,7 +252,8 @@ def larasic(request):
         page_id="larasic",
         full_template="core/_chip_list_page.html",
         fragment_template="core/_chip_list_fragment.html",
-        default_sort="serial_number",
+        default_sort="last_update",
+        default_dir="desc",
         search_fields=("serial_number", "femb__serial_number", "tray_id"),
         filter_specs=(("femb", "femb__serial_number"), ("tray", "tray_id")),
         date_range_field="last_update",
@@ -276,7 +277,8 @@ def coldadc(request):
         page_id="coldadc",
         full_template="core/_chip_list_page.html",
         fragment_template="core/_chip_list_fragment.html",
-        default_sort="serial_number",
+        default_sort="last_update",
+        default_dir="desc",
         search_fields=("serial_number", "femb__serial_number", "tray_id"),
         filter_specs=(("femb", "femb__serial_number"), ("tray", "tray_id")),
         date_range_field="last_update",
@@ -300,7 +302,8 @@ def coldata(request):
         page_id="coldata",
         full_template="core/_chip_list_page.html",
         fragment_template="core/_chip_list_fragment.html",
-        default_sort="serial_number",
+        default_sort="last_update",
+        default_dir="desc",
         search_fields=("serial_number", "femb__serial_number", "tray_id"),
         filter_specs=(("femb", "femb__serial_number"), ("tray", "tray_id")),
         date_range_field="last_update",
@@ -418,11 +421,11 @@ def femb(request):
 
     q = (request.GET.get("q") or "").strip()
     version = (request.GET.get("version") or "").strip()
-    sort = request.GET.get("sort") or "serial_number"
-    direction = request.GET.get("dir") or "asc"
+    sort = request.GET.get("sort") or "latest_test_timestamp"
+    direction = request.GET.get("dir") or "desc"
 
     if sort not in FEMB_SORT_KEYS:
-        sort = "serial_number"
+        sort = "latest_test_timestamp"
     if direction not in {"asc", "desc"}:
         direction = "asc"
 
@@ -484,7 +487,8 @@ def cable(request):
         page_id="cable",
         full_template="core/cable.html",
         fragment_template="core/_cable_list_fragment.html",
-        default_sort="serial_number",
+        default_sort="latest_test_timestamp",
+        default_dir="desc",
         search_fields=("serial_number",),
         filter_specs=(("batch", "batch_number"),),
         date_range_field="latest_test_timestamp",
