@@ -80,6 +80,12 @@ LOGIN_URL = (
 )
 LOGIN_REDIRECT_URL = f"{FORCE_SCRIPT_NAME}/" if FORCE_SCRIPT_NAME else "/"
 
+# hwdb (Fermilab hardware DB) API base. cdbdev = dev instance; flip to the
+# cdb path for production.
+HWDB_API_BASE_URL = config(
+    "HWDB_API_BASE_URL", default="https://dbwebapi2.fnal.gov:8443/cdbdev/api/v1"
+)
+
 ROOT_URLCONF = "cets.urls"
 
 TEMPLATES = [
