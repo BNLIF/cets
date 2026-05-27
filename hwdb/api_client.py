@@ -1,27 +1,16 @@
 import logging
-import os
 
 import requests
-from decouple import config
 
 logger = logging.getLogger(__name__)
 
 
 class FnalDbApiClient:
-    def __init__(self, base_url, token_path=None):
-        if token_path is None:
-            token_path = config("BEARER_TOKEN_FILE", default="/tmp/bt_u502")
+    def __init__(self, base_url, bearer):
         self.base_url = base_url
-        self.token = self._load_token(token_path)
         self.base_headers = {
-            "Authorization": f"Bearer {self.token}",
+            "Authorization": f"Bearer {bearer}",
         }
-
-    def _load_token(self, token_path):
-        if not os.path.exists(token_path):
-            raise FileNotFoundError(f"API token file not found at {token_path}")
-        with open(token_path, "r") as f:
-            return f.read().strip()
 
     def _make_request(self, method, endpoint, data=None):
         url = f"{self.base_url}/{endpoint}"

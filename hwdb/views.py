@@ -1,8 +1,11 @@
 import logging
 from datetime import datetime, timedelta
+from functools import wraps
+from urllib.parse import urlencode
 
+from django.conf import settings
 from django.http import JsonResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -10,6 +13,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from .api_client import FnalDbApiClient
 from .fnal import flow
 from .fnal import session as fnal_session
+from .fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
 
 logger = logging.getLogger(__name__)
 GENERIC_ERROR = "Failed to fetch data from the Hardware Database."
@@ -123,10 +127,35 @@ def fnal_link_poll_view(request):
     return JsonResponse({"status": "ok", "next": next_url})
 
 
-def component_list_view(request, component_type_id=None):
-    api_client = FnalDbApiClient(
-        base_url="https://dbwebapi2.fnal.gov:8443/cdbdev/api/v1"
-    )
+def with_fnal_bearer(view):
+    """Mint a per-request FNAL bearer and pass it to the view.
+
+    Owns the Q9 failure surface in one place:
+    - no/expired/undecryptable/rejected token -> redirect to the link page
+      with a ?next back to here.
+    - vault unreachable / transient -> the generic hwdb error page (re-linking
+      wouldn't help).
+    """
+
+    @wraps(view)
+    def wrapper(request, *args, **kwargs):
+        try:
+            bearer = mint_for(request)
+        except FnalLinkRequired:
+            link = reverse("hwdb:link")
+            return redirect(f"{link}?{urlencode({'next': request.get_full_path()})}")
+        except FnalUnavailable:
+            return render(
+                request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE}
+            )
+        return view(request, bearer, *args, **kwargs)
+
+    return wrapper
+
+
+@with_fnal_bearer
+def component_list_view(request, bearer, component_type_id=None):
+    api_client = FnalDbApiClient(settings.HWDB_API_BASE_URL, bearer)
 
     # If component_type_id is not provided in the URL, use a default or raise an error
     if not component_type_id:
@@ -180,10 +209,9 @@ def component_list_view(request, component_type_id=None):
         return render(request, "hwdb/error.html", {"error_message": GENERIC_ERROR})
 
 
-def subsystem_list_view(request, part1=None, part2=None):
-    api_client = FnalDbApiClient(
-        base_url="https://dbwebapi2.fnal.gov:8443/cdbdev/api/v1"
-    )
+@with_fnal_bearer
+def subsystem_list_view(request, bearer, part1=None, part2=None):
+    api_client = FnalDbApiClient(settings.HWDB_API_BASE_URL, bearer)
 
     if not part1:
         part1 = "D"  # Default part1
@@ -212,10 +240,9 @@ def subsystem_list_view(request, part1=None, part2=None):
         return render(request, "hwdb/error.html", {"error_message": GENERIC_ERROR})
 
 
-def part_type_list_view(request, part1, part2, subsystem_id):
-    api_client = FnalDbApiClient(
-        base_url="https://dbwebapi2.fnal.gov:8443/cdbdev/api/v1"
-    )
+@with_fnal_bearer
+def part_type_list_view(request, bearer, part1, part2, subsystem_id):
+    api_client = FnalDbApiClient(settings.HWDB_API_BASE_URL, bearer)
     try:
         raw_response = api_client.get_part_types_for_subsystem(
             part1, part2, subsystem_id
