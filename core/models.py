@@ -23,6 +23,9 @@ class LArASIC(models.Model):
     warm_tested_at = models.DateTimeField(null=True, blank=True)
     cold_tested_at = models.DateTimeField(null=True, blank=True)
     last_update = models.DateTimeField(auto_now=True)
+    # HWDB sync state, materialised by the "Sync with HWDB" action (hwdb app).
+    is_in_hwdb = models.BooleanField(default=False)
+    hwdb_checked_at = models.DateTimeField(null=True, blank=True)
     femb = models.ForeignKey(FEMB, on_delete=models.CASCADE, null=True, blank=True)
     femb_pos = models.CharField(max_length=2, null=True, blank=True)  # F1-4, B1-4
     installed_at_repair = models.ForeignKey(

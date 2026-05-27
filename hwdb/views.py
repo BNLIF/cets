@@ -4,17 +4,23 @@ from functools import wraps
 from urllib.parse import urlencode
 
 from django.conf import settings
+from django.core.paginator import Paginator
+from django.db.models import Max
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.http import require_POST
+
+from core.models import LArASIC
 
 from .api_client import FnalDbApiClient
 from .fnal import flow
 from .fnal import session as fnal_session
 from .fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
 from .instance import SESSION_KEY, active_instance, active_profile
+from .models import LarasicSyncState
 
 logger = logging.getLogger(__name__)
 GENERIC_ERROR = "Failed to fetch data from the Hardware Database."
@@ -34,7 +40,12 @@ def home(request):
     """
     profile = active_profile(request)
     component_types = [
-        {"name": "LArASIC", "part_type_id": profile["larasic_part_type"], "active": True},
+        {
+            "name": "LArASIC",
+            "part_type_id": profile["larasic_part_type"],
+            "active": True,
+            "url": reverse("hwdb:larasic"),
+        },
         {"name": "ColdADC", "part_type_id": None, "active": False},
         {"name": "COLDATA", "part_type_id": None, "active": False},
         {"name": "FEMB", "part_type_id": None, "active": False},
@@ -59,6 +70,114 @@ def set_instance(request):
         if choice in settings.HWDB_PROFILES:
             request.session[SESSION_KEY] = choice
     return redirect(_safe_next(request, reverse("hwdb:home")))
+
+
+def larasic_view(request):
+    """LArASIC HWDB sync summary. Local-only read of the is_in_hwdb flag (no
+    FNAL call), so it's not gated — only the Sync action hits the API."""
+    qs = LArASIC.objects.all()
+    total = qs.count()
+    in_hwdb = qs.filter(is_in_hwdb=True).count()
+    last_synced = qs.aggregate(Max("hwdb_checked_at"))["hwdb_checked_at__max"]
+    hwdb_only = LarasicSyncState.get().hwdb_only_count
+
+    show = request.GET.get("show", "to_upload")
+    if show == "in_hwdb":
+        chips = qs.filter(is_in_hwdb=True)
+    elif show == "all":
+        chips = qs
+    else:
+        show = "to_upload"
+        chips = qs.filter(is_in_hwdb=False)
+    page_obj = Paginator(chips.order_by("serial_number"), 100).get_page(
+        request.GET.get("page")
+    )
+
+    return render(
+        request,
+        "hwdb/larasic.html",
+        {
+            "total": total,
+            "in_hwdb": in_hwdb,
+            "to_upload": total - in_hwdb,
+            "hwdb_only": hwdb_only,
+            "last_synced": last_synced,
+            "page_obj": page_obj,
+            "show": show,
+            "larasic_part_type": active_profile(request)["larasic_part_type"],
+            "active_instance": active_instance(request),
+            "page": "hwdb",
+        },
+    )
+
+
+def _sync_larasic(api_client, part_type_id):
+    """Page the HWDB LArASIC components and mark each local chip in/out of
+    HWDB by serial number. Also records the count of HWDB serials with no
+    local record. Returns (total, in_hwdb, to_upload, hwdb_only)."""
+    hwdb_serials = set()
+    page = 1
+    while True:
+        resp = api_client._make_request(
+            "GET", f"component-types/{part_type_id}/components?page={page}&size=500"
+        )
+        rows = resp.get("data", [])
+        for row in rows:
+            sn = row.get("serial_number")
+            if sn:
+                hwdb_serials.add(sn)
+        pages = resp.get("pagination", {}).get("pages", 1)
+        if page >= pages or not rows:
+            break
+        page += 1
+
+    now = timezone.now()
+    chips = list(LArASIC.objects.all())
+    local_serials = set()
+    for chip in chips:
+        local_serials.add(chip.serial_number)
+        chip.is_in_hwdb = chip.serial_number in hwdb_serials
+        chip.hwdb_checked_at = now
+    LArASIC.objects.bulk_update(
+        chips, ["is_in_hwdb", "hwdb_checked_at"], batch_size=500
+    )
+    in_hwdb = sum(1 for c in chips if c.is_in_hwdb)
+    hwdb_only = len(hwdb_serials - local_serials)
+
+    state = LarasicSyncState.get()
+    state.hwdb_only_count = hwdb_only
+    state.synced_at = now
+    state.save(update_fields=["hwdb_only_count", "synced_at"])
+
+    return len(chips), in_hwdb, len(chips) - in_hwdb, hwdb_only
+
+
+@require_POST
+def larasic_sync_view(request):
+    """Run the HWDB sync, then return to the LArASIC summary.
+
+    ``is_in_hwdb`` means "exists in the PRODUCTION HWDB" (the upload target),
+    so this only acts on the prod instance — a dev session is a no-op, leaving
+    the prod worklist intact. FNAL-gated; an unlinked user is redirected to
+    link (returning to the summary, not here)."""
+    if active_instance(request) != "prod":
+        return redirect(reverse("hwdb:larasic"))
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': reverse('hwdb:larasic')})}")
+    except FnalUnavailable:
+        return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
+
+    prod = settings.HWDB_PROFILES["prod"]
+    api_client = FnalDbApiClient(prod["api"], bearer)
+    try:
+        _sync_larasic(api_client, prod["larasic_part_type"])
+    except Exception:
+        logger.exception("HWDB LArASIC sync failed")
+        return render(request, "hwdb/error.html", {"error_message": GENERIC_ERROR})
+    return redirect(reverse("hwdb:larasic"))
 
 
 def _safe_next(request, default):

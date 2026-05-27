@@ -28,13 +28,13 @@
         <div class="comp-head">
             <h2 class="comp-title">
                 {% if ct.active %}
-                <a href="{% url 'hwdb:component_list' ct.part_type_id %}" style="color: inherit;">{{ ct.name }}</a>
+                <a href="{{ ct.url }}" style="color: inherit;">{{ ct.name }}</a>
                 {% else %}
                 {{ ct.name }}
                 {% endif %}
             </h2>
             {% if ct.active %}
-            <a class="btn btn-primary btn-sm" href="{% url 'hwdb:component_list' ct.part_type_id %}">Open</a>
+            <a class="btn btn-primary btn-sm" href="{{ ct.url }}">Open</a>
             {% else %}
             <span class="badge">coming soon</span>
             {% endif %}

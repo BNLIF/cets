@@ -26,12 +26,10 @@ class SectionShellTest(TestCase):
         self.assertTemplateUsed(resp, "hwdb/home.html")
         for name in ("LArASIC", "ColdADC", "COLDATA", "FEMB", "Cable"):
             self.assertContains(resp, name)
-        # LArASIC is the only active card -> it links into the Display view,
-        # using the configured instance's part type.
-        self.assertContains(
-            resp,
-            reverse("hwdb:component_list", args=[settings.HWDB_LARASIC_PART_TYPE]),
-        )
+        # LArASIC is the only active card -> it links to the sync view and
+        # shows the configured instance's part type.
+        self.assertContains(resp, reverse("hwdb:larasic"))
+        self.assertContains(resp, settings.HWDB_LARASIC_PART_TYPE)
         self.assertContains(resp, "coming soon")
         # "More" card links into the generic tree browse.
         self.assertContains(resp, reverse("hwdb:subsystem_list"))
@@ -102,9 +100,9 @@ class SectionShellTest(TestCase):
         self.assertEqual(self.client.session["hwdb_instance"], "dev")
 
         resp = self.client.get(reverse("hwdb:home"))
-        self.assertContains(
-            resp, reverse("hwdb:component_list", args=["D08100100001"])
-        )  # dev LArASIC part type
+        # The LArASIC card now shows the dev part type (was prod's by default).
+        self.assertContains(resp, "D08100100001")
+        self.assertNotContains(resp, "D08100100003")
 
     def test_session_instance_toggle_rejects_garbage(self):
         self.client.post(reverse("hwdb:set_instance"), {"instance": "bogus"})

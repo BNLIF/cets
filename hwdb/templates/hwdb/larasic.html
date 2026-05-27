@@ -1,0 +1,88 @@
+{% extends 'core/base.html' %}
+{% load components %}
+
+{% block title %}CETS — LArASIC HWDB sync{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div>
+        {% crumbs "CETS" "Hardware Database" "LArASIC" %}
+        <h1 class="page-title">LArASIC · HWDB sync</h1>
+        <div class="page-subtitle">
+            Local chips vs the <strong>production</strong> HWDB ·
+            {% if last_synced %}last synced {{ last_synced|date:"Y-m-d H:i" }}{% else %}never synced{% endif %}
+        </div>
+    </div>
+    <div class="page-head-actions">
+        {% if active_instance == "prod" %}
+        <form method="post" action="{% url 'hwdb:larasic_sync' %}">
+            {% csrf_token %}
+            <button class="btn btn-primary" type="submit">Sync with HWDB</button>
+        </form>
+        {% else %}
+        <span class="cell-muted" style="font-size: 12px;">Switch to <span class="cell-mono">prod</span> to sync the upload worklist</span>
+        {% endif %}
+    </div>
+</div>
+
+<div class="stats" style="margin-bottom: 20px;">
+    <div class="stat"><div class="stat-label">Local total</div><div class="stat-value">{{ total }}</div></div>
+    <div class="stat"><div class="stat-label">In HWDB</div><div class="stat-value">{{ in_hwdb }}</div></div>
+    <div class="stat"><div class="stat-label">To upload</div><div class="stat-value">{{ to_upload }}</div></div>
+    <div class="stat"><div class="stat-label">In HWDB only</div><div class="stat-value">{{ hwdb_only }}</div><div class="stat-foot">in prod HWDB, not local</div></div>
+</div>
+
+<div class="pagination">
+    <div style="display: flex; gap: 6px; align-items: center;">
+        <span class="cell-muted" style="font-size: 12px;">Show</span>
+        <a class="btn btn-sm {% if show == 'to_upload' %}btn-primary{% else %}btn-ghost{% endif %}" href="?show=to_upload">To upload</a>
+        <a class="btn btn-sm {% if show == 'in_hwdb' %}btn-primary{% else %}btn-ghost{% endif %}" href="?show=in_hwdb">In HWDB</a>
+        <a class="btn btn-sm {% if show == 'all' %}btn-primary{% else %}btn-ghost{% endif %}" href="?show=all">All</a>
+        <span class="cell-muted" style="font-size: 12px; margin-left: 8px;">
+            <a href="{% url 'hwdb:component_list' larasic_part_type %}">raw HWDB records ({{ active_instance }}) →</a>
+        </span>
+    </div>
+    <div class="pager">
+        {% if page_obj.has_previous %}
+        <a class="pager-btn" href="?show={{ show }}&page=1" style="text-decoration: none;">«</a>
+        <a class="pager-btn" href="?show={{ show }}&page={{ page_obj.previous_page_number }}" style="text-decoration: none;">‹</a>
+        {% else %}
+        <button class="pager-btn" disabled>«</button>
+        <button class="pager-btn" disabled>‹</button>
+        {% endif %}
+        <span class="pager-current">{{ page_obj.number }}/{{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+        <a class="pager-btn" href="?show={{ show }}&page={{ page_obj.next_page_number }}" style="text-decoration: none;">›</a>
+        <a class="pager-btn" href="?show={{ show }}&page={{ page_obj.paginator.num_pages }}" style="text-decoration: none;">»</a>
+        {% else %}
+        <button class="pager-btn" disabled>›</button>
+        <button class="pager-btn" disabled>»</button>
+        {% endif %}
+    </div>
+</div>
+
+<div class="table-wrap">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Serial number</th>
+                <th>Status</th>
+                <th>In HWDB</th>
+                <th>Last checked</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for chip in page_obj %}
+            <tr onclick="window.location='{% url 'larasic_detail' chip.serial_number %}'">
+                <td><a class="cell-mono" style="color: var(--accent); font-weight: 500;" href="{% url 'larasic_detail' chip.serial_number %}" onclick="event.stopPropagation()">{{ chip.serial_number }}</a></td>
+                <td>{{ chip.status }}</td>
+                <td>{% if chip.is_in_hwdb %}<span class="pill linked">yes</span>{% else %}<span class="pill">no</span>{% endif %}</td>
+                <td class="cell-mono cell-muted">{{ chip.hwdb_checked_at|date:"Y-m-d H:i"|default:"—" }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="4" class="cell-muted" style="text-align: center; padding: 36px;">No chips in this view.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
