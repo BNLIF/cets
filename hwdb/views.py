@@ -14,6 +14,7 @@ from .api_client import FnalDbApiClient
 from .fnal import flow
 from .fnal import session as fnal_session
 from .fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
+from .instance import SESSION_KEY, active_instance, active_profile
 
 logger = logging.getLogger(__name__)
 GENERIC_ERROR = "Failed to fetch data from the Hardware Database."
@@ -23,31 +24,46 @@ FNAL_UNAVAILABLE = "FNAL authentication service is unavailable. Please try again
 DEVICE_FLOW_LIFETIME = timedelta(minutes=10)
 
 
-# Component types in the HWDB section landing. Only LArASIC is wired up so
-# far; the rest are shown as "coming soon" until their Display/Compare lands.
-COMPONENT_TYPES = [
-    {"name": "LArASIC", "part_type_id": "D08100100001", "active": True},
-    {"name": "ColdADC", "part_type_id": "D08100200001", "active": False},
-    {"name": "COLDATA", "part_type_id": "D08100300001", "active": False},
-    {"name": "FEMB", "part_type_id": "D08100400001", "active": False},
-    {"name": "Cable", "part_type_id": "D08102100012", "active": False},
-]
-
-
 def home(request):
     """HWDB section landing: a card per component type.
 
     Static (no HWDB API call), so it is not FNAL-gated — a logged-in user can
     see what the section offers; the per-type Display view does the gating.
+    Only LArASIC is wired up; its part type follows the configured instance.
+    The rest are "coming soon" and get an instance-resolved id when activated.
     """
+    profile = active_profile(request)
+    component_types = [
+        {"name": "LArASIC", "part_type_id": profile["larasic_part_type"], "active": True},
+        {"name": "ColdADC", "part_type_id": None, "active": False},
+        {"name": "COLDATA", "part_type_id": None, "active": False},
+        {"name": "FEMB", "part_type_id": None, "active": False},
+        {"name": "Cable", "part_type_id": None, "active": False},
+    ]
     return render(
-        request, "hwdb/home.html", {"component_types": COMPONENT_TYPES, "page": "hwdb"}
+        request,
+        "hwdb/home.html",
+        {
+            "component_types": component_types,
+            "active_instance": active_instance(request),
+            "instances": list(settings.HWDB_PROFILES),
+            "page": "hwdb",
+        },
     )
 
 
+def set_instance(request):
+    """Set the per-session HWDB instance override and return to where you were."""
+    if request.method == "POST":
+        choice = request.POST.get("instance")
+        if choice in settings.HWDB_PROFILES:
+            request.session[SESSION_KEY] = choice
+    return redirect(_safe_next(request, reverse("hwdb:home")))
+
+
 def _safe_next(request, default):
-    """Return the ?next= target if it's a safe internal URL, else default."""
-    nxt = request.GET.get("next")
+    """Return the next= target (GET or POST) if it's a safe internal URL."""
+    nxt = request.POST.get("next") or request.GET.get("next")
     if nxt and url_has_allowed_host_and_scheme(
         nxt, allowed_hosts={request.get_host()}, require_https=request.is_secure()
     ):
@@ -146,7 +162,8 @@ def with_fnal_bearer(view):
 
 @with_fnal_bearer
 def component_list_view(request, bearer, component_type_id=None):
-    api_client = FnalDbApiClient(settings.HWDB_API_BASE_URL, bearer)
+    profile = active_profile(request)
+    api_client = FnalDbApiClient(profile["api"], bearer)
 
     # If component_type_id is not provided in the URL, use a default or raise an error
     if not component_type_id:
@@ -193,6 +210,8 @@ def component_list_view(request, bearer, component_type_id=None):
             "last_page": last_page,
             "page_size": page_size,
             "current_component_type_id": component_type_id,
+            "hwdb_ui_base": profile["ui"],
+            "active_instance": active_instance(request),
             "page": "hwdb",
         }
         return render(request, "hwdb/component_list.html", context)
@@ -206,7 +225,7 @@ def component_list_view(request, bearer, component_type_id=None):
 # poking around the raw HWDB structure.
 @with_fnal_bearer
 def subsystem_list_view(request, bearer, part1=None, part2=None):
-    api_client = FnalDbApiClient(settings.HWDB_API_BASE_URL, bearer)
+    api_client = FnalDbApiClient(active_profile(request)["api"], bearer)
     part1 = part1 or "D"
     part2 = part2 or "081"
     try:
@@ -220,6 +239,7 @@ def subsystem_list_view(request, bearer, part1=None, part2=None):
             "subsystems": subsystems,
             "current_part1": part1,
             "current_part2": part2,
+            "active_instance": active_instance(request),
             "page": "hwdb",
         }
         return render(request, "hwdb/subsystem_list.html", context)
@@ -230,7 +250,8 @@ def subsystem_list_view(request, bearer, part1=None, part2=None):
 
 @with_fnal_bearer
 def part_type_list_view(request, bearer, part1, part2, subsystem_id):
-    api_client = FnalDbApiClient(settings.HWDB_API_BASE_URL, bearer)
+    profile = active_profile(request)
+    api_client = FnalDbApiClient(profile["api"], bearer)
     try:
         raw_response = api_client.get_part_types_for_subsystem(part1, part2, subsystem_id)
         part_types = raw_response.get("data", [])
@@ -242,6 +263,8 @@ def part_type_list_view(request, bearer, part1, part2, subsystem_id):
             "current_part1": part1,
             "current_part2": part2,
             "current_subsystem_id": subsystem_id,
+            "hwdb_ui_base": profile["ui"],
+            "active_instance": active_instance(request),
             "page": "hwdb",
         }
         return render(request, "hwdb/part_type_list.html", context)

@@ -8,7 +8,7 @@
     <div>
         {% crumbs "CETS" "Hardware Database" "Part types" %}
         <h1 class="page-title">Part types</h1>
-        <div class="page-subtitle">Subsystem {{ current_subsystem_id }} · {{ current_part1 }}{{ current_part2 }}</div>
+        <div class="page-subtitle">Subsystem {{ current_subsystem_id }} · {{ current_part1 }}{{ current_part2 }} · <span class="cell-mono">{{ active_instance }}</span></div>
     </div>
 </div>
 
@@ -34,7 +34,7 @@
                 <td class="cell-muted">{{ part_type.comments|default:"—" }}</td>
                 <td>
                     <a class="btn btn-ghost btn-sm" href="{% url 'hwdb:component_list' component_type_id=part_type.part_type_id %}">Records</a>
-                    <a href="https://dbweb2.fnal.gov:8443/cdbdev/view/components?pa={{ part_type.part_type_id }}" target="_blank" rel="noopener" title="View in external DB">&#x2197;</a>
+                    <a href="{{ hwdb_ui_base }}/view/components?pa={{ part_type.part_type_id }}" target="_blank" rel="noopener" title="View in external DB">&#x2197;</a>
                 </td>
             </tr>
             {% empty %}

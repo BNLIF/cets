@@ -10,6 +10,16 @@
         <h1 class="page-title">Hardware Database</h1>
         <div class="page-subtitle">Browse and sync CE components against the Fermilab HWDB · queried with your own FNAL credentials</div>
     </div>
+    <div class="page-head-actions">
+        <form method="post" action="{% url 'hwdb:set_instance' %}" style="display: flex; gap: 6px; align-items: center;">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <span class="cell-muted" style="font-size: 12px;">Instance</span>
+            {% for inst in instances %}
+            <button name="instance" value="{{ inst }}" class="btn btn-sm {% if inst == active_instance %}btn-primary{% else %}btn-ghost{% endif %}">{{ inst }}</button>
+            {% endfor %}
+        </form>
+    </div>
 </div>
 
 <div class="components-grid">
@@ -30,7 +40,11 @@
             {% endif %}
         </div>
         <div class="panel-body padded">
+            {% if ct.part_type_id %}
             <div class="cell-mono cell-muted" style="font-size: 12px;">{{ ct.part_type_id }}</div>
+            {% else %}
+            <div class="cell-muted" style="font-size: 12px;">Display &amp; sync coming soon</div>
+            {% endif %}
         </div>
     </div>
     {% endfor %}

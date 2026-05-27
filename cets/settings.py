@@ -14,6 +14,7 @@ from decouple import config, Csv
 from pathlib import Path
 
 import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -80,11 +81,32 @@ LOGIN_URL = (
 )
 LOGIN_REDIRECT_URL = f"{FORCE_SCRIPT_NAME}/" if FORCE_SCRIPT_NAME else "/"
 
-# hwdb (Fermilab hardware DB) API base. cdbdev = dev instance; flip to the
-# cdb path for production.
-HWDB_API_BASE_URL = config(
-    "HWDB_API_BASE_URL", default="https://dbwebapi2.fnal.gov:8443/cdbdev/api/v1"
-)
+# hwdb (Fermilab hardware DB) target instance. One knob drives the API base,
+# the external web-UI links, and the component part_type_id together (dev/prod
+# differ by the cdbdev<->cdb path segment plus the part type; see the official
+# dune_ce_hwdb.py). Defaults to prod.
+HWDB_INSTANCE = config("HWDB_INSTANCE", default="prod")
+HWDB_PROFILES = {
+    "prod": {
+        "api": "https://dbwebapi2.fnal.gov:8443/cdb/api/v1",
+        "ui": "https://dbweb2.fnal.gov:8443/cdb",
+        "larasic_part_type": "D08100100003",
+    },
+    "dev": {
+        "api": "https://dbwebapi2.fnal.gov:8443/cdbdev/api/v1",
+        "ui": "https://dbweb2.fnal.gov:8443/cdbdev",
+        "larasic_part_type": "D08100100001",
+    },
+}
+if HWDB_INSTANCE not in HWDB_PROFILES:
+    raise ImproperlyConfigured(
+        f"HWDB_INSTANCE must be one of {sorted(HWDB_PROFILES)}; got {HWDB_INSTANCE!r}"
+    )
+# Default-instance values (the env baseline). A per-session override may pick a
+# different profile at request time — see hwdb.instance.active_profile.
+HWDB_API_BASE_URL = HWDB_PROFILES[HWDB_INSTANCE]["api"]
+HWDB_UI_BASE_URL = HWDB_PROFILES[HWDB_INSTANCE]["ui"]
+HWDB_LARASIC_PART_TYPE = HWDB_PROFILES[HWDB_INSTANCE]["larasic_part_type"]
 
 ROOT_URLCONF = "cets.urls"
 

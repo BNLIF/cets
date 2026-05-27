@@ -8,7 +8,7 @@
     <div>
         {% crumbs "CETS" "Hardware Database" component_type_name %}
         <h1 class="page-title">{{ component_type_name }}</h1>
-        <div class="page-subtitle">Records in the Fermilab HWDB · page {{ current_page }} of {{ last_page }}</div>
+        <div class="page-subtitle">Records in the Fermilab HWDB · <span class="cell-mono">{{ active_instance }}</span> · page {{ current_page }} of {{ last_page }}</div>
     </div>
 </div>
 
@@ -51,7 +51,7 @@
             <tr>
                 <td>
                     <a class="cell-mono" style="color: var(--accent); font-weight: 500;"
-                       href="https://dbweb2.fnal.gov:8443/cdbdev/edit/component/{{ component.component_id }}"
+                       href="{{ hwdb_ui_base }}/edit/component/{{ component.component_id }}"
                        target="_blank" rel="noopener" title="View in external DB">{{ component.part_id }}</a>
                 </td>
                 <td class="cell-mono">{{ component.serial_number|default:"—" }}</td>

@@ -6,6 +6,7 @@ app_name = "hwdb"
 
 urlpatterns = [
     path("", views.home, name="home"),
+    path("instance/", views.set_instance, name="set_instance"),
     path("link/", views.fnal_link_view, name="link"),
     path("link/poll/", views.fnal_link_poll_view, name="link_poll"),
     path("components/<str:component_type_id>/", views.component_list_view, name="component_list"),
