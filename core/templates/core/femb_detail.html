@@ -111,10 +111,18 @@
                     <td>{% type_badge test.test_type %}</td>
                     <td>{% temp_badge test.test_env %}</td>
                     <td>
-                        <a href="https://www.phy.bnl.gov/twister/static/cetsdata/femb/{{ test.report_filename }}" target="_blank" rel="noopener" style="display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 12px;">
-                            Link
-                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
-                        </a>
+                        {% with report_url="https://www.phy.bnl.gov/twister/static/cetsdata/femb/"|add:test.report_filename %}
+                        <span style="display: inline-flex; align-items: center; gap: 10px;">
+                            <a href="{{ report_url }}" target="_blank" rel="noopener" style="display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 12px;">
+                                Link
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
+                            </a>
+                            <button type="button" class="copy-path-btn" data-url="{{ report_url }}" title="Copy folder path" aria-label="Copy folder path"
+                                    style="display: inline-flex; align-items: center; background: none; border: 0; padding: 0; cursor: pointer; color: var(--text-3);">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            </button>
+                        </span>
+                        {% endwith %}
                     </td>
                 </tr>
                 {% empty %}
@@ -124,4 +132,44 @@
         </table>
     </div>
 </section>
+
+<div id="copy-toast" style="position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--text); color: #fff; padding: 9px 14px; border-radius: 6px; font-family: var(--font-mono); font-size: 12px; z-index: 1000; box-shadow: 0 6px 18px rgba(0,0,0,0.22); opacity: 0; pointer-events: none; transition: opacity 0.15s; max-width: 80vw;"></div>
+
+<script>
+(function () {
+    var toastEl = document.getElementById('copy-toast');
+    var toastTimer;
+    function toast(msg) {
+        toastEl.textContent = msg;
+        toastEl.style.opacity = '1';
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(function () { toastEl.style.opacity = '0'; }, 2200);
+    }
+    function fallbackCopy(text) {
+        var ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } catch (e) {}
+        document.body.removeChild(ta);
+    }
+    document.querySelectorAll('.copy-path-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            // Report folder, host stripped, starting from the Time_ run folder.
+            var path;
+            try { path = new URL(btn.dataset.url).pathname; } catch (e) { path = btn.dataset.url; }
+            var folder = path.substring(0, path.lastIndexOf('/')) || path;
+            var idx = folder.indexOf('Time_');
+            if (idx !== -1) folder = folder.substring(idx);
+            var done = function () {
+                toast('Copied: ' + folder);
+                btn.style.color = 'var(--accent)';
+                setTimeout(function () { btn.style.color = ''; }, 900);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(folder).then(done, function () { fallbackCopy(folder); done(); });
+            } else { fallbackCopy(folder); done(); }
+        });
+    });
+})();
+</script>
 {% endblock %}
