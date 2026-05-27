@@ -14,6 +14,10 @@
             <p class="card-text"><strong>FEMB Position:</strong> {{ larasic.femb_pos }}</p>
             {% endif %}
             <p class="card-text"><strong>Last Update:</strong> {{ larasic.last_update|date:"Y-m-d H:i:s" }}</p>
+            <p class="card-text"><strong>In HWDB:</strong>
+                {% if larasic.is_in_hwdb %}<span class="pill" data-status="pass">yes</span>{% else %}<span class="pill">no</span>{% endif %}
+                {% if larasic.hwdb_checked_at %}<span class="cell-muted" style="font-size: 12px;">(checked {{ larasic.hwdb_checked_at|date:"Y-m-d H:i" }})</span>{% endif %}
+            </p>
         </div>
     </div>
 

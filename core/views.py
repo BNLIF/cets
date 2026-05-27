@@ -265,6 +265,7 @@ def larasic(request):
             "femb_options": _femb_options(),
             "tray_options": _tray_options(LArASIC),
             "detail_url_name": "larasic_detail",
+            "show_hwdb": True,
         },
     )
 

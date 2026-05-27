@@ -37,6 +37,7 @@
                     {% sortable_th key="femb_pos" label="Position" current_sort=sort current_dir=dir width="110px" %}
                     {% sortable_th key="tray_id" label="Tray ID" current_sort=sort current_dir=dir %}
                     {% sortable_th key="last_update" label="Last update" current_sort=sort current_dir=dir %}
+                    {% if show_hwdb %}<th>In HWDB</th>{% endif %}
                 </tr>
             </thead>
             <tbody>
@@ -47,9 +48,10 @@
                     <td>{% position_tag chip.femb_pos %}</td>
                     <td class="cell-mono">{% if chip.tray_id %}{{ chip.tray_id }}{% else %}<span class="cell-muted">—</span>{% endif %}</td>
                     <td class="cell-mono cell-muted">{{ chip.last_update|date:"Y-m-d H:i" }}</td>
+                    {% if show_hwdb %}<td>{% if chip.is_in_hwdb %}<span class="pill" data-status="pass" title="{% if chip.hwdb_checked_at %}checked {{ chip.hwdb_checked_at|date:'Y-m-d H:i' }}{% endif %}" onclick="event.stopPropagation()">yes</span>{% else %}<span class="pill" onclick="event.stopPropagation()">no</span>{% endif %}</td>{% endif %}
                 </tr>
                 {% empty %}
-                <tr><td colspan="5" class="cell-muted" style="text-align: center; padding: 36px;">No {{ family_label }} chips match the current filters.</td></tr>
+                <tr><td colspan="{% if show_hwdb %}6{% else %}5{% endif %}" class="cell-muted" style="text-align: center; padding: 36px;">No {{ family_label }} chips match the current filters.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
