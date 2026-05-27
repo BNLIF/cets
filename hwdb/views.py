@@ -1,12 +1,22 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
+from django.http import JsonResponse
 from django.shortcuts import render
+from django.urls import reverse
+from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 
 from .api_client import FnalDbApiClient
+from .fnal import flow
+from .fnal import session as fnal_session
 
 logger = logging.getLogger(__name__)
 GENERIC_ERROR = "Failed to fetch data from the Hardware Database."
+FNAL_UNAVAILABLE = "FNAL authentication service is unavailable. Please try again later."
+
+# How long a started device flow stays valid before the user must reload.
+DEVICE_FLOW_LIFETIME = timedelta(minutes=10)
 
 
 def home(request):
@@ -38,6 +48,79 @@ def home(request):
     ]
     context = {"system_ids": system_ids, "ce_list": ce_list}
     return render(request, "hwdb/home.html", context)
+
+
+def _safe_next(request, default):
+    """Return the ?next= target if it's a safe internal URL, else default."""
+    nxt = request.GET.get("next")
+    if nxt and url_has_allowed_host_and_scheme(
+        nxt, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        return nxt
+    return default
+
+
+def fnal_link_view(request):
+    """Start a FNAL device flow and render the polling page.
+
+    Stashes the in-progress flow (and where to return) in the session; the
+    page polls fnal_link_poll_view until vault completes the login.
+    """
+    next_url = _safe_next(request, reverse("hwdb:home"))
+    try:
+        start = flow.start()
+    except Exception:
+        logger.exception("FNAL device-flow start failed")
+        return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
+
+    fnal_session.set_flow(
+        request, start.poll_body, timezone.now() + DEVICE_FLOW_LIFETIME, next_url
+    )
+    return render(
+        request,
+        "hwdb/link.html",
+        {
+            "auth_url": start.auth_url,
+            "user_code": start.user_code,
+            "poll_url": reverse("hwdb:link_poll"),
+        },
+    )
+
+
+def fnal_link_poll_view(request):
+    """One poll tick. Returns JSON: pending / ok (+next) / error."""
+    state = fnal_session.get_flow(request)
+    if not state:
+        return JsonResponse(
+            {"status": "error", "detail": "no link in progress; reload to start"},
+            status=404,
+        )
+    if datetime.fromisoformat(state["expires_at"]) <= timezone.now():
+        fnal_session.clear_flow(request)
+        return JsonResponse(
+            {"status": "error", "detail": "link timed out; reload to start again"},
+            status=410,
+        )
+
+    try:
+        result = flow.poll(state["poll_body"])
+    except Exception:
+        logger.exception("FNAL device-flow poll failed")
+        return JsonResponse({"status": "error", "detail": FNAL_UNAVAILABLE}, status=502)
+
+    if result.outcome in ("pending", "slow_down"):
+        return JsonResponse({"status": "pending"})
+
+    try:
+        login = flow.complete(result.auth or {})
+    except Exception:
+        logger.exception("FNAL device-flow completion failed")
+        return JsonResponse({"status": "error", "detail": FNAL_UNAVAILABLE}, status=502)
+
+    fnal_session.store_link(request, login)
+    next_url = state.get("next") or reverse("hwdb:home")
+    fnal_session.clear_flow(request)
+    return JsonResponse({"status": "ok", "next": next_url})
 
 
 def component_list_view(request, component_type_id=None):

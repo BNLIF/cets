@@ -6,6 +6,8 @@ app_name = "hwdb"
 
 urlpatterns = [
     path("", views.home, name="home"),
+    path("link/", views.fnal_link_view, name="link"),
+    path("link/poll/", views.fnal_link_poll_view, name="link_poll"),
     path("components/<str:component_type_id>/", views.component_list_view, name="component_list"),
     path("components/", views.component_list_view, name="component_list_default"), # Keep a default without ID
     path("subsystems/<str:part1>/<str:part2>/", views.subsystem_list_view, name="subsystem_list_by_id"),
