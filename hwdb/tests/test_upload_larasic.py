@@ -85,8 +85,8 @@ class CsvParserTest(TestCase):
         out = csv_parser.parse_csv(p)
         self.assertEqual(out["serial_hwdb"], "002-00797")
         self.assertEqual(out["env"], "RT")
-        self.assertEqual(out["test_date"], "09_24_2025")
-        self.assertEqual(out["test_time"], "16_59_20")
+        self.assertEqual(out["test_date"], "2025/09/24")
+        self.assertEqual(out["test_time"], "16:59:20")
         self.assertEqual(out["operator_name"], "K. Zucker")
         self.assertEqual(out["test_location"], "BNL")
         self.assertEqual(out["tray_id"], "B005T0011")
@@ -209,8 +209,8 @@ class DatasheetTest(TestCase):
     def test_simple_warm(self):
         chip = _chip(warm=datetime(2025, 9, 24, 16, 59, 20, tzinfo=timezone.utc))
         sheet = larasic.build_datasheet_simple(chip, "RT", operator_name="chaoz")
-        self.assertEqual(sheet["Test Date"], "09_24_2025")
-        self.assertEqual(sheet["Test Time"], "16_59_20")
+        self.assertEqual(sheet["Test Date"], "2025/09/24")
+        self.assertEqual(sheet["Test Time"], "16:59:20")
         self.assertEqual(sheet["LArASIC Serial Number"], "002-00001")
         self.assertEqual(sheet["Test Location"], "BNL")
         self.assertEqual(sheet["Operator Name"], "chaoz")
@@ -243,7 +243,7 @@ class DatasheetTest(TestCase):
         sheet = larasic.build_datasheet_detailed(chip, p)
         # 19 header fields + 48 (16ch × 3) = 67
         self.assertEqual(len(sheet), 67)
-        self.assertEqual(sheet["Test Date"], "09_24_2025")
+        self.assertEqual(sheet["Test Date"], "2025/09/24")
         self.assertEqual(sheet["Operator Name"], "K. Zucker")
         self.assertEqual(sheet["Test Result"], "PASS")
         self.assertAlmostEqual(sheet["Power Consumption"], 31.5 + 22.1 + 18.4, places=4)
@@ -363,7 +363,7 @@ class UploadChipTest(TestCase):
             "data": [
                 {
                     "id": 59920,
-                    "test_data": {"Test Date": "09_24_2025", "Test Time": "16_59_20"},
+                    "test_data": {"Test Date": "2025/09/24", "Test Time": "16:59:20"},
                 }
             ]
         }
@@ -387,8 +387,8 @@ class UploadChipTest(TestCase):
                 {
                     "id": 59920,
                     "test_data": {
-                        "Test Date": "09_24_2025",
-                        "Test Time": "16_59_20",
+                        "Test Date": "2025/09/24",
+                        "Test Time": "16:59:20",
                     },
                 }
             ]

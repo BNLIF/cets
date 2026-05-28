@@ -139,19 +139,21 @@ def _parse_channels(row: list[str]) -> dict[int, dict[str, float]]:
 
 
 def _split_utc(utc: str) -> tuple[str, str]:
-    """``MM_DD_YYYY_HH_MM_SS`` → ``(MM_DD_YYYY, HH_MM_SS)``."""
+    """``MM_DD_YYYY_HH_MM_SS`` → ``(YYYY/MM/DD, HH:MM:SS)``."""
     parts = utc.split("_")
     if len(parts) != 6:
         raise ValueError(f"bad UTC_Time: {utc}")
-    return "_".join(parts[:3]), "_".join(parts[3:])
+    mo, d, y, h, mi, s = parts
+    return f"{y}/{mo}/{d}", f"{h}:{mi}:{s}"
 
 
-def _yyyymmddhhmmss_to_mmddyyyy_hhmmss(ts: str) -> tuple[str, str]:
+def _yyyymmddhhmmss_to_date_time(ts: str) -> tuple[str, str]:
+    """``YYYYMMDDHHMMSS`` → ``(YYYY/MM/DD, HH:MM:SS)``."""
     m = _FILENAME_TS_RE.fullmatch(ts or "")
     if not m:
         raise ValueError(f"bad timestamp: {ts}")
     y, mo, d, h, mi, s = m.groups()
-    return f"{mo}_{d}_{y}", f"{h}_{mi}_{s}"
+    return f"{y}/{mo}/{d}", f"{h}:{mi}:{s}"
 
 
 def parse_csv(csv_path: Path) -> dict:
@@ -173,7 +175,7 @@ def parse_csv(csv_path: Path) -> dict:
         test_date, test_time = _split_utc(utc)
     else:
         ts = metadata.get("RTS_timestamp", "").strip() or fn["timestamp"]
-        test_date, test_time = _yyyymmddhhmmss_to_mmddyyyy_hhmmss(ts)
+        test_date, test_time = _yyyymmddhhmmss_to_date_time(ts)
 
     env = (metadata.get("env") or fn["env"] or "").strip().upper()
     if env in {"RT", "ROOMT", "WARM"}:

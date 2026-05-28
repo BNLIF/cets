@@ -36,8 +36,8 @@ from . import csv_parser
 logger = logging.getLogger(__name__)
 
 # Karla's date / time format on the wire — same in detailed and simple modes.
-_DATE_FMT = "%m_%d_%Y"
-_TIME_FMT = "%H_%M_%S"
+_DATE_FMT = "%Y/%m/%d"
+_TIME_FMT = "%H:%M:%S"
 
 
 # ---- Errors ---------------------------------------------------------------
@@ -202,7 +202,7 @@ def set_location(api, part_id: str, institution_id: int, arrived: datetime) -> N
 
 
 def _fmt_dt(dt: datetime) -> tuple[str, str]:
-    """``datetime`` → (``MM_DD_YYYY``, ``HH_MM_SS``) — Karla's format."""
+    """``datetime`` → (``YYYY/MM/DD``, ``HH:MM:SS``) — matches earlier HWDB records."""
     return dt.strftime(_DATE_FMT), dt.strftime(_TIME_FMT)
 
 
