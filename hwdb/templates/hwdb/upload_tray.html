@@ -43,7 +43,7 @@
     </div>
 </div>
 
-<div style="display: flex; gap: 16px; align-items: center; margin-bottom: 16px; padding: 12px 16px; background: var(--surface-2); border-radius: 6px;">
+<div style="display: flex; gap: 16px; align-items: center; margin-bottom: 16px; padding: 12px 16px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 6px;">
     <label style="display: flex; gap: 6px; align-items: center; font-size: 13px;">
         <input type="checkbox" id="attach-csvs" checked> Attach source CSV when present
     </label>
@@ -54,7 +54,7 @@
     <span class="cell-muted" style="font-size: 12px;">→ streams live progress below</span>
 </div>
 
-<pre id="upload-progress" style="background: var(--surface-2); border-radius: 6px; padding: 12px 16px; min-height: 80px; max-height: 400px; overflow-y: auto; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; margin-bottom: 16px; display: none;"></pre>
+<pre id="upload-progress" style="background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; min-height: 80px; max-height: 400px; overflow-y: auto; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; margin-bottom: 16px; display: none;"></pre>
 
 <div class="table-wrap">
     <table class="table">
@@ -95,11 +95,12 @@
 <form style="display: none;">{% csrf_token %}</form>
 
 {# PROD gauntlet — only used when active_instance != "dev" (issue #21). #}
-<dialog id="prod-gauntlet" style="border: 1px solid var(--border); border-radius: 8px; padding: 24px; max-width: 460px; background: var(--surface-1);">
+<style>#prod-gauntlet::backdrop { background: rgba(0, 0, 0, 0.45); }</style>
+<dialog id="prod-gauntlet" style="border: 1px solid var(--border); border-radius: 8px; padding: 24px; max-width: 460px; background: var(--bg); color: var(--text);">
     <h2 style="margin-top: 0;">Confirm production upload</h2>
     <p id="gauntlet-message" style="color: var(--text-2);"></p>
-    <p>Type <span id="gauntlet-token" class="cell-mono" style="background: var(--surface-2); padding: 2px 6px; border-radius: 4px;"></span> below to confirm:</p>
-    <input type="text" id="gauntlet-input" autocomplete="off" autocapitalize="off" spellcheck="false" style="width: 100%; padding: 6px 8px; font-family: var(--font-mono); font-size: 13px; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-2);">
+    <p>Type <span id="gauntlet-token" class="cell-mono" style="background: var(--bg-muted); padding: 2px 6px; border-radius: 4px;"></span> below to confirm:</p>
+    <input type="text" id="gauntlet-input" autocomplete="off" autocapitalize="off" spellcheck="false" style="width: 100%; padding: 6px 8px; font-family: var(--font-mono); font-size: 13px; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-subtle); color: var(--text);">
     <div style="display: flex; gap: 8px; justify-content: flex-end;">
         <button type="button" id="gauntlet-cancel" class="btn btn-ghost">Cancel</button>
         <button type="button" id="gauntlet-confirm" class="btn btn-primary" disabled>Upload to prod</button>
