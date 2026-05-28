@@ -75,5 +75,23 @@ repair record.
 
 Readout Test System. Tests run on LArASIC chips before they're mounted
 on a FEMB. RTS results live as CSV files on an SMB-mounted read-only
-share (`RTS_DIR`); the FE detail page parses filenames to extract
+share (`RTS_DIR`); the LArASIC detail page parses filenames to extract
 metadata. Format: `<sn>_<timestamp>_<tray>_<socket>_<temperature>.csv`.
+
+### HWDB
+
+The DUNE **Hardware Database** (Fermilab's "CDB") — the external system of
+record for every DUNE hardware item. The `hwdb/` app talks to its REST API to
+display HWDB records and compare them against local chips; uploading QC records
+is future work (issue #12).
+
+- Two **instances**: `prod` (the default we compare against) and `dev` (a
+  sandbox). Users toggle between them per-session; `is_in_hwdb` is always
+  **prod-scoped**.
+- **`is_in_hwdb`** — a per-chip boolean (on `LArASIC`) recording whether that
+  serial already exists in the production HWDB, so a sync need not re-query it.
+- **FNAL link** — auth is per-session, not per-Django-user (guests share one
+  login but each links their own FNAL account). A vault OIDC device flow yields
+  a bearer minted fresh per request; see the `hwdb/fnal/` package.
+- **part-type ID** — HWDB's identifier for a component type, e.g. LArASIC is
+  `D08100100001` on dev / `D08100100003` on prod.
