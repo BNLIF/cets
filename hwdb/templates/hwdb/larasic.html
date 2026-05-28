@@ -14,6 +14,7 @@
         </div>
     </div>
     <div class="page-head-actions">
+        <a class="btn btn-ghost" href="{% url 'hwdb:upload_index' %}">Upload →</a>
         {% if active_instance == "prod" %}
         <form method="post" action="{% url 'hwdb:larasic_sync' %}">
             {% csrf_token %}

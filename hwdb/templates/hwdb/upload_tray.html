@@ -1,0 +1,189 @@
+{% extends 'core/base.html' %}
+{% load components %}
+
+{% block title %}CETS — Upload tray {{ tray_id }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div>
+        {% crumbs "CETS" "Hardware Database" "LArASIC upload" tray_id %}
+        <h1 class="page-title">Tray {{ tray_id }}</h1>
+        <div class="page-subtitle">
+            {{ chip_count }} chips · {{ to_upload }} not in (local-cached) HWDB ·
+            instance <strong>{{ active_instance }}</strong>
+        </div>
+    </div>
+    <div class="page-head-actions">
+        <form method="post" action="{% url 'hwdb:set_instance' %}" style="display: flex; gap: 6px; align-items: center;">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <span class="cell-muted" style="font-size: 12px;">Instance</span>
+            {% for inst in instances %}
+            <button name="instance" value="{{ inst }}" class="btn btn-sm {% if inst == active_instance %}btn-primary{% else %}btn-ghost{% endif %}">{{ inst }}</button>
+            {% endfor %}
+        </form>
+    </div>
+</div>
+
+{% if not is_dev %}
+<div class="comp-block" style="margin-bottom: 16px; border-left: 3px solid var(--accent);">
+    <div style="padding: 12px 16px; color: var(--text-2);">
+        <strong>PRODUCTION instance.</strong> Uploads will write to the real HWDB. Each click requires typing the tray ID (or chip serial) to confirm.
+    </div>
+</div>
+{% endif %}
+
+<div class="comp-block" style="margin-bottom: 16px; border-left: 3px solid {% if has_analysis %}var(--ok, #4caf50){% else %}var(--text-3){% endif %};">
+    <div style="padding: 12px 16px; color: var(--text-2); font-size: 13px;">
+        {% if has_analysis %}
+        <strong>Analysis CSVs available</strong> — found {{ csv_count }} file(s) under <span class="cell-mono">{{ tray_id }}/results/</span>. Detailed-mode upload (67-field datasheet + CSV attached) will run for chips whose CSV is present; chips without a matching CSV fall back to simple-mode.
+        {% else %}
+        <strong>No analysis CSVs</strong> — <span class="cell-mono">{{ tray_id }}/results/</span> is empty or missing. Every chip will upload in simple mode (7 fields, no attachment). Once the offline RTS analysis populates this batch's results, you can re-run for the detailed upload (it'll post a new test record per HWDB's history model).
+        {% endif %}
+    </div>
+</div>
+
+<div style="display: flex; gap: 16px; align-items: center; margin-bottom: 16px; padding: 12px 16px; background: var(--surface-2); border-radius: 6px;">
+    <label style="display: flex; gap: 6px; align-items: center; font-size: 13px;">
+        <input type="checkbox" id="attach-csvs" checked> Attach source CSV when present
+    </label>
+    <button type="button" id="upload-tray-btn" class="btn btn-primary">Upload tray ({{ to_upload }} to upload)</button>
+    {% if is_dev %}
+    <button type="button" id="upload-random-5-btn" class="btn btn-ghost" title="Pick 5 random chips from this tray and upload them. Dev only — quick feasibility check.">Upload random 5 (dev)</button>
+    {% endif %}
+    <span class="cell-muted" style="font-size: 12px;">→ streams live progress below</span>
+</div>
+
+<pre id="upload-progress" style="background: var(--surface-2); border-radius: 6px; padding: 12px 16px; min-height: 80px; max-height: 400px; overflow-y: auto; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; margin-bottom: 16px; display: none;"></pre>
+
+<div class="table-wrap">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Serial number</th>
+                <th>Status</th>
+                <th>Warm</th>
+                <th>Cold</th>
+                <th>RT csv</th>
+                <th>LN csv</th>
+                <th>In HWDB?</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in chip_rows %}
+            <tr>
+                <td class="cell-mono">{{ row.chip.serial_number }}</td>
+                <td>{{ row.chip.status }}</td>
+                <td class="cell-mono cell-muted">{{ row.chip.warm_tested_at|date:"Y-m-d"|default:"—" }}</td>
+                <td class="cell-mono cell-muted">{{ row.chip.cold_tested_at|date:"Y-m-d"|default:"—" }}</td>
+                <td>{% if row.has_rt_csv %}<span class="pill" data-status="pass">✓</span>{% else %}<span class="cell-muted" style="font-size: 12px;">—</span>{% endif %}</td>
+                <td>{% if row.has_ln_csv %}<span class="pill" data-status="pass">✓</span>{% else %}<span class="cell-muted" style="font-size: 12px;">—</span>{% endif %}</td>
+                <td>{% if row.chip.is_in_hwdb %}<span class="pill" data-status="pass">yes</span>{% else %}<span class="pill">no</span>{% endif %}</td>
+                <td>
+                    <button type="button" class="btn btn-sm btn-ghost upload-chip-btn" data-serial="{{ row.chip.serial_number }}">Upload this chip</button>
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="8" class="cell-muted" style="text-align: center; padding: 36px;">No chips on this tray.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{# Hidden csrf source for the JS fetch — Django's CSRF middleware reads the form field. #}
+<form style="display: none;">{% csrf_token %}</form>
+
+{# PROD gauntlet — only used when active_instance != "dev" (issue #21). #}
+<dialog id="prod-gauntlet" style="border: 1px solid var(--border); border-radius: 8px; padding: 24px; max-width: 460px; background: var(--surface-1);">
+    <h2 style="margin-top: 0;">Confirm production upload</h2>
+    <p id="gauntlet-message" style="color: var(--text-2);"></p>
+    <p>Type <span id="gauntlet-token" class="cell-mono" style="background: var(--surface-2); padding: 2px 6px; border-radius: 4px;"></span> below to confirm:</p>
+    <input type="text" id="gauntlet-input" autocomplete="off" autocapitalize="off" spellcheck="false" style="width: 100%; padding: 6px 8px; font-family: var(--font-mono); font-size: 13px; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-2);">
+    <div style="display: flex; gap: 8px; justify-content: flex-end;">
+        <button type="button" id="gauntlet-cancel" class="btn btn-ghost">Cancel</button>
+        <button type="button" id="gauntlet-confirm" class="btn btn-primary" disabled>Upload to prod</button>
+    </div>
+</dialog>
+
+<script>
+(function () {
+    const runUrl = "{% url 'hwdb:upload_run' tray_id %}";
+    const isProd = {{ is_dev|yesno:'false,true' }};
+    const trayId = "{{ tray_id|escapejs }}";
+    const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value
+        || document.cookie.split('csrftoken=')[1]?.split(';')[0]
+        || "";
+    const out = document.getElementById('upload-progress');
+    const attach = document.getElementById('attach-csvs');
+    const dialog = document.getElementById('prod-gauntlet');
+    const tokenEl = document.getElementById('gauntlet-token');
+    const messageEl = document.getElementById('gauntlet-message');
+    const inputEl = document.getElementById('gauntlet-input');
+    const confirmEl = document.getElementById('gauntlet-confirm');
+    const cancelEl = document.getElementById('gauntlet-cancel');
+
+    async function streamUpload({chipSerial = null, random5 = false} = {}) {
+        out.style.display = 'block';
+        out.textContent = '';
+        const formData = new FormData();
+        formData.append('csrfmiddlewaretoken', csrf);
+        if (chipSerial) formData.append('chip', chipSerial);
+        if (random5) formData.append('random_5', 'on');
+        formData.append('attach_csvs', attach.checked ? 'on' : '');
+        let resp;
+        try {
+            resp = await fetch(runUrl, {method: 'POST', body: formData});
+        } catch (e) {
+            out.textContent = '*** network error: ' + e + ' ***';
+            return;
+        }
+        if (!resp.ok) {
+            out.textContent = '*** HTTP ' + resp.status + ' — ' + (await resp.text()).slice(0, 500) + ' ***';
+            return;
+        }
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        while (true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            out.textContent += decoder.decode(value, {stream: true});
+            out.scrollTop = out.scrollHeight;
+        }
+    }
+
+    function maybePromptThenUpload(chipSerial, chipCount) {
+        if (!isProd) {
+            streamUpload({chipSerial});
+            return;
+        }
+        const expected = chipSerial || trayId;
+        tokenEl.textContent = expected;
+        messageEl.textContent = chipSerial
+            ? `Upload chip ${chipSerial}'s warm + cold tests to PRODUCTION HWDB.`
+            : `Upload ${chipCount} chips on tray ${trayId} to PRODUCTION HWDB.`;
+        inputEl.value = '';
+        confirmEl.disabled = true;
+        inputEl.oninput = () => { confirmEl.disabled = inputEl.value.trim() !== expected; };
+        confirmEl.onclick = () => {
+            dialog.close('confirm');
+            streamUpload({chipSerial});
+        };
+        cancelEl.onclick = () => dialog.close('cancel');
+        dialog.showModal();
+        setTimeout(() => inputEl.focus(), 50);
+    }
+
+    document.getElementById('upload-tray-btn')?.addEventListener('click', () => {
+        maybePromptThenUpload(null, {{ to_upload }});
+    });
+    document.getElementById('upload-random-5-btn')?.addEventListener('click', () => {
+        // Dev-only button; no gauntlet (the route only honors random_5 on dev).
+        streamUpload({random5: true});
+    });
+    document.querySelectorAll('.upload-chip-btn').forEach(btn => {
+        btn.addEventListener('click', () => maybePromptThenUpload(btn.dataset.serial, 1));
+    });
+})();
+</script>
+{% endblock %}

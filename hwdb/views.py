@@ -1,12 +1,14 @@
 import logging
 from datetime import datetime, timedelta
 from functools import wraps
+from pathlib import Path
 from urllib.parse import urlencode
 
+from decouple import config as env_config
 from django.conf import settings
 from django.core.paginator import Paginator
-from django.db.models import Max
-from django.http import JsonResponse
+from django.db.models import Count, Max, Q
+from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -19,8 +21,10 @@ from .api_client import FnalDbApiClient
 from .fnal import flow
 from .fnal import session as fnal_session
 from .fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
+from .fnal.session import LINK_KEY
 from .instance import SESSION_KEY, active_instance, active_profile
 from .models import LarasicSyncState
+from .upload import larasic as upload_lib
 
 logger = logging.getLogger(__name__)
 GENERIC_ERROR = "Failed to fetch data from the Hardware Database."
@@ -365,6 +369,261 @@ def subsystem_list_view(request, bearer, part1=None, part2=None):
     except Exception:
         logger.exception("HWDB API call failed")
         return render(request, "hwdb/error.html", {"error_message": GENERIC_ERROR})
+
+
+# ---- Upload (Phase-3, issues #19/#20/#21) --------------------------------
+
+
+def upload_index_view(request):
+    """List trays with chip / to-upload / last-checked counts (read-only)."""
+    trays = list(
+        LArASIC.objects.exclude(tray_id__isnull=True)
+        .exclude(tray_id="")
+        .values("tray_id")
+        .annotate(
+            chip_count=Count("id"),
+            to_upload=Count("id", filter=Q(is_in_hwdb=False)),
+            last_checked=Max("hwdb_checked_at"),
+        )
+        .order_by("-tray_id")
+    )
+    # One DB query (against the persistent CSV cache) instead of one SMB stat
+    # per tray — meaningful on the SMB-mounted RTS_DIR. May be slightly stale;
+    # the detail page corrects on visit.
+    with_csvs = upload_lib.trays_with_analysis([t["tray_id"] for t in trays])
+    for t in trays:
+        t["has_analysis"] = t["tray_id"] in with_csvs
+    return render(
+        request,
+        "hwdb/upload_index.html",
+        {
+            "trays": trays,
+            "active_instance": active_instance(request),
+            "instances": list(settings.HWDB_PROFILES),
+            "page": "hwdb",
+        },
+    )
+
+
+def _rts_root() -> Path | None:
+    """Resolve RTS_DIR from env. Returns None if unconfigured."""
+    try:
+        return Path(env_config("RTS_DIR"))
+    except Exception:
+        return None
+
+
+@require_POST
+def upload_refresh_csv_cache_view(request):
+    """Walk every known tray and refresh its CSV cache (L1 + L2).
+
+    The index page reads ``TrayCsvCache`` rows directly to avoid one SMB
+    ``stat()`` per tray on every render — that's deliberately fast and
+    deliberately stale: a tray that just gained CSVs but was never visited
+    has no row yet, so the badge won't light up until someone clicks through
+    to its detail page. This view forces the catch-up: one full scan across
+    all known trays, then redirect back to the index.
+
+    Synchronous; for a few dozen trays this takes a handful of seconds even
+    on SMB. We don't need a FNAL bearer (reads filesystem + writes local DB).
+    """
+    rts_root = _rts_root()
+    if rts_root is None:
+        return render(
+            request,
+            "hwdb/error.html",
+            {"error_message": "RTS_DIR is not configured."},
+            status=500,
+        )
+    tray_ids = list(
+        LArASIC.objects.exclude(tray_id__isnull=True)
+        .exclude(tray_id="")
+        .values_list("tray_id", flat=True)
+        .distinct()
+    )
+    for tid in tray_ids:
+        upload_lib.scan_tray_csvs(rts_root, tid)
+    return redirect("hwdb:upload_index")
+
+
+def upload_tray_view(request, tray_id):
+    """Per-tray chip list with per-row + global upload buttons.
+
+    Scans ``RTS_DIR/<tray_id>/results/`` once and badges each chip row with
+    whether its RT and LN CSVs are available — so the user sees up front
+    whether the upload will be detailed (CSV → 67 fields) or simple (no CSV
+    → 7 fields).
+    """
+    chips = LArASIC.objects.filter(tray_id=tray_id).order_by("serial_number")
+    chip_count = chips.count()
+    to_upload = chips.filter(is_in_hwdb=False).count()
+    instance = active_instance(request)
+
+    rts_root = _rts_root()
+    csvs = upload_lib.scan_tray_csvs(rts_root, tray_id)
+    chip_rows = []
+    for chip in chips:
+        chip_rows.append({
+            "chip": chip,
+            "has_rt_csv": (chip.serial_number, "RT") in csvs,
+            "has_ln_csv": (chip.serial_number, "LN") in csvs,
+        })
+    has_analysis = bool(csvs)
+
+    return render(
+        request,
+        "hwdb/upload_tray.html",
+        {
+            "tray_id": tray_id,
+            "chip_rows": chip_rows,
+            "chip_count": chip_count,
+            "to_upload": to_upload,
+            "has_analysis": has_analysis,
+            "csv_count": len(csvs),
+            "active_instance": instance,
+            "instances": list(settings.HWDB_PROFILES),
+            "is_dev": instance == "dev",
+            "page": "hwdb",
+        },
+    )
+
+
+def _stream_upload(api, chips, *, part_type_id, rts_root, attach_csvs, instance, tray_id, operator_name):
+    """Generator that yields per-chip progress lines for ``upload_run_view``.
+
+    Per Q9 error policy: continue past per-chip errors with a clear line, no
+    retries. End with a tally line. Bearer is already minted by the caller.
+    """
+    total = len(chips)
+    yield f"Starting upload of {total} chip(s) on tray {tray_id} to {instance}.\n"
+    if total == 0:
+        yield "No chips to upload.\n"
+        return
+
+    try:
+        test_type_ids = {
+            "RT": upload_lib.resolve_test_type_id(api, part_type_id, "RoomT QC Test"),
+            "LN": upload_lib.resolve_test_type_id(api, part_type_id, "CryoT QC Test"),
+        }
+    except Exception as e:
+        yield f"*** cannot resolve HWDB test types: {e} ***\n"
+        return
+
+    ok = failed = 0
+    promoted = []  # chips whose is_in_hwdb we should flip True on prod
+
+    for i, chip in enumerate(chips, 1):
+        yield f"[{i}/{total}] {chip.serial_number}: "
+        try:
+            result = upload_lib.upload_chip(
+                api,
+                chip,
+                part_type_id=part_type_id,
+                rts_root=rts_root,
+                attach_csvs=attach_csvs,
+                test_type_ids=test_type_ids,
+                operator_name=operator_name,
+            )
+        except Exception as e:
+            failed += 1
+            logger.exception("upload_chip crashed for %s", chip.serial_number)
+            yield f"CRASH — {e}\n"
+            continue
+
+        if result.error:
+            failed += 1
+            yield f"FAIL — {result.error}\n"
+            continue
+
+        bits = [f"created {result.part_id}" if result.created else f"exists ({result.part_id})"]
+        for t in result.tests:
+            if t.error:
+                bits.append(f"{t.env} FAIL: {t.error}")
+            elif t.skipped:
+                bits.append(f"{t.env} skipped (already test_id={t.test_id})")
+            else:
+                atch = " +csv" if t.csv_attached else ""
+                bits.append(f"{t.env}={t.test_id} ({t.mode}{atch})")
+        if all(t.error is None for t in result.tests):
+            ok += 1
+            if instance == "prod":
+                promoted.append((chip.pk, result.part_id))
+        else:
+            failed += 1
+        yield ", ".join(bits) + "\n"
+
+    # Q10: only flip the prod-scoped is_in_hwdb flag on a prod upload.
+    if instance == "prod" and promoted:
+        ids = [pk for pk, _ in promoted]
+        LArASIC.objects.filter(pk__in=ids).update(
+            is_in_hwdb=True, hwdb_checked_at=timezone.now()
+        )
+        yield f"(updated is_in_hwdb=True on {len(ids)} local row(s))\n"
+
+    yield f"\nDone. ok={ok} failed={failed}\n"
+
+
+@require_POST
+def upload_run_view(request, tray_id):
+    """Stream per-chip upload progress as text/plain.
+
+    Issues #19/#20 land the DEV path; #21 adds the PROD gauntlet (a
+    type-to-confirm modal on the client — see ``upload_tray.html``). The
+    server-side gate is the FNAL writer role: HWDB returns 403 without it,
+    we surface the error per-chip. Per Q8 we do not duplicate the gauntlet
+    server-side.
+    """
+    instance = active_instance(request)
+
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(
+            f"{link}?{urlencode({'next': reverse('hwdb:upload_tray', args=[tray_id])})}"
+        )
+    except FnalUnavailable:
+        return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
+
+    profile = active_profile(request)
+    api = FnalDbApiClient(profile["api"], bearer)
+    part_type_id = profile["larasic_part_type"]
+    # credkey is the FNAL services username — most honest "Operator Name" we have.
+    operator_name = (request.session.get(LINK_KEY) or {}).get("credkey") or ""
+
+    chips_qs = LArASIC.objects.filter(tray_id=tray_id).order_by("serial_number")
+    chip_filter = request.POST.get("chip")
+    if chip_filter:
+        chips_qs = chips_qs.filter(serial_number=chip_filter)
+
+    if request.POST.get("random_5") == "on" and instance == "dev":
+        # Dev-only quick-feasibility sample. order_by("?") picks a fresh random
+        # subset per click — useful for repeatedly exercising the full pipeline
+        # without burning a whole tray.
+        chips = list(chips_qs.order_by("?")[:5])
+    else:
+        chips = list(chips_qs)
+
+    attach_csvs = request.POST.get("attach_csvs", "on") == "on"
+    rts_root = _rts_root()
+
+    response = StreamingHttpResponse(
+        _stream_upload(
+            api,
+            chips,
+            part_type_id=part_type_id,
+            rts_root=rts_root,
+            attach_csvs=attach_csvs,
+            instance=instance,
+            tray_id=tray_id,
+            operator_name=operator_name,
+        ),
+        content_type="text/plain; charset=utf-8",
+    )
+    # Hint reverse proxies not to buffer; supported by nginx, ignored by Apache.
+    response["Cache-Control"] = "no-cache"
+    response["X-Accel-Buffering"] = "no"
+    return response
 
 
 @with_fnal_bearer

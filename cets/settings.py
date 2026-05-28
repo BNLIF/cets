@@ -108,6 +108,22 @@ HWDB_API_BASE_URL = HWDB_PROFILES[HWDB_INSTANCE]["api"]
 HWDB_UI_BASE_URL = HWDB_PROFILES[HWDB_INSTANCE]["ui"]
 HWDB_LARASIC_PART_TYPE = HWDB_PROFILES[HWDB_INSTANCE]["larasic_part_type"]
 
+# Per-component-type defaults for HWDB upload (Phase-3). Manufacturers and
+# institutions are per-part-type; LArASIC is BNL/TSMC. Add new entries as we
+# fan out to FEMB/ColdADC/COLDATA/Cable.
+HWDB_COMPONENT_DEFAULTS = {
+    "larasic": {
+        "manufacturer_id": 59,     # TSMC
+        "institution_id": 128,     # BNL
+        "country_code": "US",
+        "warm_test_name": "RoomT QC Test",
+        "cold_test_name": "CryoT QC Test",
+        # status_id 110 = "Waiting on QA/QC Tests" (per Karla's note.md;
+        # patched after RTS upload, refined by later QA/QC analysis).
+        "initial_status_id": 110,
+    },
+}
+
 ROOT_URLCONF = "cets.urls"
 
 TEMPLATES = [

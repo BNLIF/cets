@@ -1,0 +1,59 @@
+{% extends 'core/base.html' %}
+{% load components %}
+
+{% block title %}CETS — LArASIC upload{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div>
+        {% crumbs "CETS" "Hardware Database" "LArASIC upload" %}
+        <h1 class="page-title">LArASIC · HWDB upload</h1>
+        <div class="page-subtitle">
+            Push RTS-tested chips to the <strong>{{ active_instance }}</strong> HWDB instance, one tray at a time.
+        </div>
+    </div>
+    <div class="page-head-actions">
+        <form method="post" action="{% url 'hwdb:upload_refresh_csv_cache' %}" style="display: inline;" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Scanning…';">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-sm btn-ghost" title="Walk every tray's results/ dir and refresh the CSV cache. Slow on SMB; needed when new analysis CSVs land in a tray that's never been visited.">Refresh CSV cache</button>
+        </form>
+        <form method="post" action="{% url 'hwdb:set_instance' %}" style="display: flex; gap: 6px; align-items: center;">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <span class="cell-muted" style="font-size: 12px;">Instance</span>
+            {% for inst in instances %}
+            <button name="instance" value="{{ inst }}" class="btn btn-sm {% if inst == active_instance %}btn-primary{% else %}btn-ghost{% endif %}">{{ inst }}</button>
+            {% endfor %}
+        </form>
+    </div>
+</div>
+
+<div class="table-wrap">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Tray</th>
+                <th>Chips</th>
+                <th>To upload</th>
+                <th>Analysis</th>
+                <th>Last HWDB check</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for t in trays %}
+            <tr>
+                <td class="cell-mono"><a href="{% url 'hwdb:upload_tray' t.tray_id %}" style="color: var(--accent); font-weight: 500;">{{ t.tray_id }}</a></td>
+                <td>{{ t.chip_count }}</td>
+                <td>{{ t.to_upload }}</td>
+                <td>{% if t.has_analysis %}<span class="pill" data-status="pass" title="results/ directory exists for this tray — detailed-mode upload available">CSVs</span>{% else %}<span class="cell-muted" style="font-size: 12px;">—</span>{% endif %}</td>
+                <td class="cell-mono cell-muted">{{ t.last_checked|date:"Y-m-d H:i"|default:"—" }}</td>
+                <td><a class="btn btn-sm btn-ghost" href="{% url 'hwdb:upload_tray' t.tray_id %}">Open</a></td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6" class="cell-muted" style="text-align: center; padding: 36px;">No trays found. Run the RTS importer first.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

@@ -9,6 +9,11 @@ urlpatterns = [
     path("instance/", views.set_instance, name="set_instance"),
     path("larasic/", views.larasic_view, name="larasic"),
     path("larasic/sync/", views.larasic_sync_view, name="larasic_sync"),
+    # Phase-3 upload (issues #19/#20/#21).
+    path("larasic/upload/", views.upload_index_view, name="upload_index"),
+    path("larasic/upload/refresh-cache/", views.upload_refresh_csv_cache_view, name="upload_refresh_csv_cache"),
+    path("larasic/upload/<str:tray_id>/", views.upload_tray_view, name="upload_tray"),
+    path("larasic/upload/<str:tray_id>/run/", views.upload_run_view, name="upload_run"),
     path("link/", views.fnal_link_view, name="link"),
     path("link/poll/", views.fnal_link_poll_view, name="link_poll"),
     path("components/<str:component_type_id>/", views.component_list_view, name="component_list"),
