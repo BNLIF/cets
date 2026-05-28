@@ -94,4 +94,4 @@ is future work (issue #12).
   login but each links their own FNAL account). A vault OIDC device flow yields
   a bearer minted fresh per request; see the `hwdb/fnal/` package.
 - **part-type ID** — HWDB's identifier for a component type, e.g. LArASIC is
-  `D08100100001` on dev / `D08100100003` on prod.
+  `D08100100004` on dev / `D08100100003` on prod.

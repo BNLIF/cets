@@ -95,7 +95,7 @@ HWDB_PROFILES = {
     "dev": {
         "api": "https://dbwebapi2.fnal.gov:8443/cdbdev/api/v1",
         "ui": "https://dbweb2.fnal.gov:8443/cdbdev",
-        "larasic_part_type": "D08100100001",
+        "larasic_part_type": "D08100100004",
     },
 }
 if HWDB_INSTANCE not in HWDB_PROFILES:

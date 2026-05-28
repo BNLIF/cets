@@ -56,7 +56,7 @@ class SectionShellTest(TestCase):
             "hwdb.api_client.FnalDbApiClient._make_request", return_value=payload
         ):
             resp = self.client.get(
-                reverse("hwdb:component_list", args=["D08100100001"]) + "?page=3"
+                reverse("hwdb:component_list", args=["D08100100004"]) + "?page=3"
             )
         self.assertEqual(resp.status_code, 200)
         body = resp.content.decode()
@@ -101,7 +101,7 @@ class SectionShellTest(TestCase):
 
         resp = self.client.get(reverse("hwdb:home"))
         # The LArASIC card now shows the dev part type (was prod's by default).
-        self.assertContains(resp, "D08100100001")
+        self.assertContains(resp, "D08100100004")
         self.assertNotContains(resp, "D08100100003")
 
     def test_session_instance_toggle_rejects_garbage(self):
@@ -119,7 +119,7 @@ class SectionShellTest(TestCase):
         with mock.patch("hwdb.views.mint_for", return_value="b"), mock.patch(
             "hwdb.api_client.FnalDbApiClient._make_request", fake_make_request
         ):
-            self.client.get(reverse("hwdb:component_list", args=["D08100100001"]))
+            self.client.get(reverse("hwdb:component_list", args=["D08100100004"]))
         self.assertIn("cdbdev", captured["base"])
 
     def test_tree_browse_is_fnal_gated(self):

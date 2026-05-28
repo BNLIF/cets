@@ -8,7 +8,7 @@
 
 The HWDB has two instances — production (`cdb`) and a dev sandbox (`cdbdev`) —
 that differ only by a URL path segment and the part-type IDs (e.g. LArASIC is
-`D08100100003` on prod, `D08100100001` on dev). We compare against **prod** by
+`D08100100003` on prod, `D08100100004` on dev). We compare against **prod** by
 default, but need to reach **dev** too — for browsing and, once upload lands, to
 rehearse writes against the sandbox before touching prod. Switching by editing
 env + restarting the server is too heavy and is global to all users.
