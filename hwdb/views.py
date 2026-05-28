@@ -142,8 +142,12 @@ def _sync_larasic(api_client, part_type_id):
         local_serials.add(chip.serial_number)
         chip.is_in_hwdb = chip.serial_number in hwdb_serials
         chip.hwdb_checked_at = now
+        # If a chip leaves HWDB, its QC tests left with it — clear the flag so
+        # the next upload run walks it again.
+        if not chip.is_in_hwdb:
+            chip.qc_tests_uploaded = False
     LArASIC.objects.bulk_update(
-        chips, ["is_in_hwdb", "hwdb_checked_at"], batch_size=500
+        chips, ["is_in_hwdb", "hwdb_checked_at", "qc_tests_uploaded"], batch_size=500
     )
     in_hwdb = sum(1 for c in chips if c.is_in_hwdb)
     hwdb_only = len(hwdb_serials - local_serials)
@@ -382,7 +386,9 @@ def upload_index_view(request):
         .values("tray_id")
         .annotate(
             chip_count=Count("id"),
-            to_upload=Count("id", filter=Q(is_in_hwdb=False)),
+            # "To upload" = what the default Upload tray will walk on PROD —
+            # new chips + enrich chips (anything not yet confirmed done).
+            to_upload=Count("id", filter=Q(qc_tests_uploaded=False)),
             last_checked=Max("hwdb_checked_at"),
         )
         .order_by("-tray_id")
@@ -456,15 +462,29 @@ def upload_tray_view(request, tray_id):
     """
     chips = LArASIC.objects.filter(tray_id=tray_id).order_by("serial_number")
     chip_count = chips.count()
-    to_upload = chips.filter(is_in_hwdb=False).count()
+    # Three states. "new" = chip not in HWDB → create + post tests. "enrich" =
+    # in HWDB (likely from FEMB workflow) but our QC tests haven't been
+    # confirmed there yet → reuse part_id + post any missing tests. "done" =
+    # in HWDB and qc_tests_uploaded already True → skip unless Force re-upload.
+    new_count = chips.filter(is_in_hwdb=False).count()
+    done_count = chips.filter(is_in_hwdb=True, qc_tests_uploaded=True).count()
+    enrich_count = chip_count - new_count - done_count
+    upload_count = new_count + enrich_count
     instance = active_instance(request)
 
     rts_root = _rts_root()
     csvs = upload_lib.scan_tray_csvs(rts_root, tray_id)
     chip_rows = []
     for chip in chips:
+        if not chip.is_in_hwdb:
+            state = "new"
+        elif chip.qc_tests_uploaded:
+            state = "done"
+        else:
+            state = "enrich"
         chip_rows.append({
             "chip": chip,
+            "state": state,
             "has_rt_csv": (chip.serial_number, "RT") in csvs,
             "has_ln_csv": (chip.serial_number, "LN") in csvs,
         })
@@ -477,7 +497,10 @@ def upload_tray_view(request, tray_id):
             "tray_id": tray_id,
             "chip_rows": chip_rows,
             "chip_count": chip_count,
-            "to_upload": to_upload,
+            "new_count": new_count,
+            "enrich_count": enrich_count,
+            "done_count": done_count,
+            "upload_count": upload_count,
             "has_analysis": has_analysis,
             "csv_count": len(csvs),
             "active_instance": instance,
@@ -552,13 +575,18 @@ def _stream_upload(api, chips, *, part_type_id, rts_root, attach_csvs, instance,
             failed += 1
         yield ", ".join(bits) + "\n"
 
-    # Q10: only flip the prod-scoped is_in_hwdb flag on a prod upload.
+    # Q10: only flip the prod-scoped is_in_hwdb / qc_tests_uploaded flags on a
+    # prod upload. ``promoted`` only contains chips where every test landed
+    # cleanly (uploaded or already-there), so it's safe to also mark
+    # qc_tests_uploaded — future runs can skip them.
     if instance == "prod" and promoted:
         ids = [pk for pk, _ in promoted]
         LArASIC.objects.filter(pk__in=ids).update(
-            is_in_hwdb=True, hwdb_checked_at=timezone.now()
+            is_in_hwdb=True,
+            qc_tests_uploaded=True,
+            hwdb_checked_at=timezone.now(),
         )
-        yield f"(updated is_in_hwdb=True on {len(ids)} local row(s))\n"
+        yield f"(updated is_in_hwdb=True, qc_tests_uploaded=True on {len(ids)} local row(s))\n"
 
     yield f"\nDone. ok={ok} failed={failed}\n"
 
@@ -595,6 +623,15 @@ def upload_run_view(request, tray_id):
     chip_filter = request.POST.get("chip")
     if chip_filter:
         chips_qs = chips_qs.filter(serial_number=chip_filter)
+
+    # On PROD, default behavior skips chips whose QC tests we've already
+    # confirmed in HWDB. "Force re-upload" walks them anyway — the per-test
+    # find_existing_test dedup still protects HWDB from duplicates. Per-chip
+    # button presses bypass this filter (the user opted in explicitly). Dev
+    # always walks everything (qc_tests_uploaded reflects PROD state).
+    force = request.POST.get("force") == "on"
+    if instance == "prod" and not force and not chip_filter:
+        chips_qs = chips_qs.exclude(qc_tests_uploaded=True)
 
     if request.POST.get("random_5") == "on" and instance == "dev":
         # Dev-only quick-feasibility sample. order_by("?") picks a fresh random

@@ -26,6 +26,11 @@ class LArASIC(models.Model):
     # HWDB sync state, materialised by the "Sync with HWDB" action (hwdb app).
     is_in_hwdb = models.BooleanField(default=False)
     hwdb_checked_at = models.DateTimeField(null=True, blank=True)
+    # Set True after a successful PROD upload run lands (or confirms via
+    # find_existing_test) all of this chip's QC tests in HWDB. The Phase-3
+    # upload action skips chips with this flag on PROD, unless "Force
+    # re-upload" is on. Reset to False if sync sees the chip leave HWDB.
+    qc_tests_uploaded = models.BooleanField(default=False)
     femb = models.ForeignKey(FEMB, on_delete=models.CASCADE, null=True, blank=True)
     femb_pos = models.CharField(max_length=2, null=True, blank=True)  # F1-4, B1-4
     installed_at_repair = models.ForeignKey(

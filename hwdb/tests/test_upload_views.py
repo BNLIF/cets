@@ -134,9 +134,10 @@ class UploadRunTest(TestCase):
             resp = self.client.post(reverse("hwdb:upload_run", args=["B005T0011"]))
             body = b"".join(resp.streaming_content).decode()
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("updated is_in_hwdb=True on 1 local row", body)
+        self.assertIn("qc_tests_uploaded=True on 1 local row", body)
         self.chip.refresh_from_db()
         self.assertTrue(self.chip.is_in_hwdb)
+        self.assertTrue(self.chip.qc_tests_uploaded)
         self.assertIsNotNone(self.chip.hwdb_checked_at)
 
     def test_dev_run_streams_progress(self):
@@ -234,6 +235,101 @@ class UploadRunTest(TestCase):
             b"".join(resp.streaming_content)
         # 1 from setUp + 6 added here = 7; random_5 ignored on prod.
         self.assertEqual(len(captured), 7)
+
+    def test_prod_skips_done_chips_by_default(self):
+        # A chip whose qc_tests_uploaded is already True should be filtered
+        # out of the PROD upload loop — we already confirmed its tests in HWDB.
+        LArASIC.objects.create(
+            serial_number="002-00002", tray_id="B005T0011",
+            is_in_hwdb=True, qc_tests_uploaded=True,
+            warm_tested_at=datetime(2025, 9, 24, 17, 0, 0, tzinfo=timezone.utc),
+        )
+        self.client.post(reverse("hwdb:set_instance"), {"instance": "prod"})
+        captured = []
+
+        def fake_upload_chip(api, chip, **kw):
+            captured.append(chip.serial_number)
+            return self._ok_result()
+
+        with mock.patch("hwdb.views.mint_for", return_value="b"), \
+             mock.patch.object(upload_lib, "resolve_test_type_id", return_value=863), \
+             mock.patch.object(upload_lib, "upload_chip", side_effect=fake_upload_chip):
+            resp = self.client.post(reverse("hwdb:upload_run", args=["B005T0011"]))
+            b"".join(resp.streaming_content)
+        # Only the not-yet-done chip (002-00001 from setUp) is walked.
+        self.assertEqual(captured, ["002-00001"])
+
+    def test_force_walks_done_chips_on_prod(self):
+        # With force=on, even chips whose qc_tests_uploaded is True get walked.
+        # find_existing_test still dedups on the HWDB side; this is the
+        # "be paranoid" escape hatch.
+        LArASIC.objects.create(
+            serial_number="002-00002", tray_id="B005T0011",
+            is_in_hwdb=True, qc_tests_uploaded=True,
+            warm_tested_at=datetime(2025, 9, 24, 17, 0, 0, tzinfo=timezone.utc),
+        )
+        self.client.post(reverse("hwdb:set_instance"), {"instance": "prod"})
+        captured = []
+
+        def fake_upload_chip(api, chip, **kw):
+            captured.append(chip.serial_number)
+            return self._ok_result()
+
+        with mock.patch("hwdb.views.mint_for", return_value="b"), \
+             mock.patch.object(upload_lib, "resolve_test_type_id", return_value=863), \
+             mock.patch.object(upload_lib, "upload_chip", side_effect=fake_upload_chip):
+            resp = self.client.post(
+                reverse("hwdb:upload_run", args=["B005T0011"]),
+                {"force": "on"},
+            )
+            b"".join(resp.streaming_content)
+        self.assertEqual(sorted(captured), ["002-00001", "002-00002"])
+
+    def test_dev_walks_done_chips_regardless(self):
+        # qc_tests_uploaded reflects PROD state — dev should not honor it.
+        LArASIC.objects.create(
+            serial_number="002-00002", tray_id="B005T0011",
+            is_in_hwdb=True, qc_tests_uploaded=True,
+            warm_tested_at=datetime(2025, 9, 24, 17, 0, 0, tzinfo=timezone.utc),
+        )
+        # setUp already flipped to dev.
+        captured = []
+
+        def fake_upload_chip(api, chip, **kw):
+            captured.append(chip.serial_number)
+            return self._ok_result()
+
+        with mock.patch("hwdb.views.mint_for", return_value="b"), \
+             mock.patch.object(upload_lib, "resolve_test_type_id", return_value=863), \
+             mock.patch.object(upload_lib, "upload_chip", side_effect=fake_upload_chip):
+            resp = self.client.post(reverse("hwdb:upload_run", args=["B005T0011"]))
+            b"".join(resp.streaming_content)
+        self.assertEqual(sorted(captured), ["002-00001", "002-00002"])
+
+    def test_per_chip_button_bypasses_done_filter(self):
+        # Clicking "Upload this chip" on a done chip is an explicit opt-in —
+        # the server must honor it without requiring Force re-upload.
+        LArASIC.objects.create(
+            serial_number="002-00002", tray_id="B005T0011",
+            is_in_hwdb=True, qc_tests_uploaded=True,
+            warm_tested_at=datetime(2025, 9, 24, 17, 0, 0, tzinfo=timezone.utc),
+        )
+        self.client.post(reverse("hwdb:set_instance"), {"instance": "prod"})
+        captured = []
+
+        def fake_upload_chip(api, chip, **kw):
+            captured.append(chip.serial_number)
+            return self._ok_result()
+
+        with mock.patch("hwdb.views.mint_for", return_value="b"), \
+             mock.patch.object(upload_lib, "resolve_test_type_id", return_value=863), \
+             mock.patch.object(upload_lib, "upload_chip", side_effect=fake_upload_chip):
+            resp = self.client.post(
+                reverse("hwdb:upload_run", args=["B005T0011"]),
+                {"chip": "002-00002"},
+            )
+            b"".join(resp.streaming_content)
+        self.assertEqual(captured, ["002-00002"])
 
     def test_link_required_redirects_to_link_page(self):
         from hwdb.fnal.bearer import FnalLinkRequired

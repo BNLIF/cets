@@ -9,7 +9,7 @@
         {% crumbs "CETS" "Hardware Database" "LArASIC upload" tray_id %}
         <h1 class="page-title">Tray {{ tray_id }}</h1>
         <div class="page-subtitle">
-            {{ chip_count }} chips · {{ to_upload }} not in (local-cached) HWDB ·
+            {{ chip_count }} chips · {{ new_count }} new + {{ enrich_count }} enrich + {{ done_count }} done ·
             instance <strong>{{ active_instance }}</strong>
         </div>
     </div>
@@ -43,11 +43,15 @@
     </div>
 </div>
 
-<div style="display: flex; gap: 16px; align-items: center; margin-bottom: 16px; padding: 12px 16px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 6px;">
+<div style="display: flex; gap: 16px; align-items: center; margin-bottom: 16px; padding: 12px 16px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 6px; flex-wrap: wrap;">
     <label style="display: flex; gap: 6px; align-items: center; font-size: 13px;">
         <input type="checkbox" id="attach-csvs" checked> Attach source CSV when present
     </label>
-    <button type="button" id="upload-tray-btn" class="btn btn-primary">Upload tray ({{ to_upload }} to upload)</button>
+    <label style="display: flex; gap: 6px; align-items: center; font-size: 13px;" title="On PROD, default behavior skips chips whose QC tests we've already confirmed in HWDB. Check this to walk them anyway — the per-test dedup still protects HWDB from duplicates.">
+        <input type="checkbox" id="force-reupload"> Force re-upload (walk done chips too)
+    </label>
+    <button type="button" id="upload-tray-btn" class="btn btn-primary"
+            title="Default walks {{ upload_count }} chip(s) — {{ new_count }} new + {{ enrich_count }} enrich. {{ done_count }} done chip(s) are skipped unless Force re-upload is on.">Upload tray ({{ upload_count }} chips{% if enrich_count %}: {{ new_count }} new + {{ enrich_count }} enrich{% endif %}{% if done_count %} · {{ done_count }} done skipped{% endif %})</button>
     {% if is_dev %}
     <button type="button" id="upload-random-5-btn" class="btn btn-ghost" title="Pick 5 random chips from this tray and upload them. Dev only — quick feasibility check.">Upload random 5 (dev)</button>
     {% endif %}
@@ -66,7 +70,7 @@
                 <th>Cold</th>
                 <th>RT csv</th>
                 <th>LN csv</th>
-                <th>In HWDB?</th>
+                <th>HWDB state</th>
                 <th></th>
             </tr>
         </thead>
@@ -79,7 +83,11 @@
                 <td class="cell-mono cell-muted">{{ row.chip.cold_tested_at|date:"Y-m-d"|default:"—" }}</td>
                 <td>{% if row.has_rt_csv %}<span class="pill" data-status="pass">✓</span>{% else %}<span class="cell-muted" style="font-size: 12px;">—</span>{% endif %}</td>
                 <td>{% if row.has_ln_csv %}<span class="pill" data-status="pass">✓</span>{% else %}<span class="cell-muted" style="font-size: 12px;">—</span>{% endif %}</td>
-                <td>{% if row.chip.is_in_hwdb %}<span class="pill" data-status="pass">yes</span>{% else %}<span class="pill">no</span>{% endif %}</td>
+                <td>
+                    {% if row.state == "done" %}<span class="pill" data-status="pass" title="In HWDB and our QC tests are confirmed there. Skipped by default — per-chip button or Force re-upload overrides.">done</span>
+                    {% elif row.state == "enrich" %}<span class="pill" title="Component exists in HWDB (likely from FEMB workflow) but our QC tests aren't confirmed there. Upload posts only the missing tests.">enrich</span>
+                    {% else %}<span class="pill">new</span>{% endif %}
+                </td>
                 <td>
                     <button type="button" class="btn btn-sm btn-ghost upload-chip-btn" data-serial="{{ row.chip.serial_number }}">Upload this chip</button>
                 </td>
@@ -117,6 +125,7 @@
         || "";
     const out = document.getElementById('upload-progress');
     const attach = document.getElementById('attach-csvs');
+    const force = document.getElementById('force-reupload');
     const dialog = document.getElementById('prod-gauntlet');
     const tokenEl = document.getElementById('gauntlet-token');
     const messageEl = document.getElementById('gauntlet-message');
@@ -132,6 +141,7 @@
         if (chipSerial) formData.append('chip', chipSerial);
         if (random5) formData.append('random_5', 'on');
         formData.append('attach_csvs', attach.checked ? 'on' : '');
+        if (force?.checked) formData.append('force', 'on');
         let resp;
         try {
             resp = await fetch(runUrl, {method: 'POST', body: formData});
@@ -176,7 +186,7 @@
     }
 
     document.getElementById('upload-tray-btn')?.addEventListener('click', () => {
-        maybePromptThenUpload(null, {{ to_upload }});
+        maybePromptThenUpload(null, {{ upload_count }});
     });
     document.getElementById('upload-random-5-btn')?.addEventListener('click', () => {
         // Dev-only button; no gauntlet (the route only honors random_5 on dev).
