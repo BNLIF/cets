@@ -117,16 +117,17 @@ class FnalDbApiClient:
 
     def attach_test_image(self, test_id, file_path):
         """Multipart POST. ``file_path`` is a filesystem path; the filename
-        becomes the HWDB image_name.
+        becomes the HWDB image_name. Routes through ``self.session`` so the
+        Authorization header (set on session.headers) applies and the
+        keep-alive pool is reused; passing explicit ``headers=`` would
+        override session headers and drop auth.
         """
         url = f"{self.base_url}/component-tests/{test_id}/images"
         path = Path(file_path)
         with path.open("rb") as fp:
             files = {"image": (path.name, fp, "text/csv")}
             try:
-                response = requests.post(
-                    url, headers=self.base_headers, files=files
-                )
+                response = self.session.post(url, files=files)
                 response.raise_for_status()
                 return response.json()
             except requests.exceptions.RequestException:
