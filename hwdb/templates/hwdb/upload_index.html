@@ -6,7 +6,7 @@
 {% block content %}
 <div class="page-head">
     <div>
-        {% crumbs "CETS" "Hardware Database" "LArASIC upload" %}
+        {% crumbs "CETS" "/" "Hardware Database" "/hwdb/" "LArASIC upload" %}
         <h1 class="page-title">LArASIC · HWDB upload</h1>
         <div class="page-subtitle">
             Push RTS-tested chips to the <strong>{{ active_instance }}</strong> HWDB instance, one tray at a time.
@@ -42,10 +42,10 @@
         </thead>
         <tbody>
             {% for t in trays %}
-            <tr>
+            <tr{% if t.to_upload == 0 %} style="background: rgba(76, 175, 80, 0.08);"{% endif %}>
                 <td class="cell-mono"><a href="{% url 'hwdb:upload_tray' t.tray_id %}" style="color: var(--accent); font-weight: 500;">{{ t.tray_id }}</a></td>
                 <td>{{ t.chip_count }}</td>
-                <td>{{ t.to_upload }}</td>
+                <td>{% if t.to_upload == 0 %}<span class="pill" data-status="pass" title="Every chip's QC tests are confirmed in HWDB.">✓ done</span>{% else %}{{ t.to_upload }}{% endif %}</td>
                 <td>{% if t.has_analysis %}<span class="pill" data-status="pass" title="results/ directory exists for this tray — detailed-mode upload available">CSVs</span>{% else %}<span class="cell-muted" style="font-size: 12px;">—</span>{% endif %}</td>
                 <td class="cell-mono cell-muted">{{ t.last_checked|date:"Y-m-d H:i"|default:"—" }}</td>
                 <td><a class="btn btn-sm btn-ghost" href="{% url 'hwdb:upload_tray' t.tray_id %}">Open</a></td>
