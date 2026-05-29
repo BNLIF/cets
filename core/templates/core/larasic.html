@@ -38,7 +38,7 @@
                 <td>{{ t.chip_count }}</td>
                 <td>{{ t.rt_tested }}{% if t.rt_tested != t.chip_count %} <span class="cell-muted" style="font-size: 11px;">/ {{ t.chip_count }}</span>{% endif %}</td>
                 <td>{% if t.ln_tested == 0 %}<span class="cell-muted" style="font-size: 12px;">—</span>{% else %}{{ t.ln_tested }}{% if t.ln_tested != t.chip_count %} <span class="cell-muted" style="font-size: 11px;">/ {{ t.chip_count }}</span>{% endif %}{% endif %}</td>
-                <td>{% if t.has_csv %}<span class="pill" data-status="pass" title="Offline analysis CSVs exist for this tray.">CSVs</span>{% else %}<span class="cell-muted" style="font-size: 12px;">—</span>{% endif %}</td>
+                <td>{% if t.has_csv %}<span class="pill" data-status="new" title="Offline analysis CSVs exist for this tray.">CSV</span>{% else %}<span class="cell-muted" style="font-size: 12px;">—</span>{% endif %}</td>
                 <td class="cell-mono cell-muted">{{ t.last_activity|date:"Y-m-d H:i"|default:"—" }}</td>
             </tr>
             {% empty %}

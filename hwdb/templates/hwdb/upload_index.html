@@ -46,7 +46,7 @@
                 <td class="cell-mono"><a href="{% url 'hwdb:upload_tray' t.tray_id %}" style="color: var(--accent); font-weight: 500;">{{ t.tray_id }}</a></td>
                 <td>{{ t.chip_count }}</td>
                 <td>{% if t.to_upload == 0 %}<span class="pill" data-status="pass" title="Every chip's QC tests are confirmed in HWDB.">✓ done</span>{% else %}{{ t.to_upload }}{% endif %}</td>
-                <td>{% if t.has_analysis %}<span class="pill" data-status="pass" title="results/ directory exists for this tray — detailed-mode upload available">CSVs</span>{% else %}<span class="cell-muted" style="font-size: 12px;">—</span>{% endif %}</td>
+                <td>{% if t.has_analysis %}<span class="pill" data-status="new" title="results/ directory exists for this tray — detailed-mode upload available">CSV</span>{% else %}<span class="cell-muted" style="font-size: 12px;">—</span>{% endif %}</td>
                 <td class="cell-mono cell-muted">{{ t.last_checked|date:"Y-m-d H:i"|default:"—" }}</td>
                 <td><a class="btn btn-sm btn-ghost" href="{% url 'hwdb:upload_tray' t.tray_id %}">Open</a></td>
             </tr>

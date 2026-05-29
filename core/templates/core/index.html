@@ -7,8 +7,7 @@
 <div class="page-head">
     <div>
         {% crumbs "CETS" "Overview" %}
-        <h1 class="page-title">Cold electronics overview</h1>
-        <div class="page-subtitle">Tracking {{ femb_total }} FEMBs · drawn from the live CETS database</div>
+        <h1 class="page-title">Cold Electronics Tracking System</h1>
     </div>
     <div class="page-head-actions">
         <a class="btn btn-ghost" href="{% url 'reference' %}">Reference</a>
@@ -21,39 +20,37 @@
     {% endfor %}
 </div>
 
-<div class="dash-grid">
-    <div style="display: flex; flex-direction: column; gap: 16px;">
-        {% for c in progress_charts %}
-        <div class="panel">
-            <div class="panel-head">
-                <div>
-                    <div class="panel-title"><a href="{{ c.href }}" style="color: inherit;">{{ c.name }}</a></div>
-                    <div style="font-size: 11px; color: var(--text-4); margin-top: 2px;">{{ c.subtitle }}</div>
-                </div>
+<div style="display: flex; flex-direction: column; gap: 16px;">
+    {% for c in progress_charts %}
+    <div class="panel" data-chart-panel="{{ c.slug }}">
+        <div class="panel-head">
+            <div class="panel-title"><a href="{{ c.href }}" style="color: inherit;">{{ c.name }}</a></div>
+            {% if not c.empty %}
+            <div class="chart-range-toggle" role="tablist">
+                <button type="button" data-range="month" class="chart-range-btn">Last month · daily</button>
+                <button type="button" data-range="3month" class="chart-range-btn">Last 3 months · daily</button>
+                <button type="button" data-range="all" class="chart-range-btn is-active">All · monthly</button>
             </div>
-            <div class="panel-body padded">
-                {% if c.empty %}
-                    <div style="padding: 32px 0; text-align: center; color: var(--text-4); font-family: var(--font-mono); font-size: 12px;">No data yet.</div>
-                {% else %}
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                        <div>
-                            <div style="font-size: 11px; color: var(--text-3); margin-bottom: 6px; font-family: var(--font-mono);">Per month</div>
-                            <div style="position: relative; height: 220px;"><canvas id="bar_{{ c.slug }}"></canvas></div>
-                        </div>
-                        <div>
-                            <div style="font-size: 11px; color: var(--text-3); margin-bottom: 6px; font-family: var(--font-mono);">Cumulative</div>
-                            <div style="position: relative; height: 220px;"><canvas id="line_{{ c.slug }}"></canvas></div>
-                        </div>
-                    </div>
-                {% endif %}
-            </div>
+            {% endif %}
         </div>
-        {% endfor %}
+        <div class="panel-body padded">
+            {% if c.empty %}
+                <div style="padding: 32px 0; text-align: center; color: var(--text-4); font-family: var(--font-mono); font-size: 13px;">No data yet.</div>
+            {% else %}
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div>
+                        <div style="font-size: 13px; color: var(--text-3); margin-bottom: 6px; font-family: var(--font-mono);">Per period</div>
+                        <div style="position: relative; height: 280px;"><canvas id="bar_{{ c.slug }}"></canvas></div>
+                    </div>
+                    <div>
+                        <div style="font-size: 13px; color: var(--text-3); margin-bottom: 6px; font-family: var(--font-mono);">Cumulative</div>
+                        <div style="position: relative; height: 280px;"><canvas id="line_{{ c.slug }}"></canvas></div>
+                    </div>
+                </div>
+            {% endif %}
+        </div>
     </div>
-
-    <div>
-        {% activity_panel activity %}
-    </div>
+    {% endfor %}
 </div>
 
 {{ progress_charts|json_script:"progress-chart-configs" }}
@@ -61,33 +58,56 @@
 <script>
 (function () {
     var configs = JSON.parse(document.getElementById('progress-chart-configs').textContent);
-    var common = {
+    var commonOpts = {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-            legend: { position: 'top', labels: { boxWidth: 10, font: { size: 11 } } },
-            tooltip: { intersect: false, mode: 'index' }
+            legend: { position: 'top', labels: { boxWidth: 12, font: { size: 14 }, color: '#3a414b' } },
+            tooltip: { intersect: false, mode: 'index', titleFont: { size: 13 }, bodyFont: { size: 13 } }
         },
-        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+        scales: {
+            x: { ticks: { font: { size: 13 }, color: '#3a414b', maxRotation: 0, autoSkipPadding: 24 } },
+            y: { beginAtZero: true, ticks: { precision: 0, font: { size: 13 }, color: '#3a414b' } }
+        }
     };
+
     configs.forEach(function (c) {
         if (c.empty) return;
+        var defaultRange = 'all';
+        var initial = c.ranges[defaultRange];
+
         var barCanvas = document.getElementById('bar_' + c.slug);
-        if (barCanvas) {
-            new Chart(barCanvas, {
-                type: 'bar',
-                data: { labels: c.labels, datasets: c.bar_datasets },
-                options: common
-            });
-        }
         var lineCanvas = document.getElementById('line_' + c.slug);
-        if (lineCanvas) {
-            new Chart(lineCanvas, {
-                type: 'line',
-                data: { labels: c.labels, datasets: c.line_datasets },
-                options: common
+        if (!barCanvas || !lineCanvas) return;
+
+        var barChart = new Chart(barCanvas, {
+            type: 'bar',
+            data: { labels: initial.labels, datasets: initial.bar_datasets },
+            options: commonOpts
+        });
+        var lineChart = new Chart(lineCanvas, {
+            type: 'line',
+            data: { labels: initial.labels, datasets: initial.line_datasets },
+            options: commonOpts
+        });
+
+        var panel = document.querySelector('[data-chart-panel="' + c.slug + '"]');
+        if (!panel) return;
+        panel.querySelectorAll('.chart-range-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var key = btn.dataset.range;
+                var r = c.ranges[key];
+                if (!r) return;
+                panel.querySelectorAll('.chart-range-btn').forEach(function (b) { b.classList.remove('is-active'); });
+                btn.classList.add('is-active');
+                barChart.data.labels = r.labels;
+                barChart.data.datasets = r.bar_datasets;
+                barChart.update();
+                lineChart.data.labels = r.labels;
+                lineChart.data.datasets = r.line_datasets;
+                lineChart.update();
             });
-        }
+        });
     });
 })();
 </script>

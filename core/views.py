@@ -107,38 +107,49 @@ def home(request):
         r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
         return f"rgba({r},{g},{b},{a})"
 
-    def _chart_config(slug, name, subtitle, href, data):
-        months = data["months"]
+    def _datasets(series):
         bar_ds, line_ds = [], []
-        for s in data["series"]:
+        for s in series:
             color = s["color"]
-            bar_ds.append({"label": s["name"], "data": s["monthly"], "backgroundColor": color})
+            bar_ds.append({
+                "label": s["name"], "data": s["counts"],
+                "backgroundColor": _to_rgba(color, 0.85),
+            })
             line_ds.append({
                 "label": s["name"], "data": s["cumulative"],
-                "borderColor": color, "backgroundColor": _to_rgba(color, 0.15),
-                "tension": 0.2, "fill": True,
+                "borderColor": color, "backgroundColor": _to_rgba(color, 0.18),
+                "tension": 0.2, "fill": True, "pointRadius": 0,
             })
+        return bar_ds, line_ds
+
+    def _chart_config(slug, name, href, ranges):
+        out_ranges = {}
+        has_data = False
+        for key, r in ranges.items():
+            bar_ds, line_ds = _datasets(r["series"])
+            out_ranges[key] = {
+                "labels": r["labels"],
+                "bar_datasets": bar_ds,
+                "line_datasets": line_ds,
+            }
+            if any(any(d["data"]) for d in bar_ds):
+                has_data = True
         return {
-            "slug": slug, "name": name, "subtitle": subtitle, "href": href,
-            "labels": months, "bar_datasets": bar_ds, "line_datasets": line_ds,
-            "empty": not months,
+            "slug": slug, "name": name, "href": href,
+            "ranges": out_ranges,
+            "empty": not has_data,
         }
 
     progress_charts = [
-        _chart_config("larasic", "LArASIC", "RTS warm / cold tests per month",
-                      reverse("larasic"), queries.larasic_progress_monthly()),
-        _chart_config("femb", "FEMB", "Unique FEMBs tested per month",
-                      reverse("femb"), queries.femb_progress_monthly()),
-        _chart_config("cable", "Cable", "Unique cables tested per month",
-                      reverse("cable"), queries.cable_progress_monthly()),
+        _chart_config("larasic", "LArASIC", reverse("larasic"), queries.larasic_progress()),
+        _chart_config("femb", "FEMB", reverse("femb"), queries.femb_progress()),
+        _chart_config("cable", "Cable", reverse("cable"), queries.cable_progress()),
     ]
 
     context = {
         "page": "home",
-        "femb_total": femb_total,
         "stat_cards": stat_cards,
         "progress_charts": progress_charts,
-        "activity": queries.recent_activity(limit=10),
     }
     return render(request, "core/index.html", context)
 
@@ -412,7 +423,6 @@ def _family_list_response(
     date_range_field=None,
     page_size=FAMILY_PAGE_SIZE,
     extra_context=None,
-    activity_prefix=None,
 ):
     """Shared scaffolding for family list pages (LArASIC, ColdADC, COLDATA, Cable).
 
@@ -468,7 +478,6 @@ def _family_list_response(
         "since": since.isoformat() if since else "",
         "until": until.isoformat() if until else "",
     }
-    context["activity"] = queries.recent_activity(limit=10, target_prefix=activity_prefix)
     if extra_context:
         context.update(extra_context)
 
@@ -526,7 +535,6 @@ def femb(request):
         "until": until.isoformat() if until else "",
         "version_options": [{"value": v, "label": v} for v in versions],
         "femb_total": FEMB.objects.count(),
-        "activity": queries.recent_activity(limit=10, target_prefix="FEMB"),
     }
     template = "core/_femb_list_fragment.html" if getattr(request, "htmx", False) else "core/femb.html"
     return render(request, template, context)
@@ -555,7 +563,6 @@ def cable(request):
         search_fields=("serial_number",),
         filter_specs=(("batch", "batch_number"),),
         date_range_field="latest_test_timestamp",
-        activity_prefix="Cable",
         extra_context={
             "family_label": "Cable",
             "family_title": "Cold cables",
@@ -622,11 +629,6 @@ def femb_detail(request, version, serial_number):
     larasics = femb.larasic_set.filter(removed_at_repair__isnull=True).order_by("femb_pos")
     coldadcs = femb.coldadc_set.filter(removed_at_repair__isnull=True).order_by("femb_pos")
     coldatas = femb.coldata_set.filter(removed_at_repair__isnull=True).order_by("femb_pos")
-    info_cells = [
-        {"label": "VERSION", "value": femb.version, "is_pill": False},
-        {"label": "STATUS", "value": femb.status, "is_pill": True},
-        {"label": "LAST UPDATE", "value": femb.last_update.strftime("%Y-%m-%d %H:%M:%S"), "is_pill": False},
-    ]
     context = {
         "femb": femb,
         "femb_tests": femb_tests,
@@ -634,7 +636,6 @@ def femb_detail(request, version, serial_number):
         "larasics": larasics,
         "coldadcs": coldadcs,
         "coldatas": coldatas,
-        "info_cells": info_cells,
         "page": "femb",
     }
     return render(request, "core/femb_detail.html", context)
