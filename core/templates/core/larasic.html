@@ -1,45 +1,21 @@
 {% extends 'core/base.html' %}
 {% load components %}
 
-{% block title %}CETS — LArASIC HWDB sync{% endblock %}
+{% block title %}CETS — LArASIC{% endblock %}
 
 {% block content %}
 <div class="page-head">
     <div>
-        {% crumbs "CETS" "/" "Hardware Database" "/hwdb/" "LArASIC" %}
-        <h1 class="page-title">LArASIC · HWDB sync</h1>
-        <div class="page-subtitle">
-            Local chips vs the <strong>production</strong> HWDB ·
-            {% if last_synced %}last synced {{ last_synced|date:"Y-m-d H:i" }}{% else %}never synced{% endif %}
-        </div>
+        {% crumbs "CETS" "/" "LArASIC" %}
+        <h1 class="page-title">Frontend ASICs</h1>
+        <div class="page-subtitle">16-channel cold front-end ASICs · {{ total_count }} tracked</div>
     </div>
-    <div class="page-head-actions">
-        <a class="btn btn-ghost" href="{% url 'hwdb:upload_index' %}">Upload →</a>
-        {% if active_instance == "prod" %}
-        <form method="post" action="{% url 'hwdb:larasic_sync' %}">
-            {% csrf_token %}
-            <button class="btn btn-primary" type="submit">Sync with HWDB</button>
-        </form>
-        {% else %}
-        <span class="cell-muted" style="font-size: 12px;">Switch to <span class="cell-mono">prod</span> to sync the upload worklist</span>
-        {% endif %}
-    </div>
-</div>
-
-<div class="stats" style="margin-bottom: 20px;">
-    <div class="stat"><div class="stat-label">Local total</div><div class="stat-value">{{ total }}</div></div>
-    <div class="stat"><div class="stat-label">In HWDB</div><div class="stat-value">{{ in_hwdb }}</div></div>
-    <div class="stat"><div class="stat-label">To upload</div><div class="stat-value">{{ to_upload }}</div></div>
-    <div class="stat"><div class="stat-label">In HWDB only</div><div class="stat-value">{{ hwdb_only }}</div><div class="stat-foot">in prod HWDB, not local</div></div>
 </div>
 
 <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 12px;">
     <span class="cell-muted" style="font-size: 12px;">Group by</span>
     <a class="btn btn-sm {% if view == 'tray' %}btn-primary{% else %}btn-ghost{% endif %}" href="?view=tray">Tray</a>
     <a class="btn btn-sm {% if view == 'femb' %}btn-primary{% else %}btn-ghost{% endif %}" href="?view=femb">FEMB</a>
-    <span class="cell-muted" style="font-size: 12px; margin-left: 8px;">
-        <a href="{% url 'hwdb:component_list' larasic_part_type %}">raw HWDB records ({{ active_instance }}) →</a>
-    </span>
 </div>
 
 {% if view == 'tray' %}
@@ -51,18 +27,18 @@
                 <th>Chips</th>
                 <th>RT tested</th>
                 <th>LN tested</th>
-                <th>In HWDB</th>
+                <th>CSV report</th>
                 <th>Last activity</th>
             </tr>
         </thead>
         <tbody>
             {% for t in tray_rows %}
             <tr>
-                <td class="cell-mono"><a href="{% url 'hwdb:upload_tray' t.tray_id %}" style="color: var(--accent); font-weight: 500;">{{ t.tray_id }}</a></td>
+                <td class="cell-mono"><a href="{% url 'larasic_tray' t.tray_id %}" style="color: var(--accent); font-weight: 500;">{{ t.tray_id }}</a></td>
                 <td>{{ t.chip_count }}</td>
                 <td>{{ t.rt_tested }}{% if t.rt_tested != t.chip_count %} <span class="cell-muted" style="font-size: 11px;">/ {{ t.chip_count }}</span>{% endif %}</td>
                 <td>{% if t.ln_tested == 0 %}<span class="cell-muted" style="font-size: 12px;">—</span>{% else %}{{ t.ln_tested }}{% if t.ln_tested != t.chip_count %} <span class="cell-muted" style="font-size: 11px;">/ {{ t.chip_count }}</span>{% endif %}{% endif %}</td>
-                <td>{% if t.in_hwdb_count == t.chip_count %}<span class="pill" data-status="pass">{{ t.in_hwdb_count }}</span>{% else %}{{ t.in_hwdb_count }} <span class="cell-muted" style="font-size: 11px;">/ {{ t.chip_count }}</span>{% endif %}</td>
+                <td>{% if t.has_csv %}<span class="pill" data-status="pass" title="Offline analysis CSVs exist for this tray.">CSVs</span>{% else %}<span class="cell-muted" style="font-size: 12px;">—</span>{% endif %}</td>
                 <td class="cell-mono cell-muted">{{ t.last_activity|date:"Y-m-d H:i"|default:"—" }}</td>
             </tr>
             {% empty %}
@@ -78,7 +54,6 @@
             <tr>
                 <th>FEMB</th>
                 <th>LArASICs</th>
-                <th>In HWDB</th>
                 <th>QC tests</th>
                 <th>CHK tests</th>
                 <th>Latest test</th>
@@ -89,13 +64,12 @@
             <tr>
                 <td class="cell-mono"><a href="{% url 'femb_detail' r.femb.version r.femb.serial_number %}" style="color: var(--accent); font-weight: 500;">{{ r.femb.version }}/{{ r.femb.serial_number }}</a></td>
                 <td>{{ r.chip_count }}<span class="cell-muted" style="font-size: 11px;">/8</span></td>
-                <td>{% if r.in_hwdb_count == r.chip_count %}<span class="pill" data-status="pass">{{ r.in_hwdb_count }}</span>{% else %}{{ r.in_hwdb_count }} <span class="cell-muted" style="font-size: 11px;">/ {{ r.chip_count }}</span>{% endif %}</td>
                 <td>{{ r.qc }}</td>
                 <td>{{ r.chk }}</td>
                 <td class="cell-mono cell-muted">{{ r.latest_test|date:"Y-m-d H:i"|default:"—" }}</td>
             </tr>
             {% empty %}
-            <tr><td colspan="6" class="cell-muted" style="text-align: center; padding: 36px;">No FEMBs with LArASICs assigned.</td></tr>
+            <tr><td colspan="5" class="cell-muted" style="text-align: center; padding: 36px;">No FEMBs with LArASICs assigned.</td></tr>
             {% endfor %}
         </tbody>
     </table>

@@ -61,9 +61,17 @@ class SyncLogicTest(TestCase):
 
 class LarasicViewTest(TestCase):
     def setUp(self):
+        from datetime import datetime, timezone
         self.client.force_login(get_user_model().objects.create_user("guest", password="x"))
-        LArASIC.objects.create(serial_number="002-00001", is_in_hwdb=True)
-        LArASIC.objects.create(serial_number="002-00002", is_in_hwdb=False)
+        LArASIC.objects.create(
+            serial_number="002-00001", tray_id="B005T0011", is_in_hwdb=True,
+            warm_tested_at=datetime(2025, 9, 24, 16, 59, 20, tzinfo=timezone.utc),
+            cold_tested_at=datetime(2025, 9, 25, 10, 0, 0, tzinfo=timezone.utc),
+        )
+        LArASIC.objects.create(
+            serial_number="002-00002", tray_id="B005T0011", is_in_hwdb=False,
+            warm_tested_at=datetime(2025, 9, 24, 17, 0, 0, tzinfo=timezone.utc),
+        )
 
     def test_summary_counts(self):
         resp = self.client.get(reverse("hwdb:larasic"))
@@ -72,10 +80,28 @@ class LarasicViewTest(TestCase):
         self.assertEqual(resp.context["in_hwdb"], 1)
         self.assertEqual(resp.context["to_upload"], 1)
 
-    def test_default_shows_to_upload(self):
+    def test_default_view_is_tray_grouping(self):
         resp = self.client.get(reverse("hwdb:larasic"))
-        chips = list(resp.context["page_obj"])
-        self.assertEqual([c.serial_number for c in chips], ["002-00002"])
+        self.assertEqual(resp.context["view"], "tray")
+        tray_rows = resp.context["tray_rows"]
+        self.assertEqual(len(tray_rows), 1)
+        row = tray_rows[0]
+        self.assertEqual(row["tray_id"], "B005T0011")
+        self.assertEqual(row["chip_count"], 2)
+        self.assertEqual(row["rt_tested"], 2)
+        self.assertEqual(row["ln_tested"], 1)
+        # last_activity = max across all chips on the tray.
+        self.assertEqual(row["last_activity"].day, 25)
+
+    def test_femb_view_groups_by_femb(self):
+        from core.models import FEMB
+        f = FEMB.objects.create(version="IO-1865-1L", serial_number="00039")
+        LArASIC.objects.filter(serial_number="002-00001").update(femb=f)
+        resp = self.client.get(reverse("hwdb:larasic") + "?view=femb")
+        self.assertEqual(resp.context["view"], "femb")
+        femb_rows = resp.context["femb_rows"]
+        self.assertEqual(len(femb_rows), 1)
+        self.assertEqual(femb_rows[0]["chip_count"], 1)
 
     def test_view_is_not_fnal_gated(self):
         # Reads the local flag only; no redirect to link.

@@ -1,0 +1,43 @@
+{% extends 'core/base.html' %}
+{% load components %}
+
+{% block title %}CETS — Tray {{ tray_id }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div>
+        {% crumbs "CETS" "/" "LArASIC" "/larasic/" tray_id %}
+        <h1 class="page-title">Tray {{ tray_id }}</h1>
+        <div class="page-subtitle">
+            {{ chip_count }} chips · RT tested {{ rt_tested }}{% if rt_tested != chip_count %} / {{ chip_count }}{% endif %} · LN tested {{ ln_tested }}{% if ln_tested != chip_count %} / {{ chip_count }}{% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="table-wrap">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Serial number</th>
+                <th>Status</th>
+                <th>Warm tested</th>
+                <th>Cold tested</th>
+                <th>Last update</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for chip in chips %}
+            <tr onclick="window.location='{% url 'larasic_detail' chip.serial_number %}'">
+                <td><a class="cell-mono" style="color: var(--accent); font-weight: 500;" href="{% url 'larasic_detail' chip.serial_number %}" onclick="event.stopPropagation()">{{ chip.serial_number }}</a></td>
+                <td>{{ chip.status }}</td>
+                <td class="cell-mono cell-muted">{{ chip.warm_tested_at|date:"Y-m-d H:i"|default:"—" }}</td>
+                <td class="cell-mono cell-muted">{{ chip.cold_tested_at|date:"Y-m-d H:i"|default:"—" }}</td>
+                <td class="cell-mono cell-muted">{{ chip.last_update|date:"Y-m-d H:i" }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5" class="cell-muted" style="text-align: center; padding: 36px;">No chips on this tray.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

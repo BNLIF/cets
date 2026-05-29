@@ -11,7 +11,7 @@ from django.utils.html import escape
 from .models import LArASIC, ColdADC, COLDATA, FEMB, FembRepair, FembTest, CABLE, CableTest
 from . import queries
 from decouple import config
-from django.db.models import Subquery, OuterRef, Q
+from django.db.models import Subquery, OuterRef, Q, Count, Max
 from rest_framework.permissions import IsAdminUser, AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from .serializers import FEMBSerializer
@@ -245,29 +245,91 @@ def _tray_options(model):
 
 
 def larasic(request):
-    return _family_list_response(
-        request,
-        queryset=LArASIC.objects.select_related("femb"),
-        sort_keys=_CHIP_SORT_KEYS,
-        page_id="larasic",
-        full_template="core/_chip_list_page.html",
-        fragment_template="core/_chip_list_fragment.html",
-        default_sort="last_update",
-        default_dir="desc",
-        search_fields=("serial_number", "femb__serial_number", "tray_id"),
-        filter_specs=(("femb", "femb__serial_number"), ("tray", "tray_id")),
-        date_range_field="last_update",
-        extra_context={
-            "family_label": "LArASIC",
-            "family_title": "Frontend ASICs",
-            "family_subtitle": "16-channel cold front-end ASICs",
-            "total_count": LArASIC.objects.count(),
-            "femb_options": _femb_options(),
-            "tray_options": _tray_options(LArASIC),
-            "detail_url_name": "larasic_detail",
-            "show_hwdb": True,
-        },
-    )
+    """Group LArASIC chips by tray (default) or by FEMB. Drilling into a tray
+    opens the per-tray page in the hwdb app; drilling into a FEMB opens the
+    existing femb_detail page. No HWDB-status columns here — this is the
+    general browse view, /hwdb/larasic/ is the HWDB-focused one.
+    """
+    view = request.GET.get("view", "tray")
+    if view not in {"tray", "femb"}:
+        view = "tray"
+
+    tray_rows = []
+    femb_rows = []
+
+    if view == "tray":
+        rows = list(
+            LArASIC.objects.exclude(tray_id="").values("tray_id").annotate(
+                chip_count=Count("id"),
+                rt_tested=Count("id", filter=Q(warm_tested_at__isnull=False)),
+                ln_tested=Count("id", filter=Q(cold_tested_at__isnull=False)),
+                latest_warm=Max("warm_tested_at"),
+                latest_cold=Max("cold_tested_at"),
+            ).order_by("-tray_id")
+        )
+        # Flag trays with offline analysis CSVs — sourced from the persistent
+        # TrayCsvCache the upload page maintains. One DB query, no SMB stats.
+        from hwdb.upload import larasic as upload_lib
+        with_csvs = upload_lib.trays_with_analysis([r["tray_id"] for r in rows])
+        for r in rows:
+            w, c = r["latest_warm"], r["latest_cold"]
+            r["last_activity"] = max(w, c) if w and c else (w or c)
+            r["has_csv"] = r["tray_id"] in with_csvs
+        tray_rows = rows
+    else:
+        chip_counts = dict(
+            LArASIC.objects.filter(removed_at_repair__isnull=True, femb__isnull=False)
+            .values("femb").annotate(n=Count("id")).values_list("femb", "n")
+        )
+        qc_counts = dict(
+            FembTest.objects.filter(test_type="QC").values("femb")
+            .annotate(n=Count("id")).values_list("femb", "n")
+        )
+        chk_counts = dict(
+            FembTest.objects.filter(test_type="CHK").values("femb")
+            .annotate(n=Count("id")).values_list("femb", "n")
+        )
+        latest_test = dict(
+            FembTest.objects.values("femb").annotate(t=Max("timestamp"))
+            .values_list("femb", "t")
+        )
+        fembs = (
+            FEMB.objects.filter(pk__in=chip_counts.keys())
+            .order_by("version", "serial_number")
+        )
+        for f in fembs:
+            femb_rows.append({
+                "femb": f,
+                "chip_count": chip_counts.get(f.pk, 0),
+                "latest_test": latest_test.get(f.pk),
+                "qc": qc_counts.get(f.pk, 0),
+                "chk": chk_counts.get(f.pk, 0),
+            })
+
+    return render(request, "core/larasic.html", {
+        "view": view,
+        "tray_rows": tray_rows,
+        "femb_rows": femb_rows,
+        "total_count": LArASIC.objects.count(),
+        "page": "larasic",
+    })
+
+
+def larasic_tray(request, tray_id):
+    """Per-tray chip list — general browse, no HWDB exposure. Reached from
+    the tray rows on /larasic/.
+    """
+    chips = LArASIC.objects.filter(tray_id=tray_id).order_by("serial_number")
+    rt_tested = chips.filter(warm_tested_at__isnull=False).count()
+    ln_tested = chips.filter(cold_tested_at__isnull=False).count()
+    return render(request, "core/larasic_tray.html", {
+        "tray_id": tray_id,
+        "chips": chips,
+        "chip_count": chips.count(),
+        "rt_tested": rt_tested,
+        "ln_tested": ln_tested,
+        "page": "larasic",
+    })
 
 
 def coldadc(request):

@@ -6,7 +6,6 @@ from urllib.parse import urlencode
 
 from decouple import config as env_config
 from django.conf import settings
-from django.core.paginator import Paginator
 from django.db.models import Count, Max, Q
 from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import redirect, render
@@ -15,7 +14,7 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
-from core.models import LArASIC
+from core.models import LArASIC, FEMB, FembTest
 
 from .api_client import FnalDbApiClient
 from .fnal import flow
@@ -77,37 +76,93 @@ def set_instance(request):
 
 
 def larasic_view(request):
-    """LArASIC HWDB sync summary. Local-only read of the is_in_hwdb flag (no
-    FNAL call), so it's not gated — only the Sync action hits the API."""
+    """Browse local LArASIC chips, grouped either by tray (default) or by the
+    FEMB they're installed on. Drilling into a tray opens the per-tray upload
+    page; drilling into a FEMB opens the existing femb_detail page.
+
+    Sync stats (Local total / In HWDB / To upload / In HWDB only) stay at the
+    top — local-only read of the is_in_hwdb flag, so the page itself is not
+    FNAL-gated. Only the Sync button hits the API.
+    """
+    view = request.GET.get("view", "tray")
+    if view not in {"tray", "femb"}:
+        view = "tray"
+
     qs = LArASIC.objects.all()
     total = qs.count()
     in_hwdb = qs.filter(is_in_hwdb=True).count()
     last_synced = qs.aggregate(Max("hwdb_checked_at"))["hwdb_checked_at__max"]
     hwdb_only = LarasicSyncState.get().hwdb_only_count
 
-    show = request.GET.get("show", "to_upload")
-    if show == "in_hwdb":
-        chips = qs.filter(is_in_hwdb=True)
-    elif show == "all":
-        chips = qs
+    tray_rows = []
+    femb_rows = []
+
+    if view == "tray":
+        # Per-tray summary: chip count + how many have RT/LN tests in the
+        # local DB, plus the latest tested-at timestamp on the tray.
+        rows = list(
+            qs.exclude(tray_id="").values("tray_id").annotate(
+                chip_count=Count("id"),
+                rt_tested=Count("id", filter=Q(warm_tested_at__isnull=False)),
+                ln_tested=Count("id", filter=Q(cold_tested_at__isnull=False)),
+                in_hwdb_count=Count("id", filter=Q(is_in_hwdb=True)),
+                latest_warm=Max("warm_tested_at"),
+                latest_cold=Max("cold_tested_at"),
+            ).order_by("-tray_id")
+        )
+        for r in rows:
+            warm, cold = r["latest_warm"], r["latest_cold"]
+            r["last_activity"] = max(warm, cold) if warm and cold else (warm or cold)
+        tray_rows = rows
     else:
-        show = "to_upload"
-        chips = qs.filter(is_in_hwdb=False)
-    page_obj = Paginator(chips.order_by("serial_number"), 100).get_page(
-        request.GET.get("page")
-    )
+        # Per-FEMB summary: chip count (out of 8 slots), latest FembTest, plus
+        # how many QC and CHK FembTests have been recorded on each FEMB.
+        chip_counts = dict(
+            LArASIC.objects.filter(removed_at_repair__isnull=True, femb__isnull=False)
+            .values("femb").annotate(n=Count("id")).values_list("femb", "n")
+        )
+        in_hwdb_counts = dict(
+            LArASIC.objects.filter(removed_at_repair__isnull=True, femb__isnull=False, is_in_hwdb=True)
+            .values("femb").annotate(n=Count("id")).values_list("femb", "n")
+        )
+        qc_counts = dict(
+            FembTest.objects.filter(test_type="QC").values("femb")
+            .annotate(n=Count("id")).values_list("femb", "n")
+        )
+        chk_counts = dict(
+            FembTest.objects.filter(test_type="CHK").values("femb")
+            .annotate(n=Count("id")).values_list("femb", "n")
+        )
+        latest_test = dict(
+            FembTest.objects.values("femb").annotate(t=Max("timestamp"))
+            .values_list("femb", "t")
+        )
+        fembs = (
+            FEMB.objects.filter(pk__in=chip_counts.keys())
+            .order_by("version", "serial_number")
+        )
+        for f in fembs:
+            femb_rows.append({
+                "femb": f,
+                "chip_count": chip_counts.get(f.pk, 0),
+                "in_hwdb_count": in_hwdb_counts.get(f.pk, 0),
+                "latest_test": latest_test.get(f.pk),
+                "qc": qc_counts.get(f.pk, 0),
+                "chk": chk_counts.get(f.pk, 0),
+            })
 
     return render(
         request,
         "hwdb/larasic.html",
         {
+            "view": view,
             "total": total,
             "in_hwdb": in_hwdb,
             "to_upload": total - in_hwdb,
             "hwdb_only": hwdb_only,
             "last_synced": last_synced,
-            "page_obj": page_obj,
-            "show": show,
+            "tray_rows": tray_rows,
+            "femb_rows": femb_rows,
             "larasic_part_type": active_profile(request)["larasic_part_type"],
             "active_instance": active_instance(request),
             "page": "hwdb",

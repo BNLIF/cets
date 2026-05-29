@@ -17,14 +17,15 @@ class LarasicBadgeTest(TestCase):
     def setUp(self):
         self.client.force_login(get_user_model().objects.create_user("guest", password="x"))
 
-    def test_list_shows_in_hwdb_column(self):
+    def test_list_omits_in_hwdb_column(self):
+        # General /larasic/ is for chip browsing — HWDB sync status lives on
+        # /hwdb/larasic/ instead. Was added under #15, removed once the HWDB
+        # grouping page took over the role.
         LArASIC.objects.create(serial_number="002-00001", is_in_hwdb=True)
         LArASIC.objects.create(serial_number="002-00002", is_in_hwdb=False)
         resp = self.client.get(reverse("larasic"))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "In HWDB")
-        self.assertContains(resp, ">yes<")
-        self.assertContains(resp, ">no<")
+        self.assertNotContains(resp, "In HWDB")
 
     def test_coldadc_list_has_no_in_hwdb_column(self):
         ColdADC.objects.create(serial_number="2502-00001")
