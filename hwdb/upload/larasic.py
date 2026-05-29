@@ -306,26 +306,54 @@ def build_datasheet_detailed(chip, csv_path: Path) -> dict:
 # ---- Test post + attach --------------------------------------------------
 
 
+def _is_detailed_record(test_data: dict) -> bool:
+    """Detailed records carry per-channel readings; simple-mode records don't.
+    ``CH0 Pedestal`` is the cheapest signature field to check.
+    """
+    return "CH0 Pedestal" in test_data
+
+
 def find_existing_test(
-    api, part_id: str, test_type_id: int, test_date: str, test_time: str
+    api, part_id: str, test_type_id: int, test_date: str, test_time: str,
+    *, posting_mode: str = "simple", force_csv_attach: bool = False,
 ) -> int | None:
-    """Return the ``test_id`` of an existing test of this type with matching
-    Test Date / Test Time, else ``None``.
+    """Return the ``test_id`` that would shadow this new post, else ``None``.
 
     HWDB does NOT dedup test POSTs server-side (probe 3, 2026-05-28): the
     same ``(type, date, time)`` POSTed twice creates two records. So every
     upload must check before posting — Karla's ``isTestInHWDB`` flow.
 
-    Uses the per-type endpoint (``/components/{id}/tests/{type_id}``) which
-    returns records in a known shape we can match on. The combined
-    ``/components/{id}/tests`` endpoint returns "last instance of each type"
-    in a different shape that we don't reliably parse, so we don't use it.
+    Shape-aware matching: simple and detailed-mode records share the same
+    ``(type, date, time)`` (both derive from the chip's warm/cold timestamp).
+    So matching on those three alone would block the "simple now, detailed
+    when CSV arrives" upgrade. Rules:
+
+    - Posting **simple**: any existing record (simple or detailed) shadows
+      the new post — detailed already supersedes simple.
+    - Posting **detailed** over a **simple** existing record: not a match;
+      the detailed upload should go through (upgrades the chip's QA/QC story).
+      HWDB will hold both records in history; queries return the latest.
+    - Posting **detailed** over a **detailed** existing record: dedup as
+      before — unless ``force_csv_attach=True``, in which case we re-post
+      to retry the CSV attachment (useful when a prior detailed upload
+      posted the test but the CSV attach silently failed).
     """
     body = api.get_tests(part_id, test_type_id=test_type_id, history=True)
     for t in body.get("data") or []:
         td = t.get("test_data") or {}
-        if td.get("Test Date") == test_date and td.get("Test Time") == test_time:
+        if td.get("Test Date") != test_date or td.get("Test Time") != test_time:
+            continue
+        existing_detailed = _is_detailed_record(td)
+        if posting_mode == "simple":
             return int(t["id"])
+        # posting_mode == "detailed":
+        if not existing_detailed:
+            # Existing is simple, we're upgrading to detailed → don't dedup.
+            continue
+        if force_csv_attach:
+            # User wants to re-post detailed to retry CSV attach → don't dedup.
+            continue
+        return int(t["id"])
     return None
 
 
@@ -533,6 +561,7 @@ def upload_chip(
     attach_csvs: bool = True,
     test_type_ids: Optional[dict[str, int]] = None,
     operator_name: str = "",
+    force_csv_attach: bool = False,
 ) -> ChipResult:
     """Upload one chip end-to-end: find-or-create + status + location + tests.
 
@@ -597,13 +626,16 @@ def upload_chip(
                 )
             test_type_name = d["warm_test_name"] if env == "RT" else d["cold_test_name"]
 
-            # HWDB doesn't dedup (probe 3, 2026-05-28). Skip if a test of this
-            # type with the same Test Date/Time already exists on this item.
+            # HWDB doesn't dedup (probe 3, 2026-05-28). Skip if an existing
+            # record of this type would shadow this one. Shape-aware: detailed
+            # uploads can supersede simple ones (see find_existing_test).
             # Freshly-created chips can't have prior tests, so skip the GET.
             existing_id = (
                 None if created else find_existing_test(
                     api, part_id, test_type_ids[env],
                     sheet["Test Date"], sheet["Test Time"],
+                    posting_mode=mode,
+                    force_csv_attach=force_csv_attach,
                 )
             )
             if existing_id is not None:
@@ -673,6 +705,7 @@ def iter_upload_chips_parallel(
     test_type_ids: dict[str, int],
     operator_name: str = "",
     workers: int = 10,
+    force_csv_attach: bool = False,
 ) -> Iterator[tuple]:
     """Run ``upload_chip`` across ``chips`` in a thread pool. Yields
     ``(chip, ChipResult)`` tuples in **completion order**, not input order.
@@ -702,6 +735,7 @@ def iter_upload_chips_parallel(
             attach_csvs=attach_csvs,
             test_type_ids=test_type_ids,
             operator_name=operator_name,
+            force_csv_attach=force_csv_attach,
         )
 
     with ThreadPoolExecutor(max_workers=workers, initializer=_init) as pool:

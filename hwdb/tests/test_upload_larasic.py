@@ -418,6 +418,131 @@ class UploadChipTest(TestCase):
         self.assertEqual(result.tests[0].test_id, 59920)
         api.post_test.assert_not_called()
 
+    def test_detailed_upgrade_over_simple_posts_a_new_record(self):
+        # Common workflow: simple-mode record was uploaded earlier (no CSV
+        # available), now the analysis CSV exists and we want to add the
+        # detailed record. find_existing_test must NOT dedup the detailed
+        # post against an existing simple record at the same (type, date,
+        # time) — they intentionally share that key.
+        import tempfile
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, str(tmp))
+        rts_root = tmp
+        tray = "B005T0011"
+        (tmp / tray / "results").mkdir(parents=True)
+        _sample_csv(tmp / tray / "results", serial="002_00797")
+
+        existing_simple = {
+            "data": [
+                {
+                    "id": 59920,
+                    "test_data": {
+                        "Test Date": "2025/09/24",
+                        "Test Time": "16:59:20",
+                        # No CH0 Pedestal — this is a simple record.
+                        "LArASIC Serial Number": "002-00797",
+                    },
+                }
+            ]
+        }
+        api = self._api(
+            existing={"part_id": "D08100100004-00042"},
+            existing_tests=existing_simple,
+        )
+        api.attach_test_image.return_value = {"status": "OK", "image_id": 1}
+        chip = _chip(
+            serial="002-00797", tray=tray,
+            warm=datetime(2025, 9, 24, 16, 59, 20, tzinfo=timezone.utc),
+        )
+        result = larasic.upload_chip(
+            api, chip, part_type_id="D08100100004", instance="dev", rts_root=rts_root,
+        )
+        self.assertTrue(result.ok, result)
+        self.assertEqual(result.tests[0].mode, "detailed")
+        self.assertFalse(result.tests[0].skipped)
+        api.post_test.assert_called_once()  # detailed POSTed, not dedup'd
+
+    def test_detailed_dedups_against_existing_detailed(self):
+        # Two detailed records at the same (type, date, time) is the dup we
+        # want to avoid. With a CH0 Pedestal field in the existing record we
+        # recognize it as detailed and skip.
+        import tempfile
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, str(tmp))
+        rts_root = tmp
+        tray = "B005T0011"
+        (tmp / tray / "results").mkdir(parents=True)
+        _sample_csv(tmp / tray / "results", serial="002_00797")
+
+        existing_detailed = {
+            "data": [
+                {
+                    "id": 59920,
+                    "test_data": {
+                        "Test Date": "2025/09/24",
+                        "Test Time": "16:59:20",
+                        "CH0 Pedestal": 600,  # the signature field
+                    },
+                }
+            ]
+        }
+        api = self._api(
+            existing={"part_id": "D08100100004-00042"},
+            existing_tests=existing_detailed,
+        )
+        chip = _chip(
+            serial="002-00797", tray=tray,
+            warm=datetime(2025, 9, 24, 16, 59, 20, tzinfo=timezone.utc),
+        )
+        result = larasic.upload_chip(
+            api, chip, part_type_id="D08100100004", instance="dev", rts_root=rts_root,
+        )
+        self.assertTrue(result.tests[0].skipped)
+        api.post_test.assert_not_called()
+
+    def test_force_csv_attach_reposts_detailed_record(self):
+        # Escape hatch when a prior detailed upload's CSV attach silently
+        # failed: re-post the detailed test (creates a duplicate by design;
+        # latest wins for HWDB queries).
+        import tempfile
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, str(tmp))
+        rts_root = tmp
+        tray = "B005T0011"
+        (tmp / tray / "results").mkdir(parents=True)
+        _sample_csv(tmp / tray / "results", serial="002_00797")
+
+        existing_detailed = {
+            "data": [
+                {
+                    "id": 59920,
+                    "test_data": {
+                        "Test Date": "2025/09/24",
+                        "Test Time": "16:59:20",
+                        "CH0 Pedestal": 600,
+                    },
+                }
+            ]
+        }
+        api = self._api(
+            existing={"part_id": "D08100100004-00042"},
+            existing_tests=existing_detailed,
+        )
+        api.attach_test_image.return_value = {"status": "OK", "image_id": 1}
+        chip = _chip(
+            serial="002-00797", tray=tray,
+            warm=datetime(2025, 9, 24, 16, 59, 20, tzinfo=timezone.utc),
+        )
+        result = larasic.upload_chip(
+            api, chip, part_type_id="D08100100004", instance="dev",
+            rts_root=rts_root, force_csv_attach=True,
+        )
+        self.assertTrue(result.ok, result)
+        self.assertEqual(result.tests[0].mode, "detailed")
+        self.assertFalse(result.tests[0].skipped)
+        api.post_test.assert_called_once()
+        api.attach_test_image.assert_called_once()
+
     def test_csv_detected_uses_detailed_mode_and_attaches(self):
         import tempfile
         tmp = Path(tempfile.mkdtemp())

@@ -566,7 +566,7 @@ def upload_tray_view(request, tray_id):
     )
 
 
-def _stream_upload(api, chips, *, part_type_id, rts_root, attach_csvs, instance, tray_id, operator_name):
+def _stream_upload(api, chips, *, part_type_id, rts_root, attach_csvs, instance, tray_id, operator_name, force_csv_attach=False):
     """Generator that yields per-chip progress lines for ``upload_run_view``.
 
     Per Q9 error policy: continue past per-chip errors with a clear line, no
@@ -602,6 +602,7 @@ def _stream_upload(api, chips, *, part_type_id, rts_root, attach_csvs, instance,
                 attach_csvs=attach_csvs,
                 test_type_ids=test_type_ids,
                 operator_name=operator_name,
+                force_csv_attach=force_csv_attach,
             )
         except Exception as e:
             failed += 1
@@ -649,7 +650,7 @@ def _stream_upload(api, chips, *, part_type_id, rts_root, attach_csvs, instance,
 
 def _stream_upload_parallel(
     *, base_url, bearer, chips, part_type_id, rts_root, attach_csvs,
-    instance, tray_id, operator_name, workers,
+    instance, tray_id, operator_name, workers, force_csv_attach=False,
 ):
     """Parallel sibling of ``_stream_upload``. Same UX (per-chip line +
     final tally) but lines arrive in completion order with a monotonic
@@ -690,6 +691,7 @@ def _stream_upload_parallel(
         test_type_ids=test_type_ids,
         operator_name=operator_name,
         workers=workers,
+        force_csv_attach=force_csv_attach,
     ):
         done += 1
         prefix = f"[done {done}/{total}] {chip.serial_number}: "
@@ -777,6 +779,11 @@ def upload_run_view(request, tray_id):
         chips = list(chips_qs)
 
     attach_csvs = request.POST.get("attach_csvs", "on") == "on"
+    # Re-post detailed-mode tests even if a detailed record already exists.
+    # Used to retry CSV attachment when a prior detailed upload's attach
+    # silently failed. Posts a duplicate test record by design (probe 3:
+    # HWDB doesn't dedup, and PATCH on tests isn't supported).
+    force_csv_attach = request.POST.get("force_csv_attach") == "on"
     rts_root = _rts_root()
 
     mode = "parallel" if request.POST.get("mode") == "parallel" else "serial"
@@ -797,6 +804,7 @@ def upload_run_view(request, tray_id):
             tray_id=tray_id,
             operator_name=operator_name,
             workers=workers,
+            force_csv_attach=force_csv_attach,
         )
     else:
         stream = _stream_upload(
@@ -808,6 +816,7 @@ def upload_run_view(request, tray_id):
             instance=instance,
             tray_id=tray_id,
             operator_name=operator_name,
+            force_csv_attach=force_csv_attach,
         )
 
     response = StreamingHttpResponse(

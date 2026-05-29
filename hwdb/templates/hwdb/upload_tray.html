@@ -50,6 +50,9 @@
     <label style="display: flex; gap: 6px; align-items: center; font-size: 13px;" title="On PROD, default behavior skips chips whose QC tests we've already confirmed in HWDB. Check this to walk them anyway — the per-test dedup still protects HWDB from duplicates.">
         <input type="checkbox" id="force-reupload"> Force re-upload (walk done chips too)
     </label>
+    <label style="display: flex; gap: 6px; align-items: center; font-size: 13px;" title="Re-posts the detailed test record so its CSV attachment runs again. Use when a previous detailed upload posted the test but didn't attach the CSV (HWDB will then have two detailed records at the same date/time; latest wins). Has no effect on simple-mode uploads.">
+        <input type="checkbox" id="force-csv-attach"> Force CSV attach (re-post detailed)
+    </label>
     <button type="button" id="upload-tray-btn" class="btn btn-primary"
             title="Default walks {{ upload_count }} chip(s) — {{ new_count }} new + {{ enrich_count }} enrich. {{ done_count }} done chip(s) are skipped unless Force re-upload is on.">Upload tray ({{ upload_count }} chips{% if enrich_count %}: {{ new_count }} new + {{ enrich_count }} enrich{% endif %}{% if done_count %} · {{ done_count }} done skipped{% endif %})</button>
     <button type="button" id="upload-tray-parallel-btn" class="btn btn-primary"
@@ -187,6 +190,7 @@
     });
     const attach = document.getElementById('attach-csvs');
     const force = document.getElementById('force-reupload');
+    const forceCsv = document.getElementById('force-csv-attach');
     const dialog = document.getElementById('prod-gauntlet');
     const tokenEl = document.getElementById('gauntlet-token');
     const messageEl = document.getElementById('gauntlet-message');
@@ -205,6 +209,7 @@
         if (parallel) formData.append('mode', 'parallel');
         formData.append('attach_csvs', attach.checked ? 'on' : '');
         if (force?.checked) formData.append('force', 'on');
+        if (forceCsv?.checked) formData.append('force_csv_attach', 'on');
         let resp;
         try {
             resp = await fetch(runUrl, {method: 'POST', body: formData});
