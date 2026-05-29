@@ -4,6 +4,7 @@ Each tag pairs with a partial under `core/templates/core/components/`.
 Specs come from `.idea/design/handoff_1/`.
 """
 from django import template
+from django.urls import get_script_prefix
 
 register = template.Library()
 
@@ -56,12 +57,21 @@ def crumbs(*items):
     """Breadcrumbs. Pass alternating label/href; last item with no href is the current page.
 
     Example: `{% crumbs "CETS" home_url "FEMB" femb_url "IO-1865-1L/00039" %}`
+
+    Absolute hrefs (starting with ``/``) get the active SCRIPT_NAME prefix
+    prepended — so the same templates work locally (no prefix) and on
+    twister (where settings.FORCE_SCRIPT_NAME = "/twister/cets" makes
+    every URL live under that mount). ``{% url %}`` is already prefix-aware
+    so the rest of the templates don't need this.
     """
+    prefix = get_script_prefix().rstrip("/")  # "" locally, "/twister/cets" on twister
     pairs = []
     i = 0
     while i < len(items):
         label = items[i]
         href = items[i + 1] if i + 1 < len(items) and not _looks_like_label(items[i + 1]) else None
+        if href and href.startswith("/") and not href.startswith("//"):
+            href = prefix + href
         pairs.append({"label": label, "href": href})
         i += 2 if href else 1
     return {"items": pairs}
