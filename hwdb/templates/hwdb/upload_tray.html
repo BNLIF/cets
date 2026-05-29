@@ -52,13 +52,27 @@
     </label>
     <button type="button" id="upload-tray-btn" class="btn btn-primary"
             title="Default walks {{ upload_count }} chip(s) — {{ new_count }} new + {{ enrich_count }} enrich. {{ done_count }} done chip(s) are skipped unless Force re-upload is on.">Upload tray ({{ upload_count }} chips{% if enrich_count %}: {{ new_count }} new + {{ enrich_count }} enrich{% endif %}{% if done_count %} · {{ done_count }} done skipped{% endif %})</button>
+    <button type="button" id="upload-tray-parallel-btn" class="btn btn-primary"
+            title="Same scope as Upload tray, but 10 worker threads run in parallel. Lines arrive in completion order. See ADR-0005.">Parallel upload (×10)</button>
     {% if is_dev %}
     <button type="button" id="upload-random-5-btn" class="btn btn-ghost" title="Pick 5 random chips from this tray and upload them. Dev only — quick feasibility check.">Upload random 5 (dev)</button>
     {% endif %}
     <span class="cell-muted" style="font-size: 12px;">→ streams live progress below</span>
 </div>
 
-<pre id="upload-progress" style="background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; min-height: 80px; max-height: 400px; overflow-y: auto; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; margin-bottom: 16px; display: none;"></pre>
+<style>
+    #upload-progress-resize { background: transparent; transition: background 0.1s; }
+    #upload-progress-resize:hover, #upload-progress-resize.dragging { background: var(--accent-100); }
+</style>
+<div id="upload-progress-panel" style="display: none; position: fixed; top: 80px; right: 16px; bottom: 16px; width: 520px; min-width: 320px; max-width: calc(100vw - 32px); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15); z-index: 50; flex-direction: column;">
+    <div id="upload-progress-resize" style="position: absolute; top: 0; bottom: 0; width: 6px; cursor: ew-resize;"></div>
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg-subtle); border-radius: 8px 8px 0 0;">
+        <span style="font-size: 13px; color: var(--text-2); font-weight: 500;">Upload progress</span>
+        <button type="button" id="upload-progress-close" class="btn btn-sm btn-ghost" style="padding: 2px 8px; font-size: 16px; line-height: 1;" title="Minimize (re-open with the floating button — content is preserved)">−</button>
+    </div>
+    <pre id="upload-progress" style="flex: 1; margin: 0; padding: 12px 16px; overflow-y: auto; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; background: var(--bg-subtle); border-radius: 0 0 8px 8px;"></pre>
+</div>
+<button type="button" id="upload-progress-reopen" class="btn btn-primary" style="display: none; position: fixed; bottom: 24px; right: 24px; z-index: 50; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);" title="Re-open upload progress panel">Show progress</button>
 
 <div class="table-wrap">
     <table class="table">
@@ -124,6 +138,53 @@
         || document.cookie.split('csrftoken=')[1]?.split(';')[0]
         || "";
     const out = document.getElementById('upload-progress');
+    const panel = document.getElementById('upload-progress-panel');
+    const reopenBtn = document.getElementById('upload-progress-reopen');
+    const resizeHandle = document.getElementById('upload-progress-resize');
+
+    const PROGRESS_LS = 'cets-upload-progress';
+    const persisted = (() => { try { return JSON.parse(localStorage.getItem(PROGRESS_LS)) || {}; } catch (e) { return {}; } })();
+    const clampWidth = w => Math.max(320, Math.min(window.innerWidth - 32, w));
+    let panelWidth = clampWidth(persisted.width || 520);
+    panel.style.width = panelWidth + 'px';
+
+    function persistProgressState() {
+        try { localStorage.setItem(PROGRESS_LS, JSON.stringify({width: panelWidth})); } catch (e) {}
+    }
+
+    // Drag-to-resize on the panel's left edge (right-docked).
+    let dragStartX = 0, dragStartWidth = 0, dragging = false;
+    resizeHandle?.addEventListener('pointerdown', (e) => {
+        dragging = true;
+        dragStartX = e.clientX;
+        dragStartWidth = panelWidth;
+        resizeHandle.classList.add('dragging');
+        resizeHandle.setPointerCapture(e.pointerId);
+        e.preventDefault();
+    });
+    resizeHandle?.addEventListener('pointermove', (e) => {
+        if (!dragging) return;
+        panelWidth = clampWidth(dragStartWidth + (dragStartX - e.clientX));
+        panel.style.width = panelWidth + 'px';
+    });
+    const endDrag = (e) => {
+        if (!dragging) return;
+        dragging = false;
+        resizeHandle.classList.remove('dragging');
+        try { resizeHandle.releasePointerCapture(e.pointerId); } catch (_) {}
+        persistProgressState();
+    };
+    resizeHandle?.addEventListener('pointerup', endDrag);
+    resizeHandle?.addEventListener('pointercancel', endDrag);
+
+    document.getElementById('upload-progress-close')?.addEventListener('click', () => {
+        panel.style.display = 'none';
+        reopenBtn.style.display = 'block';
+    });
+    reopenBtn?.addEventListener('click', () => {
+        panel.style.display = 'flex';
+        reopenBtn.style.display = 'none';
+    });
     const attach = document.getElementById('attach-csvs');
     const force = document.getElementById('force-reupload');
     const dialog = document.getElementById('prod-gauntlet');
@@ -133,13 +194,15 @@
     const confirmEl = document.getElementById('gauntlet-confirm');
     const cancelEl = document.getElementById('gauntlet-cancel');
 
-    async function streamUpload({chipSerial = null, random5 = false} = {}) {
-        out.style.display = 'block';
+    async function streamUpload({chipSerial = null, random5 = false, parallel = false} = {}) {
+        panel.style.display = 'flex';
+        reopenBtn.style.display = 'none';
         out.textContent = '';
         const formData = new FormData();
         formData.append('csrfmiddlewaretoken', csrf);
         if (chipSerial) formData.append('chip', chipSerial);
         if (random5) formData.append('random_5', 'on');
+        if (parallel) formData.append('mode', 'parallel');
         formData.append('attach_csvs', attach.checked ? 'on' : '');
         if (force?.checked) formData.append('force', 'on');
         let resp;
@@ -163,22 +226,23 @@
         }
     }
 
-    function maybePromptThenUpload(chipSerial, chipCount) {
+    function maybePromptThenUpload(chipSerial, chipCount, {parallel = false} = {}) {
         if (!isProd) {
-            streamUpload({chipSerial});
+            streamUpload({chipSerial, parallel});
             return;
         }
         const expected = chipSerial || trayId;
         tokenEl.textContent = expected;
+        const flavour = parallel ? ' (parallel ×10)' : '';
         messageEl.textContent = chipSerial
-            ? `Upload chip ${chipSerial}'s warm + cold tests to PRODUCTION HWDB.`
-            : `Upload ${chipCount} chips on tray ${trayId} to PRODUCTION HWDB.`;
+            ? `Upload chip ${chipSerial}'s warm + cold tests to PRODUCTION HWDB${flavour}.`
+            : `Upload ${chipCount} chips on tray ${trayId} to PRODUCTION HWDB${flavour}.`;
         inputEl.value = '';
         confirmEl.disabled = true;
         inputEl.oninput = () => { confirmEl.disabled = inputEl.value.trim() !== expected; };
         confirmEl.onclick = () => {
             dialog.close('confirm');
-            streamUpload({chipSerial});
+            streamUpload({chipSerial, parallel});
         };
         cancelEl.onclick = () => dialog.close('cancel');
         dialog.showModal();
@@ -187,6 +251,9 @@
 
     document.getElementById('upload-tray-btn')?.addEventListener('click', () => {
         maybePromptThenUpload(null, {{ upload_count }});
+    });
+    document.getElementById('upload-tray-parallel-btn')?.addEventListener('click', () => {
+        maybePromptThenUpload(null, {{ upload_count }}, {parallel: true});
     });
     document.getElementById('upload-random-5-btn')?.addEventListener('click', () => {
         // Dev-only button; no gauntlet (the route only honors random_5 on dev).

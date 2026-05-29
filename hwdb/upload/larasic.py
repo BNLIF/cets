@@ -25,8 +25,10 @@ import os
 import stat as _stat
 from dataclasses import dataclass, field
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Iterable, Optional
+from threading import local as _thread_local_cls
+from typing import Callable, Iterable, Iterator, Optional
 
 from django.conf import settings
 from django.utils import timezone
@@ -291,6 +293,11 @@ def find_existing_test(
     HWDB does NOT dedup test POSTs server-side (probe 3, 2026-05-28): the
     same ``(type, date, time)`` POSTed twice creates two records. So every
     upload must check before posting — Karla's ``isTestInHWDB`` flow.
+
+    Uses the per-type endpoint (``/components/{id}/tests/{type_id}``) which
+    returns records in a known shape we can match on. The combined
+    ``/components/{id}/tests`` endpoint returns "last instance of each type"
+    in a different shape that we don't reliably parse, so we don't use it.
     """
     body = api.get_tests(part_id, test_type_id=test_type_id, history=True)
     for t in body.get("data") or []:
@@ -567,12 +574,12 @@ def upload_chip(
 
             # HWDB doesn't dedup (probe 3, 2026-05-28). Skip if a test of this
             # type with the same Test Date/Time already exists on this item.
-            existing_id = find_existing_test(
-                api,
-                part_id,
-                test_type_ids[env],
-                sheet["Test Date"],
-                sheet["Test Time"],
+            # Freshly-created chips can't have prior tests, so skip the GET.
+            existing_id = (
+                None if created else find_existing_test(
+                    api, part_id, test_type_ids[env],
+                    sheet["Test Date"], sheet["Test Time"],
+                )
             )
             if existing_id is not None:
                 tests.append(
@@ -625,3 +632,63 @@ def upload_chip(
     return ChipResult(
         serial_number=chip.serial_number, part_id=part_id, created=created, tests=tests
     )
+
+
+# ---- Parallel orchestrator ----------------------------------------------
+
+
+def iter_upload_chips_parallel(
+    chips: list,
+    *,
+    client_factory: Callable[[], object],
+    part_type_id: str,
+    rts_root: Optional[Path] = None,
+    attach_csvs: bool = True,
+    test_type_ids: dict[str, int],
+    operator_name: str = "",
+    workers: int = 10,
+) -> Iterator[tuple]:
+    """Run ``upload_chip`` across ``chips`` in a thread pool. Yields
+    ``(chip, ChipResult)`` tuples in **completion order**, not input order.
+
+    Each worker thread builds its own API client via ``client_factory``
+    (one ``requests.Session`` per thread — Sessions aren't fully
+    thread-safe). The factory captures bearer + base_url so this module
+    doesn't import the api_client class.
+
+    ``test_type_ids`` is resolved once by the caller and reused across
+    chips. Exceptions from ``upload_chip`` are caught and converted to a
+    ``ChipResult`` with ``error`` set, matching the serial path's
+    continue-on-error policy.
+    """
+    workers = max(1, min(32, workers))
+    tls = _thread_local_cls()
+
+    def _init():
+        tls.client = client_factory()
+
+    def _work(chip):
+        return upload_chip(
+            tls.client, chip,
+            part_type_id=part_type_id,
+            rts_root=rts_root,
+            attach_csvs=attach_csvs,
+            test_type_ids=test_type_ids,
+            operator_name=operator_name,
+        )
+
+    with ThreadPoolExecutor(max_workers=workers, initializer=_init) as pool:
+        futures = {pool.submit(_work, c): c for c in chips}
+        for fut in as_completed(futures):
+            chip = futures[fut]
+            try:
+                result = fut.result()
+            except Exception as e:
+                logger.exception("upload_chip crashed for %s", chip.serial_number)
+                result = ChipResult(
+                    serial_number=chip.serial_number,
+                    part_id=None,
+                    created=False,
+                    error=f"crashed: {e}",
+                )
+            yield chip, result

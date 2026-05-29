@@ -646,6 +646,84 @@ def _stream_upload(api, chips, *, part_type_id, rts_root, attach_csvs, instance,
     yield f"\nDone. ok={ok} failed={failed}\n"
 
 
+def _stream_upload_parallel(
+    *, base_url, bearer, chips, part_type_id, rts_root, attach_csvs,
+    instance, tray_id, operator_name, workers,
+):
+    """Parallel sibling of ``_stream_upload``. Same UX (per-chip line +
+    final tally) but lines arrive in completion order with a monotonic
+    ``[done k/total]`` counter instead of input-order ``[i/total]``.
+    See ADR-0005.
+    """
+    total = len(chips)
+    yield f"Starting parallel upload of {total} chip(s) on tray {tray_id} to {instance} ({workers} workers).\n"
+    if total == 0:
+        yield "No chips to upload.\n"
+        return
+
+    # Resolve test types once with a short-lived client; worker threads will
+    # build their own clients.
+    bootstrap = FnalDbApiClient(base_url, bearer)
+    try:
+        test_type_ids = {
+            "RT": upload_lib.resolve_test_type_id(bootstrap, part_type_id, "RoomT QC Test"),
+            "LN": upload_lib.resolve_test_type_id(bootstrap, part_type_id, "CryoT QC Test"),
+        }
+    except Exception as e:
+        yield f"*** cannot resolve HWDB test types: {e} ***\n"
+        return
+
+    def make_client():
+        return FnalDbApiClient(base_url, bearer)
+
+    ok = failed = 0
+    promoted = []
+    done = 0
+    for chip, result in upload_lib.iter_upload_chips_parallel(
+        chips,
+        client_factory=make_client,
+        part_type_id=part_type_id,
+        rts_root=rts_root,
+        attach_csvs=attach_csvs,
+        test_type_ids=test_type_ids,
+        operator_name=operator_name,
+        workers=workers,
+    ):
+        done += 1
+        prefix = f"[done {done}/{total}] {chip.serial_number}: "
+        if result.error:
+            failed += 1
+            yield prefix + f"FAIL — {result.error}\n"
+            continue
+        bits = [f"created {result.part_id}" if result.created else f"exists ({result.part_id})"]
+        for t in result.tests:
+            if t.error:
+                bits.append(f"{t.env} FAIL: {t.error}")
+            elif t.skipped:
+                bits.append(f"{t.env} skipped (already test_id={t.test_id})")
+            else:
+                atch = " +csv" if t.csv_attached else ""
+                bits.append(f"{t.env}={t.test_id} ({t.mode}{atch})")
+        if all(t.error is None for t in result.tests):
+            ok += 1
+            if instance == "prod":
+                promoted.append((chip.pk, result.part_id))
+        else:
+            failed += 1
+        yield prefix + ", ".join(bits) + "\n"
+
+    if instance == "prod" and promoted:
+        ids = [pk for pk, _ in promoted]
+        LArASIC.objects.filter(pk__in=ids).update(
+            is_in_hwdb=True,
+            qc_tests_uploaded=True,
+            hwdb_checked_at=timezone.now(),
+        )
+        yield f"(updated is_in_hwdb=True, qc_tests_uploaded=True on {len(ids)} local row(s))\n"
+
+    yield f"\nDone. ok={ok} failed={failed}\n"
+
+
 @require_POST
 def upload_run_view(request, tray_id):
     """Stream per-chip upload progress as text/plain.
@@ -699,8 +777,27 @@ def upload_run_view(request, tray_id):
     attach_csvs = request.POST.get("attach_csvs", "on") == "on"
     rts_root = _rts_root()
 
-    response = StreamingHttpResponse(
-        _stream_upload(
+    mode = "parallel" if request.POST.get("mode") == "parallel" else "serial"
+    if mode == "parallel":
+        try:
+            workers = int(request.GET.get("workers", "10"))
+        except (TypeError, ValueError):
+            workers = 10
+        workers = max(1, min(32, workers))
+        stream = _stream_upload_parallel(
+            base_url=profile["api"],
+            bearer=bearer,
+            chips=chips,
+            part_type_id=part_type_id,
+            rts_root=rts_root,
+            attach_csvs=attach_csvs,
+            instance=instance,
+            tray_id=tray_id,
+            operator_name=operator_name,
+            workers=workers,
+        )
+    else:
+        stream = _stream_upload(
             api,
             chips,
             part_type_id=part_type_id,
@@ -709,7 +806,10 @@ def upload_run_view(request, tray_id):
             instance=instance,
             tray_id=tray_id,
             operator_name=operator_name,
-        ),
+        )
+
+    response = StreamingHttpResponse(
+        stream,
         content_type="text/plain; charset=utf-8",
     )
     # Hint reverse proxies not to buffer; supported by nginx, ignored by Apache.

@@ -20,17 +20,20 @@ logger = logging.getLogger(__name__)
 class FnalDbApiClient:
     def __init__(self, base_url, bearer):
         self.base_url = base_url
-        self.base_headers = {
-            "Authorization": f"Bearer {bearer}",
-        }
+        # One Session per client = one keep-alive TCP/TLS pool. Halves
+        # per-call latency vs. fresh ``requests.request`` (no handshake).
+        # Sessions aren't fully thread-safe, so the parallel orchestrator
+        # constructs one client per worker thread.
+        self.session = requests.Session()
+        self.session.headers["Authorization"] = f"Bearer {bearer}"
 
     def _make_request(self, method, endpoint, data=None, params=None):
         url = f"{self.base_url}/{endpoint}"
-        headers = self.base_headers.copy()
+        headers = {}
         if method in ("POST", "PATCH"):
             headers["Content-Type"] = "application/json"
         try:
-            response = requests.request(
+            response = self.session.request(
                 method, url, headers=headers, json=data, params=params
             )
         except requests.exceptions.RequestException:

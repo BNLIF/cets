@@ -631,3 +631,85 @@ class ResolveTestTypeIdTest(TestCase):
         api.get_test_types.return_value = {"data": []}
         with self.assertRaises(larasic.UploadError):
             larasic.resolve_test_type_id(api, "D08100100004", "RoomT QC Test")
+
+
+# ---- parallel orchestrator -----------------------------------------------
+
+
+class IterUploadChipsParallelTest(TestCase):
+    """The orchestrator hands each thread its own client (from the factory),
+    runs upload_chip in parallel, and yields (chip, ChipResult) tuples in
+    completion order with continue-on-error semantics."""
+
+    def _make_api(self):
+        api = mock.Mock()
+        api.find_component_by_serial.return_value = None
+        # Each post_test call returns a fresh id — irrelevant here, just
+        # avoid the side_effect-runs-out exception.
+        api.create_component.side_effect = lambda *a, **k: {
+            "status": "OK", "part_id": f"PID-{id(a)}",
+        }
+        api.post_location.return_value = {"status": "OK"}
+        api.post_test.return_value = {"status": "OK", "test_id": 1}
+        api.get_tests.return_value = {"data": []}
+        return api
+
+    def test_yields_one_result_per_chip(self):
+        chips = [
+            _chip(serial=f"002-{i:05d}",
+                  warm=datetime(2025, 9, 24, 16, i, 0, tzinfo=timezone.utc))
+            for i in range(5)
+        ]
+        clients_made = []
+
+        def factory():
+            api = self._make_api()
+            clients_made.append(api)
+            return api
+
+        out = list(larasic.iter_upload_chips_parallel(
+            chips,
+            client_factory=factory,
+            part_type_id="D08100100004",
+            test_type_ids={"RT": 863, "LN": 864},
+            workers=3,
+        ))
+
+        # 5 chips → 5 results, all distinct chips covered
+        self.assertEqual(len(out), 5)
+        self.assertEqual({c.serial_number for c, _ in out},
+                         {ch.serial_number for ch in chips})
+        # Each worker thread builds its own client; 3 workers → at most 3
+        # factory invocations.
+        self.assertLessEqual(len(clients_made), 3)
+        self.assertGreaterEqual(len(clients_made), 1)
+
+    def test_continue_on_per_chip_crash(self):
+        chips = [
+            _chip(serial="002-00001",
+                  warm=datetime(2025, 9, 24, 16, 0, 0, tzinfo=timezone.utc)),
+            _chip(serial="002-00002",
+                  warm=datetime(2025, 9, 24, 16, 1, 0, tzinfo=timezone.utc)),
+        ]
+        # First chip's create blows up; second chip's path is fine. Both
+        # results must still be yielded.
+        def factory():
+            api = self._make_api()
+            api.find_component_by_serial.side_effect = (
+                lambda part_type_id, sn:
+                    (_ for _ in ()).throw(RuntimeError("boom"))
+                    if sn == "002-00001" else None
+            )
+            return api
+
+        out = list(larasic.iter_upload_chips_parallel(
+            chips,
+            client_factory=factory,
+            part_type_id="D08100100004",
+            test_type_ids={"RT": 863, "LN": 864},
+            workers=2,
+        ))
+        self.assertEqual(len(out), 2)
+        by_sn = {c.serial_number: r for c, r in out}
+        self.assertIsNotNone(by_sn["002-00001"].error)
+        self.assertIsNone(by_sn["002-00002"].error)
