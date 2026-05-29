@@ -113,7 +113,11 @@ HWDB_LARASIC_PART_TYPE = HWDB_PROFILES[HWDB_INSTANCE]["larasic_part_type"]
 # fan out to FEMB/ColdADC/COLDATA/Cable.
 HWDB_COMPONENT_DEFAULTS = {
     "larasic": {
-        "manufacturer_id": 59,     # TSMC
+        # TSMC manufacturer_id differs per HWDB instance (confirmed via
+        # .idea/spike/hwdb_id_compare.py 2026-05-29). Other ids (BNL=128,
+        # status=110) are shared. Any field whose value is a dict is treated
+        # as per-instance and resolved by _larasic_defaults(instance).
+        "manufacturer_id": {"prod": 15, "dev": 59},  # TSMC
         "institution_id": 128,     # BNL
         "country_code": "US",
         "warm_test_name": "RoomT QC Test",

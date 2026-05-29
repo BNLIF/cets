@@ -81,8 +81,26 @@ class ChipResult:
 # ---- Settings helpers -----------------------------------------------------
 
 
-def _larasic_defaults() -> dict:
-    return settings.HWDB_COMPONENT_DEFAULTS["larasic"]
+def _larasic_defaults(instance: str) -> dict:
+    """Return the LArASIC defaults resolved for ``instance`` ("prod" or "dev").
+
+    Most fields are shared across HWDB instances; the ones that aren't (e.g.
+    TSMC's ``manufacturer_id`` — confirmed via ``.idea/spike/hwdb_id_compare.py``)
+    are stored as ``{"prod": ..., "dev": ...}`` dicts in settings, and this
+    function picks the right value for the active instance.
+    """
+    raw = settings.HWDB_COMPONENT_DEFAULTS["larasic"]
+    out = {}
+    for k, v in raw.items():
+        if isinstance(v, dict) and set(v.keys()) <= {"prod", "dev"}:
+            if instance not in v:
+                raise UploadError(
+                    f"larasic default {k!r} has no value for instance {instance!r}"
+                )
+            out[k] = v[instance]
+        else:
+            out[k] = v
+    return out
 
 
 def resolve_test_type_id(api, part_type_id: str, name: str) -> int:
@@ -114,16 +132,17 @@ def find_item(api, part_type_id: str, serial_number: str) -> Optional[dict]:
     return api.find_component_by_serial(part_type_id, serial_number) or None
 
 
-def _create_payload(chip, part_type_id: str) -> dict:
+def _create_payload(chip, part_type_id: str, defaults: dict) -> dict:
     """Build the create-item JSON. See Karla's ItemToUploadJSON.
 
-    We include ``status`` in the create payload — probe 1 confirmed HWDB
-    accepts it silently (not flagged as "extra fields not permitted"). This
-    saves one PATCH per fresh chip and avoids a second specifications
-    history entry that the separate ``set_status`` PATCH would create
-    (HWDB's PATCH replaces specs, so we'd have to re-send LOT N).
+    Takes ``defaults`` (already resolved for the current instance) — see
+    ``_larasic_defaults``. We include ``status`` in the create payload —
+    probe 1 confirmed HWDB accepts it silently (not flagged as "extra fields
+    not permitted"). This saves one PATCH per fresh chip and avoids a second
+    specifications history entry that the separate ``set_status`` PATCH
+    would create (HWDB's PATCH replaces specs, so we'd have to re-send LOT N).
     """
-    d = _larasic_defaults()
+    d = defaults
     return {
         "component_type": {"part_type_id": part_type_id},
         "serial_number": chip.serial_number,
@@ -136,9 +155,12 @@ def _create_payload(chip, part_type_id: str) -> dict:
     }
 
 
-def create_item(api, chip, part_type_id: str) -> str:
-    """POST a new component. Returns the HWDB ``part_id``."""
-    payload = _create_payload(chip, part_type_id)
+def create_item(api, chip, part_type_id: str, defaults: dict) -> str:
+    """POST a new component. Returns the HWDB ``part_id``.
+
+    ``defaults`` is the per-instance-resolved dict from ``_larasic_defaults``.
+    """
+    payload = _create_payload(chip, part_type_id, defaults)
     body = api.create_component(part_type_id, payload)
     if body.get("status") != "OK":
         raise UploadError(
@@ -506,6 +528,7 @@ def upload_chip(
     chip,
     *,
     part_type_id: str,
+    instance: str,
     rts_root: Optional[Path] = None,
     attach_csvs: bool = True,
     test_type_ids: Optional[dict[str, int]] = None,
@@ -513,11 +536,13 @@ def upload_chip(
 ) -> ChipResult:
     """Upload one chip end-to-end: find-or-create + status + location + tests.
 
+    ``instance`` is "prod" or "dev" — used to resolve per-instance defaults
+    (currently the TSMC manufacturer_id; other ids are shared).
     ``test_type_ids`` is ``{"RT": <id>, "LN": <id>}``; pass it in so a batch
     caller resolves names→ids once and reuses across chips. If omitted we
     resolve per call (one extra GET per chip).
     """
-    d = _larasic_defaults()
+    d = _larasic_defaults(instance)
 
     # Resolve test type ids if the caller didn't pre-resolve them.
     if test_type_ids is None:
@@ -537,7 +562,7 @@ def upload_chip(
             # status is now embedded in the create payload (probe 1, 2026-05-28),
             # so no separate set_status PATCH — one fewer call, one fewer
             # specifications history entry.
-            part_id = create_item(api, chip, part_type_id)
+            part_id = create_item(api, chip, part_type_id, d)
             created = True
             arrived = chip.warm_tested_at or chip.cold_tested_at or timezone.now()
             set_location(api, part_id, d["institution_id"], arrived)
@@ -642,6 +667,7 @@ def iter_upload_chips_parallel(
     *,
     client_factory: Callable[[], object],
     part_type_id: str,
+    instance: str,
     rts_root: Optional[Path] = None,
     attach_csvs: bool = True,
     test_type_ids: dict[str, int],
@@ -671,6 +697,7 @@ def iter_upload_chips_parallel(
         return upload_chip(
             tls.client, chip,
             part_type_id=part_type_id,
+            instance=instance,
             rts_root=rts_root,
             attach_csvs=attach_csvs,
             test_type_ids=test_type_ids,

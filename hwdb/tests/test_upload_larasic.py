@@ -128,7 +128,8 @@ class FindAndCreateTest(TestCase):
             "status": "OK", "part_id": "D08100100004-00999",
         }
         chip = _chip(serial="002-00001", tray="B005T0011")
-        part_id = larasic.create_item(api, chip, "D08100100004")
+        defaults = larasic._larasic_defaults("dev")
+        part_id = larasic.create_item(api, chip, "D08100100004", defaults)
         self.assertEqual(part_id, "D08100100004-00999")
         # Inspect the exact payload sent
         sent_part_type, sent_payload = api.create_component.call_args.args
@@ -143,13 +144,28 @@ class FindAndCreateTest(TestCase):
         # "fresh chip" setup in one call — no separate set_status PATCH.
         self.assertEqual(sent_payload["status"], {"id": 110})
 
+    def test_create_item_prod_uses_prod_manufacturer_id(self):
+        # TSMC manufacturer_id differs per HWDB instance (prod=15, dev=59,
+        # confirmed via .idea/spike/hwdb_id_compare.py). The create payload
+        # must honor the active instance.
+        api = mock.Mock()
+        api.create_component.return_value = {
+            "status": "OK", "part_id": "D08100100003-00777",
+        }
+        larasic.create_item(
+            api, _chip(serial="002-00001", tray="B005T0011"),
+            "D08100100003", larasic._larasic_defaults("prod"),
+        )
+        _, sent = api.create_component.call_args.args
+        self.assertEqual(sent["manufacturer"], {"id": 15})
+
     def test_create_item_propagates_hwdb_error(self):
         api = mock.Mock()
         api.create_component.return_value = {
             "status": "ERROR", "data": "Not authorized: no suitable roles",
         }
         with self.assertRaises(larasic.UploadError) as ctx:
-            larasic.create_item(api, _chip(), "D08100100004")
+            larasic.create_item(api, _chip(), "D08100100004", larasic._larasic_defaults("dev"))
         self.assertIn("no suitable roles", str(ctx.exception))
 
     def test_set_status_minimal_patch_body(self):
@@ -282,7 +298,7 @@ class UploadChipTest(TestCase):
     def test_happy_path_new_chip_warm_only(self):
         api = self._api()
         chip = _chip(warm=datetime(2025, 9, 24, 16, 59, 20, tzinfo=timezone.utc))
-        result = larasic.upload_chip(api, chip, part_type_id="D08100100004", rts_root=None)
+        result = larasic.upload_chip(api, chip, part_type_id="D08100100004", instance="dev", rts_root=None)
         self.assertTrue(result.ok, result)
         self.assertTrue(result.created)
         self.assertEqual(result.part_id, "D08100100004-00999")
@@ -307,7 +323,7 @@ class UploadChipTest(TestCase):
             warm=datetime(2025, 9, 24, 16, 59, 20, tzinfo=timezone.utc),
             cold=datetime(2025, 9, 24, 18, 1, 0, tzinfo=timezone.utc),
         )
-        result = larasic.upload_chip(api, chip, part_type_id="D08100100004", rts_root=None)
+        result = larasic.upload_chip(api, chip, part_type_id="D08100100004", instance="dev", rts_root=None)
         self.assertTrue(result.ok, result)
         self.assertEqual([t.env for t in result.tests], ["RT", "LN"])
         self.assertEqual(api.post_test.call_count, 2)
@@ -315,7 +331,7 @@ class UploadChipTest(TestCase):
     def test_existing_chip_skips_create_and_location(self):
         api = self._api(existing={"part_id": "D08100100004-00042"})
         chip = _chip(warm=datetime(2025, 9, 24, 16, 59, 20, tzinfo=timezone.utc))
-        result = larasic.upload_chip(api, chip, part_type_id="D08100100004", rts_root=None)
+        result = larasic.upload_chip(api, chip, part_type_id="D08100100004", instance="dev", rts_root=None)
         self.assertTrue(result.ok, result)
         self.assertFalse(result.created)
         self.assertEqual(result.part_id, "D08100100004-00042")
@@ -329,7 +345,7 @@ class UploadChipTest(TestCase):
         api = self._api()
         api.create_component.return_value = {"status": "ERROR", "data": "no role"}
         chip = _chip(warm=datetime(2025, 9, 24, 16, 59, 20, tzinfo=timezone.utc))
-        result = larasic.upload_chip(api, chip, part_type_id="D08100100004", rts_root=None)
+        result = larasic.upload_chip(api, chip, part_type_id="D08100100004", instance="dev", rts_root=None)
         self.assertFalse(result.ok)
         self.assertIn("no role", result.error)
         self.assertEqual(result.tests, [])
@@ -345,7 +361,7 @@ class UploadChipTest(TestCase):
             warm=datetime(2025, 9, 24, 16, 59, 20, tzinfo=timezone.utc),
             cold=datetime(2025, 9, 24, 18, 1, 0, tzinfo=timezone.utc),
         )
-        result = larasic.upload_chip(api, chip, part_type_id="D08100100004", rts_root=None)
+        result = larasic.upload_chip(api, chip, part_type_id="D08100100004", instance="dev", rts_root=None)
         self.assertFalse(result.ok)
         self.assertEqual(result.tests[0].error and "validation" in result.tests[0].error, True)
         self.assertEqual(result.tests[1].error, None)
@@ -368,7 +384,7 @@ class UploadChipTest(TestCase):
             ]
         }
         api = self._api(existing={"part_id": "D08100100004-00042"}, existing_tests=existing_tests)
-        result = larasic.upload_chip(api, chip, part_type_id="D08100100004", rts_root=None)
+        result = larasic.upload_chip(api, chip, part_type_id="D08100100004", instance="dev", rts_root=None)
         self.assertTrue(result.ok, result)
         self.assertTrue(result.tests[0].skipped)
         api.patch_component.assert_not_called()
@@ -394,7 +410,7 @@ class UploadChipTest(TestCase):
             ]
         }
         api = self._api(existing={"part_id": "D08100100004-00042"}, existing_tests=existing_tests)
-        result = larasic.upload_chip(api, chip, part_type_id="D08100100004", rts_root=None)
+        result = larasic.upload_chip(api, chip, part_type_id="D08100100004", instance="dev", rts_root=None)
         self.assertTrue(result.ok, result)
         self.assertEqual(len(result.tests), 1)
         self.assertTrue(result.tests[0].skipped)
@@ -419,7 +435,7 @@ class UploadChipTest(TestCase):
             warm=datetime(2025, 9, 24, 16, 59, 20, tzinfo=timezone.utc),
         )
         result = larasic.upload_chip(
-            api, chip, part_type_id="D08100100004", rts_root=rts_root
+            api, chip, part_type_id="D08100100004", instance="dev", rts_root=rts_root
         )
         self.assertTrue(result.ok, result)
         self.assertEqual(result.tests[0].mode, "detailed")
@@ -452,7 +468,7 @@ class UploadChipTest(TestCase):
             warm=datetime(2025, 9, 24, 16, 59, 20, tzinfo=timezone.utc),
         )
         result = larasic.upload_chip(
-            api, chip, part_type_id="D08100100004", rts_root=rts_root
+            api, chip, part_type_id="D08100100004", instance="dev", rts_root=rts_root
         )
         self.assertTrue(result.ok, result)
         self.assertEqual(result.tests[0].mode, "detailed")
@@ -671,6 +687,7 @@ class IterUploadChipsParallelTest(TestCase):
             chips,
             client_factory=factory,
             part_type_id="D08100100004",
+            instance="dev",
             test_type_ids={"RT": 863, "LN": 864},
             workers=3,
         ))
@@ -706,6 +723,7 @@ class IterUploadChipsParallelTest(TestCase):
             chips,
             client_factory=factory,
             part_type_id="D08100100004",
+            instance="dev",
             test_type_ids={"RT": 863, "LN": 864},
             workers=2,
         ))
