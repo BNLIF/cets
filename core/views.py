@@ -439,7 +439,7 @@ def coldata(request):
     )
 
 
-FEMB_SORT_KEYS = {"serial_number", "version", "latest_test_timestamp"}
+FEMB_SORT_KEYS = {"serial_number", "version", "latest_test_timestamp", "qc_count", "chk_count"}
 FEMB_PAGE_SIZE = 100
 FAMILY_PAGE_SIZE = 100
 
@@ -534,11 +534,12 @@ def _family_list_response(
 def femb(request):
     latest_test = FembTest.objects.filter(femb=OuterRef("pk")).order_by("-timestamp")
     queryset = FEMB.objects.annotate(
-        latest_test_timestamp=Subquery(latest_test.values("timestamp")[:1])
+        latest_test_timestamp=Subquery(latest_test.values("timestamp")[:1]),
+        qc_count=Count("fembtest", filter=Q(fembtest__test_type="QC")),
+        chk_count=Count("fembtest", filter=Q(fembtest__test_type="CHK")),
     )
 
     q = (request.GET.get("q") or "").strip()
-    version = (request.GET.get("version") or "").strip()
     sort = request.GET.get("sort") or "latest_test_timestamp"
     direction = request.GET.get("dir") or "desc"
 
@@ -551,23 +552,12 @@ def femb(request):
         queryset = queryset.filter(
             Q(serial_number__icontains=q) | Q(version__icontains=q)
         )
-    if version:
-        queryset = queryset.filter(version=version)
-
-    since = _parse_date_param(request.GET.get("since"))
-    until = _parse_date_param(request.GET.get("until"))
-    if since:
-        queryset = queryset.filter(latest_test_timestamp__date__gte=since)
-    if until:
-        queryset = queryset.filter(latest_test_timestamp__date__lte=until)
 
     sort_field = f"-{sort}" if direction == "desc" else sort
     # Stable secondary sort so equal keys don't shuffle between pages.
     queryset = queryset.order_by(sort_field, "serial_number")
 
     page_obj = Paginator(queryset, FEMB_PAGE_SIZE).get_page(request.GET.get("page"))
-
-    versions = list(FEMB.objects.values_list("version", flat=True).distinct().order_by("version"))
 
     context = {
         "page": "femb",
@@ -576,10 +566,6 @@ def femb(request):
         "sort": sort,
         "dir": direction,
         "q": q,
-        "version": version,
-        "since": since.isoformat() if since else "",
-        "until": until.isoformat() if until else "",
-        "version_options": [{"value": v, "label": v} for v in versions],
         "femb_total": FEMB.objects.count(),
     }
     template = "core/_femb_list_fragment.html" if getattr(request, "htmx", False) else "core/femb.html"
@@ -594,9 +580,6 @@ def cable(request):
     queryset = CABLE.objects.annotate(
         latest_test_timestamp=Subquery(latest_test.values("timestamp")[:1])
     )
-    batches = list(
-        CABLE.objects.values_list("batch_number", flat=True).distinct().order_by("batch_number")
-    )
     return _family_list_response(
         request,
         queryset=queryset,
@@ -608,13 +591,11 @@ def cable(request):
         default_dir="desc",
         search_fields=("serial_number",),
         filter_specs=(("batch", "batch_number"),),
-        date_range_field="latest_test_timestamp",
         extra_context={
             "family_label": "Cable",
             "family_title": "Cold cables",
             "family_subtitle": "Cold flex cabling",
             "total_count": CABLE.objects.count(),
-            "batch_options": [{"value": str(b), "label": f"Batch {b}"} for b in batches],
         },
     )
 
