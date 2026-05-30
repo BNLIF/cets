@@ -82,8 +82,9 @@ metadata. Format: `<sn>_<timestamp>_<tray>_<socket>_<temperature>.csv`.
 
 The DUNE **Hardware Database** (Fermilab's "CDB") — the external system of
 record for every DUNE hardware item. The `hwdb/` app talks to its REST API to
-display HWDB records and compare them against local chips; uploading QC records
-is future work (issue #12).
+display HWDB records, compare them against local chips, and upload LArASIC QC
+results (serial path or 10-worker parallel path; see
+[[0005-parallel-hwdb-uploads]]).
 
 - Two **instances**: `prod` (the default we compare against) and `dev` (a
   sandbox). Users toggle between them per-session; `is_in_hwdb` is always
@@ -95,3 +96,17 @@ is future work (issue #12).
   a bearer minted fresh per request; see the `hwdb/fnal/` package.
 - **part-type ID** — HWDB's identifier for a component type, e.g. LArASIC is
   `D08100100004` on dev / `D08100100003` on prod.
+
+### Simple vs detailed QC record
+
+A LArASIC QC test (RoomT or CryoT) can be uploaded in two shapes:
+
+- **Simple** — 7 summary fields (test date/time, operator, tray/socket, pass).
+- **Detailed** — the simple fields plus 60 per-channel readings (`CH0
+  Pedestal`, `CH0 Gain`, … `CH15 ENC`) **and** an attached raw-data CSV.
+
+HWDB stores both as plain test records with no shape flag, and tests are not
+PATCHable. The dedup matcher infers shape by looking for `CH0 Pedestal` in
+`test_data`, so a simple-mode upload followed later by a detailed-mode upload
+at the same timestamp posts an **upgrade record** rather than skipping. See
+[[0006-shape-aware-test-dedup]].
