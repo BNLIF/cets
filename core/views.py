@@ -255,28 +255,52 @@ def _tray_options(model):
     return [{"value": t, "label": t} for t in trays]
 
 
-def larasic(request):
-    """Group LArASIC chips by tray (default) or by FEMB. Drilling into a tray
-    opens the per-tray page in the hwdb app; drilling into a FEMB opens the
-    existing femb_detail page. No HWDB-status columns here — this is the
-    general browse view, /hwdb/larasic/ is the HWDB-focused one.
-    """
-    view = request.GET.get("view", "tray")
-    if view not in {"tray", "femb"}:
-        view = "tray"
+def _grouped_chip_response(
+    request, *, model, family_label, family_title, family_subtitle,
+    chips_per_femb, has_tray_view, page_id,
+):
+    """Shared scaffolding for chip-family grouped list pages (LArASIC,
+    ColdADC, COLDATA). LArASIC carries both a tray and a FEMB view; the
+    others are FEMB-only (no RTS trays yet).
 
-    tray_rows = []
-    femb_rows = []
+    Supports ?q= search, ?sort=&dir= sort, and ?page= pagination on the
+    aggregated rows. The two views have disjoint sort-key sets — switching
+    `view` re-defaults sort to "last activity" for that schema.
+    """
+    if has_tray_view:
+        view = request.GET.get("view", "tray")
+        if view not in {"tray", "femb"}:
+            view = "tray"
+    else:
+        view = "femb"
+
+    q = (request.GET.get("q") or "").strip()
+    direction = request.GET.get("dir") or "desc"
+    if direction not in {"asc", "desc"}:
+        direction = "desc"
 
     if view == "tray":
+        sort_keys = {"tray_id", "chip_count", "rt_tested", "ln_tested", "last_activity"}
+        default_sort = "last_activity"
+    else:
+        sort_keys = {"femb", "chip_count", "qc", "chk", "latest_test"}
+        default_sort = "latest_test"
+    sort = request.GET.get("sort") or default_sort
+    if sort not in sort_keys:
+        sort = default_sort
+
+    rows = []
+    if view == "tray":
         rows = list(
-            LArASIC.objects.exclude(tray_id="").values("tray_id").annotate(
+            model.objects
+            .exclude(tray_id__isnull=True).exclude(tray_id="")
+            .values("tray_id").annotate(
                 chip_count=Count("id"),
                 rt_tested=Count("id", filter=Q(warm_tested_at__isnull=False)),
                 ln_tested=Count("id", filter=Q(cold_tested_at__isnull=False)),
                 latest_warm=Max("warm_tested_at"),
                 latest_cold=Max("cold_tested_at"),
-            ).order_by("-tray_id")
+            )
         )
         # Flag trays with offline analysis CSVs — sourced from the persistent
         # TrayCsvCache the upload page maintains. One DB query, no SMB stats.
@@ -286,10 +310,17 @@ def larasic(request):
             w, c = r["latest_warm"], r["latest_cold"]
             r["last_activity"] = max(w, c) if w and c else (w or c)
             r["has_csv"] = r["tray_id"] in with_csvs
-        tray_rows = rows
+        total_groups = len(rows)
+        if q:
+            ql = q.lower()
+            rows = [r for r in rows if ql in (r["tray_id"] or "").lower()]
+        rows.sort(
+            key=lambda r: (r.get(sort) is None, r.get(sort) or ""),
+            reverse=(direction == "desc"),
+        )
     else:
         chip_counts = dict(
-            LArASIC.objects.filter(removed_at_repair__isnull=True, femb__isnull=False)
+            model.objects.filter(removed_at_repair__isnull=True, femb__isnull=False)
             .values("femb").annotate(n=Count("id")).values_list("femb", "n")
         )
         qc_counts = dict(
@@ -304,12 +335,12 @@ def larasic(request):
             FembTest.objects.values("femb").annotate(t=Max("timestamp"))
             .values_list("femb", "t")
         )
-        fembs = (
-            FEMB.objects.filter(pk__in=chip_counts.keys())
-            .order_by("version", "serial_number")
-        )
+        fembs = FEMB.objects.filter(pk__in=chip_counts.keys())
+        total_groups = fembs.count()
+        if q:
+            fembs = fembs.filter(serial_number__icontains=q)
         for f in fembs:
-            femb_rows.append({
+            rows.append({
                 "femb": f,
                 "chip_count": chip_counts.get(f.pk, 0),
                 "latest_test": latest_test.get(f.pk),
@@ -317,13 +348,52 @@ def larasic(request):
                 "chk": chk_counts.get(f.pk, 0),
             })
 
-    return render(request, "core/larasic.html", {
+        def _key(r):
+            if sort == "femb":
+                f = r["femb"]
+                return (False, (f.version, f.serial_number))
+            v = r.get(sort)
+            return (v is None, v or 0)
+        rows.sort(key=_key, reverse=(direction == "desc"))
+
+    page_size = FAMILY_PAGE_SIZE
+    page_obj = Paginator(rows, page_size).get_page(request.GET.get("page"))
+
+    context = {
         "view": view,
-        "tray_rows": tray_rows,
-        "femb_rows": femb_rows,
-        "total_count": LArASIC.objects.count(),
-        "page": "larasic",
-    })
+        "q": q,
+        "sort": sort,
+        "dir": direction,
+        "page_obj": page_obj,
+        "page_size": page_size,
+        "total_count": model.objects.count(),
+        "total_groups": total_groups,
+        "page": page_id,
+        "family_label": family_label,
+        "family_title": family_title,
+        "family_subtitle": family_subtitle,
+        "chips_per_femb": chips_per_femb,
+        "has_tray_view": has_tray_view,
+    }
+    template = (
+        "core/_chip_family_fragment.html"
+        if getattr(request, "htmx", False)
+        else "core/chip_family.html"
+    )
+    return render(request, template, context)
+
+
+def larasic(request):
+    return _grouped_chip_response(
+        request,
+        model=LArASIC,
+        family_label="LArASIC",
+        family_title="Frontend ASICs",
+        family_subtitle="16-channel cold front-end ASICs",
+        chips_per_femb=8,
+        has_tray_view=True,
+        page_id="larasic",
+    )
 
 
 def larasic_tray(request, tray_id):
@@ -344,58 +414,34 @@ def larasic_tray(request, tray_id):
 
 
 def coldadc(request):
-    return _family_list_response(
+    return _grouped_chip_response(
         request,
-        queryset=ColdADC.objects.select_related("femb"),
-        sort_keys=_CHIP_SORT_KEYS,
+        model=ColdADC,
+        family_label="ColdADC",
+        family_title="Cold ADCs",
+        family_subtitle="12-bit cold ADCs",
+        chips_per_femb=8,
+        has_tray_view=False,
         page_id="coldadc",
-        full_template="core/_chip_list_page.html",
-        fragment_template="core/_chip_list_fragment.html",
-        default_sort="last_update",
-        default_dir="desc",
-        search_fields=("serial_number", "femb__serial_number", "tray_id"),
-        filter_specs=(("femb", "femb__serial_number"), ("tray", "tray_id")),
-        date_range_field="last_update",
-        extra_context={
-            "family_label": "ColdADC",
-            "family_title": "Cold ADCs",
-            "family_subtitle": "12-bit cold ADCs",
-            "total_count": ColdADC.objects.count(),
-            "femb_options": _femb_options(),
-            "tray_options": _tray_options(ColdADC),
-            "detail_url_name": "coldadc_detail",
-        },
     )
 
 
 def coldata(request):
-    return _family_list_response(
+    return _grouped_chip_response(
         request,
-        queryset=COLDATA.objects.select_related("femb"),
-        sort_keys=_CHIP_SORT_KEYS,
+        model=COLDATA,
+        family_label="COLDATA",
+        family_title="COLDATA",
+        family_subtitle="Serializer / control chips",
+        chips_per_femb=2,
+        has_tray_view=False,
         page_id="coldata",
-        full_template="core/_chip_list_page.html",
-        fragment_template="core/_chip_list_fragment.html",
-        default_sort="last_update",
-        default_dir="desc",
-        search_fields=("serial_number", "femb__serial_number", "tray_id"),
-        filter_specs=(("femb", "femb__serial_number"), ("tray", "tray_id")),
-        date_range_field="last_update",
-        extra_context={
-            "family_label": "COLDATA",
-            "family_title": "COLDATA",
-            "family_subtitle": "Serializer / control chips",
-            "total_count": COLDATA.objects.count(),
-            "femb_options": _femb_options(),
-            "tray_options": _tray_options(COLDATA),
-            "detail_url_name": "coldata_detail",
-        },
     )
 
 
 FEMB_SORT_KEYS = {"serial_number", "version", "latest_test_timestamp"}
-FEMB_PAGE_SIZE = 12
-FAMILY_PAGE_SIZE = 25
+FEMB_PAGE_SIZE = 100
+FAMILY_PAGE_SIZE = 100
 
 
 def _parse_date_param(value):

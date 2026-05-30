@@ -1,0 +1,65 @@
+{% load components %}
+<div id="list-fragment">
+    <input type="hidden" name="view" value="{{ view }}">
+    <input type="hidden" name="sort" value="{{ sort }}">
+    <input type="hidden" name="dir" value="{{ dir }}">
+
+    {% if view == 'tray' %}
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
+                <tr>
+                    {% sortable_th key="tray_id" label="Tray" current_sort=sort current_dir=dir %}
+                    {% sortable_th key="chip_count" label="Chips" current_sort=sort current_dir=dir %}
+                    {% sortable_th key="rt_tested" label="RT tested" current_sort=sort current_dir=dir %}
+                    {% sortable_th key="ln_tested" label="LN tested" current_sort=sort current_dir=dir %}
+                    <th>CSV report</th>
+                    {% sortable_th key="last_activity" label="Last activity" current_sort=sort current_dir=dir %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in page_obj %}
+                <tr>
+                    <td class="cell-mono"><a href="{% url 'larasic_tray' t.tray_id %}" style="color: var(--accent); font-weight: 500;">{{ t.tray_id }}</a></td>
+                    <td>{{ t.chip_count }}</td>
+                    <td>{{ t.rt_tested }}{% if t.rt_tested != t.chip_count %} <span class="cell-muted" style="font-size: 11px;">/ {{ t.chip_count }}</span>{% endif %}</td>
+                    <td>{% if t.ln_tested == 0 %}<span class="cell-muted" style="font-size: 12px;">—</span>{% else %}{{ t.ln_tested }}{% if t.ln_tested != t.chip_count %} <span class="cell-muted" style="font-size: 11px;">/ {{ t.chip_count }}</span>{% endif %}{% endif %}</td>
+                    <td>{% if t.has_csv %}<span class="pill" data-status="new" title="Offline analysis CSVs exist for this tray.">CSV</span>{% else %}<span class="cell-muted" style="font-size: 12px;">—</span>{% endif %}</td>
+                    <td class="cell-mono cell-muted">{{ t.last_activity|date:"Y-m-d H:i"|default:"—" }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="cell-muted" style="text-align: center; padding: 36px;">No trays match the current filters.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
+                <tr>
+                    {% sortable_th key="femb" label="FEMB" current_sort=sort current_dir=dir %}
+                    {% sortable_th key="chip_count" label=family_label|add:"s" current_sort=sort current_dir=dir %}
+                    {% sortable_th key="qc" label="QC tests" current_sort=sort current_dir=dir %}
+                    {% sortable_th key="chk" label="CHK tests" current_sort=sort current_dir=dir %}
+                    {% sortable_th key="latest_test" label="Latest test" current_sort=sort current_dir=dir %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in page_obj %}
+                <tr>
+                    <td class="cell-mono"><a href="{% url 'femb_detail' r.femb.version r.femb.serial_number %}" style="color: var(--accent); font-weight: 500;">{{ r.femb.version }}/{{ r.femb.serial_number }}</a></td>
+                    <td>{{ r.chip_count }}<span class="cell-muted" style="font-size: 11px;">/{{ chips_per_femb }}</span></td>
+                    <td>{{ r.qc }}</td>
+                    <td>{{ r.chk }}</td>
+                    <td class="cell-mono cell-muted">{{ r.latest_test|date:"Y-m-d H:i"|default:"—" }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="5" class="cell-muted" style="text-align: center; padding: 36px;">No FEMBs match the current filters.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    {% pagination page_obj page_size %}
+</div>

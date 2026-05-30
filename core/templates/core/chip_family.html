@@ -1,0 +1,44 @@
+{% extends 'core/base.html' %}
+{% load components %}
+
+{% block title %}CETS — {{ family_label }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div>
+        {% crumbs "CETS" "/" family_label %}
+        <h1 class="page-title">{{ family_title }}</h1>
+        <div class="page-subtitle">{{ family_subtitle }} · {{ total_count }} tracked</div>
+    </div>
+</div>
+
+<div class="filterbar">
+    {% if has_tray_view %}
+    <div class="chart-range-toggle" role="tablist">
+        <a class="chart-range-btn {% if view == 'tray' %}is-active{% endif %}" href="?view=tray" style="text-decoration: none;">Tray</a>
+        <a class="chart-range-btn {% if view == 'femb' %}is-active{% endif %}" href="?view=femb" style="text-decoration: none;">FEMB</a>
+    </div>
+    {% endif %}
+    <div class="filter-search">
+        <svg class="filter-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+        <input
+            id="list-search-input"
+            type="search"
+            name="q"
+            value="{{ q }}"
+            placeholder="{% if view == 'tray' %}Search by tray ID…{% else %}Search by FEMB serial number…{% endif %}"
+            hx-get="{{ request.path }}"
+            hx-target="#list-fragment"
+            hx-swap="outerHTML"
+            hx-push-url="true"
+            hx-trigger="keyup changed delay:250ms, search"
+            hx-include="[name=view], [name=sort], [name=dir]"
+        >
+    </div>
+    <div style="margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--text-3);">
+        {{ total_groups }} {% if view == 'tray' %}tray{{ total_groups|pluralize }}{% else %}FEMB{{ total_groups|pluralize }}{% endif %}
+    </div>
+</div>
+
+{% include "core/_chip_family_fragment.html" %}
+{% endblock %}
