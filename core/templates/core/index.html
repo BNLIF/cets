@@ -30,6 +30,9 @@
                 <button type="button" data-range="month" class="chart-range-btn">Last month · daily</button>
                 <button type="button" data-range="3month" class="chart-range-btn">Last 3 months · daily</button>
                 <button type="button" data-range="all" class="chart-range-btn is-active">All · monthly</button>
+                {% if c.show_projection %}
+                <button type="button" data-range="1year" class="chart-range-btn" title="3 past months + 12 future months projected at the last 90-day daily rate">1-year projection</button>
+                {% endif %}
             </div>
             {% endif %}
         </div>
@@ -93,6 +96,23 @@
 
         var panel = document.querySelector('[data-chart-panel="' + c.slug + '"]');
         if (!panel) return;
+        function applyProjectionStyling(r) {
+            // Dashed line segment past the projection boundary; bar coloring is
+            // already baked into bar_datasets via per-point backgroundColor.
+            var start = r.projection_start;
+            lineChart.data.datasets.forEach(function (ds) {
+                if (start != null) {
+                    ds.segment = {
+                        borderDash: function (ctx) {
+                            return ctx.p0DataIndex >= start - 1 ? [6, 4] : undefined;
+                        }
+                    };
+                } else {
+                    delete ds.segment;
+                }
+            });
+        }
+
         panel.querySelectorAll('.chart-range-btn').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var key = btn.dataset.range;
@@ -105,6 +125,7 @@
                 barChart.update();
                 lineChart.data.labels = r.labels;
                 lineChart.data.datasets = r.line_datasets;
+                applyProjectionStyling(r);
                 lineChart.update();
             });
         });

@@ -1,4 +1,5 @@
 """Queries that span multiple models — kept out of views to make them reusable."""
+from calendar import monthrange
 from collections import Counter
 from datetime import timedelta
 
@@ -89,6 +90,80 @@ def _ranges_for_series(series_specs):
     }
 
 
+def _project_1year(series_specs):
+    """3 past months (actual) + 12 future months (projected at the last-90-day
+    daily rate), monthly bins.
+
+    Each series projects independently from its own 90-day rate. `projection_start`
+    is the index of the first projected month — the JS uses it to dim the
+    projected bars and dash the projected line segment.
+    """
+    now = timezone.localtime()
+    today = now.date()
+    past_start = today - timedelta(days=89)
+
+    # Monthly labels: from past_start's month through (today + 365 days)'s month.
+    end = today + timedelta(days=365)
+    labels = []
+    y, m = past_start.year, past_start.month
+    while (y, m) <= (end.year, end.month):
+        labels.append(f"{y:04d}-{m:02d}")
+        m += 1
+        if m == 13:
+            m = 1
+            y += 1
+
+    # Projected months are everything strictly after the current month.
+    current_key = f"{today.year:04d}-{today.month:02d}"
+    projection_start = labels.index(current_key) + 1 if current_key in labels else len(labels)
+
+    first_y, first_m = int(labels[0][:4]), int(labels[0][5:7])
+
+    out_series = []
+    for name, color, dates in series_specs:
+        counts_by_key = Counter(
+            f"{d.year:04d}-{d.month:02d}" for d in dates if d is not None
+        )
+        # Daily rate = count of tests with timestamps in the last 90 days / 90.
+        last_90 = sum(
+            1 for d in dates
+            if d is not None and d.date() >= past_start and d.date() <= today
+        )
+        daily_rate = last_90 / 90.0
+
+        # Baseline cumulative: every test stamped BEFORE the first label's month.
+        baseline = sum(
+            1 for d in dates
+            if d is not None and (d.year, d.month) < (first_y, first_m)
+        )
+
+        counts = []
+        for i, lbl in enumerate(labels):
+            if i < projection_start:
+                counts.append(counts_by_key.get(lbl, 0))
+            else:
+                ly, lm = int(lbl[:4]), int(lbl[5:7])
+                days_in_month = monthrange(ly, lm)[1]
+                counts.append(round(daily_rate * days_in_month))
+
+        cumulative = []
+        running = baseline
+        for c in counts:
+            running += c
+            cumulative.append(running)
+
+        out_series.append({
+            "name": name, "color": color,
+            "counts": counts, "cumulative": cumulative,
+        })
+
+    return {
+        "labels": labels,
+        "series": out_series,
+        "projection_start": projection_start,
+    }
+
+
 def larasic_progress():
     warm_dates = list(LArASIC.objects.filter(
         warm_tested_at__isnull=False
@@ -96,10 +171,13 @@ def larasic_progress():
     cold_dates = list(LArASIC.objects.filter(
         cold_tested_at__isnull=False
     ).values_list("cold_tested_at", flat=True))
-    return _ranges_for_series([
+    series = [
         ("Warm+Cold", WARM_COLOR, warm_dates),
         ("Cold", COLD_COLOR, cold_dates),
-    ])
+    ]
+    out = _ranges_for_series(series)
+    out["1year"] = _project_1year(series)
+    return out
 
 
 def _unique_units_progress(test_model, fk_field):
