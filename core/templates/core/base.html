@@ -57,7 +57,24 @@
                 <div id="search-results" class="search-results"></div>
             </div>
             {% if user.is_authenticated %}
-            <a class="user-avatar" href="{% url 'admin:index' %}" title="Logged in as {{ user.username }}">{{ user.username|slice:":2"|upper }}</a>
+            <details class="user-menu" id="user-menu">
+                <summary class="user-avatar" title="Signed in as {{ user.username }}">{{ user.username|slice:":2"|upper }}</summary>
+                <div class="user-menu-pop">
+                    <div class="user-menu-header">
+                        <div class="user-menu-name">{{ user.get_full_name|default:user.username }}</div>
+                        {% if user.email %}<div class="user-menu-email">{{ user.email }}</div>{% endif %}
+                        {% if fnal_credkey %}<div class="user-menu-email" title="FNAL services username">FNAL · {{ fnal_credkey }}</div>{% endif %}
+                    </div>
+                    {% if user.is_staff %}
+                    <a class="user-menu-item" href="{% url 'admin:index' %}">Django admin</a>
+                    {% endif %}
+                    <form action="{% url 'rest_framework:logout' %}" method="post" style="margin: 0;">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{% url 'rest_framework:login' %}?next={% url 'home' %}">
+                        <button class="user-menu-item user-menu-action" type="submit">Log out</button>
+                    </form>
+                </div>
+            </details>
             {% endif %}
         </div>
     </header>
@@ -67,5 +84,14 @@
     </main>
 
     <script src="https://unpkg.com/htmx.org@1.9.5"></script>
+    <script>
+        // Close the user dropdown when clicking anywhere outside it.
+        document.addEventListener('click', function (e) {
+            var menu = document.getElementById('user-menu');
+            if (menu && menu.open && !menu.contains(e.target)) {
+                menu.removeAttribute('open');
+            }
+        });
+    </script>
 </body>
 </html>
