@@ -382,6 +382,9 @@ button { font-family: inherit; }
 }
 .user-menu-item:hover { background: var(--bg-muted); color: var(--text); text-decoration: none; }
 .user-menu-action { color: var(--text); border-top: 1px solid var(--border); border-radius: 0 0 4px 4px; margin-top: 4px; }
+/* When the logout sits immediately under the header (no Django-admin row
+   between them), the header's own bottom border is the only divider needed. */
+.user-menu-header + form .user-menu-action { border-top: 0; margin-top: 0; }
 
 /* === Page header === */
 .page {
@@ -750,6 +753,8 @@ button { font-family: inherit; }
   transform: translateX(2px);
   color: var(--text);
 }
+.fam-stat-disabled { opacity: 0.55; cursor: default; }
+.fam-stat-disabled:hover { border-color: var(--border); box-shadow: none; }
 .fam-stat-head {
   display: flex;
   align-items: flex-start;
@@ -898,6 +903,32 @@ button { font-family: inherit; }
   background: var(--accent);
   color: #ffffff;
 }
+
+/* HWDB instance switcher — same shape as chart-range-toggle, but the active
+   button is colored by which instance is live so people see at a glance
+   whether they're looking at prod or dev. */
+.instance-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  overflow: hidden;
+}
+.instance-toggle button {
+  border: 0;
+  background: transparent;
+  padding: 6px 14px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.instance-toggle button + button { border-left: 1px solid var(--border); }
+.instance-toggle button:hover { background: var(--bg-muted); color: var(--text); }
+.instance-toggle button.is-active { background: var(--accent); color: #ffffff; }
+.instance-toggle[data-active="prod"] button.is-active { background: #d97706; color: #ffffff; }
 
 /* Activity timeline */
 .timeline { padding: 4px 20px; }

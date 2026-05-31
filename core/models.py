@@ -31,6 +31,14 @@ class LArASIC(models.Model):
     # upload action skips chips with this flag on PROD, unless "Force
     # re-upload" is on. Reset to False if sync sees the chip leave HWDB.
     qc_tests_uploaded = models.BooleanField(default=False)
+    # Stamped when *our* PROD upload successfully attaches the CSV for that
+    # env. Stays NULL when the chip was uploaded simple-mode (no CSV at the
+    # time). The merged /hwdb/larasic/ "To upload" column uses these to spot
+    # chips that need CSV re-upload: if RTS_DIR has a CSV for the env but the
+    # timestamp is NULL, the row contributes to the count (and the tray loses
+    # its ✓ done tint). Local-only; never read from HWDB's qaqc_uploaded flag.
+    warm_csv_attached_at = models.DateTimeField(null=True, blank=True)
+    cold_csv_attached_at = models.DateTimeField(null=True, blank=True)
     femb = models.ForeignKey(FEMB, on_delete=models.CASCADE, null=True, blank=True)
     femb_pos = models.CharField(max_length=2, null=True, blank=True)  # F1-4, B1-4
     installed_at_repair = models.ForeignKey(

@@ -264,13 +264,66 @@ def _tray_options(model):
     return [{"value": t, "label": t} for t in trays]
 
 
+def _annotate_to_upload(rows):
+    """Inject ``to_upload_count`` into each tray row using local-only signals.
+
+    A chip needs work if any of:
+      - qc_tests_uploaded is False (never uploaded), OR
+      - RTS_DIR has an RT CSV for it AND warm_csv_attached_at is NULL, OR
+      - RTS_DIR has an LN CSV for it AND cold_csv_attached_at is NULL.
+
+    CSV availability is read from ``hwdb.TrayCsvCache`` (single DB query),
+    so this never touches HWDB's qaqc_uploaded flag — keeps the column
+    truthful even if someone edits HWDB out-of-band.
+    """
+    from hwdb.models import TrayCsvCache
+
+    tray_ids = [r["tray_id"] for r in rows]
+    chips = LArASIC.objects.filter(tray_id__in=tray_ids).values(
+        "tray_id", "serial_number", "qc_tests_uploaded",
+        "warm_csv_attached_at", "cold_csv_attached_at",
+    )
+    csvs_by_tray = {
+        row.tray_id: row.csvs or {}
+        for row in TrayCsvCache.objects.filter(tray_id__in=tray_ids)
+    }
+
+    by_tray = {}
+    for c in chips:
+        tray = c["tray_id"]
+        csvs = csvs_by_tray.get(tray, {})
+        needs = False
+        if not c["qc_tests_uploaded"]:
+            needs = True
+        else:
+            sn = c["serial_number"]
+            if f"{sn}|RT" in csvs and c["warm_csv_attached_at"] is None:
+                needs = True
+            elif f"{sn}|LN" in csvs and c["cold_csv_attached_at"] is None:
+                needs = True
+        if needs:
+            by_tray[tray] = by_tray.get(tray, 0) + 1
+    for r in rows:
+        r["to_upload_count"] = by_tray.get(r["tray_id"], 0)
+
+
 def _grouped_chip_response(
     request, *, model, family_label, family_title, family_subtitle,
     chips_per_femb, has_tray_view, page_id,
+    include_to_upload=False, tray_drill_url_name="larasic_tray",
+    full_template="core/chip_family.html",
+    fragment_template="core/_chip_family_fragment.html",
+    extra_context=None,
 ):
-    """Shared scaffolding for chip-family grouped list pages (LArASIC,
-    ColdADC, COLDATA). LArASIC carries both a tray and a FEMB view; the
-    others are FEMB-only (no RTS trays yet).
+    """Shared scaffolding for chip-family grouped list pages.
+
+    Used by:
+    - /larasic/ (LArASIC tray + FEMB views)
+    - /coldadc/ + /coldata/ (FEMB-only, no RTS trays yet)
+    - /hwdb/larasic/ (same shape + a "To upload" tray column and a tray drill
+      that goes to the upload page; pass include_to_upload=True,
+      tray_drill_url_name="hwdb:upload_tray", and a hwdb-specific full
+      template via the kwargs.)
 
     Supports ?q= search, ?sort=&dir= sort, and ?page= pagination on the
     aggregated rows. The two views have disjoint sort-key sets — switching
@@ -300,17 +353,20 @@ def _grouped_chip_response(
 
     rows = []
     if view == "tray":
+        tray_annotations = dict(
+            chip_count=Count("id"),
+            rt_tested=Count("id", filter=Q(warm_tested_at__isnull=False)),
+            ln_tested=Count("id", filter=Q(cold_tested_at__isnull=False)),
+            latest_warm=Max("warm_tested_at"),
+            latest_cold=Max("cold_tested_at"),
+        )
         rows = list(
             model.objects
             .exclude(tray_id__isnull=True).exclude(tray_id="")
-            .values("tray_id").annotate(
-                chip_count=Count("id"),
-                rt_tested=Count("id", filter=Q(warm_tested_at__isnull=False)),
-                ln_tested=Count("id", filter=Q(cold_tested_at__isnull=False)),
-                latest_warm=Max("warm_tested_at"),
-                latest_cold=Max("cold_tested_at"),
-            )
+            .values("tray_id").annotate(**tray_annotations)
         )
+        if include_to_upload:
+            _annotate_to_upload(rows)
         # Flag trays with offline analysis CSVs — sourced from the persistent
         # TrayCsvCache the upload page maintains. One DB query, no SMB stats.
         from hwdb.upload import larasic as upload_lib
@@ -383,12 +439,12 @@ def _grouped_chip_response(
         "family_subtitle": family_subtitle,
         "chips_per_femb": chips_per_femb,
         "has_tray_view": has_tray_view,
+        "include_to_upload": include_to_upload,
+        "tray_drill_url_name": tray_drill_url_name,
     }
-    template = (
-        "core/_chip_family_fragment.html"
-        if getattr(request, "htmx", False)
-        else "core/chip_family.html"
-    )
+    if extra_context:
+        context.update(extra_context)
+    template = fragment_template if getattr(request, "htmx", False) else full_template
     return render(request, template, context)
 
 

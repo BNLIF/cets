@@ -45,14 +45,15 @@ def home(request):
     component_types = [
         {
             "name": "LArASIC",
+            "description": "16-ch cold front-end ASIC",
             "part_type_id": profile["larasic_part_type"],
             "active": True,
             "url": reverse("hwdb:larasic"),
         },
-        {"name": "ColdADC", "part_type_id": None, "active": False},
-        {"name": "COLDATA", "part_type_id": None, "active": False},
-        {"name": "FEMB", "part_type_id": None, "active": False},
-        {"name": "Cable", "part_type_id": None, "active": False},
+        {"name": "ColdADC", "description": "12-bit cold ADC", "part_type_id": None, "active": False},
+        {"name": "COLDATA", "description": "Serializer / control", "part_type_id": None, "active": False},
+        {"name": "FEMB", "description": "Frontend Motherboard", "part_type_id": None, "active": False},
+        {"name": "Cable", "description": "Cold flex cable", "part_type_id": None, "active": False},
     ]
     return render(
         request,
@@ -76,17 +77,13 @@ def set_instance(request):
 
 
 def larasic_view(request):
-    """Browse local LArASIC chips, grouped either by tray (default) or by the
-    FEMB they're installed on. Drilling into a tray opens the per-tray upload
-    page; drilling into a FEMB opens the existing femb_detail page.
+    """Browse local LArASIC chips against HWDB. Same grouped tray/FEMB layout as
+    the general /larasic/ page plus an extra "In HWDB" column and sync stats.
 
-    Sync stats (Local total / In HWDB / To upload / In HWDB only) stay at the
-    top — local-only read of the is_in_hwdb flag, so the page itself is not
-    FNAL-gated. Only the Sync button hits the API.
+    The is_in_hwdb flag is local-only, so the page itself is not FNAL-gated.
+    Only the Sync button hits the API.
     """
-    view = request.GET.get("view", "tray")
-    if view not in {"tray", "femb"}:
-        view = "tray"
+    from core.views import _grouped_chip_response
 
     qs = LArASIC.objects.all()
     total = qs.count()
@@ -94,78 +91,27 @@ def larasic_view(request):
     last_synced = qs.aggregate(Max("hwdb_checked_at"))["hwdb_checked_at__max"]
     hwdb_only = LarasicSyncState.get().hwdb_only_count
 
-    tray_rows = []
-    femb_rows = []
-
-    if view == "tray":
-        # Per-tray summary: chip count + how many have RT/LN tests in the
-        # local DB, plus the latest tested-at timestamp on the tray.
-        rows = list(
-            qs.exclude(tray_id="").values("tray_id").annotate(
-                chip_count=Count("id"),
-                rt_tested=Count("id", filter=Q(warm_tested_at__isnull=False)),
-                ln_tested=Count("id", filter=Q(cold_tested_at__isnull=False)),
-                in_hwdb_count=Count("id", filter=Q(is_in_hwdb=True)),
-                latest_warm=Max("warm_tested_at"),
-                latest_cold=Max("cold_tested_at"),
-            ).order_by("-tray_id")
-        )
-        for r in rows:
-            warm, cold = r["latest_warm"], r["latest_cold"]
-            r["last_activity"] = max(warm, cold) if warm and cold else (warm or cold)
-        tray_rows = rows
-    else:
-        # Per-FEMB summary: chip count (out of 8 slots), latest FembTest, plus
-        # how many QC and CHK FembTests have been recorded on each FEMB.
-        chip_counts = dict(
-            LArASIC.objects.filter(removed_at_repair__isnull=True, femb__isnull=False)
-            .values("femb").annotate(n=Count("id")).values_list("femb", "n")
-        )
-        in_hwdb_counts = dict(
-            LArASIC.objects.filter(removed_at_repair__isnull=True, femb__isnull=False, is_in_hwdb=True)
-            .values("femb").annotate(n=Count("id")).values_list("femb", "n")
-        )
-        qc_counts = dict(
-            FembTest.objects.filter(test_type="QC").values("femb")
-            .annotate(n=Count("id")).values_list("femb", "n")
-        )
-        chk_counts = dict(
-            FembTest.objects.filter(test_type="CHK").values("femb")
-            .annotate(n=Count("id")).values_list("femb", "n")
-        )
-        latest_test = dict(
-            FembTest.objects.values("femb").annotate(t=Max("timestamp"))
-            .values_list("femb", "t")
-        )
-        fembs = (
-            FEMB.objects.filter(pk__in=chip_counts.keys())
-            .order_by("version", "serial_number")
-        )
-        for f in fembs:
-            femb_rows.append({
-                "femb": f,
-                "chip_count": chip_counts.get(f.pk, 0),
-                "in_hwdb_count": in_hwdb_counts.get(f.pk, 0),
-                "latest_test": latest_test.get(f.pk),
-                "qc": qc_counts.get(f.pk, 0),
-                "chk": chk_counts.get(f.pk, 0),
-            })
-
-    return render(
+    return _grouped_chip_response(
         request,
-        "hwdb/larasic.html",
-        {
-            "view": view,
+        model=LArASIC,
+        family_label="LArASIC",
+        family_title="LArASIC · HWDB sync",
+        family_subtitle="Local chips vs HWDB",
+        chips_per_femb=8,
+        has_tray_view=True,
+        page_id="hwdb",
+        include_to_upload=True,
+        tray_drill_url_name="hwdb:upload_tray",
+        full_template="hwdb/larasic.html",
+        extra_context={
             "total": total,
             "in_hwdb": in_hwdb,
             "to_upload": total - in_hwdb,
             "hwdb_only": hwdb_only,
             "last_synced": last_synced,
-            "tray_rows": tray_rows,
-            "femb_rows": femb_rows,
             "larasic_part_type": active_profile(request)["larasic_part_type"],
             "active_instance": active_instance(request),
-            "page": "hwdb",
+            "instances": list(settings.HWDB_PROFILES),
         },
     )
 
@@ -434,36 +380,12 @@ def subsystem_list_view(request, bearer, part1=None, part2=None):
 
 
 def upload_index_view(request):
-    """List trays with chip / to-upload / last-checked counts (read-only)."""
-    trays = list(
-        LArASIC.objects.exclude(tray_id__isnull=True)
-        .exclude(tray_id="")
-        .values("tray_id")
-        .annotate(
-            chip_count=Count("id"),
-            # "To upload" = what the default Upload tray will walk on PROD —
-            # new chips + enrich chips (anything not yet confirmed done).
-            to_upload=Count("id", filter=Q(qc_tests_uploaded=False)),
-            last_checked=Max("hwdb_checked_at"),
-        )
-        .order_by("-tray_id")
-    )
-    # One DB query (against the persistent CSV cache) instead of one SMB stat
-    # per tray — meaningful on the SMB-mounted RTS_DIR. May be slightly stale;
-    # the detail page corrects on visit.
-    with_csvs = upload_lib.trays_with_analysis([t["tray_id"] for t in trays])
-    for t in trays:
-        t["has_analysis"] = t["tray_id"] in with_csvs
-    return render(
-        request,
-        "hwdb/upload_index.html",
-        {
-            "trays": trays,
-            "active_instance": active_instance(request),
-            "instances": list(settings.HWDB_PROFILES),
-            "page": "hwdb",
-        },
-    )
+    """Legacy URL — the tray worklist is now merged into /hwdb/larasic/.
+
+    Old bookmarks land here and bounce; the merged page surfaces the same
+    To-upload count and CSV-availability signals as table columns.
+    """
+    return redirect("hwdb:larasic")
 
 
 def _rts_root() -> Path | None:
@@ -504,7 +426,7 @@ def upload_refresh_csv_cache_view(request):
     )
     for tid in tray_ids:
         upload_lib.scan_tray_csvs(rts_root, tid)
-    return redirect("hwdb:upload_index")
+    return redirect("hwdb:larasic")
 
 
 def upload_tray_view(request, tray_id):
@@ -589,6 +511,8 @@ def _stream_upload(api, chips, *, part_type_id, rts_root, attach_csvs, instance,
 
     ok = failed = 0
     promoted = []  # chips whose is_in_hwdb we should flip True on prod
+    csv_warm = []  # chip pks whose RT CSV was attached in this run
+    csv_cold = []  # chip pks whose LN CSV was attached in this run
 
     for i, chip in enumerate(chips, 1):
         yield f"[{i}/{total}] {chip.serial_number}: "
@@ -628,24 +552,41 @@ def _stream_upload(api, chips, *, part_type_id, rts_root, attach_csvs, instance,
             ok += 1
             if instance == "prod":
                 promoted.append((chip.pk, result.part_id))
+                for t in result.tests:
+                    if t.csv_attached and t.env == "RT":
+                        csv_warm.append(chip.pk)
+                    elif t.csv_attached and t.env == "LN":
+                        csv_cold.append(chip.pk)
         else:
             failed += 1
         yield ", ".join(bits) + "\n"
 
-    # Q10: only flip the prod-scoped is_in_hwdb / qc_tests_uploaded flags on a
-    # prod upload. ``promoted`` only contains chips where every test landed
-    # cleanly (uploaded or already-there), so it's safe to also mark
-    # qc_tests_uploaded — future runs can skip them.
-    if instance == "prod" and promoted:
+    yield from _commit_prod_stamps(instance, promoted, csv_warm, csv_cold)
+    yield f"\nDone. ok={ok} failed={failed}\n"
+
+
+def _commit_prod_stamps(instance, promoted, csv_warm, csv_cold):
+    """Flip is_in_hwdb / qc_tests_uploaded for promoted chips, and stamp the
+    per-env csv_attached_at timestamps for chips whose CSVs we actually attached
+    in this run. Prod-only — dev runs leave the local state alone, same as the
+    existing is_in_hwdb policy ([[0003-prod-scoped-is-in-hwdb-flag]])."""
+    if instance != "prod":
+        return
+    now = timezone.now()
+    if promoted:
         ids = [pk for pk, _ in promoted]
         LArASIC.objects.filter(pk__in=ids).update(
             is_in_hwdb=True,
             qc_tests_uploaded=True,
-            hwdb_checked_at=timezone.now(),
+            hwdb_checked_at=now,
         )
         yield f"(updated is_in_hwdb=True, qc_tests_uploaded=True on {len(ids)} local row(s))\n"
-
-    yield f"\nDone. ok={ok} failed={failed}\n"
+    if csv_warm:
+        LArASIC.objects.filter(pk__in=csv_warm).update(warm_csv_attached_at=now)
+    if csv_cold:
+        LArASIC.objects.filter(pk__in=csv_cold).update(cold_csv_attached_at=now)
+    if csv_warm or csv_cold:
+        yield f"(stamped csv_attached_at on {len(csv_warm)} RT + {len(csv_cold)} LN row(s))\n"
 
 
 def _stream_upload_parallel(
@@ -680,6 +621,8 @@ def _stream_upload_parallel(
 
     ok = failed = 0
     promoted = []
+    csv_warm = []
+    csv_cold = []
     done = 0
     for chip, result in upload_lib.iter_upload_chips_parallel(
         chips,
@@ -712,19 +655,16 @@ def _stream_upload_parallel(
             ok += 1
             if instance == "prod":
                 promoted.append((chip.pk, result.part_id))
+                for t in result.tests:
+                    if t.csv_attached and t.env == "RT":
+                        csv_warm.append(chip.pk)
+                    elif t.csv_attached and t.env == "LN":
+                        csv_cold.append(chip.pk)
         else:
             failed += 1
         yield prefix + ", ".join(bits) + "\n"
 
-    if instance == "prod" and promoted:
-        ids = [pk for pk, _ in promoted]
-        LArASIC.objects.filter(pk__in=ids).update(
-            is_in_hwdb=True,
-            qc_tests_uploaded=True,
-            hwdb_checked_at=timezone.now(),
-        )
-        yield f"(updated is_in_hwdb=True, qc_tests_uploaded=True on {len(ids)} local row(s))\n"
-
+    yield from _commit_prod_stamps(instance, promoted, csv_warm, csv_cold)
     yield f"\nDone. ok={ok} failed={failed}\n"
 
 

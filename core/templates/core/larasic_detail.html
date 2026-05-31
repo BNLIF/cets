@@ -14,6 +14,13 @@
             <p class="card-text"><strong>FEMB Position:</strong> {{ larasic.femb_pos }}</p>
             {% endif %}
             <p class="card-text"><strong>Last Update:</strong> {{ larasic.last_update|date:"Y-m-d H:i:s" }}</p>
+            <p class="card-text" title="Set by the RTS ingest when this chip appears in an RT_FE_/LN_FE_ folder under RTS_DIR; folder existence counts as test evidence even if no analysis CSV has landed yet."><strong>RTS folders:</strong>
+                <span class="cell-mono" style="font-size: 12px;">RT</span>
+                {% if larasic.warm_tested_at %}{{ larasic.warm_tested_at|date:"Y-m-d H:i" }}{% else %}<span class="cell-muted">—</span>{% endif %}
+                <span class="cell-muted" style="margin: 0 6px;">·</span>
+                <span class="cell-mono" style="font-size: 12px;">LN</span>
+                {% if larasic.cold_tested_at %}{{ larasic.cold_tested_at|date:"Y-m-d H:i" }}{% else %}<span class="cell-muted">—</span>{% endif %}
+            </p>
             <p class="card-text"><strong>In HWDB:</strong>
                 {% if larasic.is_in_hwdb %}<span class="pill" data-status="pass">yes</span>{% else %}<span class="pill">no</span>{% endif %}
                 {% if larasic.hwdb_checked_at %}<span class="cell-muted" style="font-size: 12px;">(checked {{ larasic.hwdb_checked_at|date:"Y-m-d H:i" }})</span>{% endif %}

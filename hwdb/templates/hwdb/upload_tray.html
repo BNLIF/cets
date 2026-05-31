@@ -14,13 +14,14 @@
         </div>
     </div>
     <div class="page-head-actions">
-        <form method="post" action="{% url 'hwdb:set_instance' %}" style="display: flex; gap: 6px; align-items: center;">
+        <form method="post" action="{% url 'hwdb:set_instance' %}" style="display: inline;">
             {% csrf_token %}
             <input type="hidden" name="next" value="{{ request.path }}">
-            <span class="cell-muted" style="font-size: 12px;">Instance</span>
-            {% for inst in instances %}
-            <button name="instance" value="{{ inst }}" class="btn btn-sm {% if inst == active_instance %}btn-primary{% else %}btn-ghost{% endif %}">{{ inst }}</button>
-            {% endfor %}
+            <div class="instance-toggle" data-active="{{ active_instance }}" role="group" aria-label="HWDB instance" title="HWDB instance">
+                {% for inst in instances %}
+                <button name="instance" value="{{ inst }}" class="{% if inst == active_instance %}is-active{% endif %}" title="Switch to {{ inst }} HWDB">{{ inst }}</button>
+                {% endfor %}
+            </div>
         </form>
     </div>
 </div>

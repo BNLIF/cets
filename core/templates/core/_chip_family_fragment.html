@@ -14,21 +14,23 @@
                     {% sortable_th key="rt_tested" label="RT tested" current_sort=sort current_dir=dir %}
                     {% sortable_th key="ln_tested" label="LN tested" current_sort=sort current_dir=dir %}
                     <th>CSV report</th>
+                    {% if include_to_upload %}<th>To upload</th>{% endif %}
                     {% sortable_th key="last_activity" label="Last activity" current_sort=sort current_dir=dir %}
                 </tr>
             </thead>
             <tbody>
                 {% for t in page_obj %}
-                <tr>
-                    <td class="cell-mono"><a href="{% url 'larasic_tray' t.tray_id %}" style="color: var(--accent); font-weight: 500;">{{ t.tray_id }}</a></td>
+                <tr{% if include_to_upload and t.to_upload_count == 0 %} style="background: rgba(76, 175, 80, 0.08);"{% endif %}>
+                    <td class="cell-mono"><a href="{% url tray_drill_url_name t.tray_id %}" style="color: var(--accent); font-weight: 500;">{{ t.tray_id }}</a></td>
                     <td>{{ t.chip_count }}</td>
                     <td>{{ t.rt_tested }}{% if t.rt_tested != t.chip_count %} <span class="cell-muted" style="font-size: 11px;">/ {{ t.chip_count }}</span>{% endif %}</td>
                     <td>{% if t.ln_tested == 0 %}<span class="cell-muted" style="font-size: 12px;">—</span>{% else %}{{ t.ln_tested }}{% if t.ln_tested != t.chip_count %} <span class="cell-muted" style="font-size: 11px;">/ {{ t.chip_count }}</span>{% endif %}{% endif %}</td>
                     <td>{% if t.has_csv %}<span class="pill" data-status="new" title="Offline analysis CSVs exist for this tray.">CSV</span>{% else %}<span class="cell-muted" style="font-size: 12px;">—</span>{% endif %}</td>
+                    {% if include_to_upload %}<td>{% if t.to_upload_count == 0 %}<span class="pill" data-status="pass" title="Every chip's QC tests are confirmed in HWDB.">✓ done</span>{% else %}{{ t.to_upload_count }}{% endif %}</td>{% endif %}
                     <td class="cell-mono cell-muted">{{ t.last_activity|date:"Y-m-d H:i"|default:"—" }}</td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="6" class="cell-muted" style="text-align: center; padding: 36px;">No trays match the current filters.</td></tr>
+                <tr><td colspan="{% if include_to_upload %}7{% else %}6{% endif %}" class="cell-muted" style="text-align: center; padding: 36px;">No trays match the current filters.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

@@ -7,22 +7,35 @@
 <div class="page-head">
     <div>
         {% crumbs "CETS" "/" "Hardware Database" "/hwdb/" "LArASIC" %}
-        <h1 class="page-title">LArASIC · HWDB sync</h1>
+        <h1 class="page-title">{{ family_title }}</h1>
         <div class="page-subtitle">
-            Local chips vs the <strong>production</strong> HWDB ·
+            Local chips vs the <strong>{{ active_instance }}</strong> HWDB ·
             {% if last_synced %}last synced {{ last_synced|date:"Y-m-d H:i" }}{% else %}never synced{% endif %}
         </div>
     </div>
     <div class="page-head-actions">
-        <a class="btn btn-ghost" href="{% url 'hwdb:upload_index' %}">Upload →</a>
+        <a class="btn btn-ghost" href="{% url 'hwdb:component_list' larasic_part_type %}" title="Browse raw HWDB records for this part type">Raw HWDB →</a>
+        <form method="post" action="{% url 'hwdb:upload_refresh_csv_cache' %}" style="display: inline;" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Scanning…';">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-ghost" title="Walk every tray's results/ dir and refresh the CSV cache. Slow on SMB; needed when new analysis CSVs land in a tray that's never been visited.">Refresh CSVs</button>
+        </form>
         {% if active_instance == "prod" %}
         <form method="post" action="{% url 'hwdb:larasic_sync' %}">
             {% csrf_token %}
-            <button class="btn btn-primary" type="submit">Sync with HWDB</button>
+            <button class="btn btn-ghost" type="submit" title="Pull the prod HWDB component list and update the in_hwdb flag on every local chip">Sync HWDB</button>
         </form>
         {% else %}
-        <span class="cell-muted" style="font-size: 12px;">Switch to <span class="cell-mono">prod</span> to sync the upload worklist</span>
+        <span class="cell-muted" style="font-size: 12px;">Switch to <span class="cell-mono">prod</span> to sync</span>
         {% endif %}
+        <form method="post" action="{% url 'hwdb:set_instance' %}" style="display: inline;">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <div class="instance-toggle" data-active="{{ active_instance }}" role="group" aria-label="HWDB instance" title="HWDB instance">
+                {% for inst in instances %}
+                <button name="instance" value="{{ inst }}" class="{% if inst == active_instance %}is-active{% endif %}" title="Switch to {{ inst }} HWDB">{{ inst }}</button>
+                {% endfor %}
+            </div>
+        </form>
     </div>
 </div>
 
@@ -30,75 +43,34 @@
     <div class="stat"><div class="stat-label">Local total</div><div class="stat-value">{{ total }}</div></div>
     <div class="stat"><div class="stat-label">In HWDB</div><div class="stat-value">{{ in_hwdb }}</div></div>
     <div class="stat"><div class="stat-label">To upload</div><div class="stat-value">{{ to_upload }}</div></div>
-    <div class="stat"><div class="stat-label">In HWDB only</div><div class="stat-value">{{ hwdb_only }}</div><div class="stat-foot">in prod HWDB, not local</div></div>
+    <div class="stat"><div class="stat-label">In HWDB only</div><div class="stat-value">{{ hwdb_only }}</div><div class="stat-foot">in {{ active_instance }} HWDB, not local</div></div>
 </div>
 
-<div style="display: flex; gap: 6px; align-items: center; margin-bottom: 12px;">
-    <span class="cell-muted" style="font-size: 12px;">Group by</span>
-    <a class="btn btn-sm {% if view == 'tray' %}btn-primary{% else %}btn-ghost{% endif %}" href="?view=tray">Tray</a>
-    <a class="btn btn-sm {% if view == 'femb' %}btn-primary{% else %}btn-ghost{% endif %}" href="?view=femb">FEMB</a>
-    <span class="cell-muted" style="font-size: 12px; margin-left: 8px;">
-        <a href="{% url 'hwdb:component_list' larasic_part_type %}">raw HWDB records ({{ active_instance }}) →</a>
-    </span>
+<div class="filterbar">
+    <div class="chart-range-toggle" role="tablist">
+        <a class="chart-range-btn {% if view == 'tray' %}is-active{% endif %}" href="?view=tray" style="text-decoration: none;">Tray</a>
+        <a class="chart-range-btn {% if view == 'femb' %}is-active{% endif %}" href="?view=femb" style="text-decoration: none;">FEMB</a>
+    </div>
+    <div class="filter-search">
+        <svg class="filter-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+        <input
+            id="list-search-input"
+            type="search"
+            name="q"
+            value="{{ q }}"
+            placeholder="{% if view == 'tray' %}Search by tray ID…{% else %}Search by FEMB serial number…{% endif %}"
+            hx-get="{{ request.path }}"
+            hx-target="#list-fragment"
+            hx-swap="outerHTML"
+            hx-push-url="true"
+            hx-trigger="keyup changed delay:250ms, search"
+            hx-include="[name=view], [name=sort], [name=dir]"
+        >
+    </div>
+    <div style="margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--text-3);">
+        {{ total_groups }} {% if view == 'tray' %}tray{{ total_groups|pluralize }}{% else %}FEMB{{ total_groups|pluralize }}{% endif %}
+    </div>
 </div>
 
-{% if view == 'tray' %}
-<div class="table-wrap">
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Tray</th>
-                <th>Chips</th>
-                <th>RT tested</th>
-                <th>LN tested</th>
-                <th>In HWDB</th>
-                <th>Last activity</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for t in tray_rows %}
-            <tr>
-                <td class="cell-mono"><a href="{% url 'hwdb:upload_tray' t.tray_id %}" style="color: var(--accent); font-weight: 500;">{{ t.tray_id }}</a></td>
-                <td>{{ t.chip_count }}</td>
-                <td>{{ t.rt_tested }}{% if t.rt_tested != t.chip_count %} <span class="cell-muted" style="font-size: 11px;">/ {{ t.chip_count }}</span>{% endif %}</td>
-                <td>{% if t.ln_tested == 0 %}<span class="cell-muted" style="font-size: 12px;">—</span>{% else %}{{ t.ln_tested }}{% if t.ln_tested != t.chip_count %} <span class="cell-muted" style="font-size: 11px;">/ {{ t.chip_count }}</span>{% endif %}{% endif %}</td>
-                <td>{% if t.in_hwdb_count == t.chip_count %}<span class="pill" data-status="pass">{{ t.in_hwdb_count }}</span>{% else %}{{ t.in_hwdb_count }} <span class="cell-muted" style="font-size: 11px;">/ {{ t.chip_count }}</span>{% endif %}</td>
-                <td class="cell-mono cell-muted">{{ t.last_activity|date:"Y-m-d H:i"|default:"—" }}</td>
-            </tr>
-            {% empty %}
-            <tr><td colspan="6" class="cell-muted" style="text-align: center; padding: 36px;">No trays found.</td></tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% else %}
-<div class="table-wrap">
-    <table class="table">
-        <thead>
-            <tr>
-                <th>FEMB</th>
-                <th>LArASICs</th>
-                <th>In HWDB</th>
-                <th>QC tests</th>
-                <th>CHK tests</th>
-                <th>Latest test</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for r in femb_rows %}
-            <tr>
-                <td class="cell-mono"><a href="{% url 'femb_detail' r.femb.version r.femb.serial_number %}" style="color: var(--accent); font-weight: 500;">{{ r.femb.version }}/{{ r.femb.serial_number }}</a></td>
-                <td>{{ r.chip_count }}<span class="cell-muted" style="font-size: 11px;">/8</span></td>
-                <td>{% if r.in_hwdb_count == r.chip_count %}<span class="pill" data-status="pass">{{ r.in_hwdb_count }}</span>{% else %}{{ r.in_hwdb_count }} <span class="cell-muted" style="font-size: 11px;">/ {{ r.chip_count }}</span>{% endif %}</td>
-                <td>{{ r.qc }}</td>
-                <td>{{ r.chk }}</td>
-                <td class="cell-mono cell-muted">{{ r.latest_test|date:"Y-m-d H:i"|default:"—" }}</td>
-            </tr>
-            {% empty %}
-            <tr><td colspan="6" class="cell-muted" style="text-align: center; padding: 36px;">No FEMBs with LArASICs assigned.</td></tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% endif %}
+{% include "core/_chip_family_fragment.html" %}
 {% endblock %}

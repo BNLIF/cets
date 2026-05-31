@@ -40,8 +40,15 @@ class UploadIndexTest(TestCase):
         # Untrayed chip: should not appear on the index.
         LArASIC.objects.create(serial_number="002-00004", tray_id="")
 
-    def test_lists_trays_with_counts(self):
+    def test_legacy_upload_index_redirects_to_merged_page(self):
+        # /hwdb/larasic/upload/ used to be its own tray-worklist page; it now
+        # 302s to /hwdb/larasic/ where the same data is a table column.
         resp = self.client.get(reverse("hwdb:upload_index"))
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], reverse("hwdb:larasic"))
+
+    def test_merged_page_lists_trays_with_counts(self):
+        resp = self.client.get(reverse("hwdb:larasic"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "B005T0011")
         self.assertContains(resp, "B005T0012")
@@ -54,14 +61,14 @@ class UploadIndexTest(TestCase):
              mock.patch("hwdb.views._rts_root", return_value=__import__("pathlib").Path("/tmp")):
             resp = self.client.post(reverse("hwdb:upload_refresh_csv_cache"))
         self.assertEqual(resp.status_code, 302)
-        self.assertIn(reverse("hwdb:upload_index"), resp["Location"])
+        self.assertEqual(resp["Location"], reverse("hwdb:larasic"))
         # Two distinct trays in setUp: B005T0011 (×2 chips) + B005T0012.
         scanned_trays = sorted(c.args[1] for c in scan.call_args_list)
         self.assertEqual(scanned_trays, ["B005T0011", "B005T0012"])
 
     def test_has_analysis_badge_uses_cache_table(self):
-        # The index reads TrayCsvCache (single DB query), not the SMB
-        # filesystem — so a row with non-empty csvs lights up the badge.
+        # The merged page reads TrayCsvCache (single DB query), not the SMB
+        # filesystem — so a row with non-empty csvs lights up the CSV badge.
         from hwdb.models import TrayCsvCache
         TrayCsvCache.objects.create(
             tray_id="B005T0011",
@@ -69,8 +76,8 @@ class UploadIndexTest(TestCase):
             csvs={"002-00001|RT": "002_00001_..._RT.csv"},
         )
         self.addCleanup(TrayCsvCache.objects.all().delete)
-        resp = self.client.get(reverse("hwdb:upload_index"))
-        self.assertContains(resp, "CSVs")
+        resp = self.client.get(reverse("hwdb:larasic"))
+        self.assertContains(resp, "CSV")
 
 
 class UploadTrayTest(TestCase):
@@ -87,7 +94,7 @@ class UploadTrayTest(TestCase):
         self.assertContains(resp, "002-00001")
         # Default instance is prod; the PROD warning + gauntlet markup must render.
         self.assertContains(resp, "PRODUCTION instance")
-        self.assertContains(resp, "Confirm production upload")  # gauntlet modal label
+        self.assertContains(resp, "Confirm upload")  # gauntlet modal label
         # No RTS_DIR configured in test settings → no analysis CSVs.
         self.assertContains(resp, "No analysis CSVs")
 

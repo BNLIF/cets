@@ -11,52 +11,57 @@
         <div class="page-subtitle">Browse and sync CE components against the Fermilab HWDB · queried with your own FNAL credentials</div>
     </div>
     <div class="page-head-actions">
-        <form method="post" action="{% url 'hwdb:set_instance' %}" style="display: flex; gap: 6px; align-items: center;">
+        <form method="post" action="{% url 'hwdb:set_instance' %}" style="display: inline;">
             {% csrf_token %}
             <input type="hidden" name="next" value="{{ request.path }}">
-            <span class="cell-muted" style="font-size: 12px;">Instance</span>
-            {% for inst in instances %}
-            <button name="instance" value="{{ inst }}" class="btn btn-sm {% if inst == active_instance %}btn-primary{% else %}btn-ghost{% endif %}">{{ inst }}</button>
-            {% endfor %}
+            <div class="instance-toggle" data-active="{{ active_instance }}" role="group" aria-label="HWDB instance" title="HWDB instance">
+                {% for inst in instances %}
+                <button name="instance" value="{{ inst }}" class="{% if inst == active_instance %}is-active{% endif %}" title="Switch to {{ inst }} HWDB">{{ inst }}</button>
+                {% endfor %}
+            </div>
         </form>
     </div>
 </div>
 
-<div class="components-grid">
+<div class="stats">
     {% for ct in component_types %}
-    <div class="comp-block">
-        <div class="comp-head">
-            <h2 class="comp-title">
-                {% if ct.active %}
-                <a href="{{ ct.url }}" style="color: inherit;">{{ ct.name }}</a>
-                {% else %}
-                {{ ct.name }}
-                {% endif %}
-            </h2>
-            {% if ct.active %}
-            <a class="btn btn-primary btn-sm" href="{{ ct.url }}">Open</a>
-            {% else %}
-            <span class="badge">coming soon</span>
-            {% endif %}
+    {% if ct.active %}
+    <a class="stat fam-stat" href="{{ ct.url }}">
+        <div class="fam-stat-head">
+            <div>
+                <div class="fam-stat-name">{{ ct.name }}</div>
+                <div class="fam-stat-desc">{{ ct.description }}</div>
+            </div>
+            <svg class="fam-stat-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
         </div>
-        <div class="panel-body padded">
-            {% if ct.part_type_id %}
-            <div class="cell-mono cell-muted" style="font-size: 12px;">{{ ct.part_type_id }}</div>
-            {% else %}
-            <div class="cell-muted" style="font-size: 12px;">Display &amp; sync coming soon</div>
-            {% endif %}
+        <div class="fam-stat-numbers" style="grid-template-columns: 1fr;">
+            <div>
+                <div class="fam-stat-value" style="font-family: var(--font-mono); font-size: 20px;">{{ ct.part_type_id }}</div>
+                <div class="fam-stat-num-label">part type · {{ active_instance }}</div>
+            </div>
+        </div>
+    </a>
+    {% else %}
+    <div class="stat fam-stat fam-stat-disabled">
+        <div class="fam-stat-head">
+            <div>
+                <div class="fam-stat-name">{{ ct.name }}</div>
+                <div class="fam-stat-desc">{{ ct.description }}</div>
+            </div>
+            <span class="badge">coming soon</span>
         </div>
     </div>
+    {% endif %}
     {% endfor %}
 
-    <div class="comp-block">
-        <div class="comp-head">
-            <h2 class="comp-title"><a href="{% url 'hwdb:subsystem_list' %}" style="color: inherit;">More…</a></h2>
-            <a class="btn btn-ghost btn-sm" href="{% url 'hwdb:subsystem_list' %}">Browse tree</a>
+    <a class="stat fam-stat" href="{% url 'hwdb:subsystem_list' %}">
+        <div class="fam-stat-head">
+            <div>
+                <div class="fam-stat-name">More…</div>
+                <div class="fam-stat-desc">All HWDB subsystems &amp; part types</div>
+            </div>
+            <svg class="fam-stat-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
         </div>
-        <div class="panel-body padded">
-            <div class="cell-muted" style="font-size: 12px;">Browse all subsystems &amp; part types in the HWDB</div>
-        </div>
-    </div>
+    </a>
 </div>
 {% endblock %}

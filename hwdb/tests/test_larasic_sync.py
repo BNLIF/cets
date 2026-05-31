@@ -83,9 +83,9 @@ class LarasicViewTest(TestCase):
     def test_default_view_is_tray_grouping(self):
         resp = self.client.get(reverse("hwdb:larasic"))
         self.assertEqual(resp.context["view"], "tray")
-        tray_rows = resp.context["tray_rows"]
-        self.assertEqual(len(tray_rows), 1)
-        row = tray_rows[0]
+        rows = list(resp.context["page_obj"])
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
         self.assertEqual(row["tray_id"], "B005T0011")
         self.assertEqual(row["chip_count"], 2)
         self.assertEqual(row["rt_tested"], 2)
@@ -99,9 +99,9 @@ class LarasicViewTest(TestCase):
         LArASIC.objects.filter(serial_number="002-00001").update(femb=f)
         resp = self.client.get(reverse("hwdb:larasic") + "?view=femb")
         self.assertEqual(resp.context["view"], "femb")
-        femb_rows = resp.context["femb_rows"]
-        self.assertEqual(len(femb_rows), 1)
-        self.assertEqual(femb_rows[0]["chip_count"], 1)
+        rows = list(resp.context["page_obj"])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["chip_count"], 1)
 
     def test_view_is_not_fnal_gated(self):
         # Reads the local flag only; no redirect to link.
@@ -171,10 +171,10 @@ class LarasicSyncButtonGatingTest(TestCase):
 
     def test_sync_button_on_prod(self):
         resp = self.client.get(reverse("hwdb:larasic"))
-        self.assertContains(resp, "Sync with HWDB")
+        self.assertContains(resp, "Sync HWDB")
 
     def test_no_sync_button_on_dev(self):
         self.client.post(reverse("hwdb:set_instance"), {"instance": "dev"})
         resp = self.client.get(reverse("hwdb:larasic"))
-        self.assertNotContains(resp, "Sync with HWDB")
+        self.assertNotContains(resp, "Sync HWDB")
         self.assertContains(resp, "Switch to")
