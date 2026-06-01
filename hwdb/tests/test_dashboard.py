@@ -14,9 +14,11 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from core.models import LArASIC
 from hwdb import sync as sync_mod
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable
 from hwdb.models import HwdbChip, HwdbSyncState
+from hwdb.views import _larasic_consistency_delta
 
 
 def _list_page(serials, pages=1, part_ids=None):
@@ -306,6 +308,78 @@ class DashboardViewTest(TestCase):
         # 2 total, 1 LN-tested.
         self.assertContains(resp, ">2<")  # in-HWDB count
         self.assertContains(resp, ">1<")  # LN-tested count
+
+
+class LarasicConsistencyDeltaTest(TestCase):
+    """The Δ pill on the LArASIC card (issue #27). Counts BNL-tested chips
+    that the HwdbChip mirror has not seen as tested — the upload backlog.
+    """
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("g", password="x"))
+
+    def _make_chip(self, sn, *, warm=None, cold=None):
+        from datetime import datetime, timezone as dt_tz
+        return LArASIC.objects.create(
+            serial_number=sn,
+            warm_tested_at=datetime(2026, 5, 1, tzinfo=dt_tz.utc) if warm else None,
+            cold_tested_at=datetime(2026, 5, 2, tzinfo=dt_tz.utc) if cold else None,
+        )
+
+    def _make_mirror(self, sn, *, rt=None, ln=None):
+        now = datetime(2026, 5, 10, tzinfo=dt_tz.utc)
+        return HwdbChip.objects.create(
+            family="larasic", serial_number=sn, part_id="x",
+            part_type_id="D08100100003", last_seen_at=now,
+            latest_rt_test_at=now if rt else None,
+            latest_ln_test_at=now if ln else None,
+        )
+
+    def test_delta_counts_unmirrored_tests(self):
+        # Chip A: warm + cold locally, mirror knows both → no delta.
+        self._make_chip("A", warm=True, cold=True)
+        self._make_mirror("A", rt=True, ln=True)
+        # Chip B: warm + cold locally, mirror missing both → contributes 1 to each.
+        self._make_chip("B", warm=True, cold=True)
+        # Chip C: warm-only locally, mirror has RT → no delta.
+        self._make_chip("C", warm=True)
+        self._make_mirror("C", rt=True)
+        # Chip D: cold locally, mirror has nothing → delta_ln += 1, delta_rt unchanged.
+        self._make_chip("D", cold=True)
+        d = _larasic_consistency_delta()
+        self.assertEqual(d, {"delta_rt": 1, "delta_ln": 2})
+
+    def test_toggle_button_renders_on_larasic_card(self):
+        """The 3 cards have the same default layout. LArASIC additionally has
+        a 'Show consistency check' toggle that reveals the pills on click.
+        """
+        resp = self.client.get(reverse("hwdb:dashboard"))
+        # Toggle button is on the LArASIC card only.
+        self.assertContains(resp, 'class="btn btn-sm btn-ghost consistency-toggle"')
+        self.assertContains(resp, 'data-card="larasic"')
+        # The pill container exists but is hidden by default.
+        self.assertContains(resp, 'class="consistency-pills"')
+        self.assertContains(resp, 'style="display: none;')
+
+    def test_pill_values_reflect_backlog(self):
+        """Pills carry the right counts whether they're displayed or not —
+        the JS toggle is purely cosmetic. The values must be correct.
+        """
+        self._make_chip("B", warm=True, cold=True)
+        resp = self.client.get(reverse("hwdb:dashboard"))
+        body = resp.content.decode()
+        self.assertIn("Δ 1 warm not in HWDB", body)
+        self.assertIn("Δ 1 cold not in HWDB", body)
+
+    def test_no_toggle_on_coldadc_or_coldata_cards(self):
+        """Only LArASIC has the consistency-check toggle — ColdADC and COLDATA
+        have no BNL-local test data to compare against.
+        """
+        resp = self.client.get(reverse("hwdb:dashboard"))
+        body = resp.content.decode()
+        # The toggle button is rendered only for LArASIC.
+        self.assertEqual(body.count('class="btn btn-sm btn-ghost consistency-toggle"'), 1)
+        self.assertNotIn('data-card="coldadc" style="font-size: 11px', body)
+        self.assertNotIn('data-card="coldata" style="font-size: 11px', body)
 
 
 class DashboardSyncViewTest(TestCase):

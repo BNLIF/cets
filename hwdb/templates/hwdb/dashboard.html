@@ -7,9 +7,12 @@
 <div class="page-head">
     <div>
         {% crumbs "CETS" "/" "Hardware Database" "/hwdb/" "Dashboard" %}
-        <h1 class="page-title">HWDB Dashboard</h1>
+        <h1 class="page-title page-title-hwdb">
+            Dashboard
+            <span class="page-title-hwdb-tag">HWDB</span>
+        </h1>
         <div class="page-subtitle">
-            Test progress sourced from the <strong>production</strong> HWDB · mirrored locally via Sync · see ADR-0007, ADR-0008
+            Test progress sourced from the <strong>production</strong> HWDB · mirrored locally via Sync
         </div>
     </div>
     <div class="page-head-actions">
@@ -26,14 +29,14 @@
 </div>
 
 <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
-    <label style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid #d97706; background: #fef3c7; color: #92400e; border-radius: 4px; font-size: 12px; cursor: pointer;" title="Bypass the skip-known-serials policy (ADR-0008). Every chip's tests will be re-fetched from HWDB — expensive (minutes), use only when you suspect upstream edits to chips already in the mirror.">
-        <input type="checkbox" id="force-full-resync"> Force full re-sync (slow — re-fetch every chip)
+    <label style="display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-3); cursor: pointer;" title="Bypass the skip-known-serials policy (ADR-0008). Every chip's tests will be re-fetched from HWDB — expensive (minutes), use only when you suspect upstream edits to chips already in the mirror.">
+        <input type="checkbox" id="force-full-resync" style="margin: 0;"> force full re-sync
     </label>
 </div>
 
 <div class="stats">
     {% for card in cards %}
-    <div class="stat fam-stat">
+    <div class="stat fam-stat fam-stat-static">
         <div class="fam-stat-head">
             <div>
                 <div class="fam-stat-name">{{ card.name }}</div>
@@ -57,6 +60,15 @@
                 <div class="fam-stat-num-label">LN-tested</div>
             </div>
         </div>
+        {% if card.family == "larasic" %}
+        <div style="margin-top: 8px;">
+            <button type="button" class="btn btn-sm btn-ghost consistency-toggle" data-card="{{ card.family }}" style="font-size: 11px; padding: 2px 8px;" title="BNL-tested chips that the HWDB mirror has NOT seen as tested. Hidden by default to keep the 3 cards visually symmetric.">Show consistency check</button>
+            <div class="consistency-pills" data-card="{{ card.family }}" style="display: none; flex-wrap: wrap; gap: 6px; margin-top: 8px;">
+                <span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: #fef3c7; color: #92400e; border: 1px solid #d97706; border-radius: 4px; font-size: 11px; font-family: var(--font-mono);" title="LArASIC chips with a BNL warm-test date (warm_tested_at) that the HWDB mirror has NOT seen as RT-tested. Gap = upload backlog or HWDB sync staleness.">Δ {{ card.delta_rt }} warm not in HWDB</span>
+                <span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: #fef3c7; color: #92400e; border: 1px solid #d97706; border-radius: 4px; font-size: 11px; font-family: var(--font-mono);" title="LArASIC chips with a BNL cold-test date (cold_tested_at) that the HWDB mirror has NOT seen as LN-tested. Gap = upload backlog or HWDB sync staleness.">Δ {{ card.delta_ln }} cold not in HWDB</span>
+            </div>
+        </div>
+        {% endif %}
     </div>
     {% endfor %}
 </div>
@@ -195,6 +207,18 @@
     document.querySelectorAll('.sync-btn').forEach(function (btn) {
         btn.addEventListener('click', function () {
             runSync(btn.dataset.syncUrl, btn.dataset.family);
+        });
+    });
+
+    // Consistency-check toggle (LArASIC card only). Hidden by default so all
+    // three cards have the same baseline layout; revealed on demand.
+    document.querySelectorAll('.consistency-toggle').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var pills = document.querySelector('.consistency-pills[data-card="' + btn.dataset.card + '"]');
+            if (!pills) return;
+            var hidden = pills.style.display === 'none';
+            pills.style.display = hidden ? 'flex' : 'none';
+            btn.textContent = hidden ? 'Hide consistency check' : 'Show consistency check';
         });
     });
 })();

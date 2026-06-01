@@ -94,12 +94,16 @@ def _hwdb_family_card(family):
     All numbers come from the local HwdbChip mirror — no HWDB API calls. The
     dashboard renders ColdADC for issue #23; COLDATA (#24) and LArASIC (#25)
     plug into the same shape.
+
+    LArASIC additionally carries two "Δ" counts (#27) — chips that BNL has
+    tested locally but the HWDB mirror has not seen as tested. This is the
+    upload backlog made visible.
     """
     qs = HwdbChip.objects.filter(family=family)
     total = qs.count()
     ln_tested = qs.filter(latest_ln_test_at__isnull=False).count()
     state = HwdbSyncState.for_family(family)
-    return {
+    card = {
         "family": family,
         "name": FAMILY_DISPLAY[family],
         "in_hwdb": total,
@@ -109,6 +113,33 @@ def _hwdb_family_card(family):
         "chips_disappeared": state.chips_disappeared,
         "sync_url": reverse("hwdb:dashboard_sync", args=[family]),
     }
+    if family == "larasic":
+        card.update(_larasic_consistency_delta())
+    return card
+
+
+def _larasic_consistency_delta():
+    """Counts of LArASIC chips BNL has tested locally but the HwdbChip mirror
+    has not seen as tested. See ADR-0007 — the consistency check is exactly
+    this gap. Two counts: warm (vs RT) and cold (vs LN).
+    """
+    rt_in_hwdb = HwdbChip.objects.filter(
+        family="larasic", latest_rt_test_at__isnull=False
+    ).values_list("serial_number", flat=True)
+    ln_in_hwdb = HwdbChip.objects.filter(
+        family="larasic", latest_ln_test_at__isnull=False
+    ).values_list("serial_number", flat=True)
+    delta_rt = (
+        LArASIC.objects.filter(warm_tested_at__isnull=False)
+        .exclude(serial_number__in=rt_in_hwdb)
+        .count()
+    )
+    delta_ln = (
+        LArASIC.objects.filter(cold_tested_at__isnull=False)
+        .exclude(serial_number__in=ln_in_hwdb)
+        .count()
+    )
+    return {"delta_rt": delta_rt, "delta_ln": delta_ln}
 
 
 def dashboard_view(request):

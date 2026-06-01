@@ -437,6 +437,39 @@ button { font-family: inherit; }
 .page-head-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .page-head-actions .btn { white-space: nowrap; }
 
+/* Distinct page-title accent for pages whose data is sourced from HWDB
+ * (as opposed to BNL-local — see ADR-0007). The accent bar + accent
+ * coloring makes it instantly clear at a glance which world you're in.
+ */
+.page-title-hwdb {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.page-title-hwdb::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 28px;
+  background: var(--accent);
+  border-radius: 3px;
+}
+.page-title-hwdb-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: var(--accent-50);
+  color: var(--accent-700);
+  border: 1px solid var(--accent-100);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
 /* === Buttons === */
 .btn {
   display: inline-flex;
@@ -457,11 +490,11 @@ button { font-family: inherit; }
 .btn:hover { background: var(--bg-muted); border-color: var(--border-strong); }
 .btn:active { transform: translateY(0.5px); }
 .btn-primary {
-  background: #14181f;
-  color: #f7fbff;
-  border-color: #14181f;
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }
-.btn-primary:hover { background: #232934; border-color: #232934; }
+.btn-primary:hover { background: var(--accent-700); border-color: var(--accent-700); }
 .btn-ghost { border-color: transparent; background: transparent; color: var(--text-2); }
 .btn-ghost:hover { background: var(--bg-muted); color: var(--text); }
 .btn-sm { height: 28px; padding: 0 8px; font-size: 12px; }
@@ -755,6 +788,14 @@ button { font-family: inherit; }
 }
 .fam-stat-disabled { opacity: 0.55; cursor: default; }
 .fam-stat-disabled:hover { border-color: var(--border); box-shadow: none; }
+/* Static variant — same layout as fam-stat but not whole-card-clickable.
+ * Use when the card has its own interactive controls (e.g. a Sync button)
+ * and the whole-card hover affordance would mislead users into clicking
+ * the background.
+ */
+.fam-stat-static { cursor: default; }
+.fam-stat-static:hover { border-color: var(--border); box-shadow: none; transform: none; }
+.fam-stat-static:hover .fam-stat-arrow { transform: none; color: inherit; }
 .fam-stat-head {
   display: flex;
   align-items: flex-start;

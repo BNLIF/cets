@@ -11,7 +11,10 @@
         <div class="page-subtitle">Browse and sync CE components against the Fermilab HWDB · queried with your own FNAL credentials</div>
     </div>
     <div class="page-head-actions">
-        <a class="btn btn-ghost" href="{% url 'hwdb:dashboard' %}" title="HWDB-sourced progress charts for ColdADC, COLDATA and LArASIC">Dashboard</a>
+        <a class="btn btn-primary" href="{% url 'hwdb:dashboard' %}" title="HWDB-sourced progress charts for ColdADC, COLDATA and LArASIC">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+            Dashboard
+        </a>
         <form method="post" action="{% url 'hwdb:set_instance' %}" style="display: inline;">
             {% csrf_token %}
             <input type="hidden" name="next" value="{{ request.path }}">
