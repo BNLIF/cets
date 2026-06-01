@@ -115,7 +115,7 @@ def dashboard_view(request):
     """HWDB-mirror dashboard. Reads ``HwdbChip`` (no live HWDB calls)."""
     from core import queries
 
-    families = ["coldadc", "coldata"]  # LArASIC #25 will join.
+    families = ["larasic", "coldadc", "coldata"]
     cards = [_hwdb_family_card(f) for f in families]
     charts = [
         queries.chart_config(
@@ -323,59 +323,14 @@ def larasic_view(request):
     )
 
 
-def _sync_larasic(api_client, part_type_id):
-    """Page the HWDB LArASIC components and mark each local chip in/out of
-    HWDB by serial number. Also records the count of HWDB serials with no
-    local record. Returns (total, in_hwdb, to_upload, hwdb_only)."""
-    hwdb_serials = set()
-    page = 1
-    while True:
-        resp = api_client._make_request(
-            "GET", f"component-types/{part_type_id}/components?page={page}&size=500"
-        )
-        rows = resp.get("data", [])
-        for row in rows:
-            sn = row.get("serial_number")
-            if sn:
-                hwdb_serials.add(sn)
-        pages = resp.get("pagination", {}).get("pages", 1)
-        if page >= pages or not rows:
-            break
-        page += 1
-
-    now = timezone.now()
-    chips = list(LArASIC.objects.all())
-    local_serials = set()
-    for chip in chips:
-        local_serials.add(chip.serial_number)
-        chip.is_in_hwdb = chip.serial_number in hwdb_serials
-        chip.hwdb_checked_at = now
-        # If a chip leaves HWDB, its QC tests left with it — clear the flag so
-        # the next upload run walks it again.
-        if not chip.is_in_hwdb:
-            chip.qc_tests_uploaded = False
-    LArASIC.objects.bulk_update(
-        chips, ["is_in_hwdb", "hwdb_checked_at", "qc_tests_uploaded"], batch_size=500
-    )
-    in_hwdb = sum(1 for c in chips if c.is_in_hwdb)
-    hwdb_only = len(hwdb_serials - local_serials)
-
-    state = LarasicSyncState.get()
-    state.hwdb_only_count = hwdb_only
-    state.synced_at = now
-    state.save(update_fields=["hwdb_only_count", "synced_at"])
-
-    return len(chips), in_hwdb, len(chips) - in_hwdb, hwdb_only
-
-
 @require_POST
 def larasic_sync_view(request):
-    """Run the HWDB sync, then return to the LArASIC summary.
-
-    ``is_in_hwdb`` means "exists in the PRODUCTION HWDB" (the upload target),
-    so this only acts on the prod instance — a dev session is a no-op, leaving
-    the prod worklist intact. FNAL-gated; an unlinked user is redirected to
-    link (returning to the summary, not here)."""
+    """Stream a LArASIC sync — the engine is now ``sync_family("larasic")``
+    so this populates ``HwdbChip`` AND keeps the legacy ``is_in_hwdb`` /
+    ``LarasicSyncState`` flags up-to-date (see ADR-0007 and the legacy-flag
+    helper in ``hwdb/sync.py``). Streaming because a cold sync fetches
+    ``get_tests`` per chip — minutes on a 12k-chip backlog.
+    """
     if active_instance(request) != "prod":
         return redirect(reverse("hwdb:larasic"))
     try:
@@ -387,13 +342,22 @@ def larasic_sync_view(request):
         return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
 
     prod = settings.HWDB_PROFILES["prod"]
-    api_client = FnalDbApiClient(prod["api"], bearer)
-    try:
-        _sync_larasic(api_client, prod["larasic_part_type"])
-    except Exception:
-        logger.exception("HWDB LArASIC sync failed")
-        return render(request, "hwdb/error.html", {"error_message": GENERIC_ERROR})
-    return redirect(reverse("hwdb:larasic"))
+    force_full = request.POST.get("force") == "full"
+
+    def _iter():
+        try:
+            yield from sync_family(
+                "larasic",
+                part_type_id=prod["larasic_part_type"],
+                api_base_url=prod["api"],
+                bearer=bearer,
+                force_full=force_full,
+            )
+        except Exception as e:
+            logger.exception("larasic_sync_view crashed")
+            yield f"sync larasic: CRASH · {e}\n"
+
+    return StreamingHttpResponse(_iter(), content_type="text/plain; charset=utf-8")
 
 
 def _safe_next(request, default):

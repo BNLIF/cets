@@ -20,10 +20,10 @@
             <button type="submit" class="btn btn-ghost" title="Walk every tray's results/ dir and refresh the CSV cache. Slow on SMB; needed when new analysis CSVs land in a tray that's never been visited.">Refresh CSVs</button>
         </form>
         {% if active_instance == "prod" %}
-        <form method="post" action="{% url 'hwdb:larasic_sync' %}">
-            {% csrf_token %}
-            <button class="btn btn-ghost" type="submit" title="Pull the prod HWDB component list and update the in_hwdb flag on every local chip">Sync HWDB</button>
-        </form>
+        <button type="button" id="larasic-sync-btn" class="btn btn-ghost" data-sync-url="{% url 'hwdb:larasic_sync' %}" title="Pull the prod HWDB component list, populate the HwdbChip mirror, and stamp is_in_hwdb on every local chip. Streams progress.">Sync HWDB</button>
+        <label style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border: 1px solid #d97706; background: #fef3c7; color: #92400e; border-radius: 4px; font-size: 11px; cursor: pointer;" title="Bypass skip-known-serials (ADR-0008). Re-fetches every chip's tests — minutes for 12k chips. Only use when you suspect HWDB-side edits to chips already in the mirror.">
+            <input type="checkbox" id="larasic-force-full"> Force full
+        </label>
         {% else %}
         <span class="cell-muted" style="font-size: 12px;">Switch to <span class="cell-mono">prod</span> to sync</span>
         {% endif %}
@@ -73,4 +73,48 @@
 </div>
 
 {% include "core/_chip_family_fragment.html" %}
+
+{# Streaming Sync — same floating-panel pattern as /hwdb/dashboard/. #}
+{% if active_instance == "prod" %}
+<div id="larasic-sync-panel" style="display: none; position: fixed; top: 80px; right: 16px; bottom: 16px; width: 520px; max-width: calc(100vw - 32px); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15); z-index: 50; flex-direction: column;">
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg-subtle); border-radius: 8px 8px 0 0;">
+        <span style="font-size: 13px; color: var(--text-2); font-weight: 500;">Sync progress</span>
+        <button type="button" id="larasic-sync-close" class="btn btn-sm btn-ghost" style="padding: 2px 8px; font-size: 16px; line-height: 1;" title="Close">×</button>
+    </div>
+    <pre id="larasic-sync-out" style="flex: 1; margin: 0; padding: 12px 16px; overflow-y: auto; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; background: var(--bg-subtle); border-radius: 0 0 8px 8px;"></pre>
+</div>
+<form style="display: none;">{% csrf_token %}</form>
+<script>
+(function () {
+    var btn = document.getElementById('larasic-sync-btn');
+    var panel = document.getElementById('larasic-sync-panel');
+    var out = document.getElementById('larasic-sync-out');
+    var closeBtn = document.getElementById('larasic-sync-close');
+    var forceCb = document.getElementById('larasic-force-full');
+    var csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || "";
+    closeBtn?.addEventListener('click', function () { panel.style.display = 'none'; });
+    btn?.addEventListener('click', async function () {
+        var forceFull = forceCb?.checked;
+        panel.style.display = 'flex';
+        out.textContent = 'starting LArASIC sync' + (forceFull ? ' (force full)' : '') + '…\n';
+        var fd = new FormData();
+        fd.append('csrfmiddlewaretoken', csrf);
+        if (forceFull) fd.append('force', 'full');
+        var resp;
+        try { resp = await fetch(btn.dataset.syncUrl, { method: 'POST', body: fd }); }
+        catch (e) { out.textContent += 'network error: ' + e + '\n'; return; }
+        if (resp.redirected) { out.textContent += 'redirected (likely unlinked); reload to follow.\n'; return; }
+        var reader = resp.body.getReader();
+        var decoder = new TextDecoder();
+        while (true) {
+            var { value, done } = await reader.read();
+            if (done) break;
+            out.textContent += decoder.decode(value, { stream: true });
+            out.scrollTop = out.scrollHeight;
+        }
+        out.textContent += '\nReload to see updated counts.\n';
+    });
+})();
+</script>
+{% endif %}
 {% endblock %}

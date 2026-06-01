@@ -20,8 +20,10 @@ from typing import Callable, Iterator
 
 from django.utils import timezone
 
+from core.models import LArASIC
+
 from .api_client import FnalDbApiClient
-from .models import HwdbChip, HwdbSyncState
+from .models import HwdbChip, HwdbSyncState, LarasicSyncState
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +165,39 @@ def _list_components(api, part_type_id: str) -> Iterator[dict]:
         page += 1
 
 
+def _stamp_larasic_legacy_flags(hwdb_serials: dict) -> Iterator[str]:
+    """Preserve the pre-HwdbChip behavior of the LArASIC sync: stamp
+    ``is_in_hwdb`` on every local row, persist the ``hwdb_only_count`` on
+    ``LarasicSyncState``, and clear ``qc_tests_uploaded`` on chips that
+    left HWDB. Same logic as the original ``_sync_larasic`` in
+    ``hwdb/views.py`` — extracted so the unified ``sync_family`` engine
+    owns it.
+    """
+    now = timezone.now()
+    chips = list(LArASIC.objects.all())
+    local_serials = set()
+    for chip in chips:
+        local_serials.add(chip.serial_number)
+        chip.is_in_hwdb = chip.serial_number in hwdb_serials
+        chip.hwdb_checked_at = now
+        if not chip.is_in_hwdb:
+            chip.qc_tests_uploaded = False
+    LArASIC.objects.bulk_update(
+        chips, ["is_in_hwdb", "hwdb_checked_at", "qc_tests_uploaded"],
+        batch_size=500,
+    )
+    in_hwdb = sum(1 for c in chips if c.is_in_hwdb)
+    hwdb_only = len(set(hwdb_serials) - local_serials)
+    state = LarasicSyncState.get()
+    state.hwdb_only_count = hwdb_only
+    state.synced_at = now
+    state.save(update_fields=["hwdb_only_count", "synced_at"])
+    yield (
+        f"sync larasic: stamped is_in_hwdb on {len(chips)} local row(s) · "
+        f"{in_hwdb} in HWDB · {hwdb_only} in HWDB only\n"
+    )
+
+
 def sync_family(
     family: str,
     *,
@@ -293,6 +328,14 @@ def sync_family(
         disappeared = HwdbChip.objects.filter(family=family).exclude(
             serial_number__in=hwdb_serials.keys()
         ).count()
+
+        # LArASIC has a pre-HwdbChip ``is_in_hwdb`` flag on the per-chip
+        # model (ADR-0003). Keep it in sync — the legacy /hwdb/larasic/ UI
+        # still reads it, and downstream code may too. The same sync run
+        # also persists the LarasicSyncState.hwdb_only_count surfaced on
+        # /hwdb/larasic/'s summary card. Other families have no analog.
+        if family == "larasic":
+            yield from _stamp_larasic_legacy_flags(hwdb_serials)
 
         state.chips_total = len(hwdb_serials)
         state.chips_new = len(new_rows)

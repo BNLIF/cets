@@ -1,11 +1,11 @@
-"""Tests for the LArASIC HWDB sync (issue #14). HWDB fetch is mocked.
+"""Tests for the LArASIC HWDB sync (issue #14, rewired in #25 to flow
+through hwdb.sync.sync_family). HWDB fetch is mocked.
 
     python manage.py test hwdb
 """
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -13,50 +13,96 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.models import LArASIC
-from hwdb import views
+from hwdb import sync as sync_mod
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable
-from hwdb.models import LarasicSyncState
+from hwdb.models import HwdbChip, LarasicSyncState
 
 
-def _fake_client(pages):
-    """Client whose _make_request returns successive page payloads."""
-    return SimpleNamespace(_make_request=mock.Mock(side_effect=pages))
+def _fake_sync_client(listing_pages):
+    """Build a fake FnalDbApiClient: listing pages on ``_make_request``, no
+    test types defined, no tests per chip. Suitable for asserting the
+    legacy ``is_in_hwdb`` / ``LarasicSyncState`` behavior without exercising
+    the deep test-fetch path.
+    """
+    listing_iter = iter(listing_pages)
+
+    def _make_request(method, endpoint, data=None, params=None):
+        return next(listing_iter)
+
+    client = mock.MagicMock()
+    client._make_request.side_effect = _make_request
+    # Empty test-type catalog → sync_family bails after listing, but the
+    # legacy LArASIC-flag stamper has already run (it doesn't depend on
+    # deep fetches).
+    client.get_test_types.return_value = {"data": [
+        {"id": 1, "name": "RoomT QC Test"},
+        {"id": 2, "name": "CryoT QC Test"},
+    ]}
+    client.get_tests.return_value = {"data": []}
+    return client
 
 
-class SyncLogicTest(TestCase):
+class LarasicLegacyFlagsTest(TestCase):
+    """Confirms the pre-HwdbChip behavior is preserved when sync_family
+    handles family="larasic": is_in_hwdb, hwdb_checked_at, and
+    LarasicSyncState.hwdb_only_count all still update.
+    """
     def setUp(self):
         for sn in ("002-00001", "002-00002", "002-00003"):
             LArASIC.objects.create(serial_number=sn)
 
+    def _run_sync(self, client):
+        with mock.patch("hwdb.sync.FnalDbApiClient", return_value=client):
+            list(sync_mod.sync_family(
+                "larasic",
+                part_type_id="D08100100003",
+                api_base_url="https://x",
+                bearer="b",
+                workers=1,
+            ))
+
     def test_marks_chips_in_and_out_of_hwdb(self):
-        client = _fake_client([
-            {
-                "data": [
-                    {"serial_number": "002-00001"},
-                    {"serial_number": "002-00002"},
-                    {"serial_number": "TEST", "part_id": "x"},  # no real serial elsewhere
-                ],
-                "pagination": {"pages": 1},
-            }
-        ])
-        total, in_hwdb, to_upload, hwdb_only = views._sync_larasic(client, "D08100100003")
-        self.assertEqual((total, in_hwdb, to_upload), (3, 2, 1))
-        # "TEST" is in HWDB but not local -> hwdb_only = 1, persisted.
-        self.assertEqual(hwdb_only, 1)
-        self.assertEqual(LarasicSyncState.get().hwdb_only_count, 1)
+        client = _fake_sync_client([{
+            "data": [
+                {"serial_number": "002-00001", "part_id": "P1"},
+                {"serial_number": "002-00002", "part_id": "P2"},
+                {"serial_number": "TEST", "part_id": "PT"},  # in HWDB, not local
+            ],
+            "pagination": {"pages": 1},
+        }])
+        self._run_sync(client)
         self.assertTrue(LArASIC.objects.get(serial_number="002-00001").is_in_hwdb)
+        self.assertTrue(LArASIC.objects.get(serial_number="002-00002").is_in_hwdb)
         self.assertFalse(LArASIC.objects.get(serial_number="002-00003").is_in_hwdb)
-        # All chips stamped with a check time.
+        self.assertEqual(LarasicSyncState.get().hwdb_only_count, 1)
+        # Every local chip got a hwdb_checked_at stamp.
         self.assertEqual(LArASIC.objects.filter(hwdb_checked_at__isnull=True).count(), 0)
 
     def test_pages_through_all_results(self):
-        client = _fake_client([
-            {"data": [{"serial_number": "002-00001"}], "pagination": {"pages": 2}},
-            {"data": [{"serial_number": "002-00003"}], "pagination": {"pages": 2}},
+        client = _fake_sync_client([
+            {"data": [{"serial_number": "002-00001", "part_id": "P1"}],
+             "pagination": {"pages": 2}},
+            {"data": [{"serial_number": "002-00003", "part_id": "P3"}],
+             "pagination": {"pages": 2}},
         ])
-        total, in_hwdb, to_upload, hwdb_only = views._sync_larasic(client, "pt")
+        self._run_sync(client)
+        # Both pages of the listing consumed.
         self.assertEqual(client._make_request.call_count, 2)
-        self.assertEqual((total, in_hwdb, to_upload, hwdb_only), (3, 2, 1, 0))
+        self.assertTrue(LArASIC.objects.get(serial_number="002-00001").is_in_hwdb)
+        self.assertTrue(LArASIC.objects.get(serial_number="002-00003").is_in_hwdb)
+        self.assertFalse(LArASIC.objects.get(serial_number="002-00002").is_in_hwdb)
+
+    def test_sync_populates_hwdb_chip_rows(self):
+        client = _fake_sync_client([{
+            "data": [{"serial_number": "002-00001", "part_id": "P1"}],
+            "pagination": {"pages": 1},
+        }])
+        self._run_sync(client)
+        # The same sync writes the new HwdbChip mirror — that's the
+        # rewire #25 is checking for.
+        self.assertTrue(
+            HwdbChip.objects.filter(family="larasic", serial_number="002-00001").exists()
+        )
 
 
 class LarasicViewTest(TestCase):
@@ -138,29 +184,32 @@ class LarasicSyncViewTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "unavailable")
 
-    def test_linked_sync_updates_flags_and_redirects(self):
+    def test_linked_sync_streams_and_updates_flags(self):
         LArASIC.objects.create(serial_number="002-00001")
         LArASIC.objects.create(serial_number="002-00009")
-        page = {"data": [{"serial_number": "002-00001"}], "pagination": {"pages": 1}}
         with mock.patch("hwdb.views.mint_for", return_value="bearer"), mock.patch(
-            "hwdb.api_client.FnalDbApiClient._make_request", return_value=page
-        ):
+            "hwdb.views.sync_family",
+            return_value=iter(["sync larasic: stub line\n"]),
+        ) as sf:
             resp = self.client.post(self.url)
-        self.assertRedirects(resp, reverse("hwdb:larasic"))
-        self.assertTrue(LArASIC.objects.get(serial_number="002-00001").is_in_hwdb)
-        self.assertFalse(LArASIC.objects.get(serial_number="002-00009").is_in_hwdb)
+            self.assertEqual(resp.status_code, 200)
+            body = b"".join(resp.streaming_content).decode()
+        # Engine invoked with the expected family + part_type for prod.
+        self.assertEqual(sf.call_args.args, ("larasic",))
+        self.assertEqual(sf.call_args.kwargs["part_type_id"], "D08100100003")
+        self.assertIn("stub line", body)
 
     def test_sync_on_dev_is_a_noop(self):
         # is_in_hwdb tracks PROD; a dev session must not touch it.
         chip = LArASIC.objects.create(serial_number="002-00001", is_in_hwdb=True)
         self.client.post(reverse("hwdb:set_instance"), {"instance": "dev"})
         with mock.patch("hwdb.views.mint_for") as mint, mock.patch(
-            "hwdb.api_client.FnalDbApiClient._make_request"
-        ) as req:
+            "hwdb.views.sync_family"
+        ) as sf:
             resp = self.client.post(self.url)
         self.assertRedirects(resp, reverse("hwdb:larasic"))
         mint.assert_not_called()
-        req.assert_not_called()
+        sf.assert_not_called()
         chip.refresh_from_db()
         self.assertTrue(chip.is_in_hwdb)  # untouched
 
