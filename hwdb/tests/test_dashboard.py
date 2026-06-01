@@ -263,6 +263,33 @@ class SyncFamilyTest(TestCase):
         self.assertEqual(c.latest_rt_test_at.month, 5)
         self.assertEqual(c.latest_rt_test_at.day, 20)
 
+    def test_chunked_persistence_survives_mid_run_abort(self):
+        """If the streaming worker is killed mid-fetch (gunicorn timeout in
+        prod), the chips we've already flushed must persist so a re-click
+        resumes via skip-known-serials. Simulated by aborting the generator
+        partway through.
+        """
+        # 500 chips to fetch; FLUSH_EVERY is 200 so we expect persisted
+        # rows even if we abort after consuming ~half the progress stream.
+        listing = [_list_page([f"SN{i:04d}" for i in range(500)], pages=1)]
+        tests = {
+            f"PIDSN{i:04d}": {36: _deep_body(date="2026/03/01", env_id=36)}
+            for i in range(500)
+        }
+        fake = self._patched_client(listing, tests)
+        with mock.patch("hwdb.sync.FnalDbApiClient", return_value=fake):
+            gen = sync_mod.sync_family(
+                "coldadc", part_type_id="D08100200002",
+                api_base_url="https://x", bearer="b", workers=4,
+            )
+            for line in gen:
+                if "300/500" in line:
+                    gen.close()
+                    break
+        # At least one flush boundary (200) must have landed before close().
+        persisted = HwdbChip.objects.filter(family="coldadc").count()
+        self.assertGreaterEqual(persisted, 200)
+
     def test_disappeared_chips_counted_but_not_deleted(self):
         now = datetime(2026, 5, 1, 0, 0, tzinfo=dt_tz.utc)
         HwdbChip.objects.create(

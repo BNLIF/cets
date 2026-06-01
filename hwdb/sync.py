@@ -261,7 +261,57 @@ def sync_family(
             ]
             yield f"sync {family}: {len(to_fetch)} new chip(s) to fetch\n"
 
-        fetched: list[_ChipFetch] = []
+        # Persist in chunks as fetches complete, not at the end. Keeps the
+        # sync resumable: if gunicorn kills the worker mid-run, the chips
+        # we've already flushed are in the DB, and the next click resumes
+        # via the skip-known-serials policy (ADR-0008).
+        _FLUSH_EVERY = 200
+        fetched_serials: set[str] = set()
+        buffer: list[_ChipFetch] = []
+        chips_new_total = 0
+        chips_updated_total = 0
+
+        def _flush(now):
+            nonlocal chips_new_total, chips_updated_total
+            if not buffer:
+                return
+            new_rows, update_rows = [], []
+            for f in buffer:
+                existing_row = existing.get(f.serial_number)
+                if existing_row is None:
+                    new_rows.append(HwdbChip(
+                        family=family,
+                        serial_number=f.serial_number,
+                        part_id=f.part_id or "",
+                        part_type_id=part_type_id,
+                        latest_rt_test_at=f.latest_rt_test_at,
+                        latest_ln_test_at=f.latest_ln_test_at,
+                        last_seen_at=now,
+                    ))
+                else:
+                    existing_row.part_id = f.part_id or existing_row.part_id
+                    existing_row.part_type_id = part_type_id
+                    existing_row.latest_rt_test_at = f.latest_rt_test_at
+                    existing_row.latest_ln_test_at = f.latest_ln_test_at
+                    existing_row.last_seen_at = now
+                    update_rows.append(existing_row)
+            if new_rows:
+                HwdbChip.objects.bulk_create(new_rows, batch_size=500)
+                chips_new_total += len(new_rows)
+                # Future iterations should see these as already-existing so
+                # a retry (e.g. force_full mid-run) doesn't double-insert.
+                for r in new_rows:
+                    existing[r.serial_number] = r
+            if update_rows:
+                HwdbChip.objects.bulk_update(
+                    update_rows,
+                    ["part_id", "part_type_id", "latest_rt_test_at",
+                     "latest_ln_test_at", "last_seen_at"],
+                    batch_size=500,
+                )
+                chips_updated_total += len(update_rows)
+            buffer.clear()
+
         if to_fetch:
             tls = _thread_local_cls()
 
@@ -277,49 +327,22 @@ def sync_family(
                 futs = {pool.submit(_work, item): item for item in to_fetch}
                 for fut in as_completed(futs):
                     result = fut.result()
-                    fetched.append(result)
+                    buffer.append(result)
+                    fetched_serials.add(result.serial_number)
                     done += 1
+                    if len(buffer) >= _FLUSH_EVERY:
+                        _flush(timezone.now())
                     if done % 50 == 0 or done == len(to_fetch):
-                        yield f"sync {family}: fetched {done}/{len(to_fetch)} chip(s)\n"
+                        yield (
+                            f"sync {family}: fetched {done}/{len(to_fetch)} "
+                            f"chip(s) · flushed {chips_new_total + chips_updated_total}\n"
+                        )
+            _flush(timezone.now())
 
         now = timezone.now()
-        new_rows = []
-        update_rows = []
-        for f in fetched:
-            existing_row = existing.get(f.serial_number)
-            if existing_row is None:
-                new_rows.append(
-                    HwdbChip(
-                        family=family,
-                        serial_number=f.serial_number,
-                        part_id=f.part_id or "",
-                        part_type_id=part_type_id,
-                        latest_rt_test_at=f.latest_rt_test_at,
-                        latest_ln_test_at=f.latest_ln_test_at,
-                        last_seen_at=now,
-                    )
-                )
-            else:
-                # force_full path: re-stamp test timestamps on an existing row.
-                existing_row.part_id = f.part_id or existing_row.part_id
-                existing_row.part_type_id = part_type_id
-                existing_row.latest_rt_test_at = f.latest_rt_test_at
-                existing_row.latest_ln_test_at = f.latest_ln_test_at
-                existing_row.last_seen_at = now
-                update_rows.append(existing_row)
-
-        if new_rows:
-            HwdbChip.objects.bulk_create(new_rows, batch_size=500)
-        if update_rows:
-            HwdbChip.objects.bulk_update(
-                update_rows,
-                ["part_id", "part_type_id", "latest_rt_test_at",
-                 "latest_ln_test_at", "last_seen_at"],
-                batch_size=500,
-            )
 
         # Stamp last_seen_at on the *known* serials we didn't refetch.
-        seen_known = [sn for sn in hwdb_serials if sn in existing and sn not in {f.serial_number for f in fetched}]
+        seen_known = [sn for sn in hwdb_serials if sn in existing and sn not in fetched_serials]
         if seen_known:
             HwdbChip.objects.filter(
                 family=family, serial_number__in=seen_known
@@ -338,7 +361,7 @@ def sync_family(
             yield from _stamp_larasic_legacy_flags(hwdb_serials)
 
         state.chips_total = len(hwdb_serials)
-        state.chips_new = len(new_rows)
+        state.chips_new = chips_new_total
         state.chips_disappeared = disappeared
         state.finished_at = timezone.now()
         state.save()
