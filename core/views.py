@@ -102,57 +102,10 @@ def home(request):
         },
     ]
 
-    def _to_rgba(hex_color, a):
-        h = hex_color.lstrip("#")
-        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-        return f"rgba({r},{g},{b},{a})"
-
-    def _datasets(series, projection_start=None):
-        bar_ds, line_ds = [], []
-        for s in series:
-            color = s["color"]
-            if projection_start is not None:
-                bg = [
-                    _to_rgba(color, 0.85 if i < projection_start else 0.30)
-                    for i in range(len(s["counts"]))
-                ]
-            else:
-                bg = _to_rgba(color, 0.85)
-            bar_ds.append({
-                "label": s["name"], "data": s["counts"],
-                "backgroundColor": bg,
-            })
-            line_ds.append({
-                "label": s["name"], "data": s["cumulative"],
-                "borderColor": color, "backgroundColor": _to_rgba(color, 0.18),
-                "tension": 0.2, "fill": True, "pointRadius": 0,
-            })
-        return bar_ds, line_ds
-
-    def _chart_config(slug, name, href, ranges):
-        out_ranges = {}
-        has_data = False
-        for key, r in ranges.items():
-            bar_ds, line_ds = _datasets(r["series"], r.get("projection_start"))
-            out_ranges[key] = {
-                "labels": r["labels"],
-                "bar_datasets": bar_ds,
-                "line_datasets": line_ds,
-                "projection_start": r.get("projection_start"),
-            }
-            if any(any(d["data"]) for d in bar_ds):
-                has_data = True
-        return {
-            "slug": slug, "name": name, "href": href,
-            "ranges": out_ranges,
-            "empty": not has_data,
-            "show_projection": "1year" in ranges,
-        }
-
     progress_charts = [
-        _chart_config("larasic", "LArASIC", reverse("larasic"), queries.larasic_progress()),
-        _chart_config("femb", "FEMB", reverse("femb"), queries.femb_progress()),
-        _chart_config("cable", "Cable", reverse("cable"), queries.cable_progress()),
+        queries.chart_config("larasic", "LArASIC", reverse("larasic"), queries.larasic_progress()),
+        queries.chart_config("femb", "FEMB", reverse("femb"), queries.femb_progress()),
+        queries.chart_config("cable", "Cable", reverse("cable"), queries.cable_progress()),
     ]
 
     context = {

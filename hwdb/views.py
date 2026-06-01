@@ -22,8 +22,20 @@ from .fnal import session as fnal_session
 from .fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
 from .fnal.session import LINK_KEY
 from .instance import SESSION_KEY, active_instance, active_profile
-from .models import LarasicSyncState
+from .models import HwdbChip, HwdbSyncState, LarasicSyncState
+from .sync import sync_family
 from .upload import larasic as upload_lib
+
+FAMILY_PART_TYPE_KEY = {
+    "larasic": "larasic_part_type",
+    "coldadc": "coldadc_part_type",
+    "coldata": "coldata_part_type",
+}
+FAMILY_DISPLAY = {
+    "larasic": "LArASIC",
+    "coldadc": "ColdADC",
+    "coldata": "COLDATA",
+}
 
 logger = logging.getLogger(__name__)
 GENERIC_ERROR = "Failed to fetch data from the Hardware Database."
@@ -74,6 +86,201 @@ def set_instance(request):
         if choice in settings.HWDB_PROFILES:
             request.session[SESSION_KEY] = choice
     return redirect(_safe_next(request, reverse("hwdb:home")))
+
+
+def _hwdb_family_card(family):
+    """Stat-card payload for one family on /hwdb/dashboard/.
+
+    All numbers come from the local HwdbChip mirror — no HWDB API calls. The
+    dashboard renders ColdADC for issue #23; COLDATA (#24) and LArASIC (#25)
+    plug into the same shape.
+    """
+    qs = HwdbChip.objects.filter(family=family)
+    total = qs.count()
+    ln_tested = qs.filter(latest_ln_test_at__isnull=False).count()
+    state = HwdbSyncState.for_family(family)
+    return {
+        "family": family,
+        "name": FAMILY_DISPLAY[family],
+        "in_hwdb": total,
+        "ln_tested": ln_tested,
+        "last_synced": state.finished_at,
+        "chips_new": state.chips_new,
+        "chips_disappeared": state.chips_disappeared,
+        "sync_url": reverse("hwdb:dashboard_sync", args=[family]),
+    }
+
+
+def dashboard_view(request):
+    """HWDB-mirror dashboard. Reads ``HwdbChip`` (no live HWDB calls)."""
+    from core import queries
+
+    families = ["coldadc", "coldata"]  # LArASIC #25 will join.
+    cards = [_hwdb_family_card(f) for f in families]
+    charts = [
+        queries.chart_config(
+            slug=f"hwdb-{f}",
+            name=FAMILY_DISPLAY[f],
+            href=reverse("hwdb:dashboard"),
+            ranges=queries.hwdb_family_progress(f),
+        )
+        for f in families
+    ]
+    return render(
+        request,
+        "hwdb/dashboard.html",
+        {
+            "page": "hwdb",
+            "cards": cards,
+            "progress_charts": charts,
+            "active_instance": active_instance(request),
+            "instances": list(settings.HWDB_PROFILES),
+        },
+    )
+
+
+def dashboard_probe_view(request, family):
+    """Diagnostic: fetch one chip's tests and the family's test_type catalog.
+
+    The dashboard's sync code only writes rows whose tests match the
+    "RoomT QC Test" / "CryoT QC Test" names. When a family appears to sync
+    successfully but the chart stays empty, this probe is the first thing
+    to check — either no QC tests exist upstream, or they use names our
+    mapping in ``hwdb/sync.py`` doesn't recognize.
+    """
+    if family not in FAMILY_PART_TYPE_KEY:
+        return JsonResponse({"error": "unknown family"}, status=400)
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(
+            f"{link}?{urlencode({'next': reverse('hwdb:dashboard')})}"
+        )
+    except FnalUnavailable:
+        return JsonResponse({"error": FNAL_UNAVAILABLE}, status=503)
+
+    prod = settings.HWDB_PROFILES["prod"]
+    part_type_id = prod[FAMILY_PART_TYPE_KEY[family]]
+    api = FnalDbApiClient(prod["api"], bearer)
+
+    # Allow targeting a specific chip via ?part_id=... — useful for
+    # "I think this chip has tests, why didn't sync see them?" lookups.
+    explicit_part_id = request.GET.get("part_id")
+    if explicit_part_id:
+        sample = HwdbChip.objects.filter(
+            family=family, part_id=explicit_part_id
+        ).first() or HwdbChip(part_id=explicit_part_id, serial_number="(not in mirror)")
+    else:
+        sample = HwdbChip.objects.filter(family=family).exclude(part_id="").first()
+    out = {"family": family, "part_type_id": part_type_id}
+
+    try:
+        # The catalog (/test-types) returns flat entries: {id, name, ...} —
+        # NOT nested under a "test_type" key like /components/{id}/tests does.
+        catalog = api.get_test_types(part_type_id)
+        out["test_type_catalog"] = [
+            {"id": t.get("id"), "name": t.get("name")}
+            for t in (catalog.get("data") or [])
+        ]
+    except Exception as e:
+        out["test_type_catalog_error"] = str(e)[:300]
+
+    if sample is None:
+        out["sample"] = "no HwdbChip rows for this family — run Sync first"
+    else:
+        out["sample_serial_number"] = sample.serial_number
+        out["sample_part_id"] = sample.part_id
+        try:
+            # Summary call — enumerates test types only; test_data is
+            # typically empty / metadata-only.
+            summary = api.get_tests(sample.part_id)
+            summary_tests = summary.get("data") or []
+            out["summary_test_count"] = len(summary_tests)
+            out["summary_tests"] = [
+                {
+                    "test_type_id": (t.get("test_type") or {}).get("id"),
+                    "test_type_name": (t.get("test_type") or {}).get("name"),
+                    "data_keys": list((t.get("test_data") or {}).keys())[:8],
+                    "record_keys": list(t.keys()),
+                    "record_top_level": {
+                        k: v for k, v in t.items()
+                        if k != "test_data" and not isinstance(v, (list, dict))
+                    },
+                }
+                for t in summary_tests
+            ]
+            # Deep call per test type — returns the actual datasheet.
+            # Karla's GetItemTests follows the same two-step pattern.
+            out["deep_tests"] = {}
+            for st in summary_tests:
+                tt_id = (st.get("test_type") or {}).get("id")
+                if not tt_id:
+                    continue
+                deep = api.get_tests(sample.part_id, test_type_id=tt_id, history=True)
+                deep_rows = deep.get("data") or []
+                out["deep_tests"][str(tt_id)] = {
+                    "name": (st.get("test_type") or {}).get("name"),
+                    "count": len(deep_rows),
+                    "rows": [
+                        {
+                            "id": r.get("id"),
+                            "test_date": (r.get("test_data") or {}).get("Test Date"),
+                            "test_time": (r.get("test_data") or {}).get("Test Time"),
+                            "data_keys": list((r.get("test_data") or {}).keys())[:10],
+                            "record_top_level": {
+                                k: v for k, v in r.items()
+                                if k != "test_data" and not isinstance(v, (list, dict))
+                            },
+                        }
+                        for r in deep_rows
+                    ],
+                }
+        except Exception as e:
+            out["sample_tests_error"] = str(e)[:300]
+
+    return JsonResponse(out, json_dumps_params={"indent": 2})
+
+
+@require_POST
+def dashboard_sync_view(request, family):
+    """Stream a HwdbChip sync for one family.
+
+    Prod-only (dev session = no-op redirect, mirrors ADR-0003/0004).
+    FNAL-gated; unlinked user is redirected to /hwdb/link/?next=/hwdb/dashboard/.
+    """
+    if family not in FAMILY_PART_TYPE_KEY:
+        return redirect(reverse("hwdb:dashboard"))
+    if active_instance(request) != "prod":
+        return redirect(reverse("hwdb:dashboard"))
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(
+            f"{link}?{urlencode({'next': reverse('hwdb:dashboard')})}"
+        )
+    except FnalUnavailable:
+        return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
+
+    prod = settings.HWDB_PROFILES["prod"]
+    part_type_id = prod[FAMILY_PART_TYPE_KEY[family]]
+    force_full = request.POST.get("force") == "full"
+
+    def _iter():
+        try:
+            yield from sync_family(
+                family,
+                part_type_id=part_type_id,
+                api_base_url=prod["api"],
+                bearer=bearer,
+                force_full=force_full,
+            )
+        except Exception as e:
+            logger.exception("dashboard_sync_view(%s) crashed", family)
+            yield f"sync {family}: CRASH · {e}\n"
+
+    return StreamingHttpResponse(_iter(), content_type="text/plain; charset=utf-8")
 
 
 def larasic_view(request):

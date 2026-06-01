@@ -91,11 +91,15 @@ HWDB_PROFILES = {
         "api": "https://dbwebapi2.fnal.gov:8443/cdb/api/v1",
         "ui": "https://dbweb2.fnal.gov:8443/cdb",
         "larasic_part_type": "D08100100003",
+        "coldadc_part_type": "D08100200002",  # coldadc_p2prb1
+        "coldata_part_type": "D08100300003",  # coldata_e4prb2
     },
     "dev": {
         "api": "https://dbwebapi2.fnal.gov:8443/cdbdev/api/v1",
         "ui": "https://dbweb2.fnal.gov:8443/cdbdev",
         "larasic_part_type": "D08100100004",
+        "coldadc_part_type": "D08100200001",  # coldadc_p2prep
+        "coldata_part_type": "D08100300001",  # coldata_e4prep
     },
 }
 if HWDB_INSTANCE not in HWDB_PROFILES:

@@ -96,6 +96,16 @@ results (serial path or 10-worker parallel path; see
   a bearer minted fresh per request; see the `hwdb/fnal/` package.
 - **part-type ID** — HWDB's identifier for a component type, e.g. LArASIC is
   `D08100100004` on dev / `D08100100003` on prod.
+- **HWDB mirror** — a slice of CETS state tracking what the production HWDB
+  says about each chip (existence + RT/LN latest-test dates), kept in a
+  dedicated `HwdbChip` table separate from the BNL-tested chip models.
+  The two can disagree — BNL may have cold-tested a chip whose results
+  haven't been uploaded yet — and the `/hwdb/dashboard/` consistency check
+  surfaces that gap. Each chip is fetched from HWDB exactly once. Test
+  timestamps come from `test_data["Test Date"]` when present, else from
+  HWDB's record-creation stamp (ADR-0009 — upstream institutions
+  sometimes upload empty-datasheet placeholders). See
+  [[0007-hwdb-mirror-separation]] and [[0008-skip-known-serials-incremental-sync]].
 
 ### Simple vs detailed QC record
 

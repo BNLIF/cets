@@ -6,6 +6,9 @@ app_name = "hwdb"
 
 urlpatterns = [
     path("", views.home, name="home"),
+    path("dashboard/", views.dashboard_view, name="dashboard"),
+    path("dashboard/sync/<str:family>/", views.dashboard_sync_view, name="dashboard_sync"),
+    path("dashboard/probe/<str:family>/", views.dashboard_probe_view, name="dashboard_probe"),
     path("instance/", views.set_instance, name="set_instance"),
     path("larasic/", views.larasic_view, name="larasic"),
     path("larasic/sync/", views.larasic_sync_view, name="larasic_sync"),

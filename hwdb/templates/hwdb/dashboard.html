@@ -1,0 +1,202 @@
+{% extends 'core/base.html' %}
+{% load components %}
+
+{% block title %}CETS — HWDB dashboard{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div>
+        {% crumbs "CETS" "/" "Hardware Database" "/hwdb/" "Dashboard" %}
+        <h1 class="page-title">HWDB Dashboard</h1>
+        <div class="page-subtitle">
+            Test progress sourced from the <strong>production</strong> HWDB · mirrored locally via Sync · see ADR-0007, ADR-0008
+        </div>
+    </div>
+    <div class="page-head-actions">
+        <form method="post" action="{% url 'hwdb:set_instance' %}" style="display: inline;">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <div class="instance-toggle" data-active="{{ active_instance }}" role="group" aria-label="HWDB instance" title="HWDB instance · the dashboard always reads prod; the toggle gates whether Sync can run">
+                {% for inst in instances %}
+                <button name="instance" value="{{ inst }}" class="{% if inst == active_instance %}is-active{% endif %}" title="Switch to {{ inst }} HWDB">{{ inst }}</button>
+                {% endfor %}
+            </div>
+        </form>
+    </div>
+</div>
+
+<div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+    <label style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid #d97706; background: #fef3c7; color: #92400e; border-radius: 4px; font-size: 12px; cursor: pointer;" title="Bypass the skip-known-serials policy (ADR-0008). Every chip's tests will be re-fetched from HWDB — expensive (minutes), use only when you suspect upstream edits to chips already in the mirror.">
+        <input type="checkbox" id="force-full-resync"> Force full re-sync (slow — re-fetch every chip)
+    </label>
+</div>
+
+<div class="stats">
+    {% for card in cards %}
+    <div class="stat fam-stat">
+        <div class="fam-stat-head">
+            <div>
+                <div class="fam-stat-name">{{ card.name }}</div>
+                <div class="fam-stat-desc">
+                    {% if card.last_synced %}Last sync · {{ card.last_synced|date:"Y-m-d H:i" }}{% else %}Never synced{% endif %}
+                </div>
+            </div>
+            {% if active_instance == "prod" %}
+            <button type="button" class="btn btn-sm btn-primary sync-btn" data-family="{{ card.family }}" data-sync-url="{{ card.sync_url }}" title="Pull new chips from prod HWDB into the mirror table">Sync</button>
+            {% else %}
+            <span class="cell-muted" style="font-size: 11px;">prod only</span>
+            {% endif %}
+        </div>
+        <div class="fam-stat-numbers">
+            <div>
+                <div class="fam-stat-value">{{ card.in_hwdb }}</div>
+                <div class="fam-stat-num-label">In HWDB</div>
+            </div>
+            <div>
+                <div class="fam-stat-value">{{ card.ln_tested }}</div>
+                <div class="fam-stat-num-label">LN-tested</div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 16px;">
+    {% for c in progress_charts %}
+    <div class="panel" data-chart-panel="{{ c.slug }}">
+        <div class="panel-head">
+            <div class="panel-title">{{ c.name }}</div>
+            {% if not c.empty %}
+            <div class="chart-range-toggle" role="tablist">
+                <button type="button" data-range="month" class="chart-range-btn">Last month · daily</button>
+                <button type="button" data-range="3month" class="chart-range-btn">Last 3 months · daily</button>
+                <button type="button" data-range="all" class="chart-range-btn is-active">All · monthly</button>
+                {% if c.show_projection %}
+                <button type="button" data-range="1year" class="chart-range-btn" title="3 past months + 12 future months projected at the last 90-day daily rate">1-year projection</button>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+        <div class="panel-body padded">
+            {% if c.empty %}
+                <div style="padding: 32px 0; text-align: center; color: var(--text-4); font-family: var(--font-mono); font-size: 13px;">No data yet — click Sync above to populate from HWDB.</div>
+            {% else %}
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div>
+                        <div style="font-size: 13px; color: var(--text-3); margin-bottom: 6px; font-family: var(--font-mono);">Per period</div>
+                        <div style="position: relative; height: 280px;"><canvas id="bar_{{ c.slug }}"></canvas></div>
+                    </div>
+                    <div>
+                        <div style="font-size: 13px; color: var(--text-3); margin-bottom: 6px; font-family: var(--font-mono);">Cumulative</div>
+                        <div style="position: relative; height: 280px;"><canvas id="line_{{ c.slug }}"></canvas></div>
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{# Floating progress panel — minimal version of upload tray's (no resize, no localStorage). #}
+<div id="sync-progress-panel" style="display: none; position: fixed; top: 80px; right: 16px; bottom: 16px; width: 520px; max-width: calc(100vw - 32px); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15); z-index: 50; flex-direction: column;">
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg-subtle); border-radius: 8px 8px 0 0;">
+        <span style="font-size: 13px; color: var(--text-2); font-weight: 500;">Sync progress</span>
+        <button type="button" id="sync-progress-close" class="btn btn-sm btn-ghost" style="padding: 2px 8px; font-size: 16px; line-height: 1;" title="Close">×</button>
+    </div>
+    <pre id="sync-progress" style="flex: 1; margin: 0; padding: 12px 16px; overflow-y: auto; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; background: var(--bg-subtle); border-radius: 0 0 8px 8px;"></pre>
+</div>
+
+<form style="display: none;">{% csrf_token %}</form>
+
+{{ progress_charts|json_script:"progress-chart-configs" }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+    var configs = JSON.parse(document.getElementById('progress-chart-configs').textContent);
+    var commonOpts = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { position: 'top', labels: { boxWidth: 12, font: { size: 14 }, color: '#3a414b' } },
+            tooltip: { intersect: false, mode: 'index', titleFont: { size: 13 }, bodyFont: { size: 13 } }
+        },
+        scales: {
+            x: { ticks: { font: { size: 13 }, color: '#3a414b', maxRotation: 0, autoSkipPadding: 24 } },
+            y: { beginAtZero: true, ticks: { precision: 0, font: { size: 13 }, color: '#3a414b' } }
+        }
+    };
+
+    configs.forEach(function (c) {
+        if (c.empty) return;
+        var initial = c.ranges['all'];
+        var barCanvas = document.getElementById('bar_' + c.slug);
+        var lineCanvas = document.getElementById('line_' + c.slug);
+        if (!barCanvas || !lineCanvas) return;
+        var barChart = new Chart(barCanvas, { type: 'bar', data: { labels: initial.labels, datasets: initial.bar_datasets }, options: commonOpts });
+        var lineChart = new Chart(lineCanvas, { type: 'line', data: { labels: initial.labels, datasets: initial.line_datasets }, options: commonOpts });
+        var panel = document.querySelector('[data-chart-panel="' + c.slug + '"]');
+        if (!panel) return;
+        function applyProjectionStyling(r) {
+            var start = r.projection_start;
+            lineChart.data.datasets.forEach(function (ds) {
+                if (start != null) {
+                    ds.segment = { borderDash: function (ctx) { return ctx.p0DataIndex >= start - 1 ? [6, 4] : undefined; } };
+                } else {
+                    delete ds.segment;
+                }
+            });
+        }
+        panel.querySelectorAll('.chart-range-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var key = btn.dataset.range;
+                var r = c.ranges[key];
+                if (!r) return;
+                panel.querySelectorAll('.chart-range-btn').forEach(function (b) { b.classList.remove('is-active'); });
+                btn.classList.add('is-active');
+                barChart.data.labels = r.labels;
+                barChart.data.datasets = r.bar_datasets;
+                barChart.update();
+                lineChart.data.labels = r.labels;
+                lineChart.data.datasets = r.line_datasets;
+                applyProjectionStyling(r);
+                lineChart.update();
+            });
+        });
+    });
+
+    // Sync buttons → streaming POST → floating panel.
+    var panel = document.getElementById('sync-progress-panel');
+    var out = document.getElementById('sync-progress');
+    var csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || "";
+    document.getElementById('sync-progress-close')?.addEventListener('click', function () { panel.style.display = 'none'; });
+
+    async function runSync(url, family) {
+        var forceFull = document.getElementById('force-full-resync')?.checked;
+        panel.style.display = 'flex';
+        out.textContent = 'starting sync for ' + family
+            + (forceFull ? ' (force full re-sync)' : '') + '…\n';
+        var fd = new FormData();
+        fd.append('csrfmiddlewaretoken', csrf);
+        if (forceFull) fd.append('force', 'full');
+        var resp;
+        try { resp = await fetch(url, { method: 'POST', body: fd }); }
+        catch (e) { out.textContent += 'network error: ' + e + '\n'; return; }
+        if (resp.redirected) { out.textContent += 'redirected (likely unlinked or non-prod); reload to follow.\n'; return; }
+        var reader = resp.body.getReader();
+        var decoder = new TextDecoder();
+        while (true) {
+            var { value, done } = await reader.read();
+            if (done) break;
+            out.textContent += decoder.decode(value, { stream: true });
+            out.scrollTop = out.scrollHeight;
+        }
+        out.textContent += '\nReload the page to see updated charts.\n';
+    }
+    document.querySelectorAll('.sync-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            runSync(btn.dataset.syncUrl, btn.dataset.family);
+        });
+    });
+})();
+</script>
+{% endblock %}
