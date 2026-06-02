@@ -27,7 +27,7 @@
         </thead>
         <tbody>
             {% for chip in chips %}
-            <tr onclick="window.location='{% url 'larasic_detail' chip.serial_number %}'">
+            <tr onclick="if(!window.getSelection().toString())window.location='{% url 'larasic_detail' chip.serial_number %}'">
                 <td><a class="cell-mono" style="color: var(--accent); font-weight: 500;" href="{% url 'larasic_detail' chip.serial_number %}" onclick="event.stopPropagation()">{{ chip.serial_number }}</a></td>
                 <td>{{ chip.status }}</td>
                 <td class="cell-mono cell-muted">{{ chip.warm_tested_at|date:"Y-m-d H:i"|default:"—" }}</td>

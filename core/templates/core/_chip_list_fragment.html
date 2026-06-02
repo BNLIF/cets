@@ -42,7 +42,7 @@
             </thead>
             <tbody>
                 {% for chip in page_obj %}
-                <tr onclick="window.location='{% url detail_url_name chip.serial_number %}'">
+                <tr onclick="if(!window.getSelection().toString())window.location='{% url detail_url_name chip.serial_number %}'">
                     <td><a href="{% url detail_url_name chip.serial_number %}" class="cell-mono" style="color: var(--accent); font-weight: 500;" onclick="event.stopPropagation()">{{ chip.serial_number }}</a></td>
                     <td>{% if chip.femb %}<a href="{% url 'femb_detail' version=chip.femb.version serial_number=chip.femb.serial_number %}" class="cell-mono" onclick="event.stopPropagation()" style="color: var(--text-2);">{{ chip.femb.version }}/{{ chip.femb.serial_number }}</a>{% else %}<span class="cell-muted">—</span>{% endif %}</td>
                     <td>{% position_tag chip.femb_pos %}</td>

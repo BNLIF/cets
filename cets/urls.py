@@ -38,6 +38,7 @@ urlpatterns = [
     path(
         "femb/<str:version>/<str:serial_number>/", views.femb_detail, name="femb_detail"
     ),
+    path("others/", views.others, name="others"),
     path("cable/", views.cable, name="cable"),
     path("cable/<str:serial_number>/", views.cable_detail, name="cable_detail"),
     path(

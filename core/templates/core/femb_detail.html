@@ -29,7 +29,7 @@
                 <thead><tr><th>Serial number</th><th style="width: 80px;">Position</th></tr></thead>
                 <tbody>
                     {% for chip in larasics %}
-                    <tr onclick="window.location='{% url 'larasic_detail' chip.serial_number %}'">
+                    <tr onclick="if(!window.getSelection().toString())window.location='{% url 'larasic_detail' chip.serial_number %}'">
                         <td><a href="{% url 'larasic_detail' chip.serial_number %}" class="cell-mono" style="color: var(--accent); font-weight: 500;" onclick="event.stopPropagation()">{{ chip.serial_number }}</a></td>
                         <td>{% position_tag chip.femb_pos %}</td>
                     </tr>
@@ -49,7 +49,7 @@
                 <thead><tr><th>Serial number</th><th style="width: 80px;">Position</th></tr></thead>
                 <tbody>
                     {% for chip in coldadcs %}
-                    <tr onclick="window.location='{% url 'coldadc_detail' chip.serial_number %}'">
+                    <tr onclick="if(!window.getSelection().toString())window.location='{% url 'coldadc_detail' chip.serial_number %}'">
                         <td><a href="{% url 'coldadc_detail' chip.serial_number %}" class="cell-mono" style="color: var(--accent); font-weight: 500;" onclick="event.stopPropagation()">{{ chip.serial_number }}</a></td>
                         <td>{% position_tag chip.femb_pos %}</td>
                     </tr>
@@ -69,7 +69,7 @@
                 <thead><tr><th>Serial number</th><th style="width: 80px;">Position</th></tr></thead>
                 <tbody>
                     {% for chip in coldatas %}
-                    <tr onclick="window.location='{% url 'coldata_detail' chip.serial_number %}'">
+                    <tr onclick="if(!window.getSelection().toString())window.location='{% url 'coldata_detail' chip.serial_number %}'">
                         <td><a href="{% url 'coldata_detail' chip.serial_number %}" class="cell-mono" style="color: var(--accent); font-weight: 500;" onclick="event.stopPropagation()">{{ chip.serial_number }}</a></td>
                         <td>{% position_tag chip.femb_pos %}</td>
                     </tr>

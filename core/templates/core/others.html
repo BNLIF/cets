@@ -1,0 +1,44 @@
+{% extends 'core/base.html' %}
+{% load components %}
+
+{% block title %}CETS — Others{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div>
+        {% crumbs "CETS" "/" "Others" %}
+        <h1 class="page-title">Others</h1>
+        <div class="page-subtitle">Components beyond the primary signal-path chips (LArASIC, ColdADC, COLDATA, FEMB)</div>
+    </div>
+</div>
+
+<div class="stats">
+    {% for card in cards %}
+    {% if card.active %}
+    <a class="stat fam-stat" href="{{ card.url }}">
+        <div class="fam-stat-head">
+            <div>
+                <div class="fam-stat-name">{{ card.name }}</div>
+            </div>
+            <svg class="fam-stat-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+        </div>
+        <div class="fam-stat-numbers" style="grid-template-columns: 1fr;">
+            <div>
+                <div class="fam-stat-value">{{ card.count }}</div>
+                <div class="fam-stat-num-label">tracked</div>
+            </div>
+        </div>
+    </a>
+    {% else %}
+    <div class="stat fam-stat fam-stat-disabled">
+        <div class="fam-stat-head">
+            <div>
+                <div class="fam-stat-name">{{ card.name }}</div>
+            </div>
+            <span class="badge">coming soon</span>
+        </div>
+    </div>
+    {% endif %}
+    {% endfor %}
+</div>
+{% endblock %}

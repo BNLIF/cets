@@ -602,7 +602,7 @@ def cable(request):
         request,
         queryset=queryset,
         sort_keys=_CABLE_SORT_KEYS,
-        page_id="cable",
+        page_id="others",
         full_template="core/cable.html",
         fragment_template="core/_cable_list_fragment.html",
         default_sort="latest_test_timestamp",
@@ -618,13 +618,37 @@ def cable(request):
     )
 
 
+_OTHERS_CARDS = (
+    {"slug": "cable", "name": "Cable", "active": True, "url_name": "cable"},
+    {"slug": "crp-patch-panel", "name": "CRP patch panel board", "active": False},
+    {"slug": "wib", "name": "WIB", "active": False},
+    {"slug": "ptb", "name": "PTB", "active": False},
+    {"slug": "wiec", "name": "WIEC", "active": False},
+    {"slug": "bias-warm-filter", "name": "Bias warm filter board", "active": False},
+    {"slug": "wiec-fan-fanout", "name": "WIEC fan fanout board", "active": False},
+    {"slug": "wiec-heater-fanout", "name": "WIEC heater fanout board", "active": False},
+)
+
+
+def others(request):
+    cable_count = CABLE.objects.count()
+    cards = []
+    for card in _OTHERS_CARDS:
+        item = dict(card)
+        if card["slug"] == "cable":
+            item["url"] = reverse(card["url_name"])
+            item["count"] = cable_count
+        cards.append(item)
+    return render(request, "core/others.html", {"page": "others", "cards": cards})
+
+
 def cable_detail(request, serial_number):
     cable = get_object_or_404(CABLE, serial_number=serial_number)
     cable_tests = CableTest.objects.filter(cable=cable).order_by("-timestamp")
     context = {
         "cable": cable,
         "cable_tests": cable_tests,
-        "page": "cable",
+        "page": "others",
     }
     return render(request, "core/cable_detail.html", context)
 

@@ -14,7 +14,7 @@
             </thead>
             <tbody>
                 {% for cable in page_obj %}
-                <tr onclick="window.location='{% url 'cable_detail' cable.serial_number %}'">
+                <tr onclick="if(!window.getSelection().toString())window.location='{% url 'cable_detail' cable.serial_number %}'">
                     <td><a href="{% url 'cable_detail' cable.serial_number %}" class="cell-mono" style="color: var(--accent); font-weight: 500;" onclick="event.stopPropagation()">{{ cable.serial_number }}</a></td>
                     <td class="cell-mono">{{ cable.batch_number }}</td>
                     <td class="cell-mono cell-muted">{{ cable.latest_test_timestamp|date:"Y-m-d H:i"|default:"—" }}</td>
