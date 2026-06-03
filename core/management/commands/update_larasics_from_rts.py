@@ -97,15 +97,19 @@ class BatchScan:
     valid_session_count: int = 0
 
 
-def scan_batch(batch_dir: Path, cutoff: datetime | None = None) -> BatchScan:
+def scan_batch(batch_dir: Path) -> BatchScan:
+    # No session-level cutoff: ``Time_`` folder names are reused across retry
+    # sessions (a batch can hold several distinct sessions sharing one
+    # ``Time_<ts>`` name), so filtering sessions by that timestamp drops new
+    # data whenever a name collides with the DB cutoff. The batch-level mtime
+    # gate in handle() already restricts us to batches that changed; scanning
+    # all of a changed batch's sessions is idempotent (warm/cold take the max).
     batch = BatchScan(batch_id=batch_dir.name)
     for session in batch_dir.iterdir():
         if not session.is_dir():
             continue
         ts = parse_time_folder(session.name)
         if ts is None:
-            continue
-        if cutoff is not None and ts <= cutoff:
             continue
         try:
             sub_names = [s.name for s in session.iterdir() if s.is_dir()]
@@ -172,9 +176,10 @@ class Command(BaseCommand):
             action="store_true",
             help=(
                 "Incremental mode: skip batch folders whose mtime is not newer "
-                "than max(warm_tested_at, cold_tested_at) in the DB, and skip "
-                "sessions whose Time_ name is not newer than that cutoff. "
-                "Intended for the daily cron."
+                "than max(warm_tested_at, cold_tested_at) in the DB. Selected "
+                "batches are scanned in full (sessions are not filtered by their "
+                "Time_ name, which is reused across retries). Intended for the "
+                "daily cron."
             ),
         )
 
@@ -231,7 +236,7 @@ class Command(BaseCommand):
 
         total = len(batch_dirs)
         for i, batch_dir in enumerate(batch_dirs, start=1):
-            batch = scan_batch(batch_dir, cutoff=cutoff_dt)
+            batch = scan_batch(batch_dir)
             warm_str = batch.warm_date.strftime("%Y-%m-%d") if batch.warm_date else "-"
             cold_str = batch.cold_date.strftime("%Y-%m-%d") if batch.cold_date else "-"
             tag = ""
