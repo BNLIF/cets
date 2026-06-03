@@ -2,14 +2,36 @@ import os
 import re
 import subprocess
 from datetime import datetime
+from pathlib import Path
 
 from decouple import config
 from django.core.management.base import BaseCommand
 from django.db import transaction
-from pathlib import Path
 from django.utils import timezone
 
 from core.models import FEMB, FembTest
+
+
+# Local (gitignored) file listing known-bad report paths to skip. Lines
+# ending in "/" are treated as prefixes; other lines are exact relative
+# paths under FEMB_QC_DIR. Blank lines and "#" comments are ignored.
+IGNORE_FILE = Path("tmp/femb_test_ignore.txt")
+
+
+def _load_ignore_file(path):
+    prefixes = []
+    exact = set()
+    if not path.is_file():
+        return tuple(prefixes), frozenset(exact)
+    for raw in path.read_text().splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        if line.endswith("/"):
+            prefixes.append(line)
+        else:
+            exact.add(line)
+    return tuple(prefixes), frozenset(exact)
 
 
 class Command(BaseCommand):
@@ -32,19 +54,16 @@ class Command(BaseCommand):
             )
             return
 
-        touch_file = Path("tmp/TOUCH_FEMBTEST_DB_UPDATE.txt")
+        ignored_prefixes, ignored_paths = _load_ignore_file(IGNORE_FILE)
 
-        # self.stdout.write(
-        #     f"Finding new report files in {femb_qc_dir} newer than {touch_file}..."
-        # )
-
+        # Full scan: rsync preserves source mtimes, so newly-mirrored files
+        # can have older mtimes than any local marker. Dedup happens below
+        # via (femb, timestamp) DB lookup. Scan is local disk, ~0.15s.
         cmd = [
             "find",
             femb_qc_dir,
             "-type",
             "f",
-            "-newer",
-            str(touch_file),
             "(",
             "-name",
             "Final*.md",
@@ -61,15 +80,19 @@ class Command(BaseCommand):
 
         files = result.stdout.strip().split("\n")
         if not files or not files[0]:
-            self.stdout.write(self.style.SUCCESS("No new test reports found."))
+            self.stdout.write(self.style.SUCCESS("No test reports found."))
             return
 
-        self.stdout.write(f"Found {len(files)} new report files.")
+        self.stdout.write(f"Scanning {len(files)} report files.")
 
         new_tests = []
+        ignored_count = 0
         for file_path in files:
             test_data = None
             relative_path = os.path.relpath(file_path, femb_qc_dir)
+            if relative_path.startswith(ignored_prefixes) or relative_path in ignored_paths:
+                ignored_count += 1
+                continue
             if file_path.endswith(".md"):
                 test_data = self._parse_md_path(relative_path, femb_qc_dir)
             elif file_path.endswith(".html"):
@@ -98,9 +121,13 @@ class Command(BaseCommand):
                         )
                     )
 
+        if ignored_count:
+            self.stdout.write(
+                f"Skipped {ignored_count} file(s) matching ignored path prefixes."
+            )
+
         if not new_tests:
             self.stdout.write(self.style.SUCCESS("No new unique tests to add."))
-            touch_file.touch()
             return
 
         self.stdout.write(
@@ -120,7 +147,6 @@ class Command(BaseCommand):
         with transaction.atomic():
             FembTest.objects.bulk_create(new_tests)
 
-        touch_file.touch()
         self.stdout.write(
             self.style.SUCCESS(
                 f"Successfully updated database with {len(new_tests)} new tests."
@@ -137,7 +163,11 @@ class Command(BaseCommand):
             r"_(?P<test_env>LN|RT)_"
             r"(?P<test_type>QC|CHK)/"
             r".*?"
-            r"Final_Report_FEMB_BNL.*?_FEMB_(?P<version>[\w-]+)_(?P<serial_number>\d+)_.*\.md"
+            # Version is the BNL FEMB pattern (e.g. IO-1865-1J / I0-1865-1K).
+            # Serial follows, optionally separated by "_" or "-", or with no
+            # separator at all (uploads vary). 4-digit serials get zero-padded
+            # to 5 by .zfill(5) below.
+            r"Final_Report_FEMB_+BNL.*?_FEMB_(?P<version>I[O0]-\d{4}-\d[A-Z])[-_]?(?P<serial_number>\d{4,5})_.*\.md"
         )
 
         match = pattern.search(relative_path)
@@ -179,9 +209,11 @@ class Command(BaseCommand):
             r"Time_(?P<year>\d{4})_(?P<month>\d{2})/"
             r"(?P<day>\d{2})_(?P<hour>\d{2})_(?P<minute>\d{2})_(?P<second>\d{2})_.*?"
             r"_(?P<test_env>LN|RT)_"
+            r"(?:last_)?"  # optional "last_" marks a re-check of the same FEMB pair
             r"(?P<test_type>CHK)/"
             r"Report/.*?"
-            r"report_FEMB_BNL.*?_FEMB_(?P<version>[\w-]+)_(?P<serial_number>\d+)_.*?_(?P<status>[PF])\.html"
+            # See note on version/serial format in _parse_md_path.
+            r"report_FEMB_+BNL.*?_FEMB_(?P<version>I[O0]-\d{4}-\d[A-Z])[-_]?(?P<serial_number>\d{4,5})_.*?_(?P<status>[PF])\.html"
         )
 
         match = pattern.search(relative_path)

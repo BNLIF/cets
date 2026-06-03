@@ -12,6 +12,28 @@ from django.utils import timezone
 from core.models import CABLE, CableTest
 
 
+# Local (gitignored) file listing known-bad report paths to skip. Lines
+# ending in "/" are treated as prefixes; other lines are exact relative
+# paths under CABLE_QC_DIR. Blank lines and "#" comments are ignored.
+IGNORE_FILE = Path("tmp/cable_test_ignore.txt")
+
+
+def _load_ignore_file(path):
+    prefixes = []
+    exact = set()
+    if not path.is_file():
+        return tuple(prefixes), frozenset(exact)
+    for raw in path.read_text().splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        if line.endswith("/"):
+            prefixes.append(line)
+        else:
+            exact.add(line)
+    return tuple(prefixes), frozenset(exact)
+
+
 class Command(BaseCommand):
     help = "Update CABLE tests from report files."
 
@@ -32,23 +54,12 @@ class Command(BaseCommand):
             )
             return
 
-        touch_file = Path("tmp/TOUCH_CABLETEST_DB_UPDATE.txt")
-        
-        # Create tmp directory if it doesn't exist
-        touch_file.parent.mkdir(parents=True, exist_ok=True)
-        if not touch_file.exists():
-            touch_file.touch()
+        ignored_prefixes, ignored_paths = _load_ignore_file(IGNORE_FILE)
 
-        cmd = [
-            "find",
-            cable_qc_dir,
-            "-type",
-            "f",
-            "-newer",
-            str(touch_file),
-            "-name",
-            "report*.html",
-        ]
+        # Full scan: rsync preserves source mtimes, so newly-mirrored
+        # directories can have older mtimes than any local marker. Dedup
+        # happens below via (cable, timestamp) DB lookup.
+        cmd = ["find", cable_qc_dir, "-type", "f", "-name", "report*.html"]
 
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
@@ -57,15 +68,19 @@ class Command(BaseCommand):
 
         files = result.stdout.strip().split("\n")
         if not files or not files[0]:
-            self.stdout.write(self.style.SUCCESS("No new test reports found."))
+            self.stdout.write(self.style.SUCCESS("No test reports found."))
             return
 
-        self.stdout.write(f"Found {len(files)} new report files.")
+        self.stdout.write(f"Scanning {len(files)} report files.")
 
         new_tests = []
+        ignored_count = 0
         for file_path in files:
             test_data = None
             relative_path = os.path.relpath(file_path, cable_qc_dir)
+            if relative_path.startswith(ignored_prefixes) or relative_path in ignored_paths:
+                ignored_count += 1
+                continue
             if file_path.endswith(".html"):
                 test_data = self._parse_html_path(relative_path)
 
@@ -101,9 +116,13 @@ class Command(BaseCommand):
                         )
                     )
 
+        if ignored_count:
+            self.stdout.write(
+                f"Skipped {ignored_count} file(s) matching ignored path prefixes."
+            )
+
         if not new_tests:
             self.stdout.write(self.style.SUCCESS("No new unique tests to add."))
-            touch_file.touch()
             return
 
         self.stdout.write(
@@ -123,7 +142,6 @@ class Command(BaseCommand):
         with transaction.atomic():
             CableTest.objects.bulk_create(new_tests)
 
-        touch_file.touch()
         self.stdout.write(
             self.style.SUCCESS(
                 f"Successfully updated database with {len(new_tests)} new tests."
