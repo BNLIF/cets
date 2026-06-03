@@ -11,7 +11,8 @@ from django.utils.html import escape
 from .models import LArASIC, ColdADC, COLDATA, FEMB, FembRepair, FembTest, CABLE, CableTest
 from . import queries
 from decouple import config
-from django.db.models import Subquery, OuterRef, Q, Count, Max
+from django.db.models import Subquery, OuterRef, Q, Count, Max, IntegerField
+from django.db.models.functions import Coalesce
 from rest_framework.permissions import IsAdminUser, AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from .serializers import FEMBSerializer
@@ -457,7 +458,23 @@ def coldata(request):
     )
 
 
-FEMB_SORT_KEYS = {"serial_number", "version", "first_test_timestamp", "latest_test_timestamp", "qc_count", "chk_count"}
+FEMB_SORT_KEYS = {"serial_number", "version", "chip_count", "repair_count", "first_test_timestamp", "latest_test_timestamp", "qc_count", "chk_count"}
+
+
+def _installed_chip_count_sq(model):
+    """Correlated subquery: number of currently-installed chips of `model` on
+    each FEMB. A subquery (not a JOIN) so it can sit alongside the fembtest
+    Count() annotations without inflating them via row multiplication.
+    """
+    return Coalesce(
+        Subquery(
+            model.objects
+            .filter(femb=OuterRef("pk"), removed_at_repair__isnull=True)
+            .order_by().values("femb").annotate(n=Count("id")).values("n"),
+            output_field=IntegerField(),
+        ),
+        0,
+    )
 FEMB_PAGE_SIZE = 100
 FAMILY_PAGE_SIZE = 100
 
@@ -557,6 +574,19 @@ def femb(request):
         latest_test_timestamp=Subquery(latest_test.values("timestamp")[:1]),
         qc_count=Count("fembtest", filter=Q(fembtest__test_type="QC")),
         chk_count=Count("fembtest", filter=Q(fembtest__test_type="CHK")),
+        chip_count=(
+            _installed_chip_count_sq(LArASIC)
+            + _installed_chip_count_sq(ColdADC)
+            + _installed_chip_count_sq(COLDATA)
+        ),
+        repair_count=Coalesce(
+            Subquery(
+                FembRepair.objects.filter(femb=OuterRef("pk"))
+                .order_by().values("femb").annotate(n=Count("id")).values("n"),
+                output_field=IntegerField(),
+            ),
+            0,
+        ),
     )
 
     q = (request.GET.get("q") or "").strip()

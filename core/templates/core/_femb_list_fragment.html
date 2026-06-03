@@ -8,6 +8,8 @@
             <thead>
                 <tr>
                     {% sortable_th key="serial_number" label="FEMB" current_sort=sort current_dir=dir %}
+                    {% sortable_th key="chip_count" label="Chips" current_sort=sort current_dir=dir %}
+                    {% sortable_th key="repair_count" label="Repairs" current_sort=sort current_dir=dir %}
                     {% sortable_th key="qc_count" label="QC tests" current_sort=sort current_dir=dir %}
                     {% sortable_th key="chk_count" label="CHK tests" current_sort=sort current_dir=dir %}
                     {% sortable_th key="first_test_timestamp" label="First test" current_sort=sort current_dir=dir %}
@@ -18,13 +20,15 @@
                 {% for femb_obj in page_obj %}
                 <tr>
                     <td class="cell-mono"><a href="{% url 'femb_detail' version=femb_obj.version serial_number=femb_obj.serial_number %}" style="color: var(--accent); font-weight: 500;">{{ femb_obj.version }}/{{ femb_obj.serial_number }}</a></td>
+                    <td>{% if femb_obj.chip_count %}{{ femb_obj.chip_count }}{% else %}<span class="cell-muted">—</span>{% endif %}</td>
+                    <td>{% if femb_obj.repair_count %}{{ femb_obj.repair_count }}{% else %}<span class="cell-muted">—</span>{% endif %}</td>
                     <td>{{ femb_obj.qc_count }}</td>
                     <td>{{ femb_obj.chk_count }}</td>
                     <td class="cell-mono cell-muted">{{ femb_obj.first_test_timestamp|date:"Y-m-d H:i"|default:"—" }}</td>
                     <td class="cell-mono cell-muted">{{ femb_obj.latest_test_timestamp|date:"Y-m-d H:i"|default:"—" }}</td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="5" class="cell-muted" style="text-align: center; padding: 36px;">No FEMBs match the current filters.</td></tr>
+                <tr><td colspan="7" class="cell-muted" style="text-align: center; padding: 36px;">No FEMBs match the current filters.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
