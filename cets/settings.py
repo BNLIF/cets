@@ -35,6 +35,11 @@ ALLOWED_HOSTS = config("ALLOWED_HOSTS", cast=Csv())
 
 FORCE_SCRIPT_NAME = config("FORCE_SCRIPT_NAME", default=None)
 
+# Tests must resolve URLs rooted at "/", not under FORCE_SCRIPT_NAME (which
+# prod sets to /twister/cets). The runner neutralizes the prefix — see
+# cets/test_runner.py for why.
+TEST_RUNNER = "cets.test_runner.CetsTestRunner"
+
 CSRF_TRUSTED_ORIGINS = config("CSRF_TRUSTED_ORIGINS", default="", cast=Csv())
 
 if not DEBUG:
