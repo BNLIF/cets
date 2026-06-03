@@ -457,7 +457,7 @@ def coldata(request):
     )
 
 
-FEMB_SORT_KEYS = {"serial_number", "version", "latest_test_timestamp", "qc_count", "chk_count"}
+FEMB_SORT_KEYS = {"serial_number", "version", "first_test_timestamp", "latest_test_timestamp", "qc_count", "chk_count"}
 FEMB_PAGE_SIZE = 100
 FAMILY_PAGE_SIZE = 100
 
@@ -551,7 +551,9 @@ def _family_list_response(
 
 def femb(request):
     latest_test = FembTest.objects.filter(femb=OuterRef("pk")).order_by("-timestamp")
+    first_test = FembTest.objects.filter(femb=OuterRef("pk")).order_by("timestamp")
     queryset = FEMB.objects.annotate(
+        first_test_timestamp=Subquery(first_test.values("timestamp")[:1]),
         latest_test_timestamp=Subquery(latest_test.values("timestamp")[:1]),
         qc_count=Count("fembtest", filter=Q(fembtest__test_type="QC")),
         chk_count=Count("fembtest", filter=Q(fembtest__test_type="CHK")),

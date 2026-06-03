@@ -7,6 +7,7 @@ class FEMB(models.Model):
     version = models.CharField(max_length=20, default="IO-1865-1K")
     serial_number = models.CharField(max_length=10)
     status = models.CharField(max_length=20, default="testing")
+    notes = models.TextField(blank=True, default="")
     last_update = models.DateTimeField(auto_now=True)
 
     class Meta:
