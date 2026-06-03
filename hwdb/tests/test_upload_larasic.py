@@ -16,13 +16,16 @@ from hwdb.upload import csv_parser, larasic
 # ---- Fixtures -------------------------------------------------------------
 
 
-def _chip(serial="002-00001", tray="B005T0011", warm=None, cold=None):
+def _chip(serial="002-00001", tray="B005T0011", warm=None, cold=None,
+          warm_csv_attached=None, cold_csv_attached=None):
     """Minimal stand-in for a LArASIC model row."""
     return SimpleNamespace(
         serial_number=serial,
         tray_id=tray,
         warm_tested_at=warm,
         cold_tested_at=cold,
+        warm_csv_attached_at=warm_csv_attached,
+        cold_csv_attached_at=cold_csv_attached,
     )
 
 
@@ -856,3 +859,51 @@ class IterUploadChipsParallelTest(TestCase):
         by_sn = {c.serial_number: r for c, r in out}
         self.assertIsNotNone(by_sn["002-00001"].error)
         self.assertIsNone(by_sn["002-00002"].error)
+
+
+class CsvAttachPendingTest(TestCase):
+    """``csv_attach_pending`` is the shared "tests done but a CSV is waiting to
+    be attached" predicate. The tray detail view, the bulk-upload filter, and
+    the index worklist all rely on it agreeing on what "done" means.
+    """
+
+    WARM = datetime(2025, 9, 24, 16, 59, 20, tzinfo=timezone.utc)
+
+    def test_no_csvs_available_is_never_pending(self):
+        chip = _chip(serial="002-00797")
+        self.assertFalse(larasic.csv_attach_pending(chip, {}))
+
+    def test_rt_csv_available_and_unattached_is_pending(self):
+        chip = _chip(serial="002-00797")
+        csvs = {("002-00797", "RT"): Path("x_RT.csv")}
+        self.assertTrue(larasic.csv_attach_pending(chip, csvs))
+
+    def test_ln_csv_available_and_unattached_is_pending(self):
+        chip = _chip(serial="002-00797")
+        csvs = {("002-00797", "LN"): Path("x_LN.csv")}
+        self.assertTrue(larasic.csv_attach_pending(chip, csvs))
+
+    def test_already_attached_is_not_pending(self):
+        chip = _chip(
+            serial="002-00797",
+            warm_csv_attached=self.WARM, cold_csv_attached=self.WARM,
+        )
+        csvs = {
+            ("002-00797", "RT"): Path("x_RT.csv"),
+            ("002-00797", "LN"): Path("x_LN.csv"),
+        }
+        self.assertFalse(larasic.csv_attach_pending(chip, csvs))
+
+    def test_partial_attach_still_pending(self):
+        # RT attached but LN CSV newly arrived and not yet attached.
+        chip = _chip(serial="002-00797", warm_csv_attached=self.WARM)
+        csvs = {
+            ("002-00797", "RT"): Path("x_RT.csv"),
+            ("002-00797", "LN"): Path("x_LN.csv"),
+        }
+        self.assertTrue(larasic.csv_attach_pending(chip, csvs))
+
+    def test_only_other_chips_csv_present_is_not_pending(self):
+        chip = _chip(serial="002-00797")
+        csvs = {("002-99999", "RT"): Path("other_RT.csv")}
+        self.assertFalse(larasic.csv_attach_pending(chip, csvs))

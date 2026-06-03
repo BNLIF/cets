@@ -9,7 +9,7 @@
         {% crumbs "CETS" "/" "Hardware Database" "/hwdb/" "LArASIC upload" "/hwdb/larasic/upload/" tray_id %}
         <h1 class="page-title">Tray {{ tray_id }}</h1>
         <div class="page-subtitle">
-            {{ chip_count }} chips · {{ new_count }} new + {{ enrich_count }} enrich + {{ done_count }} done ·
+            {{ chip_count }} chips · {{ new_count }} new + {{ enrich_count }} enrich{% if csv_pending_count %} + {{ csv_pending_count }} csv-pending{% endif %} + {{ done_count }} done ·
             instance <strong>{{ active_instance }}</strong>
         </div>
     </div>
@@ -55,7 +55,7 @@
         <input type="checkbox" id="force-csv-attach"> Force CSV attach
     </label>
     <button type="button" id="upload-tray-btn" class="btn btn-primary"
-            title="Walks {{ upload_count }} chip(s) — {{ new_count }} new + {{ enrich_count }} enrich. {{ done_count }} done chip(s) are skipped unless Force re-upload is on.">Upload tray ({{ upload_count }})</button>
+            title="Walks {{ upload_count }} chip(s) — {{ new_count }} new + {{ enrich_count }} enrich + {{ csv_pending_count }} csv-pending. {{ done_count }} done chip(s) are skipped unless Force re-upload is on.">Upload tray ({{ upload_count }})</button>
     <button type="button" id="upload-tray-parallel-btn" class="btn btn-primary"
             title="Same scope as Upload tray, but 10 worker threads run in parallel. Lines arrive in completion order. See ADR-0005.">Parallel ×10 ({{ upload_count }})</button>
     {% if is_dev %}
@@ -94,7 +94,7 @@
         <tbody>
             {% for row in chip_rows %}
             <tr>
-                <td class="cell-mono">{{ row.chip.serial_number }}</td>
+                <td class="cell-mono">{% if row.hwdb_url %}<a href="{{ row.hwdb_url }}" target="_blank" rel="noopener" title="Open this chip's record in HWDB (test &amp; upload history)">{{ row.chip.serial_number }}</a>{% else %}{{ row.chip.serial_number }}{% endif %}</td>
                 <td>{{ row.chip.status }}</td>
                 <td class="cell-mono cell-muted">{{ row.chip.warm_tested_at|date:"Y-m-d"|default:"—" }}</td>
                 <td class="cell-mono cell-muted">{{ row.chip.cold_tested_at|date:"Y-m-d"|default:"—" }}</td>
@@ -102,6 +102,7 @@
                 <td>{% if row.has_ln_csv %}<span class="pill" data-status="pass">✓</span>{% else %}<span class="cell-muted" style="font-size: 12px;">—</span>{% endif %}</td>
                 <td>
                     {% if row.state == "done" %}<span class="pill" data-status="pass" title="In HWDB and our QC tests are confirmed there. Skipped by default — per-chip button or Force re-upload overrides.">done</span>
+                    {% elif row.state == "csv-pending" %}<span class="pill" data-status="warn" title="QC tests are confirmed in HWDB, but an analysis CSV is now available and not yet attached. Upload re-posts in detailed mode and attaches the CSV.">csv-pending</span>
                     {% elif row.state == "enrich" %}<span class="pill" title="Component exists in HWDB (likely from FEMB workflow) but our QC tests aren't confirmed there. Upload posts only the missing tests.">enrich</span>
                     {% else %}<span class="pill">new</span>{% endif %}
                 </td>

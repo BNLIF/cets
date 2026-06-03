@@ -508,6 +508,24 @@ def scan_tray_csvs(rts_root: Optional[Path], tray_id: str) -> dict[tuple[str, st
     return out
 
 
+def csv_attach_pending(chip, csvs: dict[tuple[str, str], Path]) -> bool:
+    """True if an analysis CSV now exists for this chip but isn't attached yet.
+
+    ``csvs`` is the ``{(serial_number, env): Path}`` dict from
+    ``scan_tray_csvs``. A chip is CSV-pending when an RT (resp. LN) CSV is
+    available and its ``warm_csv_attached_at`` (resp. ``cold_csv_attached_at``)
+    is still NULL. This mirrors the index page's ``_annotate_to_upload`` so the
+    tray detail view, the bulk-upload filter, and the worklist all agree on
+    what "done" means: tests uploaded *and* no waiting CSV to attach.
+    """
+    sn = chip.serial_number
+    if (sn, "RT") in csvs and chip.warm_csv_attached_at is None:
+        return True
+    if (sn, "LN") in csvs and chip.cold_csv_attached_at is None:
+        return True
+    return False
+
+
 def clear_csv_cache() -> None:
     """Drop the in-process L1 cache. Tests call this between runs.
 

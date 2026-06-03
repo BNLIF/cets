@@ -641,32 +641,56 @@ def upload_tray_view(request, tray_id):
     """
     chips = LArASIC.objects.filter(tray_id=tray_id).order_by("serial_number")
     chip_count = chips.count()
-    # Three states. "new" = chip not in HWDB → create + post tests. "enrich" =
-    # in HWDB (likely from FEMB workflow) but our QC tests haven't been
-    # confirmed there yet → reuse part_id + post any missing tests. "done" =
-    # in HWDB and qc_tests_uploaded already True → skip unless Force re-upload.
-    new_count = chips.filter(is_in_hwdb=False).count()
-    done_count = chips.filter(is_in_hwdb=True, qc_tests_uploaded=True).count()
-    enrich_count = chip_count - new_count - done_count
-    upload_count = new_count + enrich_count
     instance = active_instance(request)
 
     rts_root = _rts_root()
     csvs = upload_lib.scan_tray_csvs(rts_root, tray_id)
+
+    # Map serial → HWDB part_id so each row can deep-link to the official
+    # component record (test/upload history). The HwdbChip mirror is synced
+    # from PROD (all rows are the prod part type), so the link targets the prod
+    # UI regardless of the active instance — that's where the canonical history
+    # lives. Chips not yet in HWDB have no part_id and render unlinked.
+    part_ids = dict(
+        HwdbChip.objects.filter(
+            family="larasic",
+            serial_number__in=chips.values_list("serial_number", flat=True),
+        ).values_list("serial_number", "part_id")
+    )
+    hwdb_ui_base = settings.HWDB_PROFILES["prod"]["ui"]
+
+    # Four states (computed per-chip so "done" can account for CSV attachment,
+    # matching the index page's to_upload_count — see _annotate_to_upload):
+    #   "new"         — not in HWDB → create + post tests.
+    #   "enrich"      — in HWDB (likely from FEMB workflow) but our QC tests
+    #                   aren't confirmed there → reuse part_id + post missing tests.
+    #   "csv-pending" — tests confirmed, but an analysis CSV is now available
+    #                   and not yet attached → re-upload upgrades simple→detailed.
+    #   "done"        — tests confirmed and no CSV waiting → skip unless Force.
+    new_count = enrich_count = csv_pending_count = done_count = 0
     chip_rows = []
     for chip in chips:
         if not chip.is_in_hwdb:
             state = "new"
-        elif chip.qc_tests_uploaded:
-            state = "done"
-        else:
+            new_count += 1
+        elif not chip.qc_tests_uploaded:
             state = "enrich"
+            enrich_count += 1
+        elif upload_lib.csv_attach_pending(chip, csvs):
+            state = "csv-pending"
+            csv_pending_count += 1
+        else:
+            state = "done"
+            done_count += 1
+        pid = part_ids.get(chip.serial_number)
         chip_rows.append({
             "chip": chip,
             "state": state,
             "has_rt_csv": (chip.serial_number, "RT") in csvs,
             "has_ln_csv": (chip.serial_number, "LN") in csvs,
+            "hwdb_url": f"{hwdb_ui_base}/edit/component/{pid}" if pid else None,
         })
+    upload_count = new_count + enrich_count + csv_pending_count
     has_analysis = bool(csvs)
 
     return render(
@@ -678,6 +702,7 @@ def upload_tray_view(request, tray_id):
             "chip_count": chip_count,
             "new_count": new_count,
             "enrich_count": enrich_count,
+            "csv_pending_count": csv_pending_count,
             "done_count": done_count,
             "upload_count": upload_count,
             "has_analysis": has_analysis,
@@ -903,14 +928,8 @@ def upload_run_view(request, tray_id):
     if chip_filter:
         chips_qs = chips_qs.filter(serial_number=chip_filter)
 
-    # On PROD, default behavior skips chips whose QC tests we've already
-    # confirmed in HWDB. "Force re-upload" walks them anyway — the per-test
-    # find_existing_test dedup still protects HWDB from duplicates. Per-chip
-    # button presses bypass this filter (the user opted in explicitly). Dev
-    # always walks everything (qc_tests_uploaded reflects PROD state).
+    rts_root = _rts_root()
     force = request.POST.get("force") == "on"
-    if instance == "prod" and not force and not chip_filter:
-        chips_qs = chips_qs.exclude(qc_tests_uploaded=True)
 
     if request.POST.get("random_5") == "on" and instance == "dev":
         # Dev-only quick-feasibility sample. order_by("?") picks a fresh random
@@ -920,13 +939,26 @@ def upload_run_view(request, tray_id):
     else:
         chips = list(chips_qs)
 
+    # On PROD, default behavior skips chips that are fully done: QC tests
+    # confirmed AND no newly-available CSV waiting to be attached. A csv-pending
+    # chip is kept so the bulk run upgrades it simple→detailed and attaches the
+    # CSV (find_existing_test won't dedup detailed-over-simple). "Force
+    # re-upload" walks everything — find_existing_test still protects HWDB from
+    # duplicates. Per-chip button presses bypass this filter (explicit opt-in).
+    # Dev always walks everything (qc_tests_uploaded reflects PROD state).
+    if instance == "prod" and not force and not chip_filter:
+        csvs = upload_lib.scan_tray_csvs(rts_root, tray_id)
+        chips = [
+            c for c in chips
+            if not c.qc_tests_uploaded or upload_lib.csv_attach_pending(c, csvs)
+        ]
+
     attach_csvs = request.POST.get("attach_csvs", "on") == "on"
     # Re-post detailed-mode tests even if a detailed record already exists.
     # Used to retry CSV attachment when a prior detailed upload's attach
     # silently failed. Posts a duplicate test record by design (probe 3:
     # HWDB doesn't dedup, and PATCH on tests isn't supported).
     force_csv_attach = request.POST.get("force_csv_attach") == "on"
-    rts_root = _rts_root()
 
     mode = "parallel" if request.POST.get("mode") == "parallel" else "serial"
     if mode == "parallel":
