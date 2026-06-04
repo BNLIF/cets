@@ -17,6 +17,23 @@ from core.models import FEMB, FembTest
 # paths under FEMB_QC_DIR. Blank lines and "#" comments are ignored.
 IGNORE_FILE = Path("tmp/femb_test_ignore.txt")
 
+# Verdict header near the top of a QC Final_Report: green "PASS ... Quality
+# Control", red "fail ... the Quality Control tests", or dark "Quality
+# Control in Test" (run incomplete — no verdict, stays blank).
+QC_VERDICT_RE = re.compile(r"(?P<passed>PASS\s+Quality Control)|faild?\s+the Quality Control")
+
+
+def _qc_status_from_report(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            head = f.read(2048)
+    except OSError:
+        return ""
+    match = QC_VERDICT_RE.search(head)
+    if not match:
+        return ""
+    return "pass" if match.group("passed") else "fail"
+
 
 def _load_ignore_file(path):
     prefixes = []
@@ -86,6 +103,7 @@ class Command(BaseCommand):
         self.stdout.write(f"Scanning {len(files)} report files.")
 
         new_tests = []
+        updated_tests = []
         ignored_count = 0
         for file_path in files:
             test_data = None
@@ -106,9 +124,10 @@ class Command(BaseCommand):
                 if created:
                     self.stdout.write(f"Created new FEMB: {femb}")
 
-                if not FembTest.objects.filter(
+                existing = FembTest.objects.filter(
                     femb=femb, timestamp=test_data["timestamp"]
-                ).exists():
+                ).first()
+                if existing is None:
                     new_tests.append(
                         FembTest(
                             femb=femb,
@@ -120,22 +139,36 @@ class Command(BaseCommand):
                             status=test_data.get("status", ""),
                         )
                     )
+                else:
+                    # Backfill: status parsing was added after many rows were
+                    # imported (QC verdicts come from the report header).
+                    status = test_data.get("status", "")
+                    if status and existing.status != status:
+                        existing.status = status
+                        updated_tests.append(existing)
 
         if ignored_count:
             self.stdout.write(
                 f"Skipped {ignored_count} file(s) matching ignored path prefixes."
             )
 
-        if not new_tests:
+        if not new_tests and not updated_tests:
             self.stdout.write(self.style.SUCCESS("No new unique tests to add."))
             return
 
-        self.stdout.write(
-            self.style.WARNING(f"\nFound {len(new_tests)} new tests to be added:")
-        )
-        for test in new_tests:
+        if new_tests:
             self.stdout.write(
-                f"  - {test.femb}, {test.timestamp}, {test.test_type}, {test.test_env}, status: {test.status}"
+                self.style.WARNING(f"\nFound {len(new_tests)} new tests to be added:")
+            )
+            for test in new_tests:
+                self.stdout.write(
+                    f"  - {test.femb}, {test.timestamp}, {test.test_type}, {test.test_env}, status: {test.status}"
+                )
+        if updated_tests:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"\nFound {len(updated_tests)} existing tests whose status will be backfilled."
+                )
             )
 
         if not options["silent"]:
@@ -146,10 +179,12 @@ class Command(BaseCommand):
 
         with transaction.atomic():
             FembTest.objects.bulk_create(new_tests)
+            FembTest.objects.bulk_update(updated_tests, ["status"])
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Successfully updated database with {len(new_tests)} new tests."
+                f"Successfully updated database with {len(new_tests)} new tests"
+                f" and {len(updated_tests)} status backfills."
             )
         )
 
@@ -199,6 +234,7 @@ class Command(BaseCommand):
             "test_type": data["test_type"],
             "version": data["version"],
             "serial_number": data["serial_number"].zfill(5),
+            "status": _qc_status_from_report(os.path.join(base_dir, file_path)),
         }
 
     def _parse_html_path(self, file_path, base_dir):
