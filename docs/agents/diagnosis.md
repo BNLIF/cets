@@ -37,7 +37,7 @@ Query **read-only**: `sqlite3 'file:db.sqlite3?mode=ro'`. Key tables (Django mod
 
 | Table | Model | What it holds |
 |---|---|---|
-| `core_femb` | FEMB | Inventory: `serial_number` (short form, e.g. `00023`), `version` (e.g. `IO-1865-1L`), `status` |
+| `core_femb` | FEMB | Inventory: `serial_number` (short form, e.g. `00023`), `version` (e.g. `IO-1865-1L`), `status`, `notes` (dated expert entries — debug findings, off-db repairs; appended via the web UI) |
 | `core_fembtest` | FembTest | One row per test: `timestamp`, `test_type` (QC/CHK), `test_env` (RT/LN), `status`, `report_filename`, `femb_id` |
 | `core_fembrepair` | FembRepair | Repair log: `iteration_number`, `date`, `operator`, `what_was_fixed`, `comments` |
 | `core_larasic` | LArASIC | 8 per FEMB: `serial_number`, `femb_id`, `femb_pos` (F1–F4/B1–B4) |
