@@ -3,11 +3,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from django.shortcuts import render, get_object_or_404, redirect
-from django.http import HttpResponse, HttpResponseNotFound
+from django.http import HttpResponse, HttpResponseForbidden, HttpResponseNotFound
 from django.core.paginator import Paginator
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import escape
+from django.views.decorators.http import require_POST
 from .models import LArASIC, ColdADC, COLDATA, FEMB, FembRepair, FembTest, CABLE, CableTest
 from . import queries
 from decouple import config
@@ -740,6 +741,30 @@ def femb_detail(request, version, serial_number):
         "page": "femb",
     }
     return render(request, "core/femb_detail.html", context)
+
+
+@require_POST
+def femb_note(request, version, serial_number):
+    """Append a dated entry to a FEMB's notes; staff may replace the full text."""
+    femb = get_object_or_404(FEMB, version=version, serial_number=serial_number)
+    if request.POST.get("action") == "replace":
+        if not request.user.is_staff:
+            return HttpResponseForbidden("Only admins can edit existing notes.")
+        femb.notes = request.POST.get("notes", "").strip()
+        femb.save(update_fields=["notes"])
+    else:
+        content = request.POST.get("content", "").strip()
+        if content:
+            who = request.POST.get("who", "").strip() or "CE"
+            try:
+                # Editable for retrospective notes; falls back to today.
+                note_date = datetime.strptime(request.POST.get("date", ""), "%Y-%m-%d").date()
+            except ValueError:
+                note_date = timezone.localdate()
+            entry = f"{note_date:%Y-%m-%d} [{who}] {content}"
+            femb.notes = f"{femb.notes.strip()}\n\n{entry}".strip()
+            femb.save(update_fields=["notes"])
+    return redirect("femb_detail", version=version, serial_number=serial_number)
 
 
 def rts_file_content(request, serial_number, filename):

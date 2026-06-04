@@ -12,6 +12,10 @@
         </h1>
     </div>
     <div class="page-head-actions">
+        <button type="button" class="btn btn-ghost" onclick="var p = document.getElementById('add-note-panel'); p.hidden = !p.hidden; if (!p.hidden) p.querySelector('textarea').focus();">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+            Add note
+        </button>
         <a class="btn btn-ghost" href="{% url 'femb' %}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 5l-7 7 7 7"/></svg>
             Back to list
@@ -19,12 +23,35 @@
     </div>
 </div>
 
+<div id="add-note-panel" hidden style="margin-bottom: 24px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-subtle);">
+    <form method="post" action="{% url 'femb_note' femb.version femb.serial_number %}" style="display: flex; flex-direction: column; gap: 6px; max-width: 560px;">
+        {% csrf_token %}
+        <div style="display: flex; gap: 8px; align-items: center; font-size: 12px;">
+            <input type="date" name="date" value="{% now 'Y-m-d' %}" style="padding: 4px 8px; font-size: 12px; font-family: var(--font-mono); border: 1px solid var(--border); border-radius: 4px;" title="Note date — change for retrospective notes">
+            <input name="who" value="CE" style="width: 110px; padding: 4px 8px; font-size: 12px; font-family: var(--font-mono); border: 1px solid var(--border); border-radius: 4px;" title="Who is adding this note">
+        </div>
+        <textarea name="content" required rows="3" placeholder="Note content (appended — existing notes are not editable)" style="padding: 6px 8px; font-size: 13px; border: 1px solid var(--border); border-radius: 4px; resize: vertical;"></textarea>
+        <div><button type="submit" class="btn btn-ghost" style="font-size: 12px;">Append note</button></div>
+    </form>
+</div>
+
 {% if femb.notes %}
 <div style="display: flex; gap: 10px; align-items: flex-start; margin-bottom: 24px; padding: 12px 14px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 6px; background: var(--bg-subtle);">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-    <div>
+    <div style="flex: 1;">
         <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-3); margin-bottom: 3px;">Note</div>
         <div style="font-size: 13px; line-height: 1.5; color: var(--text-2);">{{ femb.notes|linebreaksbr }}</div>
+        {% if user.is_staff %}
+        <details style="margin-top: 6px;">
+            <summary style="cursor: pointer; font-family: var(--font-mono); font-size: 12px; color: var(--text-3); user-select: none;">Edit (admin)</summary>
+            <form method="post" action="{% url 'femb_note' femb.version femb.serial_number %}" style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px; max-width: 560px;">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="replace">
+                <textarea name="notes" rows="6" style="padding: 6px 8px; font-size: 13px; font-family: var(--font-mono); border: 1px solid var(--border); border-radius: 4px; resize: vertical;">{{ femb.notes }}</textarea>
+                <div><button type="submit" class="btn btn-ghost" style="font-size: 12px;">Save full text</button></div>
+            </form>
+        </details>
+        {% endif %}
     </div>
 </div>
 {% endif %}
