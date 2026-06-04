@@ -9,7 +9,7 @@ Where the evidence lives when diagnosing a FEMB QC failure. Used by the `/ce-dia
 | Laptop (dev) | `tmp/femb/` (full mirror, contains `bnl/`) | `db.sqlite3` at repo root |
 | Twister (production) | `/home/chao/mnt/femb/FEMB_QC` (SMB mount, fast) | `db.sqlite3` in the server's cets clone |
 
-`FembTest.report_filename` is relative and `bnl/`-prefixed — resolve it against the QC report root. Note: the laptop `.env` sets `FEMB_QC_DIR=tmp/femb2`, which is a sparse copy; the full mirror is `tmp/femb` (open item in #28 to reconcile).
+`FembTest.report_filename` is relative and `bnl/`-prefixed — resolve it against the QC report root (`FEMB_QC_DIR` in `.env`).
 
 ## Run directories
 
@@ -38,17 +38,17 @@ Query **read-only**: `sqlite3 'file:db.sqlite3?mode=ro'`. Key tables (Django mod
 | Table | Model | What it holds |
 |---|---|---|
 | `core_femb` | FEMB | Inventory: `serial_number` (short form, e.g. `00023`), `version` (e.g. `IO-1865-1L`), `status` |
-| `core_femb_test` | FembTest | One row per test: `timestamp`, `test_type` (QC/CHK), `test_env` (RT/LN), `status`, `report_filename`, `femb_id` |
-| `core_femb_repair` | FembRepair | Repair log: `iteration_number`, `date`, `operator`, `what_was_fixed`, `comments` |
-| `core_fe` | LArASIC | 8 per FEMB: `serial_number`, `femb_id`, `femb_pos` (F1–F4/B1–B4) |
-| `core_adc` | ColdADC | 8 per FEMB, same shape |
+| `core_fembtest` | FembTest | One row per test: `timestamp`, `test_type` (QC/CHK), `test_env` (RT/LN), `status`, `report_filename`, `femb_id` |
+| `core_fembrepair` | FembRepair | Repair log: `iteration_number`, `date`, `operator`, `what_was_fixed`, `comments` |
+| `core_larasic` | LArASIC | 8 per FEMB: `serial_number`, `femb_id`, `femb_pos` (F1–F4/B1–B4) |
+| `core_coldadc` | ColdADC | 8 per FEMB, same shape |
 | `core_coldata` | COLDATA | 2 per FEMB (F1, F2) |
-| `core_cable`, `core_cable_test` | CABLE, CableTest | Cable inventory + tests |
+| `core_cable`, `core_cabletest` | CABLE, CableTest | Cable inventory + tests |
 
 Gotchas:
 
 - Run-dir names use the **full serial** (`BNL_FEMB_IO-1865-1L_00038`); `core_femb.serial_number` stores the **short form** (`00038`) with the batch in `version`. Query with both: `WHERE serial_number='00038' AND version='IO-1865-1L'`.
 - Position labels collide across chip types (`LArASIC F1` ≠ `ColdADC F1`) — key on `(chip type, femb_pos)`. See `CONTEXT.md`.
-- `core_femb_test.status` is often blank for QC rows — the report file verdict is authoritative.
+- `core_fembtest.status` is often blank for QC rows — the report file verdict is authoritative.
 
-Recurrence check: test timeline from `core_femb_test` ordered by `timestamp`, with `core_femb_repair` for intervening repairs.
+Recurrence check: test timeline from `core_fembtest` ordered by `timestamp`, with `core_fembrepair` for intervening repairs.

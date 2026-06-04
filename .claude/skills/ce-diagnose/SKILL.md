@@ -15,7 +15,7 @@ Read `docs/agents/diagnosis.md` first: environment paths (laptop vs Twister QC r
 
 - `bnl/...` relative path → resolve against the environment's QC report root.
 - Run dir → `ls <dir>/**/report_*_F_*.md`; if none fail, check the `Final_Report_*.md` verdict — the run may have passed (say so and stop unless asked to review anyway).
-- FEMB serial → newest first: `ls -dt <qc-root>/bnl/Time_*/*<serial>*/FEMB*<serial>*`; or query `core_femb_test.report_filename` for its test rows.
+- FEMB serial → newest first: `ls -dt <qc-root>/bnl/Time_*/*<serial>*/FEMB*<serial>*`; or query `core_fembtest.report_filename` for its test rows.
 - Pasted error text → grep the QC root for matching strings.
 
 ### 2. Read the evidence (always)
@@ -28,9 +28,9 @@ Read `docs/agents/diagnosis.md` first: environment paths (laptop vs Twister QC r
 
 Query the db read-only (`sqlite3 'file:db.sqlite3?mode=ro'`), matching `serial_number` (short form) + `version`:
 
-- Test timeline: `core_femb_test` joined on `core_femb`, ordered by `timestamp`. QC-row `status` is often blank — the report file verdict is authoritative.
-- Repairs between runs: `core_femb_repair` (`what_was_fixed`, `operator`, `comments`).
-- Chips on the board: `core_fe` / `core_adc` / `core_coldata` by `femb_id` + `femb_pos` — needed to name a suspect chip. Chip-index→`femb_pos` readout mapping is unconfirmed; flag this when recommending a chip replacement.
+- Test timeline: `core_fembtest` joined on `core_femb`, ordered by `timestamp`. QC-row `status` is often blank — the report file verdict is authoritative.
+- Repairs between runs: `core_fembrepair` (`what_was_fixed`, `operator`, `comments`).
+- Chips on the board: `core_larasic` / `core_coldadc` / `core_coldata` by `femb_id` + `femb_pos` — needed to name a suspect chip. Chip index → `femb_pos` mapping is in the taxonomy doc (idx 0–7 → F1, B1, B2, F2, F3, B3, B4, F4).
 
 Recurrence changes the recommendation: first failure → reseat/re-run; recurring after repair → suspect the named chip or the repair itself.
 

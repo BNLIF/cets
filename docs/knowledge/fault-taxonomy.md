@@ -46,5 +46,10 @@ Granularity: **channel** = individual channels independently · **chip** = all 1
 ## Report-side conventions
 
 - Failing channels appear at the top of a failed report as `[[<channels>], [<chip indices>]]`, e.g. `[[44], [2]]` = channel 44, chip index 2. Chip index = `channel // 16` (index 0–7 over the 128 channels).
-- Chip index → physical position (`LArASIC F1–F4 / B1–B4` in the db's `core_fe.femb_pos`): readout-order mapping **not yet confirmed** — verify before naming a physical chip for replacement.
+- Chip index → physical position (`core_larasic.femb_pos`), from ce-workflow `backend/catalog_agent.py`:
+
+  | Chip index | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+  |---|---|---|---|---|---|---|---|---|
+  | Channels | 0–15 | 16–31 | 32–47 | 48–63 | 64–79 | 80–95 | 96–111 | 112–127 |
+  | `femb_pos` | F1 | B1 | B2 | F2 | F3 | B3 | B4 | F4 |
 - LArASIC register encodings used in test configs: `snc` 1=200 mV / 0=900 mV baseline; gain `(sg0,sg1)`: 4.7=(1,1), 7.8=(1,0), 14=(0,0), 25=(0,1) mV/fC; peaking `(st0,st1)`: 0.5µs=(0,1), 1µs=(1,0), 2µs=(1,1), 3µs=(1,1).
