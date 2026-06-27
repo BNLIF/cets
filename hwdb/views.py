@@ -590,6 +590,26 @@ def subsystem_list_view(request, bearer, part1=None, part2=None):
 # ---- FD-VD component explorer (ADR-0010, issue #29) ----------------------
 
 
+# FD CE (system 81) component types that already have rich, dedicated pages.
+# The explorer's generic plots stay uniform; these are *additional* deep-links
+# out to the existing CE tooling (issue #31). Keyed by FD CE subsystem name.
+def _ce_links(node):
+    if node is None or node.system_id != 81:
+        return []
+    dashboard = {"label": "CE progress dashboard", "url": reverse("hwdb:dashboard")}
+    by_subsystem = {
+        "LArASIC": [
+            {"label": "Detailed QC & upload", "url": reverse("hwdb:larasic")},
+            {"label": "LArASIC chips", "url": reverse("larasic")},
+            dashboard,
+        ],
+        "ColdADC": [{"label": "ColdADC chips", "url": reverse("coldadc")}, dashboard],
+        "COLDATA": [{"label": "COLDATA chips", "url": reverse("coldata")}, dashboard],
+        "FEMB": [{"label": "FEMB", "url": reverse("femb")}, dashboard],
+    }
+    return by_subsystem.get(node.subsystem_name, [])
+
+
 def explore_view(request):
     """Read-only FD-VD component hierarchy, rendered from the local mirror.
 
@@ -641,6 +661,7 @@ def explore_view(request):
             "tree": tree,
             "selected_node": selected_node,
             "chart": chart,
+            "ce_links": _ce_links(selected_node),
             "node_count": len(nodes),
             "sync_state": HierarchySyncState.get(),
             "active_instance": active_instance(request),

@@ -117,6 +117,14 @@
             </div>
         </div>
 
+        {% if ce_links %}
+        <div style="margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px;">
+            {% for link in ce_links %}
+            <a class="btn btn-sm btn-ghost" href="{{ link.url }}" title="Open the existing CE page">{{ link.label }} →</a>
+            {% endfor %}
+        </div>
+        {% endif %}
+
         {% if selected_node.tests_sync_error %}
         <div class="banner banner-warn" style="margin: 10px 0;">Last test sync error: {{ selected_node.tests_sync_error }}</div>
         {% endif %}
