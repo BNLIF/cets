@@ -15,8 +15,10 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from core.models import LArASIC, FEMB, FembTest
+from core.queries import chart_config, component_type_progress
 
 from .api_client import FnalDbApiClient
+from .events import sync_test_events
 from .fnal import flow
 from .fnal import session as fnal_session
 from .fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
@@ -622,12 +624,23 @@ def explore_view(request):
     selected = request.GET.get("node")
     selected_node = next((n for n in nodes if n.part_type_id == selected), None)
 
+    chart = None
+    if selected_node and selected_node.tests_synced_at:
+        ranges = component_type_progress(selected_node.part_type_id)
+        chart = chart_config(
+            slug=selected_node.part_type_id,
+            name=selected_node.component_type_name,
+            href="",
+            ranges=ranges,
+        )
+
     return render(
         request,
         "hwdb/explore.html",
         {
             "tree": tree,
             "selected_node": selected_node,
+            "chart": chart,
             "node_count": len(nodes),
             "sync_state": HierarchySyncState.get(),
             "active_instance": active_instance(request),
@@ -660,6 +673,35 @@ def explore_sync_view(request):
         except Exception as e:
             logger.exception("explore_sync_view crashed")
             yield f"hierarchy sync: CRASH · {e}\n"
+
+    return StreamingHttpResponse(_iter(), content_type="text/plain; charset=utf-8")
+
+
+@require_POST
+def explore_node_sync_view(request, part_type_id):
+    """Stream a test-event sync for one component type (issue #30).
+
+    Lazy per-type sync behind the explorer's plot panel. FNAL-gated; reads the
+    production tree (canonical). The browser fires this automatically on first
+    visit to an unsynced leaf, and on the manual "Sync now" button.
+    """
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        nxt = f"{reverse('hwdb:explore')}?node={part_type_id}"
+        return redirect(f"{link}?{urlencode({'next': nxt})}")
+    except FnalUnavailable:
+        return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
+
+    base_url = settings.HWDB_PROFILES["prod"]["api"]
+
+    def _iter():
+        try:
+            yield from sync_test_events(base_url, bearer, part_type_id)
+        except Exception as e:
+            logger.exception("explore_node_sync_view(%s) crashed", part_type_id)
+            yield f"test sync: CRASH · {e}\n"
 
     return StreamingHttpResponse(_iter(), content_type="text/plain; charset=utf-8")
 

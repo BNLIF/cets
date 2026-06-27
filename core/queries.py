@@ -13,6 +13,14 @@ from .models import CableTest, FembTest, LArASIC
 WARM_COLOR = "#f0b455"   # warm gold
 COLD_COLOR = "#0369a1"   # sky-700 — matches --accent body blue
 
+# Palette for the explorer's per-test-type series (issue #30). Test types are
+# dynamic (one series per HWDB test_type.name), so colours cycle through this
+# list in a stable, name-sorted order.
+TEST_TYPE_PALETTE = [
+    "#0369a1", "#f0b455", "#15803d", "#9333ea",
+    "#dc2626", "#0891b2", "#c2410c", "#4f46e5",
+]
+
 
 def _cumulate(values):
     s = 0
@@ -238,6 +246,28 @@ def hwdb_family_progress(family):
     out = _ranges_for_series(series)
     out["1year"] = _project_1year(series)
     return out
+
+
+def component_type_progress(part_type_id):
+    """Tests-recorded-per-month for one component type from ``HwdbTestEvent``.
+
+    One series per ``test_type_name`` (dynamic — read from the data, no
+    hard-coded consortium knowledge), counted by HWDB ``created`` timestamp.
+    Returns the month/3month/all ranges; no 1-year projection (the "recorded"
+    timeline is often bulk-loaded, so a steady-rate projection would mislead).
+    """
+    from hwdb.models import HwdbTestEvent
+    rows = HwdbTestEvent.objects.filter(part_type_id=part_type_id).values_list(
+        "test_type_name", "created"
+    )
+    dates_by_type = {}
+    for name, created in rows:
+        dates_by_type.setdefault(name or "(unnamed)", []).append(created)
+    series = [
+        (name, TEST_TYPE_PALETTE[i % len(TEST_TYPE_PALETTE)], dates_by_type[name])
+        for i, name in enumerate(sorted(dates_by_type))
+    ]
+    return _ranges_for_series(series)
 
 
 def larasic_progress():

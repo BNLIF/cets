@@ -122,12 +122,46 @@ class ComponentTypeNode(models.Model):
     full_name = models.CharField(max_length=300, blank=True, default="")
     n_components = models.PositiveIntegerField(default=0)
     synced_at = models.DateTimeField(auto_now=True)
+    # Per-type test-event sync state (issue #30). NULL tests_synced_at = the
+    # leaf's tests have never been pulled; the explorer syncs lazily on first
+    # visit. n_tests powers the "has test data" tree accent.
+    tests_synced_at = models.DateTimeField(null=True, blank=True)
+    n_tests = models.PositiveIntegerField(default=0)
+    tests_sync_error = models.TextField(blank=True, default="")
 
     class Meta:
         ordering = ["system_id", "subsystem_id", "component_type_name"]
 
     def __str__(self):
         return f"ComponentTypeNode({self.part_type_id}, {self.component_type_name})"
+
+
+class HwdbTestEvent(models.Model):
+    """One test record for one component, mirrored from production HWDB.
+
+    The raw events behind the /hwdb/explore/ "tests recorded per month" plots
+    (ADR-0010). Stored from the uniform summary endpoint
+    (``components/{part_id}/tests``): every consortium's record carries
+    ``created`` (HWDB record timestamp) + ``test_type.name``, with no
+    per-consortium date logic. Re-synced wholesale per component type, so rows
+    for a ``part_type_id`` are deleted and rewritten on each sync.
+
+    ``created`` is the HWDB record timestamp (when the test was *recorded*),
+    not necessarily when it was physically run — the plots are labelled
+    accordingly. Physics dates (datasheet ``Test Date``) are a future
+    refinement gated on the detailed endpoint.
+    """
+
+    part_type_id = models.CharField(max_length=20, db_index=True)
+    part_id = models.CharField(max_length=50)
+    test_type_name = models.CharField(max_length=100)
+    created = models.DateTimeField()
+
+    class Meta:
+        indexes = [models.Index(fields=["part_type_id", "created"])]
+
+    def __str__(self):
+        return f"HwdbTestEvent({self.part_type_id}, {self.test_type_name}, {self.created:%Y-%m-%d})"
 
 
 class HierarchySyncState(models.Model):

@@ -89,7 +89,7 @@
                     <li class="tree-leaf">
                         <a href="?node={{ leaf.part_type_id }}" class="{% if selected_node and leaf.part_type_id == selected_node.part_type_id %}is-selected{% endif %}">
                             <span>{{ leaf.component_type_name }}</span>
-                            <span class="tree-count {% if leaf.n_components %}has-data{% endif %}" title="{{ leaf.n_components }} components in HWDB">&#9679;{{ leaf.n_components }}</span>
+                            <span class="tree-count {% if leaf.n_tests %}has-data{% endif %}" title="{{ leaf.n_components }} components{% if leaf.tests_synced_at %} · {{ leaf.n_tests }} tests{% else %} · tests not synced{% endif %}">&#9679;{{ leaf.n_components }}</span>
                         </a>
                     </li>
                     {% endfor %}
@@ -102,19 +102,67 @@
 
     <section class="explore-panel">
         {% if selected_node %}
-        <h2 class="page-title" style="font-size: 20px;">{{ selected_node.component_type_name }}</h2>
-        <div class="page-subtitle">{{ selected_node.full_name }}</div>
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;">
+            <div>
+                <h2 class="page-title" style="font-size: 20px;">{{ selected_node.component_type_name }}</h2>
+                <div class="page-subtitle">{{ selected_node.full_name }}</div>
+            </div>
+            <div style="text-align: right; white-space: nowrap;">
+                <button id="node-sync-btn" class="btn btn-sm btn-primary" type="button"
+                        data-sync-url="{% url 'hwdb:explore_node_sync' part_type_id=selected_node.part_type_id %}"
+                        title="Pull this component type's test records from prod HWDB">Sync now</button>
+                <div class="cell-muted" style="font-size: 12px; margin-top: 6px;">
+                    {% if selected_node.tests_synced_at %}tests synced {{ selected_node.tests_synced_at|timesince }} ago{% else %}never synced{% endif %}
+                </div>
+            </div>
+        </div>
+
+        {% if selected_node.tests_sync_error %}
+        <div class="banner banner-warn" style="margin: 10px 0;">Last test sync error: {{ selected_node.tests_sync_error }}</div>
+        {% endif %}
+
+        <pre id="node-sync-log"></pre>
+
+        {% if selected_node.tests_synced_at %}
+            {% if chart and not chart.empty %}
+            <div class="panel" data-chart-panel="{{ chart.slug }}" style="border: none; margin-top: 10px;">
+                <div class="chart-range-toggle" role="tablist" style="margin-bottom: 12px;">
+                    <button type="button" data-range="month" class="chart-range-btn">Last month · daily</button>
+                    <button type="button" data-range="3month" class="chart-range-btn">Last 3 months · daily</button>
+                    <button type="button" data-range="all" class="chart-range-btn is-active">All · monthly</button>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div>
+                        <div style="font-size: 13px; color: var(--text-3); margin-bottom: 6px; font-family: var(--font-mono);">Tests recorded per period</div>
+                        <div style="position: relative; height: 280px;"><canvas id="bar_{{ chart.slug }}"></canvas></div>
+                    </div>
+                    <div>
+                        <div style="font-size: 13px; color: var(--text-3); margin-bottom: 6px; font-family: var(--font-mono);">Cumulative</div>
+                        <div style="position: relative; height: 280px;"><canvas id="line_{{ chart.slug }}"></canvas></div>
+                    </div>
+                </div>
+                <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">Binned by HWDB record date (“tests recorded”, not physics test date), faceted by test type.</p>
+            </div>
+            {% else %}
+            <div class="explore-empty">No tests recorded for this component type yet.</div>
+            {% endif %}
+        {% else %}
+        <div class="explore-empty" id="node-unsynced" data-sync-url="{% url 'hwdb:explore_node_sync' part_type_id=selected_node.part_type_id %}">
+            <p>Test events not synced yet.</p>
+            <p class="cell-muted">Syncing from HWDB now… (needs your FNAL link)</p>
+        </div>
+        {% endif %}
+
         <dl class="panel-meta">
             <dt>Part type ID</dt><dd>{{ selected_node.part_type_id }}</dd>
             <dt>System</dt><dd>{{ selected_node.system_name }} ({{ selected_node.system_id }})</dd>
             <dt>Subsystem</dt><dd>{{ selected_node.subsystem_name }} ({{ selected_node.subsystem_id }})</dd>
             <dt>Components in HWDB</dt><dd>{{ selected_node.n_components }}</dd>
+            <dt>Test events</dt><dd>{{ selected_node.n_tests }}</dd>
         </dl>
-        <p class="cell-muted" style="margin-top: 24px;">Test-history plots for this component type arrive in the next slice (#30).</p>
         {% else %}
         <div class="explore-empty">
-            <p>Select a component type from the tree to see its details.</p>
-            <p class="cell-muted">Tests-recorded-per-month plots arrive in #30.</p>
+            <p>Select a component type from the tree to see its test history.</p>
         </div>
         {% endif %}
     </section>
@@ -127,36 +175,78 @@
 {% endif %}
 
 {% csrf_token %}
+{% if chart %}{{ chart|json_script:"node-chart-config" }}{% endif %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 (function () {
-    const btn = document.getElementById("refresh-btn");
-    const log = document.getElementById("sync-log");
-    const csrf = document.querySelector("input[name=csrfmiddlewaretoken]").value;
-    btn.addEventListener("click", async function () {
-        btn.disabled = true;
-        log.style.display = "block";
-        log.textContent = "Refreshing hierarchy…\n";
-        try {
-            const resp = await fetch("{% url 'hwdb:explore_sync' %}", {
-                method: "POST",
-                headers: { "X-CSRFToken": csrf },
-            });
-            if (resp.redirected) { window.location = resp.url; return; }
-            const reader = resp.body.getReader();
-            const dec = new TextDecoder();
-            while (true) {
-                const { value, done } = await reader.read();
-                if (done) break;
-                log.textContent += dec.decode(value, { stream: true });
-                log.scrollTop = log.scrollHeight;
-            }
-            log.textContent += "\nReloading…\n";
-            window.location.reload();
-        } catch (e) {
-            log.textContent += "\nrefresh failed: " + e + "\n";
-            btn.disabled = false;
+    var csrf = document.querySelector("input[name=csrfmiddlewaretoken]").value;
+
+    async function stream(url, logEl, startMsg) {
+        logEl.style.display = "block";
+        logEl.textContent = startMsg;
+        var fd = new FormData(); fd.append("csrfmiddlewaretoken", csrf);
+        var resp;
+        try { resp = await fetch(url, { method: "POST", body: fd }); }
+        catch (e) { logEl.textContent += "\nnetwork error: " + e + "\n"; return false; }
+        if (resp.redirected) { window.location = resp.url; return false; }
+        var reader = resp.body.getReader(), dec = new TextDecoder();
+        while (true) {
+            var r = await reader.read();
+            if (r.done) break;
+            logEl.textContent += dec.decode(r.value, { stream: true });
+            logEl.scrollTop = logEl.scrollHeight;
         }
+        return true;
+    }
+
+    // Refresh hierarchy (skeleton).
+    var rb = document.getElementById("refresh-btn");
+    if (rb) rb.addEventListener("click", async function () {
+        rb.disabled = true;
+        var ok = await stream("{% url 'hwdb:explore_sync' %}", document.getElementById("sync-log"), "Refreshing hierarchy…\n");
+        if (ok) { window.location.reload(); } else { rb.disabled = false; }
     });
+
+    // Per-node test-event sync (manual button + auto on first visit).
+    var nodeLog = document.getElementById("node-sync-log");
+    async function nodeSync(url) {
+        var btn = document.getElementById("node-sync-btn");
+        if (btn) btn.disabled = true;
+        var ok = await stream(url, nodeLog, "Syncing test events…\n");
+        if (ok) { window.location.reload(); } else if (btn) { btn.disabled = false; }
+    }
+    var nb = document.getElementById("node-sync-btn");
+    if (nb) nb.addEventListener("click", function () { nodeSync(nb.dataset.syncUrl); });
+    var unsynced = document.getElementById("node-unsynced");
+    if (unsynced) { nodeSync(unsynced.dataset.syncUrl); }  // auto-sync on first visit
+
+    // Render the selected node's chart.
+    var cfgEl = document.getElementById("node-chart-config");
+    if (cfgEl && window.Chart) {
+        var c = JSON.parse(cfgEl.textContent);
+        if (!c.empty) {
+            var commonOpts = {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 13 }, color: '#3a414b' } },
+                           tooltip: { intersect: false, mode: 'index' } },
+                scales: { x: { ticks: { font: { size: 12 }, color: '#3a414b', maxRotation: 0, autoSkipPadding: 24 } },
+                          y: { beginAtZero: true, ticks: { precision: 0, font: { size: 12 }, color: '#3a414b' } } }
+            };
+            var initial = c.ranges['all'];
+            var barChart = new Chart(document.getElementById('bar_' + c.slug), { type: 'bar', data: { labels: initial.labels, datasets: initial.bar_datasets }, options: commonOpts });
+            var lineChart = new Chart(document.getElementById('line_' + c.slug), { type: 'line', data: { labels: initial.labels, datasets: initial.line_datasets }, options: commonOpts });
+            var panel = document.querySelector('[data-chart-panel="' + c.slug + '"]');
+            panel.querySelectorAll('.chart-range-btn').forEach(function (b) {
+                b.addEventListener('click', function () {
+                    var r = c.ranges[b.dataset.range]; if (!r) return;
+                    panel.querySelectorAll('.chart-range-btn').forEach(function (x) { x.classList.remove('is-active'); });
+                    b.classList.add('is-active');
+                    barChart.data.labels = r.labels; barChart.data.datasets = r.bar_datasets; barChart.update();
+                    lineChart.data.labels = r.labels; lineChart.data.datasets = r.line_datasets; lineChart.update();
+                });
+            });
+        }
+    }
 })();
 </script>
 {% endblock %}

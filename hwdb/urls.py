@@ -20,6 +20,7 @@ urlpatterns = [
     # FD-VD component explorer (ADR-0010, issue #29).
     path("explore/", views.explore_view, name="explore"),
     path("explore/sync/", views.explore_sync_view, name="explore_sync"),
+    path("explore/sync-tests/<str:part_type_id>/", views.explore_node_sync_view, name="explore_node_sync"),
     path("link/", views.fnal_link_view, name="link"),
     path("link/poll/", views.fnal_link_poll_view, name="link_poll"),
     path("components/<str:component_type_id>/", views.component_list_view, name="component_list"),
