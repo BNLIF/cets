@@ -17,6 +17,9 @@ urlpatterns = [
     path("larasic/upload/refresh-cache/", views.upload_refresh_csv_cache_view, name="upload_refresh_csv_cache"),
     path("larasic/upload/<str:tray_id>/", views.upload_tray_view, name="upload_tray"),
     path("larasic/upload/<str:tray_id>/run/", views.upload_run_view, name="upload_run"),
+    # FD-VD component explorer (ADR-0010, issue #29).
+    path("explore/", views.explore_view, name="explore"),
+    path("explore/sync/", views.explore_sync_view, name="explore_sync"),
     path("link/", views.fnal_link_view, name="link"),
     path("link/poll/", views.fnal_link_poll_view, name="link_poll"),
     path("components/<str:component_type_id>/", views.component_list_view, name="component_list"),

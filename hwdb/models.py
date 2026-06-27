@@ -97,3 +97,53 @@ class HwdbSyncState(models.Model):
     def for_family(cls, family):
         obj, _ = cls.objects.get_or_create(family=family)
         return obj
+
+
+class ComponentTypeNode(models.Model):
+    """One leaf of the FD-VD component hierarchy, mirrored from production HWDB.
+
+    The skeleton that powers the /hwdb/explore/ tree (ADR-0010). One row per
+    HWDB component type under a whitelisted FD-VD system; the row carries its
+    place in the System → Subsystem → Component Type tree plus a component
+    count. Populated by hierarchy.sync_hierarchy() — read-only, additive, and
+    independent of the chip mirror (``HwdbChip``) and the BNL chip models.
+
+    The ``part_type_id`` encodes the path: ``D08100100003`` =
+    ``D`` (project) · ``081`` (system) · ``001`` (subsystem) · ``00003`` (type).
+    """
+
+    part_type_id = models.CharField(max_length=20, primary_key=True)
+    project = models.CharField(max_length=4, default="D")
+    system_id = models.PositiveIntegerField(db_index=True)
+    system_name = models.CharField(max_length=100)
+    subsystem_id = models.PositiveIntegerField()
+    subsystem_name = models.CharField(max_length=100)
+    component_type_name = models.CharField(max_length=200)
+    full_name = models.CharField(max_length=300, blank=True, default="")
+    n_components = models.PositiveIntegerField(default=0)
+    synced_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["system_id", "subsystem_id", "component_type_name"]
+
+    def __str__(self):
+        return f"ComponentTypeNode({self.part_type_id}, {self.component_type_name})"
+
+
+class HierarchySyncState(models.Model):
+    """Singleton recording the last hierarchy (skeleton) sync run.
+
+    Surfaces "hierarchy refreshed · 3h ago" and the node/system counts on
+    /hwdb/explore/. Mirrors the LarasicSyncState singleton pattern.
+    """
+
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    systems_count = models.PositiveIntegerField(default=0)
+    nodes_count = models.PositiveIntegerField(default=0)
+    last_error = models.TextField(blank=True, default="")
+
+    @classmethod
+    def get(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj

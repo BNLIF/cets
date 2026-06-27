@@ -59,6 +59,14 @@ class FnalDbApiClient:
         endpoint = f"component-types/{component_type_id}/components"
         return self._make_request("GET", endpoint)
 
+    def get_systems(self, part1="D"):
+        """List the systems under a project (part1), e.g. ``GET systems/D``.
+
+        Each entry has ``id`` (the system segment of the PID) and ``name``
+        (e.g. ``FD-VD TDE``). Used to walk the FD-VD hierarchy (ADR-0010).
+        """
+        return self._make_request("GET", f"systems/{part1}")
+
     def get_subsystems(self, part1, part2):
         return self._make_request("GET", f"subsystems/{part1}/{part2}")
 

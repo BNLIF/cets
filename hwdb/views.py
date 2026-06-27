@@ -22,7 +22,14 @@ from .fnal import session as fnal_session
 from .fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
 from .fnal.session import LINK_KEY
 from .instance import SESSION_KEY, active_instance, active_profile
-from .models import HwdbChip, HwdbSyncState, LarasicSyncState
+from .hierarchy import sync_hierarchy
+from .models import (
+    ComponentTypeNode,
+    HierarchySyncState,
+    HwdbChip,
+    HwdbSyncState,
+    LarasicSyncState,
+)
 from .sync import sync_family
 from .upload import larasic as upload_lib
 
@@ -576,6 +583,85 @@ def subsystem_list_view(request, bearer, part1=None, part2=None):
     except Exception:
         logger.exception("HWDB API call failed")
         return render(request, "hwdb/error.html", {"error_message": GENERIC_ERROR})
+
+
+# ---- FD-VD component explorer (ADR-0010, issue #29) ----------------------
+
+
+def explore_view(request):
+    """Read-only FD-VD component hierarchy, rendered from the local mirror.
+
+    The sidebar folder-tree (System ▸ Subsystem ▸ Component Type) is built
+    entirely from ``ComponentTypeNode`` rows — no live HWDB call on render, so
+    the page is not FNAL-gated. Only the "Refresh hierarchy" button hits the
+    API. Selecting a leaf (``?node=<part_type_id>``) shows a placeholder panel;
+    the per-type plots land in issue #30.
+    """
+    nodes = list(ComponentTypeNode.objects.all())  # Meta-ordered
+
+    systems: dict[int, dict] = {}
+    for n in nodes:
+        s = systems.setdefault(
+            n.system_id,
+            {"id": n.system_id, "name": n.system_name, "subs": {}},
+        )
+        ss = s["subs"].setdefault(
+            n.subsystem_id,
+            {"id": n.subsystem_id, "name": n.subsystem_name, "leaves": []},
+        )
+        ss["leaves"].append(n)
+
+    tree = []
+    for s in sorted(systems.values(), key=lambda x: x["id"]):
+        s["subs"] = sorted(s["subs"].values(), key=lambda x: x["id"])
+        s["n_components"] = sum(
+            leaf.n_components for sub in s["subs"] for leaf in sub["leaves"]
+        )
+        tree.append(s)
+
+    selected = request.GET.get("node")
+    selected_node = next((n for n in nodes if n.part_type_id == selected), None)
+
+    return render(
+        request,
+        "hwdb/explore.html",
+        {
+            "tree": tree,
+            "selected_node": selected_node,
+            "node_count": len(nodes),
+            "sync_state": HierarchySyncState.get(),
+            "active_instance": active_instance(request),
+            "page": "hwdb",
+        },
+    )
+
+
+@require_POST
+def explore_sync_view(request):
+    """Stream a skeleton (hierarchy) refresh into ``ComponentTypeNode``.
+
+    FNAL-gated; unlinked user is redirected to the link page with a ?next back
+    to /hwdb/explore/. Reads the production tree regardless of the session
+    instance (the hierarchy is the same shape on dev, but prod is canonical).
+    """
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': reverse('hwdb:explore')})}")
+    except FnalUnavailable:
+        return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
+
+    api = FnalDbApiClient(settings.HWDB_PROFILES["prod"]["api"], bearer)
+
+    def _iter():
+        try:
+            yield from sync_hierarchy(api)
+        except Exception as e:
+            logger.exception("explore_sync_view crashed")
+            yield f"hierarchy sync: CRASH · {e}\n"
+
+    return StreamingHttpResponse(_iter(), content_type="text/plain; charset=utf-8")
 
 
 # ---- Upload (Phase-3, issues #19/#20/#21) --------------------------------

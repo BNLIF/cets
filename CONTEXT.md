@@ -107,6 +107,39 @@ results (serial path or 10-worker parallel path; see
   sometimes upload empty-datasheet placeholders). See
   [[0007-hwdb-mirror-separation]] and [[0008-skip-known-serials-incremental-sync]].
 
+### Hardware hierarchy (System / Subsystem / Component Type)
+
+HWDB organises every part under a four-level path that is encoded directly in
+the part-type ID. For LArASIC P5B Prod, `D08100100003` decodes as:
+
+| Segment | Value | Level |
+|---------|-------|-------|
+| `D` | DUNE | **Project** |
+| `081` | FD CE | **System** |
+| `001` | LArASIC | **Subsystem** |
+| `00003` | LArASIC P5B Prod | **Component Type** |
+
+- **System**: top-level grouping under a Project, one per detector-area /
+  consortium (e.g. `FD-VD TDE` = id 57, `FD CE` = id 81). The numeric `id`
+  from `GET systems/D` is the 2nd PID segment. FD-VD spans systems
+  51/54/55/56/57/58/59/80 plus the shared `FD CE` (81), DAQ, Slow Control.
+- **Subsystem**: second level (e.g. `Digital electronics`, `Chimney`). The
+  `subsystem_id` is the 3rd PID segment.
+- **Component Type**: the leaf type with its own QC test-types and components
+  (e.g. `AMC`, `LArASIC P5B Prod`). HWDB exposes a `full_name` like
+  `D.FD-VD TDE.Digital electronics.AMC`. This is what the existing models call
+  the **part-type ID**.
+  _Avoid_: "part type" alone when the level matters — say Component Type.
+- **Consortium**: the organisation that owns a slice of the hierarchy. For
+  FD-VD it maps ~1:1 onto a System (CRP → Top/Bottom CRP, TDE, PDS, HVS, CI,
+  Calibration; CE and DAQ are shared across FD-VD and FD-HD).
+
+The whole tree is live in production HWDB and walkable via the API
+(`systems/D` → `subsystems/D/{sys}` → `component-types/D/{sys}/{subsys}` →
+`components` → `tests`). Today CETS surfaces only 3 of the 14 `FD CE`
+subsystems (the three chip families); the dashboard expansion is about
+navigating the rest read-only. See [[0007-hwdb-mirror-separation]].
+
 ### Simple vs detailed QC record
 
 A LArASIC QC test (RoomT or CryoT) can be uploaded in two shapes:

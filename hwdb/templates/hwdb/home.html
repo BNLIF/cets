@@ -58,6 +58,16 @@
     {% endif %}
     {% endfor %}
 
+    <a class="stat fam-stat" href="{% url 'hwdb:explore' %}">
+        <div class="fam-stat-head">
+            <div>
+                <div class="fam-stat-name">Explore FD-VD components</div>
+                <div class="fam-stat-desc">Browse the full FD-VD hierarchy &amp; test history</div>
+            </div>
+            <svg class="fam-stat-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+        </div>
+    </a>
+
     <a class="stat fam-stat" href="{% url 'hwdb:subsystem_list' %}">
         <div class="fam-stat-head">
             <div>

@@ -1,0 +1,162 @@
+{% extends 'core/base.html' %}
+{% load components %}
+
+{% block title %}CETS — FD-VD components{% endblock %}
+
+{% block content %}
+<style>
+  .explore-layout { display: flex; gap: 20px; align-items: flex-start; }
+  .explore-tree {
+    flex: 0 0 360px; max-width: 360px; min-width: 280px;
+    border: 1px solid var(--border, #e3e3e6); border-radius: 10px;
+    padding: 8px; max-height: calc(100vh - 220px); overflow: auto;
+    position: sticky; top: 16px;
+  }
+  .explore-panel {
+    flex: 1 1 auto; min-width: 0;
+    border: 1px solid var(--border, #e3e3e6); border-radius: 10px; padding: 24px;
+  }
+  .explore-tree details { margin: 0; }
+  .explore-tree summary {
+    cursor: pointer; padding: 5px 8px; border-radius: 6px; font-weight: 600;
+    list-style: none; display: flex; align-items: center; gap: 8px;
+  }
+  .explore-tree summary::-webkit-details-marker { display: none; }
+  .explore-tree summary::before { content: "▸"; color: var(--muted, #9aa); font-size: 11px; }
+  .explore-tree details[open] > summary::before { content: "▾"; }
+  .explore-tree summary:hover { background: var(--hover, #f4f4f6); }
+  .tree-sub > summary { font-weight: 500; padding-left: 22px; }
+  .tree-leaves { list-style: none; margin: 0; padding: 0 0 4px 0; }
+  .tree-leaf a {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 4px 8px 4px 44px; border-radius: 6px; text-decoration: none;
+    color: var(--text, #222); font-size: 13px;
+  }
+  .tree-leaf a:hover { background: var(--hover, #f4f4f6); }
+  .tree-leaf a.is-selected { background: var(--accent-soft, #eef2ff); font-weight: 600; }
+  .tree-count {
+    font-family: var(--font-mono, monospace); font-size: 11px;
+    color: var(--muted, #888); white-space: nowrap;
+  }
+  .tree-count.has-data { color: var(--accent, #3753c8); }
+  .sys-count { margin-left: auto; }
+  .explore-empty { text-align: center; padding: 48px 16px; color: var(--muted, #888); }
+  .panel-meta { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin-top: 16px; }
+  .panel-meta dt { color: var(--muted, #888); }
+  .panel-meta dd { margin: 0; font-family: var(--font-mono, monospace); }
+  #sync-log {
+    margin-top: 14px; background: #11131a; color: #cdd3e0; border-radius: 8px;
+    padding: 12px; font-family: var(--font-mono, monospace); font-size: 12px;
+    white-space: pre-wrap; max-height: 240px; overflow: auto; display: none;
+  }
+</style>
+
+<div class="page-head">
+    <div>
+        {% crumbs "CETS" "/" "Hardware Database" "/hwdb/" "Explore" %}
+        <h1 class="page-title">FD-VD components</h1>
+        <div class="page-subtitle">
+            {{ node_count }} component type{{ node_count|pluralize }} ·
+            {% if sync_state.finished_at %}hierarchy refreshed {{ sync_state.finished_at|timesince }} ago{% else %}never refreshed{% endif %}
+            · <span class="cell-mono">prod</span>
+        </div>
+    </div>
+    <div class="page-head-actions">
+        <button id="refresh-btn" class="btn btn-primary" type="button" title="Walk the live HWDB tree into the local mirror">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            Refresh hierarchy
+        </button>
+    </div>
+</div>
+
+{% if sync_state.last_error %}
+<div class="banner banner-warn" style="margin-bottom: 14px;">Last refresh error: {{ sync_state.last_error }}</div>
+{% endif %}
+
+<pre id="sync-log"></pre>
+
+{% if tree %}
+<div class="explore-layout">
+    <nav class="explore-tree" aria-label="FD-VD component hierarchy">
+        {% for system in tree %}
+        <details open>
+            <summary>{{ system.name }}<span class="tree-count sys-count">{{ system.n_components }}</span></summary>
+            {% for sub in system.subs %}
+            <details class="tree-sub">
+                <summary>{{ sub.name }}</summary>
+                <ul class="tree-leaves">
+                    {% for leaf in sub.leaves %}
+                    <li class="tree-leaf">
+                        <a href="?node={{ leaf.part_type_id }}" class="{% if selected_node and leaf.part_type_id == selected_node.part_type_id %}is-selected{% endif %}">
+                            <span>{{ leaf.component_type_name }}</span>
+                            <span class="tree-count {% if leaf.n_components %}has-data{% endif %}" title="{{ leaf.n_components }} components in HWDB">&#9679;{{ leaf.n_components }}</span>
+                        </a>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </details>
+            {% endfor %}
+        </details>
+        {% endfor %}
+    </nav>
+
+    <section class="explore-panel">
+        {% if selected_node %}
+        <h2 class="page-title" style="font-size: 20px;">{{ selected_node.component_type_name }}</h2>
+        <div class="page-subtitle">{{ selected_node.full_name }}</div>
+        <dl class="panel-meta">
+            <dt>Part type ID</dt><dd>{{ selected_node.part_type_id }}</dd>
+            <dt>System</dt><dd>{{ selected_node.system_name }} ({{ selected_node.system_id }})</dd>
+            <dt>Subsystem</dt><dd>{{ selected_node.subsystem_name }} ({{ selected_node.subsystem_id }})</dd>
+            <dt>Components in HWDB</dt><dd>{{ selected_node.n_components }}</dd>
+        </dl>
+        <p class="cell-muted" style="margin-top: 24px;">Test-history plots for this component type arrive in the next slice (#30).</p>
+        {% else %}
+        <div class="explore-empty">
+            <p>Select a component type from the tree to see its details.</p>
+            <p class="cell-muted">Tests-recorded-per-month plots arrive in #30.</p>
+        </div>
+        {% endif %}
+    </section>
+</div>
+{% else %}
+<div class="explore-empty">
+    <p>The hierarchy mirror is empty.</p>
+    <p class="cell-muted">Click <strong>Refresh hierarchy</strong> to walk the live HWDB tree (requires an FNAL link).</p>
+</div>
+{% endif %}
+
+{% csrf_token %}
+<script>
+(function () {
+    const btn = document.getElementById("refresh-btn");
+    const log = document.getElementById("sync-log");
+    const csrf = document.querySelector("input[name=csrfmiddlewaretoken]").value;
+    btn.addEventListener("click", async function () {
+        btn.disabled = true;
+        log.style.display = "block";
+        log.textContent = "Refreshing hierarchy…\n";
+        try {
+            const resp = await fetch("{% url 'hwdb:explore_sync' %}", {
+                method: "POST",
+                headers: { "X-CSRFToken": csrf },
+            });
+            if (resp.redirected) { window.location = resp.url; return; }
+            const reader = resp.body.getReader();
+            const dec = new TextDecoder();
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                log.textContent += dec.decode(value, { stream: true });
+                log.scrollTop = log.scrollHeight;
+            }
+            log.textContent += "\nReloading…\n";
+            window.location.reload();
+        } catch (e) {
+            log.textContent += "\nrefresh failed: " + e + "\n";
+            btn.disabled = false;
+        }
+    });
+})();
+</script>
+{% endblock %}
