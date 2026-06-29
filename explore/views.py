@@ -114,23 +114,6 @@ def login_poll_view(request):
     return JsonResponse({"status": "ok", "next": next_url})
 
 
-def _ce_links(node):
-    if node is None or node.system_id != 81:
-        return []
-    dashboard = {"label": "CE progress dashboard", "url": reverse("hwdb:dashboard")}
-    by_subsystem = {
-        "LArASIC": [
-            {"label": "Detailed QC & upload", "url": reverse("hwdb:larasic")},
-            {"label": "LArASIC chips", "url": reverse("larasic")},
-            dashboard,
-        ],
-        "ColdADC": [{"label": "ColdADC chips", "url": reverse("coldadc")}, dashboard],
-        "COLDATA": [{"label": "COLDATA chips", "url": reverse("coldata")}, dashboard],
-        "FEMB": [{"label": "FEMB", "url": reverse("femb")}, dashboard],
-    }
-    return by_subsystem.get(node.subsystem_name, [])
-
-
 @login_not_required
 @fnal_login_required
 def explore_view(request):
@@ -200,7 +183,6 @@ def explore_view(request):
             "tree": tree,
             "selected_node": selected_node,
             "charts": charts,
-            "ce_links": _ce_links(selected_node),
             # Mirror is prod-sourced, so deep-link the part type to prod's UI
             # (matches the /hwdb/larasic/ convention).
             "hwdb_ui_base": settings.HWDB_PROFILES["prod"]["ui"],
