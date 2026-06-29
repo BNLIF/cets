@@ -23,7 +23,7 @@ from pathlib import Path
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
-from explore.hierarchy import is_fdvd_system
+from explore import curation
 from hwdb.api_client import FnalDbApiClient
 from hwdb.fnal import flow
 
@@ -74,18 +74,19 @@ class Command(BaseCommand):
             (body.get("data") or []), key=lambda s: s.get("id") or 0
         )
 
+        curated = curation.curated_system_ids()
         kept = 0
         self.stdout.write(f"{'id':>4}  {'keep':<5}  name")
         self.stdout.write("-" * 50)
         for s in systems:
             sid = s.get("id")
             name = s.get("name") or ""
-            keep = is_fdvd_system(name)
+            keep = sid in curated
             kept += keep
             self.stdout.write(f"{sid:>4}  {'KEEP' if keep else 'skip':<5}  {name}")
         self.stdout.write("-" * 50)
         self.stdout.write(
-            f"{len(systems)} systems total · {kept} kept by the FD-VD whitelist"
+            f"{len(systems)} systems total · {kept} curated (curation.yaml)"
         )
 
     def _login(self) -> str:

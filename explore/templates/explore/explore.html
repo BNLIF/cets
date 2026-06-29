@@ -24,11 +24,18 @@
   .explore-tree summary::before { content: "▸"; color: var(--muted, #9aa); font-size: 16px; line-height: 1; width: 14px; text-align: center; }
   .explore-tree details[open] > summary::before { content: "▾"; }
   .explore-tree summary:hover { background: var(--hover, #f4f4f6); }
-  .tree-sub > summary { font-weight: 500; padding-left: 22px; }
+  .tree-region > summary { font-weight: 700; }
+  .tree-fam > summary { font-weight: 600; padding-left: 24px; }
+  .tree-sys > summary { font-weight: 500; padding-left: 40px; }
+  .tree-sub > summary { font-weight: 500; padding-left: 40px; }
+  .is-dim > summary { color: var(--muted, #888); }
+  .tree-dim { margin-left: auto; font-size: 11px; font-weight: 400; color: var(--muted, #aaa); font-style: italic; }
+  .tree-sublabel { font-weight: 400; font-size: 11px; color: var(--muted, #999); }
+  .tree-note { font-size: 11px; color: var(--muted, #999); padding: 2px 8px 6px 26px; }
   .tree-leaves { list-style: none; margin: 0; padding: 0 0 4px 0; }
   .tree-leaf a {
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    padding: 4px 8px 4px 44px; border-radius: 6px; text-decoration: none;
+    padding: 4px 8px 4px 56px; border-radius: 6px; text-decoration: none;
     color: var(--text, #222); font-size: 13px;
   }
   .tree-leaf a:hover { background: var(--hover, #f4f4f6); }
@@ -73,27 +80,31 @@
 
 <pre id="sync-log"></pre>
 
-{% if tree %}
+{% if regions %}
 <div class="explore-layout">
-    <nav class="explore-tree" aria-label="FD-VD component hierarchy">
-        {% for system in tree %}
-        <details open>
-            <summary>{{ system.name }}<span class="tree-count sys-count {% if system.n_tests %}has-data{% endif %}" title="{{ system.n_components }} components{% if system.n_tests %} · {{ system.n_tests }} tests{% endif %}">&#9679;{{ system.n_components }}</span></summary>
-            {% for sub in system.subs %}
-            <details class="tree-sub">
-                <summary>{{ sub.name }}<span class="tree-count sys-count {% if sub.n_tests %}has-data{% endif %}" title="{{ sub.n_components }} components{% if sub.n_tests %} · {{ sub.n_tests }} tests{% endif %}">&#9679;{{ sub.n_components }}</span></summary>
-                <ul class="tree-leaves">
-                    {% for leaf in sub.leaves %}
-                    <li class="tree-leaf">
-                        <a href="?node={{ leaf.part_type_id }}" class="{% if selected_node and leaf.part_type_id == selected_node.part_type_id %}is-selected{% endif %}">
-                            <span>{{ leaf.name }}</span>
-                            <span class="tree-count {% if leaf.n_tests %}has-data{% endif %}" title="{{ leaf.n_components }} components{% if leaf.tests_synced_at %} · {{ leaf.n_tests }} tests{% else %} · tests not synced{% endif %}">&#9679;{{ leaf.n_components }}</span>
-                        </a>
-                    </li>
-                    {% endfor %}
-                </ul>
+    <nav class="explore-tree" aria-label="DUNE hardware hierarchy">
+        {% for region in regions %}
+        <details class="tree-region{% if not region.curated %} is-dim{% endif %}" {% if region.curated %}open{% endif %}>
+            <summary>{{ region.name }}{% if not region.curated %}<span class="tree-dim">not curated</span>{% endif %}</summary>
+            {% for fam in region.families %}
+            <details class="tree-fam{% if not fam.curated %} is-dim{% endif %}" {% if fam.curated %}open{% endif %}>
+                <summary>{{ fam.name }}{% if fam.sub %} <span class="tree-sublabel">{{ fam.sub }}</span>{% endif %}{% if fam.curated %}<span class="tree-count sys-count {% if fam.n_tests %}has-data{% endif %}" title="{{ fam.n_components }} components">&#9679;{{ fam.n_components }}</span>{% else %}<span class="tree-dim">not curated</span>{% endif %}</summary>
+                {% if fam.curated %}
+                    {% if fam.flattened %}
+                        {% for sub in fam.subs %}{% include 'explore/_subtree.html' %}{% endfor %}
+                    {% else %}
+                        {% for system in fam.systems %}
+                        <details class="tree-sys">
+                            <summary>{{ system.name }}<span class="tree-count sys-count {% if system.n_tests %}has-data{% endif %}" title="{{ system.n_components }} components{% if system.n_tests %} · {{ system.n_tests }} tests{% endif %}">&#9679;{{ system.n_components }}</span></summary>
+                            {% for sub in system.subs %}{% include 'explore/_subtree.html' %}{% endfor %}
+                        </details>
+                        {% endfor %}
+                    {% endif %}
+                    {% if fam.note %}<div class="tree-note">{{ fam.note }}</div>{% endif %}
+                {% endif %}
             </details>
             {% endfor %}
+            {% if region.note and not region.curated %}<div class="tree-note">{{ region.note }}</div>{% endif %}
         </details>
         {% endfor %}
     </nav>

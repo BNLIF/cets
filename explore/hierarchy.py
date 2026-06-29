@@ -17,18 +17,10 @@ from typing import Iterator
 
 from django.utils import timezone
 
+from . import curation
 from .models import HierarchyNode, HierarchySyncState
 
 logger = logging.getLogger(__name__)
-
-
-def is_fdvd_system(name: str) -> bool:
-    """The v1 whitelist (ADR-0010): systems named ``FD-VD *`` plus ``FD CE``
-    (which holds the FD-VD chips, FEMB and cables). Adding another system is a
-    one-line edit here.
-    """
-    name = (name or "").strip()
-    return name.startswith("FD-VD") or name == "FD CE"
 
 
 def _count_components(api, part_type_id: str) -> int:
@@ -67,9 +59,10 @@ def sync_hierarchy(api, project: str = "D") -> Iterator[str]:
     leaves = 0
     try:
         sys_body = api.get_systems(project)
+        curated = curation.curated_system_ids()
         systems = [
             s for s in (sys_body.get("data") or [])
-            if is_fdvd_system(s.get("name") or "")
+            if s.get("id") in curated
         ]
         systems.sort(key=lambda s: s.get("id") or 0)
         yield f"hierarchy: {len(systems)} curated systems to walk\n"

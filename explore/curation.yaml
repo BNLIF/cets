@@ -1,0 +1,37 @@
+# Curated DUNE hardware taxonomy for the explorer (ADR-0012).
+#
+# Source of truth for what is browsable: Region → Family → member HWDB system
+# ids. Only systems listed under a browsable family are walked by the refresh
+# and shown in the tree. Families/regions with `curated: false` are declared
+# placeholders — they render dimmed ("not curated") so the audit→curate loop
+# has somewhere to land, but aren't browsable and pull no data.
+#
+# Run `python manage.py list_systems` to audit this against live HWDB and see
+# what's newly available to curate (issue #39). System ids are the `id` field
+# of `systems/D`.
+
+regions:
+  - name: Far Detector
+    families:
+      - name: FD-VD
+        sub: Vertical Drift
+        systems: [51, 54, 55, 56, 57, 58, 59, 80]
+      - name: FD CE
+        sub: Cold Electronics            # single system → flattened in the tree
+        systems: [81]
+      - name: FD-HD
+        sub: Horizontal Drift
+        curated: false
+        note: "6 systems in HWDB · not curated"
+      - name: FD shared
+        sub: DAQ · Slow Control · Cryostat · Integration
+        curated: false
+        note: "5 systems in HWDB · not curated"
+
+  - name: Near Detector
+    curated: false
+    note: "9 systems in HWDB · not curated"
+
+  - name: Other
+    curated: false
+    note: "Facilities · Computing · Prototypes · not curated"

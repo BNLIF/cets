@@ -18,6 +18,7 @@ from hwdb.fnal import session as fnal_session
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
 from hwdb.instance import active_instance
 
+from . import curation
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, sync_test_events
 from .hierarchy import sync_hierarchy
@@ -140,7 +141,7 @@ def explore_view(request):
         else:  # component_type
             leaves_by_sub.setdefault(n.parent_id, []).append(n)
 
-    tree = []
+    systems_by_id = {}
     for s in systems:
         subs = []
         for sub in subs_by_sys.get(s.pk, []):
@@ -151,11 +152,43 @@ def explore_view(request):
                 "n_components": sum(l.n_components for l in leaves),
                 "n_tests": sum(l.n_tests for l in leaves),
             })
-        tree.append({
+        systems_by_id[s.system_id] = {
             "id": s.system_id, "name": s.system_name,
             "subs": subs,
             "n_components": sum(sub["n_components"] for sub in subs),
             "n_tests": sum(sub["n_tests"] for sub in subs),
+        }
+
+    # Overlay the curation.yaml grouping: Region → Family → System. A family
+    # mapping to one system is flattened (its subsystems render directly); a
+    # family/region marked not-curated renders dimmed (ADR-0012).
+    regions = []
+    for region in curation.regions():
+        r_browsable = region.get("curated", True) is not False
+        families = []
+        for fam in region.get("families", []) or []:
+            sys_ids = fam.get("systems") or []
+            f_browsable = fam.get("curated", True) is not False and bool(sys_ids)
+            sysdicts = [systems_by_id[i] for i in sys_ids if i in systems_by_id]
+            # Flatten on the *curated* system count: a family that owns exactly
+            # one system (FD CE) collapses the system tier even before others
+            # are mirrored; FD-VD (8 systems) never flattens.
+            flat = len(sys_ids) == 1
+            fctx = {
+                "name": fam["name"], "sub": fam.get("sub", ""),
+                "curated": f_browsable, "note": fam.get("note", ""),
+                "flattened": flat,
+                "n_components": sum(s["n_components"] for s in sysdicts),
+                "n_tests": sum(s["n_tests"] for s in sysdicts),
+            }
+            if flat:
+                fctx["subs"] = sysdicts[0]["subs"] if sysdicts else []
+            else:
+                fctx["systems"] = sysdicts
+            families.append(fctx)
+        regions.append({
+            "name": region["name"], "curated": r_browsable,
+            "note": region.get("note", ""), "families": families,
         })
 
     selected = request.GET.get("node")
@@ -194,7 +227,7 @@ def explore_view(request):
         request,
         "explore/explore.html",
         {
-            "tree": tree,
+            "regions": regions,
             "selected_node": selected_node,
             "charts": charts,
             # Mirror is prod-sourced, so deep-link the part type to prod's UI

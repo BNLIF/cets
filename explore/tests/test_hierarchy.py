@@ -12,7 +12,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from explore import hierarchy
+from explore import curation, hierarchy
 from explore.models import HierarchyNode as H
 from explore.models import HierarchySyncState
 from hwdb.fnal.bearer import FnalLinkRequired
@@ -49,16 +49,24 @@ def _fake_api(systems, subsystems, part_types, counts):
     return api
 
 
-class WhitelistTest(TestCase):
-    def test_fdvd_systems_included_others_excluded(self):
-        self.assertTrue(hierarchy.is_fdvd_system("FD-VD TDE"))
-        self.assertTrue(hierarchy.is_fdvd_system("FD CE"))
-        self.assertFalse(hierarchy.is_fdvd_system("FD-HD APA"))
-        self.assertFalse(hierarchy.is_fdvd_system("ND: TMS"))
-        self.assertFalse(hierarchy.is_fdvd_system(""))
+class CurationTest(TestCase):
+    def test_curated_systems_from_yaml(self):
+        # The real curation.yaml: FD-VD systems + FD CE curated; FD-HD/ND not.
+        ids = curation.curated_system_ids()
+        self.assertIn(57, ids)   # FD-VD TDE
+        self.assertIn(81, ids)   # FD CE
+        self.assertNotIn(1, ids)    # FD-HD Complete Detector
+        self.assertNotIn(100, ids)  # ND
 
 
 class SyncHierarchyTest(TestCase):
+    def setUp(self):
+        # Drive the walk from a controlled curated set, not the real yaml.
+        p = mock.patch("explore.hierarchy.curation.curated_system_ids",
+                       return_value={57, 60})
+        p.start()
+        self.addCleanup(p.stop)
+
     def _api(self):
         return _fake_api(
             systems=[
@@ -157,6 +165,42 @@ class ExploreViewTest(TestCase):
         self.assertIn("FD-VD TDE", html)
         self.assertIn("Digital electronics", html)
         self.assertIn("node-sync-btn", html)
+
+
+class GroupingTest(TestCase):
+    """Region/Family overlay from curation.yaml (issue #38)."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("g", "g@g.io", "pw")
+        self.client.force_login(self.user)
+
+    def _html(self):
+        return self.client.get(reverse("explore:home")).content.decode()
+
+    def test_non_curated_region_renders_dimmed(self):
+        html = self._html()
+        self.assertIn("Near Detector", html)   # declared region…
+        self.assertIn("not curated", html)      # …shown dimmed, not browsable
+
+    def test_single_system_family_flattens(self):
+        # FD CE owns one system (81) → system tier collapses; its subsystems
+        # render directly under the family, no system node.
+        _chain("D08100100003", sid=81, sname="FD CE", ssid=1, ssname="LArASIC",
+               tname="LArASIC P5B Prod")
+        html = self._html()
+        self.assertIn("LArASIC", html)
+        self.assertNotIn('class="tree-sys"', html)  # no system tier rendered
+
+    def test_multi_system_family_keeps_system_tier(self):
+        _chain("D05700200001", tname="AMC")  # FD-VD TDE (system 57)
+        html = self._html()
+        self.assertIn("FD-VD TDE", html)
+        self.assertIn('class="tree-sys"', html)      # system tier kept for multi-system FD-VD
+
+    def test_uncurated_system_not_shown(self):
+        H.objects.create(level=H.LEVEL_SYSTEM, system_id=999,
+                         system_name="Phantom System", name="Phantom System")
+        self.assertNotIn("Phantom System", self._html())
 
 
 class ExploreSyncViewTest(TestCase):
