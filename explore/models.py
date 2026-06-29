@@ -1,42 +1,64 @@
 from django.db import models
 
 
-class ComponentTypeNode(models.Model):
-    """One leaf of the FD-VD component hierarchy, mirrored from production HWDB.
+class HierarchyNode(models.Model):
+    """One node of the DUNE hardware structure, mirrored from production HWDB.
 
-    The skeleton that powers the /explore/ tree (ADR-0010, ADR-0011). One row
-    per HWDB component type under a whitelisted FD-VD system; the row carries
-    its place in the System → Subsystem → Component Type tree plus a component
-    count. Populated by hierarchy.sync_hierarchy() — read-only, additive, and
-    independent of the CE chip mirror (``hwdb.HwdbChip``) and the BNL chip
-    models.
+    The structure-first skeleton that powers the /explore/ tree (ADR-0012,
+    generalizing the leaf-only ``ComponentTypeNode`` of ADR-0010). One row per
+    HWDB **System**, **Subsystem**, *and* **Component Type** under a curated
+    system — including empty intermediate nodes, so a system registered upstream
+    with no component types yet is still navigable. ``parent`` links a node to
+    its container (systems have none; Region/Family come from the curation YAML
+    at render time, not from this mirror). Populated by
+    hierarchy.sync_hierarchy() — read-only, additive, independent of the CE chip
+    mirror (``hwdb.HwdbChip``).
 
-    The ``part_type_id`` encodes the path: ``D08100100003`` =
-    ``D`` (project) · ``081`` (system) · ``001`` (subsystem) · ``00003`` (type).
+    Denormalized ``system_*``/``subsystem_*`` fields are carried on every node so
+    the tree and a selected leaf render without walking parents. The leaf-only
+    fields (``part_type_id`` and the test-sync state) are blank/zero on
+    System/Subsystem rows. ``part_type_id`` keys the event tables and encodes the
+    path: ``D08100100003`` = ``D``·``081``·``001``·``00003``.
     """
 
-    part_type_id = models.CharField(max_length=20, primary_key=True)
+    LEVEL_SYSTEM = "system"
+    LEVEL_SUBSYSTEM = "subsystem"
+    LEVEL_TYPE = "component_type"
+    LEVEL_CHOICES = [
+        (LEVEL_SYSTEM, "System"),
+        (LEVEL_SUBSYSTEM, "Subsystem"),
+        (LEVEL_TYPE, "Component type"),
+    ]
+
+    level = models.CharField(max_length=16, choices=LEVEL_CHOICES, db_index=True)
+    parent = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.CASCADE, related_name="children"
+    )
     project = models.CharField(max_length=4, default="D")
     system_id = models.PositiveIntegerField(db_index=True)
     system_name = models.CharField(max_length=100)
-    subsystem_id = models.PositiveIntegerField()
-    subsystem_name = models.CharField(max_length=100)
-    component_type_name = models.CharField(max_length=200)
+    subsystem_id = models.PositiveIntegerField(null=True, blank=True)
+    subsystem_name = models.CharField(max_length=100, blank=True, default="")
+    name = models.CharField(max_length=200)  # this node's own display name
     full_name = models.CharField(max_length=300, blank=True, default="")
+
+    # Component-type leaves only (blank/zero on System & Subsystem rows):
+    part_type_id = models.CharField(max_length=20, blank=True, default="", db_index=True)
     n_components = models.PositiveIntegerField(default=0)
-    synced_at = models.DateTimeField(auto_now=True)
-    # Per-type test-event sync state (issue #30). NULL tests_synced_at = the
-    # leaf's tests have never been pulled; the explorer syncs lazily on first
-    # visit. n_tests powers the "has test data" tree accent.
+    # NULL tests_synced_at = the leaf's tests have never been pulled; the
+    # explorer syncs lazily on first visit. n_tests powers the tree accent.
     tests_synced_at = models.DateTimeField(null=True, blank=True)
     n_tests = models.PositiveIntegerField(default=0)
     tests_sync_error = models.TextField(blank=True, default="")
 
+    synced_at = models.DateTimeField(auto_now=True)
+
     class Meta:
-        ordering = ["system_id", "subsystem_id", "component_type_name"]
+        ordering = ["system_id", "subsystem_id", "name"]
+        indexes = [models.Index(fields=["level", "system_id"])]
 
     def __str__(self):
-        return f"ComponentTypeNode({self.part_type_id}, {self.component_type_name})"
+        return f"HierarchyNode({self.level}, {self.name})"
 
 
 class HwdbTestEvent(models.Model):

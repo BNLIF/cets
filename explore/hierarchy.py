@@ -17,7 +17,7 @@ from typing import Iterator
 
 from django.utils import timezone
 
-from .models import ComponentTypeNode, HierarchySyncState
+from .models import HierarchyNode, HierarchySyncState
 
 logger = logging.getLogger(__name__)
 
@@ -48,10 +48,13 @@ def _count_components(api, part_type_id: str) -> int:
 
 
 def sync_hierarchy(api, project: str = "D") -> Iterator[str]:
-    """Walk the whitelisted FD-VD systems into the ``ComponentTypeNode`` mirror.
+    """Walk the curated systems into the ``HierarchyNode`` structure mirror.
 
-    Upserts every component type found and prunes nodes that have disappeared
-    (only after a clean full walk). Yields progress lines.
+    Records a node for every System, Subsystem, and Component Type — including
+    empty systems/subsystems (so a system registered upstream with no component
+    types is still navigable, ADR-0012). Leaf test-sync state
+    (``tests_synced_at``/``n_tests``) is preserved across re-syncs. Prunes nodes
+    that have disappeared after a clean full walk. Yields progress lines.
     """
     state = HierarchySyncState.get()
     state.started_at = timezone.now()
@@ -59,9 +62,9 @@ def sync_hierarchy(api, project: str = "D") -> Iterator[str]:
     state.last_error = ""
     state.save()
 
-    seen: set[str] = set()
+    seen: set[int] = set()
     systems_done = 0
-    nodes = 0
+    leaves = 0
     try:
         sys_body = api.get_systems(project)
         systems = [
@@ -69,11 +72,18 @@ def sync_hierarchy(api, project: str = "D") -> Iterator[str]:
             if is_fdvd_system(s.get("name") or "")
         ]
         systems.sort(key=lambda s: s.get("id") or 0)
-        yield f"hierarchy: {len(systems)} FD-VD systems to walk\n"
+        yield f"hierarchy: {len(systems)} curated systems to walk\n"
 
         for s in systems:
             sid = s.get("id")
             sname = s.get("name") or ""
+            sys_node, _ = HierarchyNode.objects.update_or_create(
+                level=HierarchyNode.LEVEL_SYSTEM, system_id=sid, subsystem_id=None,
+                part_type_id="",
+                defaults={"project": project, "system_name": sname, "name": sname},
+            )
+            seen.add(sys_node.pk)
+
             sub_body = api.get_subsystems(project, f"{sid:03d}")
             subs = sorted(
                 sub_body.get("data") or [],
@@ -84,6 +94,16 @@ def sync_hierarchy(api, project: str = "D") -> Iterator[str]:
             for ss in subs:
                 ssid = ss.get("subsystem_id")
                 ssname = ss.get("subsystem_name") or ""
+                sub_node, _ = HierarchyNode.objects.update_or_create(
+                    level=HierarchyNode.LEVEL_SUBSYSTEM, system_id=sid,
+                    subsystem_id=ssid, part_type_id="",
+                    defaults={
+                        "parent": sys_node, "project": project,
+                        "system_name": sname, "subsystem_name": ssname, "name": ssname,
+                    },
+                )
+                seen.add(sub_node.pk)
+
                 ct_body = api.get_part_types_for_subsystem(project, f"{sid:03d}", ssid)
                 cts = ct_body.get("data") or []
                 for ct in cts:
@@ -93,35 +113,32 @@ def sync_hierarchy(api, project: str = "D") -> Iterator[str]:
                     full = ct.get("full_name") or ""
                     leaf = full.split(".")[-1].strip() if full else ptid
                     n = _count_components(api, ptid)
-                    ComponentTypeNode.objects.update_or_create(
-                        part_type_id=ptid,
+                    # defaults exclude the test-sync fields so they survive re-sync.
+                    type_node, _ = HierarchyNode.objects.update_or_create(
+                        level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid,
                         defaults={
-                            "project": project,
-                            "system_id": sid,
-                            "system_name": sname,
-                            "subsystem_id": ssid,
-                            "subsystem_name": ssname,
-                            "component_type_name": leaf,
-                            "full_name": full,
-                            "n_components": n,
+                            "parent": sub_node, "project": project,
+                            "system_id": sid, "system_name": sname,
+                            "subsystem_id": ssid, "subsystem_name": ssname,
+                            "name": leaf, "full_name": full, "n_components": n,
                         },
                     )
-                    seen.add(ptid)
-                    nodes += 1
+                    seen.add(type_node.pk)
+                    leaves += 1
                 if cts:
                     yield f"    {ssname}: {len(cts)} component types\n"
             systems_done += 1
 
-        stale = ComponentTypeNode.objects.exclude(part_type_id__in=seen)
+        stale = HierarchyNode.objects.exclude(pk__in=seen)
         n_stale = stale.count()
         stale.delete()
 
         state.finished_at = timezone.now()
         state.systems_count = systems_done
-        state.nodes_count = nodes
+        state.nodes_count = leaves
         state.save()
         yield (
-            f"done: {nodes} component types across {systems_done} systems"
+            f"done: {leaves} component types across {systems_done} systems"
             f"{f' ({n_stale} stale removed)' if n_stale else ''}\n"
         )
     except Exception as e:

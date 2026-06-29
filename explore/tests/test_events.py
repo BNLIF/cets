@@ -15,20 +15,32 @@ from django.urls import reverse
 from django.utils import timezone
 
 from explore import events
-from explore.models import ComponentTypeNode, HwdbComponentEvent, HwdbTestEvent
+from explore.models import HierarchyNode as H
+from explore.models import HwdbComponentEvent, HwdbTestEvent
 from explore.queries import component_type_progress, component_update_progress
 from hwdb.fnal.bearer import FnalLinkRequired
 
 
 def _node(ptid="D05700200001", **kw):
-    defaults = dict(
-        part_type_id=ptid, system_id=57, system_name="FD-VD TDE",
-        subsystem_id=2, subsystem_name="Digital electronics",
-        component_type_name="AMC", full_name="D.FD-VD TDE.Digital electronics.AMC",
-        n_components=2,
-    )
-    defaults.update(kw)
-    return ComponentTypeNode.objects.create(**defaults)
+    """Create the system+subsystem chain and a component-type leaf; return the leaf."""
+    system_id = kw.pop("system_id", 57)
+    system_name = kw.pop("system_name", "FD-VD TDE")
+    subsystem_id = kw.pop("subsystem_id", 2)
+    subsystem_name = kw.pop("subsystem_name", "Digital electronics")
+    tname = kw.pop("component_type_name", "AMC")
+    kw.setdefault("full_name", "D.FD-VD TDE.Digital electronics.AMC")
+    kw.setdefault("n_components", 2)
+    sys, _ = H.objects.get_or_create(
+        level=H.LEVEL_SYSTEM, system_id=system_id, subsystem_id=None, part_type_id="",
+        defaults={"system_name": system_name, "name": system_name})
+    sub, _ = H.objects.get_or_create(
+        level=H.LEVEL_SUBSYSTEM, system_id=system_id, subsystem_id=subsystem_id,
+        part_type_id="", defaults={"parent": sys, "system_name": system_name,
+                                   "subsystem_name": subsystem_name, "name": subsystem_name})
+    return H.objects.create(
+        level=H.LEVEL_TYPE, parent=sub, system_id=system_id, system_name=system_name,
+        subsystem_id=subsystem_id, subsystem_name=subsystem_name, name=tname,
+        part_type_id=ptid, **kw)
 
 
 def _fake_client(part_ids, tests_by_part):
@@ -73,7 +85,7 @@ class SyncTestEventsTest(TestCase):
         self.assertEqual(HwdbTestEvent.objects.filter(part_type_id="D05700200001").count(), 3)
         # registration events: one per listed component
         self.assertEqual(HwdbComponentEvent.objects.filter(part_type_id="D05700200001").count(), 2)
-        node = ComponentTypeNode.objects.get(part_type_id="D05700200001")
+        node = H.objects.get(level=H.LEVEL_TYPE, part_type_id="D05700200001")
         self.assertEqual(node.n_tests, 3)
         self.assertIsNotNone(node.tests_synced_at)
         self.assertEqual(node.n_components, 2)

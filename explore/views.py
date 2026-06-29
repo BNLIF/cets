@@ -21,7 +21,7 @@ from hwdb.instance import active_instance
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, sync_test_events
 from .hierarchy import sync_hierarchy
-from .models import ComponentTypeNode, HierarchySyncState
+from .models import HierarchyNode, HierarchySyncState
 from .queries import component_type_progress, component_update_progress
 
 logger = logging.getLogger(__name__)
@@ -117,39 +117,53 @@ def login_poll_view(request):
 @login_not_required
 @fnal_login_required
 def explore_view(request):
-    """Read-only FD-VD component hierarchy, rendered from the local mirror.
+    """Read-only DUNE hardware hierarchy, rendered from the local mirror.
 
-    The sidebar folder-tree (System ▸ Subsystem ▸ Component Type) is built
-    entirely from ``ComponentTypeNode`` rows — no live HWDB call on render, so
-    the page is not FNAL-gated. Only the "Refresh hierarchy" button hits the
-    API. Selecting a leaf (``?node=<part_type_id>``) shows its plots.
+    The sidebar folder-tree (System ▸ Subsystem ▸ Component Type) is built from
+    the ``HierarchyNode`` structure mirror — including empty systems/subsystems
+    (ADR-0012) — with no live HWDB call on render, so the page is not
+    FNAL-gated. Only "Refresh hierarchy" hits the API. Selecting a leaf
+    (``?node=<part_type_id>``) shows its plots.
     """
-    nodes = list(ComponentTypeNode.objects.all())  # Meta-ordered
-
-    systems: dict[int, dict] = {}
-    for n in nodes:
-        s = systems.setdefault(
-            n.system_id,
-            {"id": n.system_id, "name": n.system_name, "subs": {}},
-        )
-        ss = s["subs"].setdefault(
-            n.subsystem_id,
-            {"id": n.subsystem_id, "name": n.subsystem_name, "leaves": []},
-        )
-        ss["leaves"].append(n)
+    # One query for the structure; build the tree via parent links in memory.
+    all_nodes = list(
+        HierarchyNode.objects.all().order_by("system_id", "subsystem_id", "name")
+    )
+    leaves_by_sub: dict[int, list] = {}
+    subs_by_sys: dict[int, list] = {}
+    systems = []
+    for n in all_nodes:
+        if n.level == HierarchyNode.LEVEL_SYSTEM:
+            systems.append(n)
+        elif n.level == HierarchyNode.LEVEL_SUBSYSTEM:
+            subs_by_sys.setdefault(n.parent_id, []).append(n)
+        else:  # component_type
+            leaves_by_sub.setdefault(n.parent_id, []).append(n)
 
     tree = []
-    for s in sorted(systems.values(), key=lambda x: x["id"]):
-        s["subs"] = sorted(s["subs"].values(), key=lambda x: x["id"])
-        for sub in s["subs"]:
-            sub["n_components"] = sum(leaf.n_components for leaf in sub["leaves"])
-            sub["n_tests"] = sum(leaf.n_tests for leaf in sub["leaves"])
-        s["n_components"] = sum(sub["n_components"] for sub in s["subs"])
-        s["n_tests"] = sum(sub["n_tests"] for sub in s["subs"])
-        tree.append(s)
+    for s in systems:
+        subs = []
+        for sub in subs_by_sys.get(s.pk, []):
+            leaves = leaves_by_sub.get(sub.pk, [])
+            subs.append({
+                "id": sub.subsystem_id, "name": sub.subsystem_name or sub.name,
+                "leaves": leaves,
+                "n_components": sum(l.n_components for l in leaves),
+                "n_tests": sum(l.n_tests for l in leaves),
+            })
+        tree.append({
+            "id": s.system_id, "name": s.system_name,
+            "subs": subs,
+            "n_components": sum(sub["n_components"] for sub in subs),
+            "n_tests": sum(sub["n_tests"] for sub in subs),
+        })
 
     selected = request.GET.get("node")
-    selected_node = next((n for n in nodes if n.part_type_id == selected), None)
+    selected_node = next(
+        (n for n in all_nodes
+         if n.level == HierarchyNode.LEVEL_TYPE and n.part_type_id == selected),
+        None,
+    ) if selected else None
 
     charts = []
     if selected_node and selected_node.tests_synced_at:
@@ -186,7 +200,7 @@ def explore_view(request):
             # Mirror is prod-sourced, so deep-link the part type to prod's UI
             # (matches the /hwdb/larasic/ convention).
             "hwdb_ui_base": settings.HWDB_PROFILES["prod"]["ui"],
-            "node_count": len(nodes),
+            "node_count": sum(len(v) for v in leaves_by_sub.values()),
             "sync_state": HierarchySyncState.get(),
             "active_instance": active_instance(request),
             "page": "hwdb",

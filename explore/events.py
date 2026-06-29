@@ -25,7 +25,7 @@ from django.utils import timezone
 from hwdb.api_client import FnalDbApiClient
 from hwdb.sync import _parse_test_date  # reuse the dashboard's YYYY/MM/DD parser
 
-from .models import ComponentTypeNode, HwdbComponentEvent, HwdbTestEvent
+from .models import HierarchyNode, HwdbComponentEvent, HwdbTestEvent
 
 logger = logging.getLogger(__name__)
 
@@ -155,8 +155,10 @@ def sync_test_events(
     - ``full``: re-fetch everything — detail + all tests — for all components.
     """
     try:
-        node = ComponentTypeNode.objects.get(part_type_id=part_type_id)
-    except ComponentTypeNode.DoesNotExist:
+        node = HierarchyNode.objects.get(
+            level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id
+        )
+    except HierarchyNode.DoesNotExist:
         yield f"sync tests: unknown component type {part_type_id}\n"
         return
 

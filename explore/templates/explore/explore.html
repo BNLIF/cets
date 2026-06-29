@@ -1,6 +1,6 @@
 {% extends 'explore/base.html' %}
 
-{% block title %}FD-VD components · DUNE Hardware Explorer{% endblock %}
+{% block title %}FD-VD components · DUNE HWDB Explorer{% endblock %}
 
 {% block content %}
 <style>
@@ -86,7 +86,7 @@
                     {% for leaf in sub.leaves %}
                     <li class="tree-leaf">
                         <a href="?node={{ leaf.part_type_id }}" class="{% if selected_node and leaf.part_type_id == selected_node.part_type_id %}is-selected{% endif %}">
-                            <span>{{ leaf.component_type_name }}</span>
+                            <span>{{ leaf.name }}</span>
                             <span class="tree-count {% if leaf.n_tests %}has-data{% endif %}" title="{{ leaf.n_components }} components{% if leaf.tests_synced_at %} · {{ leaf.n_tests }} tests{% else %} · tests not synced{% endif %}">&#9679;{{ leaf.n_components }}</span>
                         </a>
                     </li>
@@ -102,8 +102,8 @@
         {% if selected_node %}
         <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;">
             <div>
-                <h2 class="page-title" style="font-size: 20px;">{{ selected_node.component_type_name }}</h2>
-                <div class="page-subtitle">{{ selected_node.project }} <span class="crumbs-sep">›</span> {{ selected_node.system_name }} <span class="crumbs-sep">›</span> {{ selected_node.subsystem_name }} <span class="crumbs-sep">›</span> {{ selected_node.component_type_name }}</div>
+                <h2 class="page-title" style="font-size: 20px;">{{ selected_node.name }}</h2>
+                <div class="page-subtitle">{{ selected_node.project }} <span class="crumbs-sep">›</span> {{ selected_node.system_name }} <span class="crumbs-sep">›</span> {{ selected_node.subsystem_name }} <span class="crumbs-sep">›</span> {{ selected_node.name }}</div>
             </div>
             <div style="text-align: right; white-space: nowrap;">
                 <div style="display: flex; gap: 6px; justify-content: flex-end;">
