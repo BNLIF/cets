@@ -1,7 +1,9 @@
-"""List every top-level HWDB system and flag which the FD-VD whitelist keeps.
+"""Audit live HWDB systems against the curation (`explore/curation.yaml`).
 
-Read-only probe (no DB writes) for deciding future scope expansion — where do
-FD-HD, PDS, and the shared systems actually sit among `systems/D`?
+Read-only probe (no DB writes). Labels each top-level `systems/D` entry
+**curated** or **not curated**, and separately reports curated ids that have
+disappeared from HWDB — so curation drift (new systems to adopt, stale entries
+to drop) is caught deliberately rather than silently.
 
 Easiest: mint a fresh bearer inline via CILogon (no token-file juggling) —
 
@@ -29,7 +31,7 @@ from hwdb.fnal import flow
 
 
 class Command(BaseCommand):
-    help = "List all top-level HWDB systems and whether the FD-VD whitelist keeps each."
+    help = "Audit live HWDB systems against curation.yaml (curated / not curated / drift)."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -75,19 +77,40 @@ class Command(BaseCommand):
         )
 
         curated = curation.curated_system_ids()
-        kept = 0
-        self.stdout.write(f"{'id':>4}  {'keep':<5}  name")
-        self.stdout.write("-" * 50)
+        live_ids = {s.get("id") for s in systems}
+
+        # Per-system: curated vs in-HWDB-but-not-curated.
+        self.stdout.write(f"{'id':>4}  {'status':<13}  name")
+        self.stdout.write("-" * 52)
+        n_curated = 0
         for s in systems:
             sid = s.get("id")
             name = s.get("name") or ""
-            keep = sid in curated
-            kept += keep
-            self.stdout.write(f"{sid:>4}  {'KEEP' if keep else 'skip':<5}  {name}")
-        self.stdout.write("-" * 50)
+            is_curated = sid in curated
+            n_curated += is_curated
+            self.stdout.write(
+                f"{sid:>4}  {'curated' if is_curated else 'not curated':<13}  {name}"
+            )
+
+        # Drift: curated in the YAML but no longer present in HWDB.
+        missing = sorted(curated - live_ids)
+        if missing:
+            self.stdout.write("")
+            self.stdout.write("curated but missing from HWDB (stale curation.yaml entries):")
+            for sid in missing:
+                self.stdout.write(f"  {sid}")
+
+        not_curated = len(systems) - n_curated
+        self.stdout.write("-" * 52)
         self.stdout.write(
-            f"{len(systems)} systems total · {kept} curated (curation.yaml)"
+            f"{len(systems)} systems in HWDB · {n_curated} curated · "
+            f"{not_curated} not curated · {len(missing)} curated-but-missing"
         )
+        if not_curated:
+            self.stdout.write(
+                "Review the 'not curated' systems above; add any newly-relevant "
+                "ones to explore/curation.yaml."
+            )
 
     def _login(self) -> str:
         """Run the CILogon device flow in the terminal and mint a fresh bearer.
