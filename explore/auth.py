@@ -26,16 +26,35 @@ from django.urls import reverse
 # explicit backend. The default ModelBackend is the only one configured.
 _BACKEND = "django.contrib.auth.backends.ModelBackend"
 
+# FNAL-provisioned users live in their own username namespace: the Django
+# username is ``fnal:<credkey>``, never the bare credkey. This keeps the FNAL
+# identity space disjoint from local accounts — a FNAL credkey can never resolve
+# to a pre-existing privileged account (e.g. ``admin``), and signing in via FNAL
+# is always a distinct, explore-only identity. The colon is rejected by Django's
+# username validator, so no hand-created account can ever collide with it.
+# (ADR-0011.) CETS staff reach CETS via their password login, not this door.
+FNAL_USERNAME_PREFIX = "fnal:"
+
+
+def fnal_username(credkey: str) -> str:
+    return f"{FNAL_USERNAME_PREFIX}{credkey}"
+
 
 def provision_and_login(request, login_result):
     """Map a completed FNAL device flow to a Django user and log them in.
 
-    The ``credkey`` is the stable identity; we key the Django user on it,
-    auto-creating a password-less account the first time someone signs in via
-    FNAL (subsequent logins reuse it). Returns the user.
+    The ``credkey`` is the stable identity; we key the Django user on
+    ``fnal:<credkey>`` (a namespace disjoint from local accounts — see
+    ``FNAL_USERNAME_PREFIX``), auto-creating a password-less, group-less (hence
+    explore-only) account the first time someone signs in via FNAL. Returns the
+    user. The real credkey for display lives in the session link (surfaced by
+    ``hwdb.context_processors.fnal_link``).
     """
     User = get_user_model()
-    user, created = User.objects.get_or_create(username=login_result.credkey)
+    user, created = User.objects.get_or_create(
+        username=fnal_username(login_result.credkey),
+        defaults={"first_name": login_result.credkey},
+    )
     if created:
         user.set_unusable_password()
         user.save(update_fields=["password"])

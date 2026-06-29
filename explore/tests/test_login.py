@@ -89,6 +89,7 @@ class ExploreLoginPollTest(TestCase):
     def test_completion_provisions_user_and_logs_in(self):
         self._seed(next_url="/explore/?node=D08100100003")
         User = get_user_model()
+        # FNAL users live in the fnal: namespace — never the bare credkey.
         self.assertFalse(User.objects.filter(username="chaoz").exists())
         with mock.patch("hwdb.fnal.flow.poll",
                         return_value=flow.PollResult(outcome="complete", auth=_complete_auth())):
@@ -99,9 +100,11 @@ class ExploreLoginPollTest(TestCase):
         self.assertEqual(body["status"], "ok")
         self.assertEqual(body["next"], "/explore/?node=D08100100003")
 
-        # User auto-provisioned, keyed on credkey, password-less, and logged in.
-        u = User.objects.get(username="chaoz")
+        # User auto-provisioned as fnal:<credkey>, password-less, logged in,
+        # and NOT a cets member (explore-only).
+        u = User.objects.get(username="fnal:chaoz")
         self.assertFalse(u.has_usable_password())
+        self.assertFalse(u.groups.filter(name="cets").exists())
         self.assertEqual(int(self.client.session[SESSION_KEY]), u.pk)
         # Vault link stored; flow cleared.
         self.assertIn(LINK_KEY, self.client.session)
@@ -114,7 +117,21 @@ class ExploreLoginPollTest(TestCase):
             with mock.patch("hwdb.fnal.flow.poll",
                             return_value=flow.PollResult(outcome="complete", auth=_complete_auth())):
                 self.client.get(reverse("explore:login_poll"))
-        self.assertEqual(User.objects.filter(username="chaoz").count(), 1)
+        self.assertEqual(User.objects.filter(username="fnal:chaoz").count(), 1)
+
+    def test_fnal_login_does_not_hijack_existing_account(self):
+        # A pre-existing privileged local account named like a credkey must not
+        # be reused by FNAL login (privilege-escalation guard).
+        User = get_user_model()
+        User.objects.create_superuser("chaoz", "c@c.io", "pw")
+        self._seed()
+        with mock.patch("hwdb.fnal.flow.poll",
+                        return_value=flow.PollResult(outcome="complete", auth=_complete_auth())):
+            self.client.get(reverse("explore:login_poll"))
+        # Logged in as the namespaced explore-only user, not the superuser.
+        u = User.objects.get(pk=int(self.client.session[SESSION_KEY]))
+        self.assertEqual(u.username, "fnal:chaoz")
+        self.assertFalse(u.is_superuser)
 
     def test_authenticated_explore_user_can_view(self):
         # After login, the credkey user can view the explore tree (no FNAL link

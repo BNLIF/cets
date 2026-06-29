@@ -32,13 +32,24 @@ server-rendered templates + htmx, and already owns the same vault device flow in
   Permanent redirects from `/hwdb/explore/*`. Server-rendered + htmx, **not** a
   Vue/Vite SPA.
 - **FNAL device flow is the sole login.** On completion of an explore-started
-  flow, `get_or_create` a Django user keyed on `credkey` and `login()` them
-  (Strategy 1 — real Django users, not session-only). This is dunecat's
-  `upsert_user(oidc_sub)` pattern expressed on Django's user system; we keep
-  cets's existing `hwdb/fnal/` flow and do **not** port dunecat's session/user
-  tables or its stack. Extends [[0001-session-scoped-fnal-linkage]] and
+  flow, `get_or_create` a Django user and `login()` them (Strategy 1 — real
+  Django users, not session-only). This is dunecat's `upsert_user(oidc_sub)`
+  pattern expressed on Django's user system; we keep cets's existing
+  `hwdb/fnal/` flow and do **not** port dunecat's session/user tables or its
+  stack. Extends [[0001-session-scoped-fnal-linkage]] and
   [[0002-per-request-bearer-minting]] — the session vault token is unchanged;
   we additionally bind a Django identity to it for the explore app.
+- **FNAL users live in a `fnal:<credkey>` username namespace**, disjoint from
+  local accounts — *not* the bare `credkey`. Keying on the bare credkey would
+  merge the FNAL identity space with local usernames: a FNAL login whose credkey
+  matched a pre-existing account (e.g. the `admin` superuser, or a CE teammate
+  enrolled in `cets`) would resolve to *that* account, silently granting CETS
+  access — a privilege-escalation path and the reason "logging in via FNAL as
+  chaoz still showed CETS" during dev. With the namespace, signing in via FNAL
+  is always a distinct, group-less → explore-only identity; CETS staff reach the
+  CETS zone through their password login (and, being `cets` members, see explore
+  too — no FNAL link needed). The colon is rejected by Django's username
+  validator, so no hand-created account can collide with the namespace.
 - **One shared device flow, two intents.** The flow carries a `login_user` flag
   set at *start*: explore-started flows auto-login; the CE "Link FNAL" flow
   (CETS zone) stays link-only and **byte-for-byte unchanged** — a `guest`
