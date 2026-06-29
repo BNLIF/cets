@@ -270,6 +270,24 @@ def component_type_progress(part_type_id):
     return _ranges_for_series(series)
 
 
+def component_update_progress(part_type_id):
+    """Components-updated-per-month for one component type from
+    ``HwdbComponentEvent``. A single series binned by each component's HWDB
+    ``updated`` (last-modified) date — the activity view (status changes, QC
+    uploads, etc. bump ``updated``), which tracks real work better than the
+    mint date. Falls back to ``created`` for any row missing ``updated``.
+    """
+    from hwdb.models import HwdbComponentEvent
+    dates = [
+        u or c for u, c in
+        HwdbComponentEvent.objects.filter(part_type_id=part_type_id)
+        .values_list("updated", "created")
+        if (u or c) is not None
+    ]
+    series = [("Components updated", COLD_COLOR, dates)]
+    return _ranges_for_series(series)
+
+
 def larasic_progress():
     warm_dates = list(LArASIC.objects.filter(
         warm_tested_at__isnull=False

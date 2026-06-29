@@ -15,10 +15,14 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from core.models import LArASIC, FEMB, FembTest
-from core.queries import chart_config, component_type_progress
+from core.queries import (
+    chart_config,
+    component_type_progress,
+    component_update_progress,
+)
 
 from .api_client import FnalDbApiClient
-from .events import sync_test_events
+from .events import physics_date_field, sync_test_events
 from .fnal import flow
 from .fnal import session as fnal_session
 from .fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
@@ -636,23 +640,40 @@ def explore_view(request):
     tree = []
     for s in sorted(systems.values(), key=lambda x: x["id"]):
         s["subs"] = sorted(s["subs"].values(), key=lambda x: x["id"])
-        s["n_components"] = sum(
-            leaf.n_components for sub in s["subs"] for leaf in sub["leaves"]
-        )
+        for sub in s["subs"]:
+            sub["n_components"] = sum(leaf.n_components for leaf in sub["leaves"])
+            sub["n_tests"] = sum(leaf.n_tests for leaf in sub["leaves"])
+        s["n_components"] = sum(sub["n_components"] for sub in s["subs"])
+        s["n_tests"] = sum(sub["n_tests"] for sub in s["subs"])
         tree.append(s)
 
     selected = request.GET.get("node")
     selected_node = next((n for n in nodes if n.part_type_id == selected), None)
 
-    chart = None
+    charts = []
     if selected_node and selected_node.tests_synced_at:
-        ranges = component_type_progress(selected_node.part_type_id)
-        chart = chart_config(
-            slug=selected_node.part_type_id,
-            name=selected_node.component_type_name,
-            href="",
-            ranges=ranges,
+        ptid = selected_node.part_type_id
+        comp_chart = chart_config(
+            slug=f"{ptid}_comp", name="Components updated", href="",
+            ranges=component_update_progress(ptid),
         )
+        comp_chart["caption"] = (
+            "By HWDB last-updated date (status change / QC upload bumps it), "
+            "not the original mint date."
+        )
+        phys = physics_date_field(selected_node.part_type_id)
+        test_chart = chart_config(
+            slug=f"{ptid}_test",
+            name="Tests performed" if phys else "Tests recorded",
+            href="", ranges=component_type_progress(ptid),
+        )
+        test_chart["caption"] = (
+            f"By physics test date (test_data “{phys}”), faceted by test type."
+            if phys else
+            "By HWDB record date (upload time, not physics test date), "
+            "faceted by test type."
+        )
+        charts = [comp_chart, test_chart]
 
     return render(
         request,
@@ -660,8 +681,11 @@ def explore_view(request):
         {
             "tree": tree,
             "selected_node": selected_node,
-            "chart": chart,
+            "charts": charts,
             "ce_links": _ce_links(selected_node),
+            # Mirror is prod-sourced, so deep-link the part type to prod's UI
+            # (matches the /hwdb/larasic/ convention).
+            "hwdb_ui_base": settings.HWDB_PROFILES["prod"]["ui"],
             "node_count": len(nodes),
             "sync_state": HierarchySyncState.get(),
             "active_instance": active_instance(request),
@@ -716,10 +740,13 @@ def explore_node_sync_view(request, part_type_id):
         return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
 
     base_url = settings.HWDB_PROFILES["prod"]["api"]
+    mode = request.POST.get("mode", "incremental")
+    if mode not in ("incremental", "components", "full"):
+        mode = "incremental"
 
     def _iter():
         try:
-            yield from sync_test_events(base_url, bearer, part_type_id)
+            yield from sync_test_events(base_url, bearer, part_type_id, mode=mode)
         except Exception as e:
             logger.exception("explore_node_sync_view(%s) crashed", part_type_id)
             yield f"test sync: CRASH · {e}\n"

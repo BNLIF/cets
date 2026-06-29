@@ -32,11 +32,23 @@ level. So generic count-plots need zero per-consortium logic.
   mirror is left untouched — it stores a *different* metric (each chip's latest
   RT/LN date → "chips reaching tested-state per month"), whereas this stores
   raw test events → "tests recorded per month".
-- **Canonical plot date = HWDB `created`.** Uniform and always present;
-  labelled "tests *recorded* per month" (not physics test date). Physics /
-  datasheet dates from the detailed `…/tests/{type_id}` endpoint are a deferred
-  refinement. Extends the created-timestamp fallback of
-  [[0009-hwdb-mirror-test-timestamp-fallback]].
+- **Plot date = physics `Test Date` where a component type provides one, else
+  HWDB `created`.** A `physics_date_field(part_type_id)` resolver registry maps
+  component types to their datasheet date field; only the CE chip families are
+  mapped today (→ `test_data["Test Date"]`, via the detailed
+  `…/tests/{type_id}` endpoint, reusing the dashboard's parser), everyone else
+  falls back to the uniform `created` upload stamp. Extends
+  [[0009-hwdb-mirror-test-timestamp-fallback]]. **Update (issue #30 follow-up):**
+  originally `created`-only; switched after the LArASIC plot was found to
+  bunch on the bulk-upload date (2026-05-29) instead of the real Dec-2025/
+  Jan-2026 test dates. Cost: the physics path fetches one detailed call per
+  defined test type per component (vs one summary call), so CE syncs are
+  heavier; non-CE types are unchanged.
+- **Component inventory chart uses `updated`, not `created`.** A second chart
+  ("Components updated per month") bins each component by its HWDB last-modified
+  date (status change / QC upload bumps it) — a better activity signal than the
+  mint date. Requires a per-component detail fetch (the listing lacks
+  `updated`).
 - **Test-type facets read dynamically** from `test_type.name` — no hard-coded
   consortium knowledge (TDE's `amc_bandwidth_test` and CE's `RoomT QC Test`
   are just legend labels).
@@ -46,10 +58,15 @@ level. So generic count-plots need zero per-consortium logic.
 - **Scope (v1): a curated FD-VD whitelist** — systems named `FD-VD *` plus
   `FD CE`. Other shared `FD *` systems (DAQ, Slow Control, Cryostat, …) are
   excluded for now; adding one is a whitelist edit.
-- **Sync: skeleton eager, plot data lazy.** A `sync_hierarchy` command (+
-  button) populates `ComponentTypeNode` for the whitelist; per-component-type
-  test events sync on first visit to that leaf and cache, FNAL-gated like the
-  existing sync. Reuses the existing streaming-sync UX.
+- **Sync: skeleton eager, plot data lazy + incremental.** A `sync_hierarchy`
+  command (+ button) populates `ComponentTypeNode` for the whitelist;
+  per-component-type events sync on first visit to that leaf and cache,
+  FNAL-gated, reusing the streaming-sync UX. Three cost-tiered modes mirror the
+  dashboard's skip-known policy ([[0008-skip-known-serials-incremental-sync]]):
+  `incremental` (new components only — default), `components` (re-fetch detail
+  for all to refresh the `updated` chart, tests for new only), and `full`
+  (everything, incl. all tests). Test/component event rows carry `part_id` so
+  incremental can append without disturbing existing rows.
 - **CE stays as-is.** CE leaves render the same generic plots but link out to
   the existing `/hwdb/larasic/`, CE detail, and `/hwdb/dashboard/` pages. The
   demoted generic browse (`subsystem_list_view` / `part_type_list_view`) is

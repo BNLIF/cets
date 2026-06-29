@@ -22,7 +22,7 @@
     list-style: none; display: flex; align-items: center; gap: 8px;
   }
   .explore-tree summary::-webkit-details-marker { display: none; }
-  .explore-tree summary::before { content: "▸"; color: var(--muted, #9aa); font-size: 11px; }
+  .explore-tree summary::before { content: "▸"; color: var(--muted, #9aa); font-size: 16px; line-height: 1; width: 14px; text-align: center; }
   .explore-tree details[open] > summary::before { content: "▾"; }
   .explore-tree summary:hover { background: var(--hover, #f4f4f6); }
   .tree-sub > summary { font-weight: 500; padding-left: 22px; }
@@ -80,10 +80,10 @@
     <nav class="explore-tree" aria-label="FD-VD component hierarchy">
         {% for system in tree %}
         <details open>
-            <summary>{{ system.name }}<span class="tree-count sys-count">{{ system.n_components }}</span></summary>
+            <summary>{{ system.name }}<span class="tree-count sys-count {% if system.n_tests %}has-data{% endif %}" title="{{ system.n_components }} components{% if system.n_tests %} · {{ system.n_tests }} tests{% endif %}">&#9679;{{ system.n_components }}</span></summary>
             {% for sub in system.subs %}
             <details class="tree-sub">
-                <summary>{{ sub.name }}</summary>
+                <summary>{{ sub.name }}<span class="tree-count sys-count {% if sub.n_tests %}has-data{% endif %}" title="{{ sub.n_components }} components{% if sub.n_tests %} · {{ sub.n_tests }} tests{% endif %}">&#9679;{{ sub.n_components }}</span></summary>
                 <ul class="tree-leaves">
                     {% for leaf in sub.leaves %}
                     <li class="tree-leaf">
@@ -105,14 +105,25 @@
         <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;">
             <div>
                 <h2 class="page-title" style="font-size: 20px;">{{ selected_node.component_type_name }}</h2>
-                <div class="page-subtitle">{{ selected_node.full_name }}</div>
+                <div class="page-subtitle">{{ selected_node.project }} <span class="crumbs-sep">›</span> {{ selected_node.system_name }} <span class="crumbs-sep">›</span> {{ selected_node.subsystem_name }} <span class="crumbs-sep">›</span> {{ selected_node.component_type_name }}</div>
             </div>
             <div style="text-align: right; white-space: nowrap;">
-                <button id="node-sync-btn" class="btn btn-sm btn-primary" type="button"
-                        data-sync-url="{% url 'hwdb:explore_node_sync' part_type_id=selected_node.part_type_id %}"
-                        title="Pull this component type's test records from prod HWDB">Sync now</button>
+                <div style="display: flex; gap: 6px; justify-content: flex-end;">
+                    <button class="btn btn-sm btn-primary node-sync-btn" type="button"
+                            data-mode="incremental"
+                            data-sync-url="{% url 'hwdb:explore_node_sync' part_type_id=selected_node.part_type_id %}"
+                            title="Fetch newly-added components only (cheap)">Sync new</button>
+                    <button class="btn btn-sm btn-ghost node-sync-btn" type="button"
+                            data-mode="components"
+                            data-sync-url="{% url 'hwdb:explore_node_sync' part_type_id=selected_node.part_type_id %}"
+                            title="Refresh ‘updated’ for all components — no test re-fetch (medium)">Refresh updated</button>
+                    <button class="btn btn-sm btn-ghost node-sync-btn" type="button"
+                            data-mode="full"
+                            data-sync-url="{% url 'hwdb:explore_node_sync' part_type_id=selected_node.part_type_id %}"
+                            title="Re-fetch everything incl. all tests (slow)">Full re-sync</button>
+                </div>
                 <div class="cell-muted" style="font-size: 12px; margin-top: 6px;">
-                    {% if selected_node.tests_synced_at %}tests synced {{ selected_node.tests_synced_at|timesince }} ago{% else %}never synced{% endif %}
+                    {% if selected_node.tests_synced_at %}synced {{ selected_node.tests_synced_at|timesince }} ago{% else %}never synced{% endif %}
                 </div>
             </div>
         </div>
@@ -132,8 +143,12 @@
         <pre id="node-sync-log"></pre>
 
         {% if selected_node.tests_synced_at %}
-            {% if chart and not chart.empty %}
-            <div class="panel" data-chart-panel="{{ chart.slug }}" style="border: none; margin-top: 10px;">
+            {% for c in charts %}
+            <div class="panel" data-chart-panel="{{ c.slug }}" style="border: none; margin-top: 18px;">
+                <div class="panel-title" style="font-size: 14px; margin-bottom: 8px;">{{ c.name }}</div>
+                {% if c.empty %}
+                <div class="explore-empty" style="padding: 24px 16px;">No {{ c.name|lower }} for this component type yet.</div>
+                {% else %}
                 <div class="chart-range-toggle" role="tablist" style="margin-bottom: 12px;">
                     <button type="button" data-range="month" class="chart-range-btn">Last month · daily</button>
                     <button type="button" data-range="3month" class="chart-range-btn">Last 3 months · daily</button>
@@ -141,19 +156,18 @@
                 </div>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
                     <div>
-                        <div style="font-size: 13px; color: var(--text-3); margin-bottom: 6px; font-family: var(--font-mono);">Tests recorded per period</div>
-                        <div style="position: relative; height: 280px;"><canvas id="bar_{{ chart.slug }}"></canvas></div>
+                        <div style="font-size: 13px; color: var(--text-3); margin-bottom: 6px; font-family: var(--font-mono);">Per period</div>
+                        <div style="position: relative; height: 260px;"><canvas id="bar_{{ c.slug }}"></canvas></div>
                     </div>
                     <div>
                         <div style="font-size: 13px; color: var(--text-3); margin-bottom: 6px; font-family: var(--font-mono);">Cumulative</div>
-                        <div style="position: relative; height: 280px;"><canvas id="line_{{ chart.slug }}"></canvas></div>
+                        <div style="position: relative; height: 260px;"><canvas id="line_{{ c.slug }}"></canvas></div>
                     </div>
                 </div>
-                <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">Binned by HWDB record date (“tests recorded”, not physics test date), faceted by test type.</p>
+                {% endif %}
+                <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">{{ c.caption }}</p>
             </div>
-            {% else %}
-            <div class="explore-empty">No tests recorded for this component type yet.</div>
-            {% endif %}
+            {% endfor %}
         {% else %}
         <div class="explore-empty" id="node-unsynced" data-sync-url="{% url 'hwdb:explore_node_sync' part_type_id=selected_node.part_type_id %}">
             <p>Test events not synced yet.</p>
@@ -162,7 +176,7 @@
         {% endif %}
 
         <dl class="panel-meta">
-            <dt>Part type ID</dt><dd>{{ selected_node.part_type_id }}</dd>
+            <dt>Part type ID</dt><dd><a href="{{ hwdb_ui_base }}/view/components?pa={{ selected_node.part_type_id }}" target="_blank" rel="noopener" title="Open this component type in the FNAL HWDB">{{ selected_node.part_type_id }} <span aria-hidden="true">&#x2197;</span></a></dd>
             <dt>System</dt><dd>{{ selected_node.system_name }} ({{ selected_node.system_id }})</dd>
             <dt>Subsystem</dt><dd>{{ selected_node.subsystem_name }} ({{ selected_node.subsystem_id }})</dd>
             <dt>Components in HWDB</dt><dd>{{ selected_node.n_components }}</dd>
@@ -183,16 +197,17 @@
 {% endif %}
 
 {% csrf_token %}
-{% if chart %}{{ chart|json_script:"node-chart-config" }}{% endif %}
+{% if charts %}{{ charts|json_script:"node-chart-config" }}{% endif %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 (function () {
     var csrf = document.querySelector("input[name=csrfmiddlewaretoken]").value;
 
-    async function stream(url, logEl, startMsg) {
+    async function stream(url, logEl, startMsg, extra) {
         logEl.style.display = "block";
         logEl.textContent = startMsg;
         var fd = new FormData(); fd.append("csrfmiddlewaretoken", csrf);
+        if (extra) Object.keys(extra).forEach(function (k) { fd.append(k, extra[k]); });
         var resp;
         try { resp = await fetch(url, { method: "POST", body: fd }); }
         catch (e) { logEl.textContent += "\nnetwork error: " + e + "\n"; return false; }
@@ -215,35 +230,38 @@
         if (ok) { window.location.reload(); } else { rb.disabled = false; }
     });
 
-    // Per-node test-event sync (manual button + auto on first visit).
+    // Per-node test-event sync (mode buttons + auto on first visit).
     var nodeLog = document.getElementById("node-sync-log");
-    async function nodeSync(url) {
-        var btn = document.getElementById("node-sync-btn");
-        if (btn) btn.disabled = true;
-        var ok = await stream(url, nodeLog, "Syncing test events…\n");
-        if (ok) { window.location.reload(); } else if (btn) { btn.disabled = false; }
+    var syncBtns = document.querySelectorAll(".node-sync-btn");
+    async function nodeSync(url, mode) {
+        syncBtns.forEach(function (b) { b.disabled = true; });
+        var ok = await stream(url, nodeLog, "Syncing (" + mode + ")…\n", { mode: mode });
+        if (ok) { window.location.reload(); }
+        else { syncBtns.forEach(function (b) { b.disabled = false; }); }
     }
-    var nb = document.getElementById("node-sync-btn");
-    if (nb) nb.addEventListener("click", function () { nodeSync(nb.dataset.syncUrl); });
+    syncBtns.forEach(function (b) {
+        b.addEventListener("click", function () { nodeSync(b.dataset.syncUrl, b.dataset.mode); });
+    });
     var unsynced = document.getElementById("node-unsynced");
-    if (unsynced) { nodeSync(unsynced.dataset.syncUrl); }  // auto-sync on first visit
+    if (unsynced) { nodeSync(unsynced.dataset.syncUrl, "incremental"); }  // auto on first visit
 
-    // Render the selected node's chart.
+    // Render the selected node's charts (components registered + tests recorded).
     var cfgEl = document.getElementById("node-chart-config");
     if (cfgEl && window.Chart) {
-        var c = JSON.parse(cfgEl.textContent);
-        if (!c.empty) {
-            var commonOpts = {
-                responsive: true, maintainAspectRatio: false,
-                plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 13 }, color: '#3a414b' } },
-                           tooltip: { intersect: false, mode: 'index' } },
-                scales: { x: { ticks: { font: { size: 12 }, color: '#3a414b', maxRotation: 0, autoSkipPadding: 24 } },
-                          y: { beginAtZero: true, ticks: { precision: 0, font: { size: 12 }, color: '#3a414b' } } }
-            };
+        var commonOpts = {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 13 }, color: '#3a414b' } },
+                       tooltip: { intersect: false, mode: 'index' } },
+            scales: { x: { ticks: { font: { size: 12 }, color: '#3a414b', maxRotation: 0, autoSkipPadding: 24 } },
+                      y: { beginAtZero: true, ticks: { precision: 0, font: { size: 12 }, color: '#3a414b' } } }
+        };
+        JSON.parse(cfgEl.textContent).forEach(function (c) {
+            if (c.empty) return;
             var initial = c.ranges['all'];
             var barChart = new Chart(document.getElementById('bar_' + c.slug), { type: 'bar', data: { labels: initial.labels, datasets: initial.bar_datasets }, options: commonOpts });
             var lineChart = new Chart(document.getElementById('line_' + c.slug), { type: 'line', data: { labels: initial.labels, datasets: initial.line_datasets }, options: commonOpts });
             var panel = document.querySelector('[data-chart-panel="' + c.slug + '"]');
+            if (!panel) return;
             panel.querySelectorAll('.chart-range-btn').forEach(function (b) {
                 b.addEventListener('click', function () {
                     var r = c.ranges[b.dataset.range]; if (!r) return;
@@ -253,7 +271,7 @@
                     lineChart.data.labels = r.labels; lineChart.data.datasets = r.line_datasets; lineChart.update();
                 });
             });
-        }
+        });
     }
 })();
 </script>

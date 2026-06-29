@@ -134,9 +134,11 @@ class ExploreViewTest(TestCase):
         self.client.force_login(self.user)
         resp = self.client.get(reverse("hwdb:explore") + "?node=D05700200001")
         html = resp.content.decode()
-        self.assertIn("D.FD-VD TDE.Digital electronics.AMC", html)
+        # Breadcrumb built from the node's parts (system › subsystem › type).
+        self.assertIn("FD-VD TDE", html)
+        self.assertIn("Digital electronics", html)
         # Unsynced node → the per-type test sync panel (see #30).
-        self.assertIn("Sync now", html)
+        self.assertIn("node-sync-btn", html)
 
 
 class ExploreSyncViewTest(TestCase):

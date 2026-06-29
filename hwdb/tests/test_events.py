@@ -14,10 +14,10 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.queries import component_type_progress
+from core.queries import component_type_progress, component_update_progress
 from hwdb import events
 from hwdb.fnal.bearer import FnalLinkRequired
-from hwdb.models import ComponentTypeNode, HwdbTestEvent
+from hwdb.models import ComponentTypeNode, HwdbComponentEvent, HwdbTestEvent
 
 
 def _node(ptid="D05700200001", **kw):
@@ -38,8 +38,12 @@ def _fake_client(part_ids, tests_by_part):
     client = mock.MagicMock()
 
     def _make_request(method, endpoint, data=None, params=None):
-        # component listing
-        return {"data": [{"part_id": p} for p in part_ids], "pagination": {"pages": 1}}
+        if endpoint.startswith("component-types/"):
+            # component listing (part_ids only; created/updated come from detail)
+            return {"data": [{"part_id": p} for p in part_ids], "pagination": {"pages": 1}}
+        # component detail: components/{pid} → created + updated
+        return {"data": {"created": "2025-02-01T00:00:00+00:00",
+                         "updated": "2025-03-15T00:00:00+00:00"}}
 
     client._make_request.side_effect = _make_request
     client.get_tests.side_effect = lambda pid: {"data": tests_by_part.get(pid, [])}
@@ -50,10 +54,10 @@ class SyncTestEventsTest(TestCase):
     def setUp(self):
         _node()
 
-    def _run(self, part_ids, tests_by_part):
+    def _run(self, part_ids, tests_by_part, mode="incremental"):
         client = _fake_client(part_ids, tests_by_part)
         with mock.patch("hwdb.events.FnalDbApiClient", return_value=client):
-            return list(events.sync_test_events("https://x", "bearer", "D05700200001"))
+            return list(events.sync_test_events("https://x", "bearer", "D05700200001", mode=mode))
 
     def test_stores_events_and_facets_by_test_type(self):
         tests_by_part = {
@@ -67,21 +71,49 @@ class SyncTestEventsTest(TestCase):
         }
         self._run(["P1", "P2"], tests_by_part)
         self.assertEqual(HwdbTestEvent.objects.filter(part_type_id="D05700200001").count(), 3)
+        # registration events: one per listed component
+        self.assertEqual(HwdbComponentEvent.objects.filter(part_type_id="D05700200001").count(), 2)
         node = ComponentTypeNode.objects.get(part_type_id="D05700200001")
         self.assertEqual(node.n_tests, 3)
         self.assertIsNotNone(node.tests_synced_at)
         self.assertEqual(node.n_components, 2)
 
-    def test_rewrites_wholesale_on_resync(self):
+    def test_component_events_synced_even_with_no_tests(self):
+        # 350-components-0-tests case (e.g. CRU Anode): registration plot
+        # still has data while the test plot is empty.
+        self._run(["P1", "P2", "P3"], {})
+        self.assertEqual(HwdbTestEvent.objects.count(), 0)
+        self.assertEqual(HwdbComponentEvent.objects.filter(part_type_id="D05700200001").count(), 3)
+
+    def test_full_resync_rewrites_wholesale(self):
         self._run(["P1"], {"P1": [{"created": "2025-03-10T10:00:00+00:00", "test_type": {"name": "x"}}]})
         self.assertEqual(HwdbTestEvent.objects.count(), 1)
-        # second run with different data fully replaces the first
+        # a FULL re-sync with different data fully replaces the first
         self._run(["P1"], {"P1": [
             {"created": "2025-05-10T10:00:00+00:00", "test_type": {"name": "y"}},
             {"created": "2025-05-11T10:00:00+00:00", "test_type": {"name": "y"}},
-        ]})
+        ]}, mode="full")
         self.assertEqual(HwdbTestEvent.objects.count(), 2)
         self.assertFalse(HwdbTestEvent.objects.filter(test_type_name="x").exists())
+
+    def test_incremental_skips_known_components(self):
+        self._run(["P1"], {"P1": [{"created": "2025-03-10T10:00:00+00:00", "test_type": {"name": "x"}}]})
+        self.assertEqual(HwdbComponentEvent.objects.count(), 1)
+        # P1 now known; an incremental run with P1+P2 fetches only P2
+        self._run(["P1", "P2"], {"P2": [{"created": "2025-04-01T10:00:00+00:00", "test_type": {"name": "x"}}]})
+        self.assertEqual(HwdbComponentEvent.objects.count(), 2)        # P1 kept + P2 added
+        self.assertEqual(HwdbTestEvent.objects.count(), 2)            # P1's kept + P2's added
+
+    def test_components_mode_refreshes_detail_but_not_known_tests(self):
+        self._run(["P1"], {"P1": [{"created": "2025-03-10T10:00:00+00:00", "test_type": {"name": "x"}}]})
+        # components mode: detail for all (P1 refreshed + P2 added), tests for P2 only.
+        self._run(["P1", "P2"], {
+            "P1": [{"created": "2099-01-01T00:00:00+00:00", "test_type": {"name": "SHOULD_NOT_REFETCH"}}],
+            "P2": [{"created": "2025-04-01T10:00:00+00:00", "test_type": {"name": "x"}}],
+        }, mode="components")
+        self.assertEqual(HwdbComponentEvent.objects.count(), 2)        # rewritten: P1 + P2
+        self.assertEqual(HwdbTestEvent.objects.count(), 2)            # P1's original kept + P2's
+        self.assertFalse(HwdbTestEvent.objects.filter(test_type_name="SHOULD_NOT_REFETCH").exists())
 
     def test_skips_records_without_created(self):
         self._run(["P1"], {"P1": [
@@ -106,20 +138,97 @@ class ComponentTypeProgressTest(TestCase):
         self.assertEqual(sum(sum(s["counts"]) for s in ranges["all"]["series"]), 3)
 
 
+class PhysicsDatePathTest(TestCase):
+    """For CE chip types the tests chart bins on the physics ``Test Date``
+    (test_data), not the HWDB ``created`` upload stamp (the LArASIC gap the
+    user flagged)."""
+
+    def setUp(self):
+        from django.conf import settings
+        self.ptid = settings.HWDB_PROFILES["prod"]["larasic_part_type"]
+        _node(self.ptid, system_id=81, system_name="FD CE",
+              subsystem_name="LArASIC", component_type_name="LArASIC P5B Prod")
+
+    def test_uses_physics_test_date_not_created(self):
+        client = mock.MagicMock()
+
+        def _make_request(method, endpoint, data=None, params=None):
+            if endpoint.endswith("/components"):
+                return {"data": [{"part_id": "P1"}], "pagination": {"pages": 1}}
+            return {"data": {"created": "2026-05-29T00:00:00+00:00",
+                             "updated": "2026-05-29T00:00:00+00:00"}}
+
+        client._make_request.side_effect = _make_request
+        client.get_test_types.return_value = {"data": [{"name": "CryoT QC Test", "id": 37}]}
+
+        def _get_tests(pid, test_type_id=None, history=False):
+            # detailed endpoint → carries test_data with the real Test Date
+            return {"data": [{"created": "2026-05-29T00:00:00+00:00",
+                              "test_data": {"Test Date": "2026/01/05"}}]}
+
+        client.get_tests.side_effect = _get_tests
+        with mock.patch("hwdb.events.FnalDbApiClient", return_value=client):
+            list(events.sync_test_events("https://x", "b", self.ptid))
+
+        evs = HwdbTestEvent.objects.filter(part_type_id=self.ptid)
+        self.assertEqual(evs.count(), 1)
+        e = evs.first()
+        self.assertEqual((e.created.year, e.created.month, e.created.day), (2026, 1, 5))  # physics, not May 29
+        self.assertEqual(e.test_type_name, "CryoT QC Test")
+
+    def test_non_ce_type_has_no_physics_field(self):
+        self.assertIsNone(events.physics_date_field("D05700200001"))   # TDE AMC
+        self.assertEqual(events.physics_date_field(self.ptid), "Test Date")
+
+
+class ComponentUpdateProgressTest(TestCase):
+    def test_single_series_by_component_updated_date(self):
+        ptid = "D05500300001"
+        for day in (10, 11, 12):
+            HwdbComponentEvent.objects.create(
+                part_type_id=ptid, part_id=f"P{day}",
+                created=datetime(2025, 1, 1, tzinfo=dt_timezone.utc),
+                updated=datetime(2025, 3, day, tzinfo=dt_timezone.utc),
+            )
+        ranges = component_update_progress(ptid)
+        series = ranges["all"]["series"]
+        self.assertEqual(len(series), 1)
+        self.assertEqual(series[0]["name"], "Components updated")
+        self.assertEqual(sum(series[0]["counts"]), 3)
+        # bins by `updated` (March), not `created` (January)
+        self.assertIn("2025-03", ranges["all"]["labels"])
+        self.assertNotIn("2025-01", ranges["all"]["labels"])
+
+    def test_falls_back_to_created_when_updated_missing(self):
+        ptid = "D05500300002"
+        HwdbComponentEvent.objects.create(
+            part_type_id=ptid, part_id="P1",
+            created=datetime(2025, 5, 9, tzinfo=dt_timezone.utc), updated=None,
+        )
+        ranges = component_update_progress(ptid)
+        self.assertEqual(sum(ranges["all"]["series"][0]["counts"]), 1)
+
+
 class ExplorePlotViewTest(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user("plotter", "p@p.io", "pw")
         self.client.force_login(self.user)
 
-    def test_synced_node_renders_chart(self):
+    def test_synced_node_renders_both_charts(self):
         node = _node(tests_synced_at=timezone.now(), n_tests=1)
         HwdbTestEvent.objects.create(
             part_type_id=node.part_type_id, part_id="", test_type_name="amc_bandwidth_test",
             created=datetime(2025, 3, 10, tzinfo=dt_timezone.utc),
         )
+        HwdbComponentEvent.objects.create(
+            part_type_id=node.part_type_id, part_id="P1",
+            created=datetime(2025, 1, 5, tzinfo=dt_timezone.utc),
+        )
         html = self.client.get(reverse("hwdb:explore") + f"?node={node.part_type_id}").content.decode()
         self.assertIn("node-chart-config", html)
-        self.assertIn(f"bar_{node.part_type_id}", html)
+        self.assertIn(f"bar_{node.part_type_id}_comp", html)   # components-updated chart
+        self.assertIn(f"bar_{node.part_type_id}_test", html)   # tests-recorded chart
+        self.assertIn("Components updated", html)
         self.assertIn("amc_bandwidth_test", html)
 
     def test_unsynced_node_shows_autosync_block(self):

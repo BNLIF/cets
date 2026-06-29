@@ -146,10 +146,10 @@ class HwdbTestEvent(models.Model):
     per-consortium date logic. Re-synced wholesale per component type, so rows
     for a ``part_type_id`` are deleted and rewritten on each sync.
 
-    ``created`` is the HWDB record timestamp (when the test was *recorded*),
-    not necessarily when it was physically run — the plots are labelled
-    accordingly. Physics dates (datasheet ``Test Date``) are a future
-    refinement gated on the detailed endpoint.
+    ``created`` holds the date the plot bins on: the physics ``test_data``
+    date for component types we've mapped (CE → "Test Date"), else the HWDB
+    record timestamp. See ``events.physics_date_field`` and ADR-0010. Rows are
+    keyed by ``part_id`` so the incremental sync can append per component.
     """
 
     part_type_id = models.CharField(max_length=20, db_index=True)
@@ -162,6 +162,30 @@ class HwdbTestEvent(models.Model):
 
     def __str__(self):
         return f"HwdbTestEvent({self.part_type_id}, {self.test_type_name}, {self.created:%Y-%m-%d})"
+
+
+class HwdbComponentEvent(models.Model):
+    """One component registration for one component type, mirrored from HWDB.
+
+    The raw events behind the /hwdb/explore/ "components updated per month"
+    plot (the inventory-activity view, complementing the test-record plot).
+    From the component detail record (``components/{pid}``): ``created`` is the
+    mint date; ``updated`` is the last-modified date the chart bins on (status
+    change / QC upload bumps it). Synced in the same pass as ``HwdbTestEvent``;
+    incremental syncs append new components, while ``components``/``full`` modes
+    rewrite all rows. See ADR-0010.
+    """
+
+    part_type_id = models.CharField(max_length=20, db_index=True)
+    part_id = models.CharField(max_length=50)
+    created = models.DateTimeField(null=True, blank=True)   # HWDB mint date
+    updated = models.DateTimeField(null=True, blank=True)   # HWDB last-modified
+
+    class Meta:
+        indexes = [models.Index(fields=["part_type_id", "updated"])]
+
+    def __str__(self):
+        return f"HwdbComponentEvent({self.part_type_id}, {self.updated:%Y-%m-%d})"
 
 
 class HierarchySyncState(models.Model):
