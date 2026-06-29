@@ -16,8 +16,8 @@ from pathlib import Path
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
+from explore.hierarchy import sync_hierarchy
 from hwdb.api_client import FnalDbApiClient
-from hwdb.hierarchy import sync_hierarchy
 
 
 class Command(BaseCommand):

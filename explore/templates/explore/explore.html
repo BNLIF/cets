@@ -111,15 +111,15 @@
                 <div style="display: flex; gap: 6px; justify-content: flex-end;">
                     <button class="btn btn-sm btn-primary node-sync-btn" type="button"
                             data-mode="incremental"
-                            data-sync-url="{% url 'hwdb:explore_node_sync' part_type_id=selected_node.part_type_id %}"
+                            data-sync-url="{% url 'explore:node_sync' part_type_id=selected_node.part_type_id %}"
                             title="Fetch newly-added components only (cheap)">Sync new</button>
                     <button class="btn btn-sm btn-ghost node-sync-btn" type="button"
                             data-mode="components"
-                            data-sync-url="{% url 'hwdb:explore_node_sync' part_type_id=selected_node.part_type_id %}"
+                            data-sync-url="{% url 'explore:node_sync' part_type_id=selected_node.part_type_id %}"
                             title="Refresh ‘updated’ for all components — no test re-fetch (medium)">Refresh updated</button>
                     <button class="btn btn-sm btn-ghost node-sync-btn" type="button"
                             data-mode="full"
-                            data-sync-url="{% url 'hwdb:explore_node_sync' part_type_id=selected_node.part_type_id %}"
+                            data-sync-url="{% url 'explore:node_sync' part_type_id=selected_node.part_type_id %}"
                             title="Re-fetch everything incl. all tests (slow)">Full re-sync</button>
                 </div>
                 <div class="cell-muted" style="font-size: 12px; margin-top: 6px;">
@@ -169,7 +169,7 @@
             </div>
             {% endfor %}
         {% else %}
-        <div class="explore-empty" id="node-unsynced" data-sync-url="{% url 'hwdb:explore_node_sync' part_type_id=selected_node.part_type_id %}">
+        <div class="explore-empty" id="node-unsynced" data-sync-url="{% url 'explore:node_sync' part_type_id=selected_node.part_type_id %}">
             <p>Test events not synced yet.</p>
             <p class="cell-muted">Syncing from HWDB now… (needs your FNAL link)</p>
         </div>
@@ -226,7 +226,7 @@
     var rb = document.getElementById("refresh-btn");
     if (rb) rb.addEventListener("click", async function () {
         rb.disabled = true;
-        var ok = await stream("{% url 'hwdb:explore_sync' %}", document.getElementById("sync-log"), "Refreshing hierarchy…\n");
+        var ok = await stream("{% url 'explore:sync' %}", document.getElementById("sync-log"), "Refreshing hierarchy…\n");
         if (ok) { window.location.reload(); } else { rb.disabled = false; }
     });
 

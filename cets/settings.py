@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     "core",
     "users",
     "hwdb",
+    "explore",
 ]
 
 MIDDLEWARE = [

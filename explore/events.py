@@ -6,8 +6,8 @@ the uniform summary endpoint (``components/{part_id}/tests`` → ``created`` +
 ``test_type.name``). Read-only against HWDB; additive locally (ADR-0010).
 
 Lazy and per-type: the explorer calls this on first visit to a leaf. Rows for
-the part type are rewritten wholesale each run. Like ``sync.sync_family`` it
-fetches in parallel (reads are idempotent) and yields plain-text progress
+the part type are rewritten wholesale each run. Like ``hwdb.sync.sync_family``
+it fetches in parallel (reads are idempotent) and yields plain-text progress
 lines for a ``StreamingHttpResponse`` to wrap.
 """
 
@@ -22,9 +22,10 @@ from typing import Iterator
 from django.conf import settings
 from django.utils import timezone
 
-from .api_client import FnalDbApiClient
+from hwdb.api_client import FnalDbApiClient
+from hwdb.sync import _parse_test_date  # reuse the dashboard's YYYY/MM/DD parser
+
 from .models import ComponentTypeNode, HwdbComponentEvent, HwdbTestEvent
-from .sync import _parse_test_date  # reuse the dashboard's YYYY/MM/DD parser
 
 logger = logging.getLogger(__name__)
 

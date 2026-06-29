@@ -1,7 +1,7 @@
 """Tests for the FD-VD hierarchy skeleton sync + explorer view (issue #29,
-ADR-0010). HWDB fetch is mocked — no network.
+ADR-0010/0011). HWDB fetch is mocked — no network.
 
-    python manage.py test hwdb
+    python manage.py test explore
 """
 
 from __future__ import annotations
@@ -12,9 +12,9 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from hwdb import hierarchy
+from explore import hierarchy
+from explore.models import ComponentTypeNode, HierarchySyncState
 from hwdb.fnal.bearer import FnalLinkRequired
-from hwdb.models import ComponentTypeNode, HierarchySyncState
 
 
 def _fake_api(systems, subsystems, part_types, counts):
@@ -116,12 +116,12 @@ class ExploreViewTest(TestCase):
         )
 
     def test_requires_login(self):
-        resp = self.client.get(reverse("hwdb:explore"))
+        resp = self.client.get(reverse("explore:home"))
         self.assertEqual(resp.status_code, 302)
 
     def test_renders_tree_from_mirror(self):
         self.client.force_login(self.user)
-        resp = self.client.get(reverse("hwdb:explore"))
+        resp = self.client.get(reverse("explore:home"))
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
         self.assertIn("FD-VD TDE", html)
@@ -132,7 +132,7 @@ class ExploreViewTest(TestCase):
 
     def test_selected_node_panel(self):
         self.client.force_login(self.user)
-        resp = self.client.get(reverse("hwdb:explore") + "?node=D05700200001")
+        resp = self.client.get(reverse("explore:home") + "?node=D05700200001")
         html = resp.content.decode()
         # Breadcrumb built from the node's parts (system › subsystem › type).
         self.assertIn("FD-VD TDE", html)
@@ -147,20 +147,20 @@ class ExploreSyncViewTest(TestCase):
         self.client.force_login(self.user)
 
     def test_get_not_allowed(self):
-        resp = self.client.get(reverse("hwdb:explore_sync"))
+        resp = self.client.get(reverse("explore:sync"))
         self.assertEqual(resp.status_code, 405)
 
     def test_unlinked_redirects_to_link(self):
-        with mock.patch("hwdb.views.mint_for", side_effect=FnalLinkRequired("no link")):
-            resp = self.client.post(reverse("hwdb:explore_sync"))
+        with mock.patch("explore.views.mint_for", side_effect=FnalLinkRequired("no link")):
+            resp = self.client.post(reverse("explore:sync"))
         self.assertEqual(resp.status_code, 302)
         self.assertIn(reverse("hwdb:link"), resp["Location"])
 
     def test_streams_sync_output_when_linked(self):
-        with mock.patch("hwdb.views.mint_for", return_value="bearer"), \
-             mock.patch("hwdb.views.FnalDbApiClient"), \
-             mock.patch("hwdb.views.sync_hierarchy", return_value=iter(["line one\n", "done\n"])):
-            resp = self.client.post(reverse("hwdb:explore_sync"))
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient"), \
+             mock.patch("explore.views.sync_hierarchy", return_value=iter(["line one\n", "done\n"])):
+            resp = self.client.post(reverse("explore:sync"))
             body = b"".join(resp.streaming_content).decode()
         self.assertEqual(resp.status_code, 200)
         self.assertIn("line one", body)

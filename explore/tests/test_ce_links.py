@@ -3,7 +3,7 @@
 CE component types render the same generic plots as everyone, plus extra
 deep-links to the existing rich CE pages. Non-CE leaves get no such links.
 
-    python manage.py test hwdb
+    python manage.py test explore
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from hwdb.models import ComponentTypeNode
+from explore.models import ComponentTypeNode
 
 
 def _node(ptid, system_id, system_name, subsystem_name, **kw):
@@ -30,7 +30,7 @@ class CeLinkOutTest(TestCase):
         self.client.force_login(self.user)
 
     def _html(self, ptid):
-        return self.client.get(reverse("hwdb:explore") + f"?node={ptid}").content.decode()
+        return self.client.get(reverse("explore:home") + f"?node={ptid}").content.decode()
 
     def test_larasic_leaf_links_to_ce_pages(self):
         _node("D08100100003", 81, "FD CE", "LArASIC", component_type_name="LArASIC P5B Prod")

@@ -5,8 +5,9 @@ whitelist (``systems/D`` → ``subsystems/D/{sys}`` → ``component-types/D/{sys
 and mirrors each component type into ``ComponentTypeNode`` with a true
 component count. Read-only against HWDB; additive locally (ADR-0010).
 
-Like ``sync.sync_family``, the orchestrator yields plain-text progress lines so
-a view can wrap a ``StreamingHttpResponse`` on top without changing the engine.
+Like ``hwdb.sync.sync_family``, the orchestrator yields plain-text progress
+lines so a view can wrap a ``StreamingHttpResponse`` on top without changing
+the engine.
 """
 
 from __future__ import annotations

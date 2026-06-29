@@ -25,6 +25,7 @@ urlpatterns = [
     path("reference/", views.reference, name="reference"),
     path("search/typeahead/", views.search_typeahead, name="search_typeahead"),
     path("hwdb/", include("hwdb.urls")),
+    path("explore/", include("explore.urls")),
     path("larasic/", views.larasic, name="larasic"),
     # Per-tray drill from the LArASIC grouping page. Listed before the serial
     # detail pattern so "tray" is matched as a literal segment.

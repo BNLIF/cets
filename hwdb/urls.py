@@ -1,4 +1,5 @@
 from django.urls import path
+from django.views.generic.base import RedirectView
 
 from . import views
 
@@ -17,10 +18,10 @@ urlpatterns = [
     path("larasic/upload/refresh-cache/", views.upload_refresh_csv_cache_view, name="upload_refresh_csv_cache"),
     path("larasic/upload/<str:tray_id>/", views.upload_tray_view, name="upload_tray"),
     path("larasic/upload/<str:tray_id>/run/", views.upload_run_view, name="upload_run"),
-    # FD-VD component explorer (ADR-0010, issue #29).
-    path("explore/", views.explore_view, name="explore"),
-    path("explore/sync/", views.explore_sync_view, name="explore_sync"),
-    path("explore/sync-tests/<str:part_type_id>/", views.explore_node_sync_view, name="explore_node_sync"),
+    # The FD-VD explorer moved to its own app at /explore/ (ADR-0011, #32).
+    # Permanent-redirect old bookmarks (the ?node= query string is preserved).
+    path("explore/", RedirectView.as_view(pattern_name="explore:home",
+                                           permanent=True, query_string=True)),
     path("link/", views.fnal_link_view, name="link"),
     path("link/poll/", views.fnal_link_poll_view, name="link_poll"),
     path("components/<str:component_type_id>/", views.component_list_view, name="component_list"),

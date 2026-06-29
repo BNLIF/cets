@@ -1,7 +1,7 @@
 """Tests for the per-component-type test-event sync + explorer plots
-(issue #30, ADR-0010). HWDB fetch is mocked — no network.
+(issue #30, ADR-0010/0011). HWDB fetch is mocked — no network.
 
-    python manage.py test hwdb
+    python manage.py test explore
 """
 
 from __future__ import annotations
@@ -14,10 +14,10 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.queries import component_type_progress, component_update_progress
-from hwdb import events
+from explore import events
+from explore.models import ComponentTypeNode, HwdbComponentEvent, HwdbTestEvent
+from explore.queries import component_type_progress, component_update_progress
 from hwdb.fnal.bearer import FnalLinkRequired
-from hwdb.models import ComponentTypeNode, HwdbComponentEvent, HwdbTestEvent
 
 
 def _node(ptid="D05700200001", **kw):
@@ -56,7 +56,7 @@ class SyncTestEventsTest(TestCase):
 
     def _run(self, part_ids, tests_by_part, mode="incremental"):
         client = _fake_client(part_ids, tests_by_part)
-        with mock.patch("hwdb.events.FnalDbApiClient", return_value=client):
+        with mock.patch("explore.events.FnalDbApiClient", return_value=client):
             return list(events.sync_test_events("https://x", "bearer", "D05700200001", mode=mode))
 
     def test_stores_events_and_facets_by_test_type(self):
@@ -167,7 +167,7 @@ class PhysicsDatePathTest(TestCase):
                               "test_data": {"Test Date": "2026/01/05"}}]}
 
         client.get_tests.side_effect = _get_tests
-        with mock.patch("hwdb.events.FnalDbApiClient", return_value=client):
+        with mock.patch("explore.events.FnalDbApiClient", return_value=client):
             list(events.sync_test_events("https://x", "b", self.ptid))
 
         evs = HwdbTestEvent.objects.filter(part_type_id=self.ptid)
@@ -224,7 +224,7 @@ class ExplorePlotViewTest(TestCase):
             part_type_id=node.part_type_id, part_id="P1",
             created=datetime(2025, 1, 5, tzinfo=dt_timezone.utc),
         )
-        html = self.client.get(reverse("hwdb:explore") + f"?node={node.part_type_id}").content.decode()
+        html = self.client.get(reverse("explore:home") + f"?node={node.part_type_id}").content.decode()
         self.assertIn("node-chart-config", html)
         self.assertIn(f"bar_{node.part_type_id}_comp", html)   # components-updated chart
         self.assertIn(f"bar_{node.part_type_id}_test", html)   # tests-recorded chart
@@ -233,12 +233,12 @@ class ExplorePlotViewTest(TestCase):
 
     def test_unsynced_node_shows_autosync_block(self):
         node = _node()  # tests_synced_at is NULL
-        html = self.client.get(reverse("hwdb:explore") + f"?node={node.part_type_id}").content.decode()
+        html = self.client.get(reverse("explore:home") + f"?node={node.part_type_id}").content.decode()
         self.assertIn('id="node-unsynced"', html)
 
     def test_synced_but_empty_node(self):
         node = _node(tests_synced_at=timezone.now(), n_tests=0)
-        html = self.client.get(reverse("hwdb:explore") + f"?node={node.part_type_id}").content.decode()
+        html = self.client.get(reverse("explore:home") + f"?node={node.part_type_id}").content.decode()
         self.assertIn("No tests recorded", html)
 
 
@@ -249,19 +249,19 @@ class ExploreNodeSyncViewTest(TestCase):
         _node()
 
     def test_get_not_allowed(self):
-        resp = self.client.get(reverse("hwdb:explore_node_sync", args=["D05700200001"]))
+        resp = self.client.get(reverse("explore:node_sync", args=["D05700200001"]))
         self.assertEqual(resp.status_code, 405)
 
     def test_unlinked_redirects_with_node_next(self):
-        with mock.patch("hwdb.views.mint_for", side_effect=FnalLinkRequired("no link")):
-            resp = self.client.post(reverse("hwdb:explore_node_sync", args=["D05700200001"]))
+        with mock.patch("explore.views.mint_for", side_effect=FnalLinkRequired("no link")):
+            resp = self.client.post(reverse("explore:node_sync", args=["D05700200001"]))
         self.assertEqual(resp.status_code, 302)
         self.assertIn("node%3DD05700200001", resp["Location"])  # ?next=...?node=...
 
     def test_streams_when_linked(self):
-        with mock.patch("hwdb.views.mint_for", return_value="bearer"), \
-             mock.patch("hwdb.views.sync_test_events", return_value=iter(["scanning\n", "done\n"])):
-            resp = self.client.post(reverse("hwdb:explore_node_sync", args=["D05700200001"]))
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.sync_test_events", return_value=iter(["scanning\n", "done\n"])):
+            resp = self.client.post(reverse("explore:node_sync", args=["D05700200001"]))
             body = b"".join(resp.streaming_content).decode()
         self.assertEqual(resp.status_code, 200)
         self.assertIn("done", body)
