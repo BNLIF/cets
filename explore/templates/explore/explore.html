@@ -1,7 +1,6 @@
-{% extends 'core/base.html' %}
-{% load components %}
+{% extends 'explore/base.html' %}
 
-{% block title %}CETS — FD-VD components{% endblock %}
+{% block title %}FD-VD components · DUNE Hardware Explorer{% endblock %}
 
 {% block content %}
 <style>
@@ -53,7 +52,6 @@
 
 <div class="page-head">
     <div>
-        {% crumbs "CETS" "/" "Hardware Database" "/hwdb/" "Explore" %}
         <h1 class="page-title">FD-VD components</h1>
         <div class="page-subtitle">
             {{ node_count }} component type{{ node_count|pluralize }} ·

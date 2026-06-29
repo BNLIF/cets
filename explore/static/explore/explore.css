@@ -1,0 +1,214 @@
+/* DUNE Hardware Explorer — standalone chrome + design system (ADR-0011, #35).
+ *
+ * Visual language ported from ~/Code/dunecat (tokens.css + base.css + the
+ * AppHeader/PageFrame/Btn chrome): warm cream/amber, IBM Plex. Self-contained —
+ * the explore pages load only this file, never CETS's cets.css. */
+
+:root {
+  /* surfaces */
+  --bg:        #fbf8f1;
+  --page:      #fefcf7;
+  --surface:   #f4efe3;
+  --surface-2: #ebe4d4;
+
+  /* text */
+  --ink:   #1c1812;
+  --body:  #2a241b;
+  --dim:   #6e6453;
+  --faint: #a59982;
+
+  /* rules */
+  --rule:      #e6dfcd;
+  --rule-soft: #ede7d7;
+  --rule-hard: #cdc3aa;
+
+  /* accent (amber) */
+  --accent:      oklch(0.55 0.13 55);
+  --accent-ink:  oklch(0.42 0.13 55);
+  --accent-soft: oklch(0.96 0.03 70);
+  --accent-bg:   oklch(0.93 0.05 70);
+
+  /* status */
+  --good:    oklch(0.50 0.10 145);
+  --warn:    oklch(0.58 0.13 50);
+  --warn-bg: oklch(0.95 0.05 60);
+  --bad:     oklch(0.52 0.16 25);
+
+  /* type */
+  --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* radii / shadow */
+  --r-sm: 5px;
+  --r-md: 7px;
+  --r-lg: 10px;
+  --r-pill: 999px;
+  --shadow-card: 0 1px 0 var(--rule-soft);
+
+  /* Compatibility aliases so the explore template's inline styles and the
+   * ported component classes (which use CETS variable names) resolve against
+   * the dunecat palette. */
+  --border:        var(--rule);
+  --border-strong: var(--rule-hard);
+  --muted:         var(--dim);
+  --hover:         var(--surface);
+  --text:          var(--body);
+  --text-2:        var(--dim);
+  --text-3:        var(--faint);
+  --panel:         var(--page);
+  --bg-muted:      var(--surface);
+  --bg-subtle:     var(--surface);
+  --bg-hover:      var(--surface);
+  --accent-700:    var(--accent-ink);
+  --font-display:  var(--font-sans);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; height: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--body);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--rule-hard); border-radius: var(--r-sm); }
+
+/* ---- Chrome (header / page frame) ------------------------------------- */
+
+.eh-header {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  height: 56px;
+  padding: 0 22px;
+  background: var(--page);
+  border-bottom: 1px solid var(--rule);
+}
+.eh-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  text-decoration: none;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+.eh-brand-mark {
+  width: 26px; height: 26px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 14px;
+}
+.eh-nav { display: flex; gap: 22px; flex-shrink: 0; }
+.eh-nav-item {
+  position: relative;
+  color: var(--dim);
+  text-decoration: none;
+  font-size: 13.5px;
+  font-weight: 500;
+  padding: 4px 0;
+}
+.eh-nav-item.active { color: var(--ink); font-weight: 600; }
+.eh-nav-item.active::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: -1px;
+  height: 2px; background: var(--accent);
+}
+.eh-right { display: flex; align-items: center; gap: 12px; flex-shrink: 0; margin-left: auto; }
+.eh-user {
+  display: inline-flex; align-items: center; gap: 8px;
+  color: var(--dim); font-size: 12.5px;
+}
+.eh-user-dot {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--accent); color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11.5px; font-weight: 600;
+}
+.eh-signout {
+  height: 28px; padding: 0 10px;
+  border: 1px solid var(--rule); background: var(--page);
+  border-radius: 6px; font-family: var(--font-sans); font-size: 12px;
+  color: var(--body); cursor: pointer;
+}
+.eh-signout:hover { background: var(--surface); }
+
+.eh-main { padding: 28px 22px 56px; max-width: 1280px; margin: 0 auto; }
+
+/* ---- Page head -------------------------------------------------------- */
+
+.page-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 24px; margin-bottom: 26px; padding-bottom: 18px;
+  border-bottom: 1px solid var(--rule);
+}
+.page-head > div:first-child { min-width: 0; }
+.page-title {
+  font-family: var(--font-sans); font-size: 26px; font-weight: 600;
+  letter-spacing: -0.02em; margin: 0; line-height: 1.15; color: var(--ink);
+}
+.page-subtitle { color: var(--faint); font-size: 13.5px; margin-top: 6px; }
+.page-head-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+.crumbs-sep { color: var(--faint); padding: 0 2px; }
+
+/* ---- Buttons (dunecat Btn) -------------------------------------------- */
+
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 14px;
+  border: 1px solid var(--rule); background: var(--page); color: var(--body);
+  font-family: var(--font-sans); font-size: 13px; font-weight: 500;
+  white-space: nowrap; border-radius: var(--r-md); cursor: pointer;
+  transition: background 0.12s, border-color 0.12s; text-decoration: none;
+}
+.btn:hover { background: var(--surface); border-color: var(--rule-hard); }
+.btn svg { width: 14px; height: 14px; }
+.btn-primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+.btn-primary:hover { background: #000; border-color: #000; }
+.btn-ghost { border-color: transparent; background: transparent; color: var(--dim); }
+.btn-ghost:hover { background: var(--surface); color: var(--body); }
+.btn-sm { height: 28px; padding: 0 10px; font-size: 12px; }
+.btn:disabled { opacity: 0.55; cursor: default; }
+
+/* ---- Panels / cells / banners ----------------------------------------- */
+
+.panel {
+  border: 1px solid var(--rule); border-radius: var(--r-lg);
+  background: var(--page); overflow: hidden;
+}
+.panel-title { font-size: 15px; font-weight: 600; color: var(--ink); }
+.cell-mono { font-family: var(--font-mono); color: var(--dim); }
+.cell-muted { color: var(--faint); }
+
+.banner {
+  padding: 10px 14px; border-radius: var(--r-md); font-size: 13px;
+  border: 1px solid var(--rule);
+}
+.banner-warn { background: var(--warn-bg); border-color: var(--warn); color: var(--ink); }
+
+/* ---- Chart range toggle ----------------------------------------------- */
+
+.chart-range-toggle {
+  display: inline-flex; border: 1px solid var(--rule);
+  border-radius: var(--r-md); background: var(--page); overflow: hidden;
+}
+.chart-range-btn {
+  border: 0; background: transparent; padding: 6px 12px; font-size: 13px;
+  font-family: inherit; color: var(--dim); cursor: pointer; transition: background 0.12s;
+}
+.chart-range-btn + .chart-range-btn { border-left: 1px solid var(--rule); }
+.chart-range-btn:hover { background: var(--surface); color: var(--body); }
+.chart-range-btn.is-active { background: var(--accent); color: #fff; }

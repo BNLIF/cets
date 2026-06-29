@@ -1,0 +1,47 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-density="spacious">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}DUNE Hardware Explorer{% endblock %}</title>
+    <link rel="icon" href="{% static 'core/images/favicon.png' %}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="{% static 'explore/explore.css' %}" rel="stylesheet">
+</head>
+<body>
+    <header class="eh-header">
+        <a class="eh-brand" href="{% url 'explore:home' %}">
+            <span class="eh-brand-mark">D</span>
+            DUNE Hardware Explorer
+        </a>
+        <nav class="eh-nav">
+            <a class="eh-nav-item active" href="{% url 'explore:home' %}">Components</a>
+        </nav>
+        <div class="eh-right">
+            {% if fnal_credkey %}
+            <span class="eh-user" title="Signed in via FNAL">
+                <span class="eh-user-dot">{{ fnal_credkey|slice:":2"|upper }}</span>{{ fnal_credkey }}
+            </span>
+            {% elif user.is_authenticated %}
+            <span class="eh-user" title="{{ user.username }}">
+                <span class="eh-user-dot">{{ user.get_full_name|default:user.username|slice:":2"|upper }}</span>{{ user.get_full_name|default:user.username }}
+            </span>
+            {% endif %}
+            {% if user.is_authenticated %}
+            <form action="{% url 'rest_framework:logout' %}" method="post" style="margin:0;">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{% url 'explore:login' %}">
+                <button class="eh-signout" type="submit">Sign out</button>
+            </form>
+            {% endif %}
+        </div>
+    </header>
+
+    <main class="eh-main">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>
