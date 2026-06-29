@@ -11,7 +11,7 @@ from __future__ import annotations
 import base64
 from unittest import mock
 
-from django.contrib.auth import get_user_model
+from django.contrib.auth import SESSION_KEY, get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
@@ -104,6 +104,27 @@ class LinkFlowTest(TestCase):
         ct = base64.b64decode(link["vault_ct"])
         nonce = base64.b64decode(link["vault_nonce"])
         self.assertEqual(crypto.decrypt(ct, nonce), b"s.vault-token-xyz")
+
+    def test_ce_flow_does_not_provision_or_swap_user(self):
+        # ADR-0011: the CE "Link FNAL" flow stays link-only — it must NOT create
+        # a credkey-named user or swap the logged-in `guest` for one. Only the
+        # explore-started flow (login_user=True) logs a user in.
+        self._seed_flow()
+        self.assertFalse(self.client.session[FLOW_KEY].get("login_user"))
+        auth = {
+            "client_token": "s.tok",
+            "lease_duration": 2419200,
+            "metadata": {"credkey": "chaoz"},
+        }
+        with mock.patch(
+            "hwdb.fnal.flow.poll",
+            return_value=flow.PollResult(outcome="complete", auth=auth),
+        ):
+            self.client.get(self.poll_url)
+        User = get_user_model()
+        self.assertFalse(User.objects.filter(username="chaoz").exists())
+        # Still the original guest in the session.
+        self.assertEqual(self.client.session[SESSION_KEY], str(User.objects.get(username="guest").pk))
 
     def test_poll_expired_flow_410_and_cleared(self):
         self._seed_flow()

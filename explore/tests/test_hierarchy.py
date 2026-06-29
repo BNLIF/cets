@@ -116,8 +116,10 @@ class ExploreViewTest(TestCase):
         )
 
     def test_requires_login(self):
+        # Anonymous → FNAL login (ADR-0011), not the CETS password page.
         resp = self.client.get(reverse("explore:home"))
         self.assertEqual(resp.status_code, 302)
+        self.assertIn(reverse("explore:login"), resp["Location"])
 
     def test_renders_tree_from_mirror(self):
         self.client.force_login(self.user)

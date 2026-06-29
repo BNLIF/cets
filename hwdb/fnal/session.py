@@ -28,11 +28,21 @@ FLOW_KEY = "fnal_link_flow"
 LINK_KEY = "fnal_link"
 
 
-def set_flow(request, poll_body: dict, expires_at, next_url: str) -> None:
+def set_flow(
+    request, poll_body: dict, expires_at, next_url: str, login_user: bool = False
+) -> None:
+    """Stash an in-progress device flow.
+
+    ``login_user`` is the intent flag (ADR-0011): an explore-started flow sets
+    it so completion provisions + logs in a Django user, while the CE "Link
+    FNAL" flow leaves it ``False`` and stays link-only. The default keeps every
+    existing (CE) caller byte-for-byte unchanged.
+    """
     request.session[FLOW_KEY] = {
         "poll_body": poll_body,
         "expires_at": expires_at.isoformat(),
         "next": next_url,
+        "login_user": login_user,
     }
 
 
