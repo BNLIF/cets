@@ -4,9 +4,10 @@ from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
 
-from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase, override_settings
+
+from cets.testutils import make_cets_user
 
 from core.management.commands.update_fembs_from_ocr import (
     components_to_state,
@@ -170,8 +171,7 @@ class ViewSmokeTests(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        User = get_user_model()
-        cls.user = User.objects.create_user(username="smoketest", password="x")
+        cls.user = make_cets_user(username="smoketest")
         cls.femb = FEMB.objects.create(version="IO-1865-1K", serial_number="00001")
         cls.larasic = LArASIC.objects.create(
             serial_number="009-00001", femb=cls.femb, femb_pos="F1", status="on-femb",

@@ -77,6 +77,9 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.auth.middleware.LoginRequiredMiddleware",
+    # Two-zone guard: keep FNAL-provisioned explore users out of the CETS zone
+    # (ADR-0011). After auth/login so it only judges authenticated users.
+    "explore.middleware.CetsZoneMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django_htmx.middleware.HtmxMiddleware",

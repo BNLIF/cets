@@ -10,10 +10,10 @@ from datetime import datetime, timezone as dt_tz
 from types import SimpleNamespace
 from unittest import mock
 
-from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from cets.testutils import make_cets_user
 from core.models import LArASIC
 from hwdb import sync as sync_mod
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable
@@ -311,7 +311,7 @@ class SyncFamilyTest(TestCase):
 
 class DashboardViewTest(TestCase):
     def setUp(self):
-        self.client.force_login(get_user_model().objects.create_user("g", password="x"))
+        self.client.force_login(make_cets_user("g"))
 
     def test_dashboard_renders_with_no_data(self):
         resp = self.client.get(reverse("hwdb:dashboard"))
@@ -342,7 +342,7 @@ class LarasicConsistencyDeltaTest(TestCase):
     that the HwdbChip mirror has not seen as tested — the upload backlog.
     """
     def setUp(self):
-        self.client.force_login(get_user_model().objects.create_user("g", password="x"))
+        self.client.force_login(make_cets_user("g"))
 
     def _make_chip(self, sn, *, warm=None, cold=None):
         from datetime import datetime, timezone as dt_tz
@@ -411,7 +411,7 @@ class LarasicConsistencyDeltaTest(TestCase):
 
 class DashboardSyncViewTest(TestCase):
     def setUp(self):
-        self.client.force_login(get_user_model().objects.create_user("g", password="x"))
+        self.client.force_login(make_cets_user("g"))
         self.url = reverse("hwdb:dashboard_sync", args=["coldadc"])
 
     def test_dev_session_is_a_noop_redirect(self):

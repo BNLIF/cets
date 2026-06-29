@@ -6,16 +6,16 @@ reads the is_in_hwdb flag, no FNAL call.
 
 from __future__ import annotations
 
-from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from cets.testutils import make_cets_user
 from core.models import ColdADC, LArASIC
 
 
 class LarasicBadgeTest(TestCase):
     def setUp(self):
-        self.client.force_login(get_user_model().objects.create_user("guest", password="x"))
+        self.client.force_login(make_cets_user())
 
     def test_list_omits_in_hwdb_column(self):
         # General /larasic/ is for chip browsing — HWDB sync status lives on

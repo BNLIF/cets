@@ -12,11 +12,11 @@ from types import SimpleNamespace
 from unittest import mock
 
 import requests
-from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from cets.testutils import make_cets_user
 from hwdb.fnal import crypto
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
 from hwdb.fnal.session import LINK_KEY
@@ -94,7 +94,7 @@ class MintForTest(TestCase):
 
 class WithFnalBearerDecoratorTest(TestCase):
     def setUp(self):
-        user = get_user_model().objects.create_user("guest", password="x")
+        user = make_cets_user()
         self.client.force_login(user)
         self.url = reverse("hwdb:component_list_default")
 

@@ -8,16 +8,16 @@ from __future__ import annotations
 from unittest import mock
 
 from django.conf import settings
-from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from cets.testutils import make_cets_user
 from hwdb.fnal.bearer import FnalLinkRequired
 
 
 class SectionShellTest(TestCase):
     def setUp(self):
-        user = get_user_model().objects.create_user("guest", password="x")
+        user = make_cets_user()
         self.client.force_login(user)
 
     def test_landing_lists_component_type_cards(self):

@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from unittest import mock
 
-from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from cets.testutils import make_cets_user
 from core.models import LArASIC
 from hwdb import sync as sync_mod
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable
@@ -108,7 +108,7 @@ class LarasicLegacyFlagsTest(TestCase):
 class LarasicViewTest(TestCase):
     def setUp(self):
         from datetime import datetime, timezone
-        self.client.force_login(get_user_model().objects.create_user("guest", password="x"))
+        self.client.force_login(make_cets_user())
         LArASIC.objects.create(
             serial_number="002-00001", tray_id="B005T0011", is_in_hwdb=True,
             warm_tested_at=datetime(2025, 9, 24, 16, 59, 20, tzinfo=timezone.utc),
@@ -165,7 +165,7 @@ class LarasicViewTest(TestCase):
 
 class LarasicSyncViewTest(TestCase):
     def setUp(self):
-        self.client.force_login(get_user_model().objects.create_user("guest", password="x"))
+        self.client.force_login(make_cets_user())
         self.url = reverse("hwdb:larasic_sync")
 
     def test_get_not_allowed(self):
@@ -216,7 +216,7 @@ class LarasicSyncViewTest(TestCase):
 
 class LarasicSyncButtonGatingTest(TestCase):
     def setUp(self):
-        self.client.force_login(get_user_model().objects.create_user("guest", password="x"))
+        self.client.force_login(make_cets_user())
 
     def test_sync_button_on_prod(self):
         resp = self.client.get(reverse("hwdb:larasic"))

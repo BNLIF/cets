@@ -11,16 +11,16 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest import mock
 
-from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from cets.testutils import make_cets_user
 from core.models import LArASIC
 from hwdb.upload import larasic as upload_lib
 
 
 def _login(client):
-    user = get_user_model().objects.create_user("guest", password="x")
+    user = make_cets_user()
     client.force_login(user)
     return user
 
