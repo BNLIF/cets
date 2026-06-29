@@ -1,6 +1,6 @@
 # Read-only FD-VD component dashboard over a locally-mirrored HWDB hierarchy
 
-status: accepted
+status: accepted (additive constraint relaxed by [[0011-explore-standalone-app-fnal-login]])
 
 To extend the dashboard beyond cold electronics, we add a **read-only**,
 navigation-first view of the full FD-VD component hierarchy. The hierarchy is
