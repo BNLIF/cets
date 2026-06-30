@@ -255,7 +255,7 @@ class SidebarTest(TestCase):
         self.assertEqual(regions, ["Far Detector", "Near Detector", "Other"])
         fd = self._find(tree, "Far Detector")
         fams = [f["label"] for f in fd["children"]]
-        self.assertEqual(fams, ["FD-VD", "FD CE", "FD-HD", "FD shared"])
+        self.assertEqual(fams, ["FD-VD", "FD CE", "FD-HD", "FD Common", "FS"])
 
     def test_path_open_and_current_highlighted(self):
         tree = self._tree("FD/FD-VD/57/2/D05700200001")  # a leaf

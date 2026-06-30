@@ -28,10 +28,14 @@ regions:
         key: FD-HD
         sub: Horizontal Drift
         systems: [1, 3, 4, 5, 8, 9]
-      - name: FD shared
-        key: FD-shared
-        sub: DAQ · Slow Control · Cryostat · Integration
+      - name: FD Common
+        key: FD-shared            # key stays stable so deep links don't break
+        sub: DAQ · Slow Control · Cryostat · Integration · Installation
         systems: [82, 83, 85, 86, 600]
+      - name: FS
+        key: FS
+        sub: Far Site · Safety · BSI · Cryogenics · Networking
+        systems: [200, 201, 300, 400]
 
   - name: Near Detector
     key: ND
