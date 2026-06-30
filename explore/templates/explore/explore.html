@@ -30,8 +30,45 @@
   .pill.synced { color: var(--good); border-color: color-mix(in oklch, var(--good) 30%, var(--rule)); }
   .pill.unsynced { color: var(--accent-ink); border-color: color-mix(in oklch, var(--accent) 30%, var(--rule)); }
 
+  /* sidebar + main layout — flush full-height sidebar, not a card.
+   * (.eh-main override lives here too so a cached explore.css can't re-inset it.) */
+  .eh-main { padding: 0; }
+  .ex-layout { display: flex; align-items: stretch; }
+  .ex-side { flex: 0 0 262px; min-width: 0; align-self: stretch;
+    position: sticky; top: 0; max-height: 100vh; overflow: auto;
+    border-right: 1px solid var(--rule); background: var(--page); padding: 14px 8px; }
+  .ex-layout.collapsed .ex-side { display: none; }
+  .ex-main { flex: 1; min-width: 0; padding: 26px 30px 56px; max-width: 1220px; }
+  .ex-side-label { font-size: 11px; font-weight: 600; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--faint); padding: 2px 8px 10px; }
+  /* folder tree: native <details> chevrons, nested indentation */
+  .extree-folder { margin: 0; }
+  .extree-row, .extree-leaf {
+    display: flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: var(--r-sm);
+    font-size: 13px; color: var(--body); text-decoration: none; cursor: pointer; }
+  summary.extree-row { list-style: none; }
+  summary.extree-row::-webkit-details-marker { display: none; }
+  summary.extree-row::before { content: "▸"; flex: 0 0 11px; text-align: center;
+    color: var(--faint); font-size: 16px; }
+  details.extree-folder[open] > summary.extree-row::before { content: "▾"; }
+  .extree-leaf::before, .extree-flat::before { content: ""; flex: 0 0 11px; }
+  .extree-leaf::before { content: "·"; text-align: center; color: var(--rule-hard); font-size: 16px; }
+  a.extree-row:hover, a.extree-leaf:hover, summary.extree-row:hover { background: var(--surface); }
+  .extree-row.is-cur, .extree-leaf.is-cur { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+  .extree-row.dim { color: var(--faint); cursor: default; }
+  .extree-row.dim:hover { background: none; }
+  .extree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  summary.extree-row a.extree-name { text-decoration: none; color: inherit; }
+  summary.extree-row a.extree-name:hover { text-decoration: underline; }
+  .extree-kids { padding-left: 13px; }
+  .ex-count { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--faint); white-space: nowrap; padding-left: 6px; }
+
+  /* leaf detail: each plot + the meta is a card (matches the prototype) */
+  .chart-card { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg); padding: 16px 18px; margin-top: 16px; }
+
   .explore-empty { text-align: center; padding: 40px 16px; color: var(--faint); }
-  .panel-meta { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin-top: 20px; }
+  .panel-meta { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin-top: 16px;
+    border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg); padding: 16px 18px; }
   .panel-meta dt { color: var(--faint); }
   .panel-meta dd { margin: 0; font-family: var(--font-mono); }
   .panel-meta a { color: var(--accent-ink); }
@@ -39,6 +76,13 @@
     padding: 12px; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap;
     max-height: 240px; overflow: auto; display: none; }
 </style>
+
+<div class="ex-layout" id="ex-layout">
+  <aside class="ex-side" id="ex-side" aria-label="Hierarchy tree">
+    <div class="ex-side-label">Curated hierarchy</div>
+    {% for node in sidebar %}{% include "explore/_tree_node.html" with node=node %}{% endfor %}
+  </aside>
+  <div class="ex-main">
 
 <nav class="crumbs" aria-label="Breadcrumb">
     {% for crumb in view.crumbs %}
@@ -98,7 +142,7 @@
 
     {% if leaf.tests_synced_at %}
         {% for c in charts %}
-        <div class="panel" data-chart-panel="{{ c.slug }}" style="border: none; margin-top: 18px;">
+        <div class="chart-card" data-chart-panel="{{ c.slug }}">
             <div class="panel-title" style="font-size: 14px; margin-bottom: 8px;">{{ c.name }}</div>
             {% if c.empty %}
             <div class="explore-empty" style="padding: 24px 16px;">No {{ c.name|lower }} for this component type yet.</div>
@@ -108,7 +152,7 @@
                 <button type="button" data-range="3month" class="chart-range-btn">Last 3 months · daily</button>
                 <button type="button" data-range="all" class="chart-range-btn is-active">All · monthly</button>
             </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+            <div style="display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px;">
                 <div><div style="font-size: 13px; color: var(--faint); margin-bottom: 6px; font-family: var(--font-mono);">Per period</div><div style="position: relative; height: 260px;"><canvas id="bar_{{ c.slug }}"></canvas></div></div>
                 <div><div style="font-size: 13px; color: var(--faint); margin-bottom: 6px; font-family: var(--font-mono);">Cumulative</div><div style="position: relative; height: 260px;"><canvas id="line_{{ c.slug }}"></canvas></div></div>
             </div>
@@ -159,12 +203,25 @@
     {% endif %}
 {% endif %}
 
+  </div>{# .ex-main #}
+</div>{# .ex-layout #}
+
 {% csrf_token %}
 {% if charts %}{{ charts|json_script:"node-chart-config" }}{% endif %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 (function () {
     var csrf = document.querySelector("input[name=csrfmiddlewaretoken]").value;
+
+    // Sidebar collapse (persisted).
+    var layout = document.getElementById("ex-layout");
+    if (localStorage.getItem("exSideCollapsed") === "1") layout.classList.add("collapsed");
+    var st = document.getElementById("side-toggle");
+    if (st) st.addEventListener("click", function () {
+        var hidden = layout.classList.toggle("collapsed");
+        localStorage.setItem("exSideCollapsed", hidden ? "1" : "0");
+        window.dispatchEvent(new Event("resize"));  // let charts refit the new width
+    });
     async function stream(url, logEl, startMsg, extra) {
         logEl.style.display = "block"; logEl.textContent = startMsg;
         var fd = new FormData(); fd.append("csrfmiddlewaretoken", csrf);

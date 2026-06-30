@@ -138,15 +138,23 @@ def _int(seg):
         raise Http404("bad path segment")
 
 
+def _ctx(kind, region_key=None, family_key=None, flat=False,
+         system_id=None, subsystem_id=None, part_type_id=None):
+    return {"kind": kind, "region_key": region_key, "family_key": family_key,
+            "flat": flat, "system_id": system_id, "subsystem_id": subsystem_id,
+            "part_type_id": part_type_id}
+
+
 def resolve(trail: str | None) -> dict:
     """Resolve a URL trail to a view spec: crumbs + the current node's children
-    (folder) or the leaf node (detail). Raises Http404 on an unknown path."""
+    (folder) or the leaf node (detail), plus a ``ctx`` describing the current
+    node's place in the tree (for the sidebar). Raises Http404 on a bad path."""
     crumbs = [{"name": HOME_LABEL, "url": node_path()}]
     segs = [s for s in (trail or "").split("/") if s]
 
     if not segs:
         return {"kind": "root", "name": HOME_LABEL, "sub": "Curated DUNE hardware",
-                "crumbs": crumbs, "cards": _region_cards()}
+                "crumbs": crumbs, "cards": _region_cards(), "ctx": _ctx("root")}
 
     region = curation.find_region(segs[0])
     if not region or not curation.region_is_browsable(region):
@@ -155,7 +163,8 @@ def resolve(trail: str | None) -> dict:
     crumbs.append({"name": region["name"], "url": node_path(rk)})
     if len(segs) == 1:
         return {"kind": "region", "name": region["name"], "sub": "",
-                "crumbs": crumbs, "cards": _family_cards(region)}
+                "crumbs": crumbs, "cards": _family_cards(region),
+                "ctx": _ctx("region", region_key=rk)}
 
     family = curation.find_family(region, segs[1])
     if not family or not curation.family_is_browsable(family):
@@ -172,7 +181,8 @@ def resolve(trail: str | None) -> dict:
     else:
         if not rest:
             return {"kind": "family", "name": family["name"], "sub": family.get("sub", ""),
-                    "crumbs": crumbs, "cards": _system_cards(region, family)}
+                    "crumbs": crumbs, "cards": _system_cards(region, family),
+                    "ctx": _ctx("family", region_key=rk, family_key=fk, flat=flat)}
         sid = _int(rest[0])
         if sid not in (family.get("systems") or []):
             raise Http404("system not in family")
@@ -184,36 +194,137 @@ def resolve(trail: str | None) -> dict:
 
     if system is None:
         raise Http404("system not mirrored")
+    sysid = system.system_id
 
     if not rest:
         return {"kind": "family" if flat else "system",
                 "name": family["name"] if flat else system.system_name,
                 "sub": family.get("sub", "") if flat else "",
                 "crumbs": crumbs,
-                "cards": _subsystem_cards(region, family, system, flat)}
+                "cards": _subsystem_cards(region, family, system, flat),
+                "ctx": _ctx("family" if flat else "system", region_key=rk,
+                            family_key=fk, flat=flat, system_id=sysid)}
 
     ssid = _int(rest[0])
-    subsystem = H.objects.filter(level=H.LEVEL_SUBSYSTEM, system_id=system.system_id,
+    subsystem = H.objects.filter(level=H.LEVEL_SUBSYSTEM, system_id=sysid,
                                  subsystem_id=ssid).first()
     if not subsystem:
         raise Http404("unknown subsystem")
     crumbs.append({"name": subsystem.subsystem_name,
-                   "url": node_path(rk, fk, system_id=None if flat else system.system_id,
+                   "url": node_path(rk, fk, system_id=None if flat else sysid,
                                     subsystem_id=ssid)})
     rest = rest[1:]
 
     if not rest:
         return {"kind": "subsystem", "name": subsystem.subsystem_name, "sub": "",
                 "crumbs": crumbs,
-                "cards": _leaf_cards(region, family, system, subsystem, flat)}
+                "cards": _leaf_cards(region, family, system, subsystem, flat),
+                "ctx": _ctx("subsystem", region_key=rk, family_key=fk, flat=flat,
+                            system_id=sysid, subsystem_id=ssid)}
 
     leaf = H.objects.filter(level=H.LEVEL_TYPE, part_type_id=rest[0]).first()
     if not leaf:
         raise Http404("unknown component type")
     crumbs.append({"name": leaf.name,
-                   "url": node_path(rk, fk, system_id=None if flat else system.system_id,
+                   "url": node_path(rk, fk, system_id=None if flat else sysid,
                                     subsystem_id=ssid, part_type_id=leaf.part_type_id)})
-    return {"kind": "leaf", "name": leaf.name, "sub": "", "crumbs": crumbs, "leaf": leaf}
+    return {"kind": "leaf", "name": leaf.name, "sub": "", "crumbs": crumbs, "leaf": leaf,
+            "ctx": _ctx("leaf", region_key=rk, family_key=fk, flat=flat,
+                        system_id=sysid, subsystem_id=ssid, part_type_id=leaf.part_type_id)}
+
+
+def _component_totals():
+    """({system_id: components}, {(system_id, subsystem_id): components}) in one
+    grouped query — for the sidebar count badges."""
+    by_sys, by_sub = {}, {}
+    rows = (H.objects.filter(level=H.LEVEL_TYPE)
+            .values("system_id", "subsystem_id").annotate(c=Sum("n_components")))
+    for r in rows:
+        c = r["c"] or 0
+        by_sys[r["system_id"]] = by_sys.get(r["system_id"], 0) + c
+        by_sub[(r["system_id"], r["subsystem_id"])] = c
+    return by_sys, by_sub
+
+
+def _tnode(label, url, count, current, open_, dim=False, children=None, is_leaf=False):
+    return {"label": label, "url": url, "count": count, "current": current,
+            "open": open_, "dim": dim, "children": children or [], "is_leaf": is_leaf}
+
+
+def sidebar_tree(ctx: dict) -> list[dict]:
+    """The full curated tree as nested nodes for the sidebar. Every node is
+    rendered (so any folder's chevron can expand/collapse it client-side); the
+    branch to the current node (``ctx``) is flagged ``open`` so the tree opens to
+    your location, and the current node is flagged for highlighting. Each node
+    carries a component count."""
+    by_sys, by_sub = _component_totals()
+    sys_by_id, subs_by_sys, leaves_by_sub = {}, {}, {}
+    for n in H.objects.all().order_by("system_id", "subsystem_id", "name"):
+        if n.level == H.LEVEL_SYSTEM:
+            sys_by_id[n.system_id] = n
+        elif n.level == H.LEVEL_SUBSYSTEM:
+            subs_by_sys.setdefault(n.system_id, []).append(n)
+        else:
+            leaves_by_sub.setdefault((n.system_id, n.subsystem_id), []).append(n)
+
+    def subs_of(rk, fk, flat, sid):
+        out = []
+        for sub in subs_by_sys.get(sid, []):
+            ssid = sub.subsystem_id
+            on = ctx.get("system_id") == sid and ctx.get("subsystem_id") == ssid
+            leaves = [
+                _tnode(l.name,
+                       node_path(rk, fk, system_id=None if flat else sid,
+                                 subsystem_id=ssid, part_type_id=l.part_type_id),
+                       l.n_components,
+                       ctx.get("kind") == "leaf" and ctx.get("part_type_id") == l.part_type_id,
+                       False, is_leaf=True)
+                for l in leaves_by_sub.get((sid, ssid), [])
+            ]
+            out.append(_tnode(sub.subsystem_name,
+                              node_path(rk, fk, system_id=None if flat else sid, subsystem_id=ssid),
+                              by_sub.get((sid, ssid), 0),
+                              ctx.get("kind") == "subsystem" and on, on, children=leaves))
+        return out
+
+    tree = []
+    for region in curation.regions():
+        rbr = curation.region_is_browsable(region)
+        rk = region["key"]
+        fams, rcount = [], 0
+        if rbr:
+            for fam in region.get("families", []) or []:
+                fbr = curation.family_is_browsable(fam)
+                fk = fam["key"]
+                fcount = sum(by_sys.get(i, 0) for i in fam.get("systems") or []) if fbr else None
+                children = []
+                if fbr:
+                    rcount += fcount
+                    flat = curation.family_is_flat(fam)
+                    if flat:
+                        sn = sys_by_id.get(fam["systems"][0])
+                        if sn:
+                            children = subs_of(rk, fk, True, sn.system_id)
+                    else:
+                        for sid in fam.get("systems") or []:
+                            sn = sys_by_id.get(sid)
+                            if not sn:
+                                continue
+                            children.append(_tnode(
+                                sn.system_name, node_path(rk, fk, system_id=sid),
+                                by_sys.get(sid, 0),
+                                ctx.get("kind") == "system" and ctx.get("system_id") == sid,
+                                ctx.get("system_id") == sid,
+                                children=subs_of(rk, fk, False, sid)))
+                fams.append(_tnode(
+                    fam["name"], node_path(rk, fk) if fbr else None, fcount,
+                    ctx.get("kind") == "family" and ctx.get("family_key") == fk,
+                    ctx.get("family_key") == fk, dim=not fbr, children=children))
+        tree.append(_tnode(
+            region["name"], node_path(rk) if rbr else None, rcount if rbr else None,
+            ctx.get("kind") == "region" and ctx.get("region_key") == rk,
+            ctx.get("region_key") == rk, dim=not rbr, children=fams))
+    return tree
 
 
 def leaf_path_for(part_type_id: str) -> str | None:

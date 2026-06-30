@@ -164,6 +164,7 @@ def explore_view(request, trail=None):
         "explore/explore.html",
         {
             "view": view,
+            "sidebar": navigation.sidebar_tree(view["ctx"]),
             "leaf": leaf,
             "charts": charts,
             # Mirror is prod-sourced, so deep-link the part type to prod's UI.

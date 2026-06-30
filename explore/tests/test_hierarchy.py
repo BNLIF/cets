@@ -208,6 +208,63 @@ class NavigationTest(TestCase):
         self.assertNotIn("Phantom System", self._html(navigation.node_path("FD", "FD-VD")))
 
 
+class SidebarTest(TestCase):
+    """Expandable, path-following sidebar tree (issue #41)."""
+
+    def setUp(self):
+        _chain("D05700200001", tname="AMC", n_components=42)  # FD-VD TDE / Digital electronics
+        _chain("D08100100003", sid=81, sname="FD CE", ssid=1, ssname="LArASIC",
+               tname="LArASIC P5B Prod", n_components=100)
+
+    def _tree(self, trail):
+        return navigation.sidebar_tree(navigation.resolve(trail)["ctx"])
+
+    def _find(self, nodes, label):
+        for n in nodes:
+            if n["label"] == label:
+                return n
+            hit = self._find(n["children"], label)
+            if hit:
+                return hit
+        return None
+
+    def test_full_tree_built_with_all_regions_and_families(self):
+        tree = self._tree("")  # root
+        regions = [n["label"] for n in tree]
+        self.assertEqual(regions, ["Far Detector", "Near Detector", "Other"])
+        fd = self._find(tree, "Far Detector")
+        fams = [f["label"] for f in fd["children"]]
+        self.assertEqual(fams, ["FD-VD", "FD CE", "FD-HD", "FD shared"])
+
+    def test_path_open_and_current_highlighted(self):
+        tree = self._tree("FD/FD-VD/57/2/D05700200001")  # a leaf
+        self.assertTrue(self._find(tree, "Far Detector")["open"])
+        self.assertTrue(self._find(tree, "FD-VD")["open"])
+        self.assertTrue(self._find(tree, "FD-VD TDE")["open"])
+        self.assertTrue(self._find(tree, "Digital electronics")["open"])
+        self.assertTrue(self._find(tree, "AMC")["current"])
+        # a sibling family on the path's region is present but NOT open
+        self.assertFalse(self._find(tree, "FD CE")["open"])
+
+    def test_counts_on_nodes(self):
+        tree = self._tree("")
+        self.assertGreater(self._find(tree, "FD-VD TDE")["count"], 0)
+
+    def test_non_curated_is_dim_and_unlinked(self):
+        nd = self._find(self._tree(""), "Near Detector")
+        self.assertTrue(nd["dim"])
+        self.assertIsNone(nd["url"])
+
+    def test_sidebar_rendered_with_chevrons(self):
+        u = get_user_model().objects.create_user("sb", "s@s.io", "pw")
+        self.client.force_login(u)
+        html = self.client.get(navigation.node_path("FD", "FD-VD", system_id=57)).content.decode()
+        self.assertIn('id="ex-side"', html)
+        self.assertIn("extree-folder", html)   # collapsible folders
+        self.assertIn("<details", html)
+        self.assertIn("side-toggle", html)
+
+
 class ExploreSyncViewTest(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user("syncer", "s@s.io", "pw")
