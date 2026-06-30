@@ -18,7 +18,7 @@ from hwdb.fnal import session as fnal_session
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
 from hwdb.instance import active_instance
 
-from . import curation
+from . import curation, navigation
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, sync_test_events
 from .hierarchy import sync_hierarchy
@@ -117,90 +117,26 @@ def login_poll_view(request):
 
 @login_not_required
 @fnal_login_required
-def explore_view(request):
-    """Read-only DUNE hardware hierarchy, rendered from the local mirror.
+def explore_view(request, trail=None):
+    """Drill-in navigator over the curated DUNE hardware tree (ADR-0012, #40).
 
-    The sidebar folder-tree (System ▸ Subsystem ▸ Component Type) is built from
-    the ``HierarchyNode`` structure mirror — including empty systems/subsystems
-    (ADR-0012) — with no live HWDB call on render, so the page is not
-    FNAL-gated. Only "Refresh hierarchy" hits the API. Selecting a leaf
-    (``?node=<part_type_id>``) shows its plots.
+    A URL trail resolves to a node; folders render a breadcrumb + a grid of
+    child cards, a component-type leaf renders the detail panel + plots. Reads
+    the local mirror (no live HWDB on render). The legacy ``?node=<ptid>`` link
+    permanently redirects to the node's path URL.
     """
-    # One query for the structure; build the tree via parent links in memory.
-    all_nodes = list(
-        HierarchyNode.objects.all().order_by("system_id", "subsystem_id", "name")
-    )
-    leaves_by_sub: dict[int, list] = {}
-    subs_by_sys: dict[int, list] = {}
-    systems = []
-    for n in all_nodes:
-        if n.level == HierarchyNode.LEVEL_SYSTEM:
-            systems.append(n)
-        elif n.level == HierarchyNode.LEVEL_SUBSYSTEM:
-            subs_by_sys.setdefault(n.parent_id, []).append(n)
-        else:  # component_type
-            leaves_by_sub.setdefault(n.parent_id, []).append(n)
+    legacy = request.GET.get("node")
+    if legacy:
+        dest = navigation.leaf_path_for(legacy)
+        if dest:
+            return redirect(dest)
 
-    systems_by_id = {}
-    for s in systems:
-        subs = []
-        for sub in subs_by_sys.get(s.pk, []):
-            leaves = leaves_by_sub.get(sub.pk, [])
-            subs.append({
-                "id": sub.subsystem_id, "name": sub.subsystem_name or sub.name,
-                "leaves": leaves,
-                "n_components": sum(l.n_components for l in leaves),
-                "n_tests": sum(l.n_tests for l in leaves),
-            })
-        systems_by_id[s.system_id] = {
-            "id": s.system_id, "name": s.system_name,
-            "subs": subs,
-            "n_components": sum(sub["n_components"] for sub in subs),
-            "n_tests": sum(sub["n_tests"] for sub in subs),
-        }
-
-    # Overlay the curation.yaml grouping: Region → Family → System. A family
-    # mapping to one system is flattened (its subsystems render directly); a
-    # family/region marked not-curated renders dimmed (ADR-0012).
-    regions = []
-    for region in curation.regions():
-        r_browsable = region.get("curated", True) is not False
-        families = []
-        for fam in region.get("families", []) or []:
-            sys_ids = fam.get("systems") or []
-            f_browsable = fam.get("curated", True) is not False and bool(sys_ids)
-            sysdicts = [systems_by_id[i] for i in sys_ids if i in systems_by_id]
-            # Flatten on the *curated* system count: a family that owns exactly
-            # one system (FD CE) collapses the system tier even before others
-            # are mirrored; FD-VD (8 systems) never flattens.
-            flat = len(sys_ids) == 1
-            fctx = {
-                "name": fam["name"], "sub": fam.get("sub", ""),
-                "curated": f_browsable, "note": fam.get("note", ""),
-                "flattened": flat,
-                "n_components": sum(s["n_components"] for s in sysdicts),
-                "n_tests": sum(s["n_tests"] for s in sysdicts),
-            }
-            if flat:
-                fctx["subs"] = sysdicts[0]["subs"] if sysdicts else []
-            else:
-                fctx["systems"] = sysdicts
-            families.append(fctx)
-        regions.append({
-            "name": region["name"], "curated": r_browsable,
-            "note": region.get("note", ""), "families": families,
-        })
-
-    selected = request.GET.get("node")
-    selected_node = next(
-        (n for n in all_nodes
-         if n.level == HierarchyNode.LEVEL_TYPE and n.part_type_id == selected),
-        None,
-    ) if selected else None
+    view = navigation.resolve(trail)  # raises Http404 on an unknown path
 
     charts = []
-    if selected_node and selected_node.tests_synced_at:
-        ptid = selected_node.part_type_id
+    leaf = view.get("leaf")
+    if leaf and leaf.tests_synced_at:
+        ptid = leaf.part_type_id
         comp_chart = chart_config(
             slug=f"{ptid}_comp", name="Components updated", href="",
             ranges=component_update_progress(ptid),
@@ -209,7 +145,7 @@ def explore_view(request):
             "By HWDB last-updated date (status change / QC upload bumps it), "
             "not the original mint date."
         )
-        phys = physics_date_field(selected_node.part_type_id)
+        phys = physics_date_field(ptid)
         test_chart = chart_config(
             slug=f"{ptid}_test",
             name="Tests performed" if phys else "Tests recorded",
@@ -227,16 +163,13 @@ def explore_view(request):
         request,
         "explore/explore.html",
         {
-            "regions": regions,
-            "selected_node": selected_node,
+            "view": view,
+            "leaf": leaf,
             "charts": charts,
-            # Mirror is prod-sourced, so deep-link the part type to prod's UI
-            # (matches the /hwdb/larasic/ convention).
+            # Mirror is prod-sourced, so deep-link the part type to prod's UI.
             "hwdb_ui_base": settings.HWDB_PROFILES["prod"]["ui"],
-            "node_count": sum(len(v) for v in leaves_by_sub.values()),
             "sync_state": HierarchySyncState.get(),
             "active_instance": active_instance(request),
-            "page": "hwdb",
         },
     )
 

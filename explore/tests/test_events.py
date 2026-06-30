@@ -14,7 +14,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from explore import events
+from explore import events, navigation
 from explore.models import HierarchyNode as H
 from explore.models import HwdbComponentEvent, HwdbTestEvent
 from explore.queries import component_type_progress, component_update_progress
@@ -236,7 +236,7 @@ class ExplorePlotViewTest(TestCase):
             part_type_id=node.part_type_id, part_id="P1",
             created=datetime(2025, 1, 5, tzinfo=dt_timezone.utc),
         )
-        html = self.client.get(reverse("explore:home") + f"?node={node.part_type_id}").content.decode()
+        html = self.client.get(navigation.leaf_path_for(node.part_type_id)).content.decode()
         self.assertIn("node-chart-config", html)
         self.assertIn(f"bar_{node.part_type_id}_comp", html)   # components-updated chart
         self.assertIn(f"bar_{node.part_type_id}_test", html)   # tests-recorded chart
@@ -245,12 +245,12 @@ class ExplorePlotViewTest(TestCase):
 
     def test_unsynced_node_shows_autosync_block(self):
         node = _node()  # tests_synced_at is NULL
-        html = self.client.get(reverse("explore:home") + f"?node={node.part_type_id}").content.decode()
+        html = self.client.get(navigation.leaf_path_for(node.part_type_id)).content.decode()
         self.assertIn('id="node-unsynced"', html)
 
     def test_synced_but_empty_node(self):
         node = _node(tests_synced_at=timezone.now(), n_tests=0)
-        html = self.client.get(reverse("explore:home") + f"?node={node.part_type_id}").content.decode()
+        html = self.client.get(navigation.leaf_path_for(node.part_type_id)).content.decode()
         self.assertIn("No tests recorded", html)
 
 

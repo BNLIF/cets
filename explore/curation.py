@@ -35,6 +35,27 @@ def _region_is_browsable(region: dict) -> bool:
     return region.get("curated", True) is not False
 
 
+def find_region(key: str) -> dict | None:
+    return next((r for r in regions() if r.get("key") == key), None)
+
+
+def find_family(region: dict, key: str) -> dict | None:
+    return next((f for f in region.get("families", []) or [] if f.get("key") == key), None)
+
+
+def family_is_browsable(fam: dict) -> bool:
+    return _family_is_browsable(fam)
+
+
+def region_is_browsable(region: dict) -> bool:
+    return _region_is_browsable(region)
+
+
+def family_is_flat(fam: dict) -> bool:
+    """A family that owns exactly one system collapses the system tier."""
+    return len(fam.get("systems") or []) == 1
+
+
 def curated_system_ids() -> set[int]:
     """All system ids the explorer browses/syncs — the union across browsable
     families in browsable regions."""

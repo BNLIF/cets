@@ -10,28 +10,37 @@
 # what's newly available to curate (issue #39). System ids are the `id` field
 # of `systems/D`.
 
+# `key` is the stable URL slug for each region/family (used in deep links like
+# /explore/FD/FD-VD/57/2/D05700200001). Keep keys stable across edits.
 regions:
   - name: Far Detector
+    key: FD
     families:
       - name: FD-VD
+        key: FD-VD
         sub: Vertical Drift
         systems: [51, 54, 55, 56, 57, 58, 59, 80]
       - name: FD CE
+        key: FD-CE
         sub: Cold Electronics            # single system → flattened in the tree
         systems: [81]
       - name: FD-HD
+        key: FD-HD
         sub: Horizontal Drift
         curated: false
         note: "6 systems in HWDB · not curated"
       - name: FD shared
+        key: FD-shared
         sub: DAQ · Slow Control · Cryostat · Integration
         curated: false
         note: "5 systems in HWDB · not curated"
 
   - name: Near Detector
+    key: ND
     curated: false
     note: "9 systems in HWDB · not curated"
 
   - name: Other
+    key: OT
     curated: false
     note: "Facilities · Computing · Prototypes · not curated"

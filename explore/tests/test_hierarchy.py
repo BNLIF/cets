@@ -12,7 +12,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from explore import curation, hierarchy
+from explore import curation, hierarchy, navigation
 from explore.models import HierarchyNode as H
 from explore.models import HierarchySyncState
 from hwdb.fnal.bearer import FnalLinkRequired
@@ -132,75 +132,80 @@ class SyncHierarchyTest(TestCase):
         self.assertFalse(H.objects.filter(part_type_id="D05700200099").exists())
 
 
-class ExploreViewTest(TestCase):
+class NavigationTest(TestCase):
+    """Drill-in navigation + deep-link URLs (issue #40)."""
+
     def setUp(self):
         self.user = get_user_model().objects.create_user("explorer", "e@e.io", "pw")
+        self.client.force_login(self.user)
+        # FD-VD TDE (multi-system family) and FD CE (flattened family).
         _chain("D05700200001", tname="AMC", n_components=3956)
+        _chain("D08100100003", sid=81, sname="FD CE", ssid=1, ssname="LArASIC",
+               tname="LArASIC P5B Prod", tests_synced_at=None, n_components=100)
+
+    def _html(self, url):
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        return resp.content.decode()
 
     def test_requires_login(self):
+        self.client.logout()
         resp = self.client.get(reverse("explore:home"))
         self.assertEqual(resp.status_code, 302)
         self.assertIn(reverse("explore:login"), resp["Location"])
 
-    def test_renders_tree_from_mirror(self):
-        self.client.force_login(self.user)
-        html = self.client.get(reverse("explore:home")).content.decode()
-        self.assertEqual(self.client.get(reverse("explore:home")).status_code, 200)
-        self.assertIn("FD-VD TDE", html)
-        self.assertIn("Digital electronics", html)
-        self.assertIn("AMC", html)
-        self.assertIn("3956", html)
+    def test_root_shows_region_cards(self):
+        html = self._html(reverse("explore:home"))
+        self.assertIn("Far Detector", html)
+        self.assertIn("Near Detector", html)   # declared region…
+        self.assertIn("not curated", html)      # …dimmed, not browsable
         self.assertIn("Refresh hierarchy", html)
 
-    def test_empty_system_shows_in_tree(self):
-        H.objects.create(level=H.LEVEL_SYSTEM, system_id=54, system_name="FD-VD PDS",
-                         name="FD-VD PDS")
-        self.client.force_login(self.user)
-        html = self.client.get(reverse("explore:home")).content.decode()
-        self.assertIn("FD-VD PDS", html)   # empty system still navigable
+    def test_region_shows_family_cards(self):
+        html = self._html(navigation.node_path("FD"))
+        self.assertIn("FD-VD", html)
+        self.assertIn("FD CE", html)
 
-    def test_selected_node_panel(self):
-        self.client.force_login(self.user)
-        html = self.client.get(reverse("explore:home") + "?node=D05700200001").content.decode()
-        self.assertIn("FD-VD TDE", html)
-        self.assertIn("Digital electronics", html)
-        self.assertIn("node-sync-btn", html)
+    def test_multi_system_family_shows_system_cards(self):
+        html = self._html(navigation.node_path("FD", "FD-VD"))
+        self.assertIn("FD-VD TDE", html)         # system tier present
 
+    def test_single_system_family_flattens_to_subsystems(self):
+        # FD CE owns one system → its subsystems render directly under the family.
+        html = self._html(navigation.node_path("FD", "FD-CE"))
+        self.assertIn("LArASIC", html)            # subsystem card directly under family
+        self.assertNotIn(">System<", html)        # no System-tier card
 
-class GroupingTest(TestCase):
-    """Region/Family overlay from curation.yaml (issue #38)."""
+    def test_drill_system_subsystem_leaf(self):
+        sub = self._html(navigation.node_path("FD", "FD-VD", system_id=57))
+        self.assertIn("Digital electronics", sub)
+        leaves = self._html(navigation.node_path("FD", "FD-VD", system_id=57, subsystem_id=2))
+        self.assertIn("AMC", leaves)
+        leaf_url = navigation.node_path("FD", "FD-VD", system_id=57, subsystem_id=2,
+                                        part_type_id="D05700200001")
+        detail = self._html(leaf_url)
+        self.assertIn("Part type ID", detail)        # leaf detail panel
+        self.assertIn("node-sync-btn", detail)
 
-    def setUp(self):
-        self.user = get_user_model().objects.create_user("g", "g@g.io", "pw")
-        self.client.force_login(self.user)
+    def test_legacy_node_query_redirects_to_path(self):
+        resp = self.client.get(reverse("explore:home") + "?node=D05700200001")
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"],
+                         navigation.node_path("FD", "FD-VD", system_id=57,
+                                               subsystem_id=2, part_type_id="D05700200001"))
 
-    def _html(self):
-        return self.client.get(reverse("explore:home")).content.decode()
+    def test_unknown_path_404(self):
+        self.assertEqual(self.client.get(navigation.node_path("NOPE")).status_code, 404)
 
-    def test_non_curated_region_renders_dimmed(self):
-        html = self._html()
-        self.assertIn("Near Detector", html)   # declared region…
-        self.assertIn("not curated", html)      # …shown dimmed, not browsable
+    def test_non_curated_region_not_browsable(self):
+        # Near Detector is declared but curated: false → its node 404s.
+        self.assertEqual(self.client.get(navigation.node_path("ND")).status_code, 404)
 
-    def test_single_system_family_flattens(self):
-        # FD CE owns one system (81) → system tier collapses; its subsystems
-        # render directly under the family, no system node.
-        _chain("D08100100003", sid=81, sname="FD CE", ssid=1, ssname="LArASIC",
-               tname="LArASIC P5B Prod")
-        html = self._html()
-        self.assertIn("LArASIC", html)
-        self.assertNotIn('class="tree-sys"', html)  # no system tier rendered
-
-    def test_multi_system_family_keeps_system_tier(self):
-        _chain("D05700200001", tname="AMC")  # FD-VD TDE (system 57)
-        html = self._html()
-        self.assertIn("FD-VD TDE", html)
-        self.assertIn('class="tree-sys"', html)      # system tier kept for multi-system FD-VD
-
-    def test_uncurated_system_not_shown(self):
+    def test_uncurated_system_not_reachable(self):
         H.objects.create(level=H.LEVEL_SYSTEM, system_id=999,
                          system_name="Phantom System", name="Phantom System")
-        self.assertNotIn("Phantom System", self._html())
+        # 999 isn't in any curated family → not in the FD-VD systems grid.
+        self.assertNotIn("Phantom System", self._html(navigation.node_path("FD", "FD-VD")))
 
 
 class ExploreSyncViewTest(TestCase):
