@@ -37,6 +37,17 @@ class CetsZoneGuardTest(_Base):
         self.client.force_login(self.explore_user)
         self.assertEqual(self.client.get(self.cets_url).status_code, 403)
 
+    def test_deny_page_offers_cets_login_with_next(self):
+        # The deny page must not be a dead end — it links to the CETS login,
+        # carrying the requested path so login returns the user there.
+        self.client.force_login(self.explore_user)
+        resp = self.client.get(self.cets_url)
+        self.assertEqual(resp.status_code, 403)
+        from urllib.parse import urlencode
+        body = resp.content.decode()
+        login = reverse("rest_framework:login")
+        self.assertIn(f"{login}?{urlencode({'next': self.cets_url})}", body)
+
     def test_explore_only_user_allowed_on_explore(self):
         self.client.force_login(self.explore_user)
         self.assertEqual(self.client.get(self.explore_url).status_code, 200)

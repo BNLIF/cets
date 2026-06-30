@@ -16,8 +16,11 @@ superusers bypass entirely.
 
 from __future__ import annotations
 
+from urllib.parse import urlencode
+
 from django.conf import settings
 from django.http import HttpResponseForbidden
+from django.urls import reverse
 
 CETS_GROUP = "cets"
 
@@ -40,7 +43,9 @@ _FORBIDDEN_HTML = (
     "<h1 style='font-size:1.3rem'>Not available</h1>"
     "<p>This page is part of the cold-electronics tracking system and isn’t "
     "available to your account.</p>"
-    "<p><a href='{explore}'>← Back to HWDB Explorer</a></p></div>"
+    "<p>If you have a CETS account, <a href='{login}'>sign in with it</a> to "
+    "continue. Otherwise, head <a href='{explore}'>back to HWDB Explorer</a>.</p>"
+    "</div>"
 )
 
 
@@ -79,7 +84,14 @@ class CetsZoneMiddleware:
         if rm.view_name in _ALLOWED_VIEW_NAMES:
             return None
 
-        from django.urls import reverse
+        # Offer a CETS sign-in path (the deny page is otherwise a dead end for a
+        # FNAL user who actually has a CETS account). The DRF login form accepts
+        # new credentials even while authenticated, swapping the session user;
+        # ``next`` returns them to the page they wanted.
+        login = (
+            f"{reverse('rest_framework:login')}?"
+            f"{urlencode({'next': request.get_full_path()})}"
+        )
         return HttpResponseForbidden(
-            _FORBIDDEN_HTML.format(explore=reverse("explore:home"))
+            _FORBIDDEN_HTML.format(explore=reverse("explore:home"), login=login)
         )
