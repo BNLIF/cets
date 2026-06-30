@@ -198,7 +198,7 @@
             <thead><tr><th>Box PID</th><th>Status</th><th>Latest location</th><th>Contents</th><th>Shipped</th><th>Received</th></tr></thead>
             <tbody>
             {% for s in shipments %}
-                <tr class="ship-row" onclick="location.href='{% url 'explore:shipment_detail' part_id=s.part_id %}'" title="Open shipping details for {{ s.part_id }}">
+                <tr class="ship-row" onclick="location.href='{% url 'explore:part' part_id=s.part_id %}'" title="Open shipping details for {{ s.part_id }}">
                     <td class="mono"><a href="{{ hwdb_ui_base }}/edit/component/{{ s.part_id }}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open this box in the FNAL HWDB">{{ s.part_id }} <span aria-hidden="true">&#x2197;</span></a></td>
                     <td><span class="ship-pill {% if s.is_in_transit %}is-transit{% elif s.location_id is not None %}is-delivered{% else %}is-unknown{% endif %}">{{ s.status_label }}</span></td>
                     <td>{{ s.location_name|default:"—" }}</td>
@@ -279,6 +279,34 @@
         <dt>{% if is_shipping %}Boxes in HWDB{% else %}Components in HWDB{% endif %}</dt><dd>{{ leaf.n_components }}</dd>
         {% if not is_shipping %}<dt>Test events</dt><dd>{{ leaf.n_tests }}</dd>{% endif %}
     </dl>
+
+    {% if parts_page %}
+    <details class="chart-card ship-boxes" open>
+        <summary class="ship-boxes-sum">Components ({{ parts_page.paginator.count }}) <span class="cell-muted" style="font-weight:400;">— click to collapse</span></summary>
+        {% if parts_page.paginator.num_pages > 1 %}
+        <div style="display:flex;gap:14px;justify-content:center;align-items:center;margin:4px 0 14px;font-size:13px;">
+            {% if parts_page.has_previous %}<a style="color:var(--accent-ink);text-decoration:none;" href="?page=1">« First</a><a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.previous_page_number }}">‹ Prev</a>{% else %}<span class="cell-muted">« First</span><span class="cell-muted">‹ Prev</span>{% endif %}
+            <span class="cell-muted" style="font-variant-numeric:tabular-nums;">Page {{ parts_page.number }} of {{ parts_page.paginator.num_pages }} · {{ parts_page.paginator.count }} components</span>
+            {% if parts_page.has_next %}<a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.next_page_number }}">Next ›</a><a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.paginator.num_pages }}">Last »</a>{% else %}<span class="cell-muted">Next ›</span><span class="cell-muted">Last »</span>{% endif %}
+        </div>
+        {% endif %}
+        <table class="ship-table">
+            <thead><tr><th>Part ID</th><th>Created</th><th>Updated</th></tr></thead>
+            <tbody>
+            {% for p in parts_page %}
+                <tr class="ship-row" onclick="window.open('{% url 'explore:part' part_id=p.part_id %}','_blank')" title="Open {{ p.part_id }} in a new tab">
+                    <td class="mono"><a href="{% url 'explore:part' part_id=p.part_id %}" target="_blank" rel="noopener" onclick="event.stopPropagation()">{{ p.part_id }} <span aria-hidden="true">&#x2197;</span></a></td>
+                    <td class="mono">{% if p.created %}{{ p.created|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+                    <td class="mono">{% if p.updated %}{{ p.updated|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="3" class="cell-muted">No components mirrored.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">Mirrored from HWDB on sync, newest update first. “Created” is the HWDB mint date; click a row to open the part in a new tab.</p>
+    </details>
+    {% endif %}
 {% else %}
     {# ---- Folder: grid of child nodes ---- #}
     {% if view.cards %}

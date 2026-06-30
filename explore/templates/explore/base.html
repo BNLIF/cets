@@ -24,6 +24,15 @@
             <a class="eh-nav-item{% if active_nav == 'shipments' %} active{% endif %}" href="{% url 'explore:shipments' %}">Shipments</a>
         </nav>
         <div class="eh-right">
+            {% if user.is_authenticated %}
+            <form class="eh-find" role="search"
+                  onsubmit="event.preventDefault(); var v=this.pid.value.trim(); if(v){location.href='{% url 'explore:part' part_id='__PID__' %}'.replace('__PID__', encodeURIComponent(v));}">
+                <input name="pid" type="text" placeholder="Go to PID…" aria-label="Open a part by PID"
+                       autocomplete="off" spellcheck="false"
+                       style="font:inherit;font-size:13px;padding:5px 11px;border:1px solid var(--rule);
+                              border-radius:999px;background:var(--page);color:var(--ink);width:140px;">
+            </form>
+            {% endif %}
             {% if fnal_credkey %}
             <span class="eh-user" title="Signed in via FNAL">
                 <span class="eh-user-dot">{{ fnal_credkey|slice:":2"|upper }}</span>{{ fnal_credkey }}

@@ -132,56 +132,27 @@ def shipment_details(data_blob: dict | None) -> list[dict]:
     out = []
     for key, title in _DETAIL_SECTIONS:
         entries = (data_blob or {}).get(key)
-        fields, attachments = [], []
-        if isinstance(entries, list):
-            for entry in entries:
-                if not isinstance(entry, dict):
-                    continue
-                for k, v in entry.items():
-                    if v in (None, "", [], {}):
-                        continue
-                    if "Image ID" in k:
-                        attachments.append({"label": _image_label(k), "image_id": str(v)})
-                    else:
-                        fields.append({"label": k, "value": str(v)})
+        fields, attachments = fold_entries(entries if isinstance(entries, list) else [])
         out.append({"title": title, "fields": fields, "attachments": attachments})
     return out
 
 
-def box_detail(api, part_id: str) -> dict:
-    """Live detail for one box: location timeline, manifest, the FD shipping
-    checklists, and downloadable attachments.
-
-    Read live on expand (ADR-0013, #44) — not mirrored. ``timeline`` is newest
-    first; ``manifest`` is the current contents; ``details`` are the spec-blob
-    checklists; ``attachments`` is every image on the box (label, BoL, …).
-    """
-    locs = api.get_locations(part_id).get("data") or []
-    timeline = sorted(
-        ({"arrived": e.get("arrived"),
-          "location": (e.get("location") or {}).get("name"),
-          "location_id": (e.get("location") or {}).get("id"),
-          "creator": e.get("creator"),
-          "comments": e.get("comments")}
-         for e in locs),
-        key=lambda e: e["arrived"] or "", reverse=True,
-    )
-    manifest = current_manifest(api.get_subcomponents(part_id).get("data"))
-
-    images = [i for i in (api.get_images(part_id).get("data") or []) if i.get("image_id")]
-    name_by_id = {str(i["image_id"]): i.get("image_name") for i in images}
-    details = shipment_details(_spec_data(api.get_component(part_id)))
-    # Carry the real HWDB filename so downloads keep their extension; the spec
-    # only gives the image *id*, not the name (e.g. "…-shipping-label.pdf").
-    for sec in details:
-        for a in sec["attachments"]:
-            a["filename"] = name_by_id.get(a["image_id"]) or a["label"]
-            a["is_image"] = _is_image(a["filename"])
-    attachments = [{"image_id": str(i["image_id"]), "image_name": i.get("image_name"),
-                    "is_image": _is_image(i.get("image_name"))}
-                   for i in images]
-    return {"part_id": part_id, "timeline": timeline, "manifest": manifest,
-            "details": details, "attachments": attachments}
+def fold_entries(entries: list) -> tuple[list, list]:
+    """Fold a list of single-/multi-field dict entries into ordered key/value
+    ``fields`` plus downloadable ``attachments`` (any ``Image ID for …`` key).
+    Shared by the shipping checklists and the generic spec renderer (#0014)."""
+    fields, attachments = [], []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        for k, v in entry.items():
+            if v in (None, "", [], {}):
+                continue
+            if "Image ID" in k:
+                attachments.append({"label": _image_label(k), "image_id": str(v)})
+            else:
+                fields.append({"label": k, "value": str(v)})
+    return fields, attachments
 
 
 def _list_boxes(api, part_type_id: str) -> list[tuple[str, str | None]]:

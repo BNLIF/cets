@@ -15,7 +15,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from explore import curation, navigation, shipments
+from explore import curation, navigation, parts, shipments
 from explore.models import HierarchyNode as H
 from explore.models import HwdbComponentEvent, ShipmentItem
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable
@@ -272,7 +272,7 @@ class ShipmentPanelViewTest(TestCase):
                                     location_name="FNAL", location_id=1, n_contents=1)
         html = self.client.get(navigation.leaf_path_for(leaf.part_type_id)).content.decode()
         self.assertIn('class="ship-row"', html)
-        self.assertIn("/explore/shipment/B1/", html)  # row click → detail page
+        self.assertIn("/explore/part/B1/", html)  # row click → part detail page
 
     def test_box_pid_links_to_hwdb(self):
         leaf = _ship_leaf()
@@ -328,8 +328,10 @@ class ShipmentDetailsTest(TestCase):
         self.assertTrue(all(not s["fields"] and not s["attachments"] for s in secs))
 
 
-class BoxDetailTest(TestCase):
-    def _api(self, component=None, images=None):
+class PartDetailEngineTest(TestCase):
+    """parts.part_detail — the generic engine (box page is is_shipping=True)."""
+
+    def _api(self, component=None, images=None, tests=None):
         api = mock.MagicMock()
         api.get_locations.return_value = {"data": [
             _loc("BNL", 128, "2026-06-03T00:00:00-05:00"),
@@ -343,22 +345,24 @@ class BoxDetailTest(TestCase):
         ]}
         api.get_component.return_value = component or {"data": {"specifications": []}}
         api.get_images.return_value = {"data": images or []}
+        api.get_tests.return_value = {"data": tests or []}
         return api
 
     def test_timeline_sorted_desc_and_manifest_filters_unmount(self):
-        d = shipments.box_detail(self._api(), "B1")
+        d = parts.part_detail(self._api(), "B1", is_shipping=False)
         self.assertEqual(d["timeline"][0]["location"], "In Transit")
         self.assertEqual(d["timeline"][0]["location_id"], 0)
         self.assertEqual([m["part_id"] for m in d["manifest"]], ["P1"])
+        self.assertTrue(d["has_location"])
 
-    def test_includes_details_and_attachments(self):
+    def test_shipping_box_uses_lifecycle_sections_and_attachments(self):
         api = self._api(
             component=_component({"Warehouse": [{"SKU": "SKU-1", "PalletID": "PAL-7"}]}),
             images=[{"image_id": "img-1", "image_name": "label.pdf"},
                     {"image_id": None, "image_name": "broken"}],  # dropped (no id)
         )
-        d = shipments.box_detail(api, "B1")
-        self.assertEqual(_sec(d["details"], "Info @ Warehouse")["fields"][0]["label"], "SKU")
+        d = parts.part_detail(api, "B1", is_shipping=True)
+        self.assertEqual(_sec(d["sections"], "Info @ Warehouse")["fields"][0]["label"], "SKU")
         self.assertEqual([a["image_id"] for a in d["attachments"]], ["img-1"])
 
     def test_flags_image_attachments_for_thumbnailing(self):
@@ -369,7 +373,7 @@ class BoxDetailTest(TestCase):
             images=[{"image_id": "img-jpg", "image_name": "inspect.JPG"},
                     {"image_id": "img-pdf", "image_name": "bol.pdf"}],
         )
-        secs = shipments.box_detail(api, "B1")["details"]
+        secs = parts.part_detail(api, "B1", is_shipping=True)["sections"]
         atts = {a["image_id"]: a for a in _sec(secs, "Shipping")["attachments"]}
         self.assertTrue(atts["img-jpg"]["is_image"])    # .JPG (case-insensitive)
         self.assertFalse(atts["img-pdf"]["is_image"])   # .pdf → download chip
@@ -382,7 +386,7 @@ class BoxDetailTest(TestCase):
                 {"Shipping Checklist": [{"Image ID for this Shipping Sheet": "img-1"}]}),
             images=[{"image_id": "img-1", "image_name": "D08120200001-00002-shipping-label.pdf"}],
         )
-        att = _sec(shipments.box_detail(api, "B1")["details"], "Shipping")["attachments"][0]
+        att = _sec(parts.part_detail(api, "B1", is_shipping=True)["sections"], "Shipping")["attachments"][0]
         self.assertEqual(att["label"], "Shipping Sheet")
         self.assertEqual(att["filename"], "D08120200001-00002-shipping-label.pdf")
 
@@ -397,7 +401,7 @@ class ShipmentDetailPageTest(TestCase):
         self.part_id = SHIP_PTID + "-00002"
         ShipmentItem.objects.create(part_type_id=SHIP_PTID, part_id=self.part_id,
                                     location_name="In Transit", location_id=0, n_contents=1)
-        self.url = "/explore/shipment/" + self.part_id + "/"
+        self.url = "/explore/part/" + self.part_id + "/"
 
     def _api(self):
         api = mock.MagicMock()
@@ -406,6 +410,7 @@ class ShipmentDetailPageTest(TestCase):
         api.get_component.return_value = {"data": {"specifications": [
             {"DATA": {"Shipping Checklist": [{"Image ID for this Shipping Sheet": "img-1"}]}}]}}
         api.get_images.return_value = {"data": [{"image_id": "img-1", "image_name": "label.pdf"}]}
+        api.get_tests.return_value = {"data": []}
         return api
 
     def test_renders_detail_with_checklist_and_download(self):

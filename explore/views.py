@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
@@ -5,7 +6,8 @@ from urllib.parse import urlencode
 from django.conf import settings
 from django.contrib.auth.decorators import login_not_required
 from django.core.paginator import Paginator
-from django.http import JsonResponse, StreamingHttpResponse
+from django.db.models import F
+from django.http import HttpResponse, JsonResponse, StreamingHttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -23,9 +25,12 @@ from . import curation, navigation
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, sync_test_events
 from .hierarchy import sync_hierarchy
-from .models import HierarchyNode, HierarchySyncState, ShipmentItem
+from .models import (
+    HierarchyNode, HierarchySyncState, HwdbComponentEvent, ShipmentItem,
+)
 from .queries import component_type_progress, component_update_progress
-from .shipments import box_detail, sync_shipments
+from .parts import part_detail
+from .shipments import sync_shipments
 
 logger = logging.getLogger(__name__)
 FNAL_UNAVAILABLE = "FNAL authentication service is unavailable. Please try again later."
@@ -184,6 +189,17 @@ def explore_view(request, trail=None):
         )
         charts = [comp_chart, test_chart]
 
+    # Paginated parts table for a synced non-shipping leaf — every component of
+    # the type from the mirror (HwdbComponentEvent), each row opening its part
+    # page. Mirror-backed like the box table, so no live HWDB on render.
+    parts_page = None
+    if leaf and not is_shipping and leaf.tests_synced_at:
+        part_rows = (HwdbComponentEvent.objects
+                     .filter(part_type_id=leaf.part_type_id)
+                     .order_by(F("updated").desc(nulls_last=True),
+                               F("created").desc(nulls_last=True), "part_id"))
+        parts_page = Paginator(part_rows, 50).get_page(request.GET.get("page"))
+
     return render(
         request,
         "explore/explore.html",
@@ -192,6 +208,7 @@ def explore_view(request, trail=None):
             "sidebar": navigation.sidebar_tree(view["ctx"]),
             "leaf": leaf,
             "charts": charts,
+            "parts_page": parts_page,
             "is_shipping": is_shipping,
             "shipments": shipments,
             "shipment_synced_at": shipment_synced_at,
@@ -382,13 +399,43 @@ def explore_shipment_image_view(request, image_id):
 
 @login_not_required
 @fnal_login_required
-def explore_shipment_detail_view(request, part_id):
-    """Full page for one shipping box — timeline, manifest, FD shipping
-    checklists and downloadable label/attachments — so a box's details open in
-    one click instead of drilling into the leaf and expanding inline (ADR-0013).
+def explore_test_data_view(request, part_id, test_type_id):
+    """Render one test's ``test_data`` payload as pretty JSON, inline as text
+    (opened in a new tab) — ADR-0014.
 
-    Live from HWDB on render (the detail isn't mirrored); FNAL-gated, so an
-    unlinked user is bounced to the link page with a ?next back here.
+    The structured field the Python dashboard's test-data export serializes;
+    here, per part + test type, the latest record's ``test_data`` straight from
+    HWDB. FNAL-gated.
+    """
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        return JsonResponse({"error": "fnal_link", "link": reverse("hwdb:link")}, status=409)
+    except FnalUnavailable:
+        return JsonResponse({"error": "unavailable"}, status=502)
+
+    api = FnalDbApiClient(settings.HWDB_PROFILES["prod"]["api"], bearer)
+    try:
+        data = api.get_tests(part_id, test_type_id=test_type_id).get("data")
+    except Exception:
+        logger.exception("explore_test_data_view(%s,%s) crashed", part_id, test_type_id)
+        return JsonResponse({"error": "fetch_failed"}, status=502)
+
+    rec = (max(data, key=lambda r: r.get("created") or "")
+           if isinstance(data, list) and data else data if isinstance(data, dict) else None)
+    test_data = (rec or {}).get("test_data")
+    body = json.dumps(test_data if test_data is not None else {}, indent=2)
+    return HttpResponse(body, content_type="text/plain; charset=utf-8")
+
+
+@login_not_required
+@fnal_login_required
+def explore_part_view(request, part_id):
+    """Generic per-part detail page (ADR-0014): item facts, a latest-per-type
+    test summary, subcomponents, specifications, attachments (with download)
+    and a location timeline — live from HWDB. A shipping box additionally shows
+    its shipment lifecycle. FNAL-gated; an unlinked user is bounced to link with
+    a ?next back here.
     """
     try:
         bearer = mint_for(request)
@@ -396,35 +443,36 @@ def explore_shipment_detail_view(request, part_id):
         link = reverse("hwdb:link")
         return redirect(f"{link}?{urlencode({'next': request.get_full_path()})}")
     except FnalUnavailable:
-        return render(request, "explore/shipment_detail.html",
-                      {"part_id": part_id, "active_nav": "shipments", "unavailable": True})
-
-    api = FnalDbApiClient(settings.HWDB_PROFILES["prod"]["api"], bearer)
-    try:
-        detail = box_detail(api, part_id)
-    except Exception:
-        logger.exception("explore_shipment_detail_view(%s) crashed", part_id)
-        return render(request, "explore/shipment_detail.html",
-                      {"part_id": part_id, "active_nav": "shipments", "unavailable": True})
-
-    # Catch-all attachments minus the ones already shown in a checklist section.
-    shown = {a["image_id"] for sec in detail["details"] for a in sec["attachments"]}
-    other_attachments = [a for a in detail["attachments"] if a["image_id"] not in shown]
+        return render(request, "explore/part_detail.html",
+                      {"part_id": part_id, "unavailable": True})
 
     ptid = part_id.rsplit("-", 1)[0]
+    is_shipping = curation.is_shipping_type(ptid)
+    api = FnalDbApiClient(settings.HWDB_PROFILES["prod"]["api"], bearer)
+    try:
+        detail = part_detail(api, part_id, is_shipping)
+    except Exception as e:
+        logger.exception("explore_part_view(%s) crashed", part_id)
+        return render(request, "explore/part_detail.html",
+                      {"part_id": part_id, "unavailable": True,
+                       "error_detail": f"{type(e).__name__}: {e}" if settings.DEBUG else None})
+
+    # Catch-all attachments minus the ones already shown in a spec section.
+    shown = {a["image_id"] for sec in detail["sections"] for a in sec["attachments"]}
+    other_attachments = [a for a in detail["attachments"] if a["image_id"] not in shown]
+
     leaf = HierarchyNode.objects.filter(
         level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
-    box = ShipmentItem.objects.filter(part_id=part_id).first()
-    latest = detail["timeline"][0] if detail["timeline"] else None
-    return render(request, "explore/shipment_detail.html", {
-        "active_nav": "shipments",
+    box = ShipmentItem.objects.filter(part_id=part_id).first() if is_shipping else None
+    return render(request, "explore/part_detail.html", {
+        # A box belongs to the Shipments tab; everything else to Hardware.
+        "active_nav": "shipments" if is_shipping else "hardware",
         "part_id": part_id,
         "detail": detail,
+        "is_shipping": is_shipping,
         "other_attachments": other_attachments,
         "leaf": leaf,
         "leaf_path": navigation.leaf_path_for(ptid) if leaf else None,
         "box": box,
-        "latest": latest,
-        "in_transit": bool(latest and latest["location_id"] == 0),
         "hwdb_ui_base": settings.HWDB_PROFILES["prod"]["ui"],
     })

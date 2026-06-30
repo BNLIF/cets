@@ -1,5 +1,5 @@
 {% extends 'explore/base.html' %}
-{% block title %}{{ part_id }} · Shipments · HWDB Explorer{% endblock %}
+{% block title %}{{ part_id }} · HWDB Explorer{% endblock %}
 
 {% block content %}
 <style>
@@ -69,35 +69,97 @@
 
 <div class="sd-page">
   <div class="sd-crumbs">
-    <a href="{% url 'explore:shipments' %}">Shipments</a>
+    {% if is_shipping %}<a href="{% url 'explore:shipments' %}">Shipments</a>
+    {% else %}<a href="{% url 'explore:home' %}">Hardware</a>{% endif %}
     {% if leaf_path %}<span class="sep">›</span><a href="{{ leaf_path }}">{{ leaf.name }}</a>{% endif %}
     <span class="sep">›</span>{{ part_id }}
   </div>
 
   {% if unavailable %}
   <div class="sd-head"><h1>{{ part_id }}</h1></div>
-  <div class="sd-banner">Couldn’t load this box’s live detail from HWDB right now. Try again shortly.</div>
+  <div class="sd-banner">Couldn’t load this part’s live detail from HWDB right now. Try again shortly.
+    {% if error_detail %}<br><code style="font-size:12px;">{{ error_detail }}</code>{% endif %}
+  </div>
   {% else %}
 
   <div class="sd-head">
     <h1>{{ part_id }}</h1>
     <a class="hwdb" href="{{ hwdb_ui_base }}/edit/component/{{ part_id }}" target="_blank" rel="noopener">Open in FNAL HWDB &#x2197;</a>
-    {% if in_transit %}<span class="sd-pill is-transit">In Transit</span>
-    {% elif latest %}<span class="sd-pill is-delivered">Delivered</span>{% endif %}
+    {% if is_shipping %}
+      {% if detail.in_transit %}<span class="sd-pill is-transit">In Transit</span>
+      {% elif detail.has_location %}<span class="sd-pill is-delivered">Delivered</span>{% endif %}
+    {% elif detail.status %}<span class="sd-pill">{{ detail.status }}</span>{% endif %}
   </div>
-  <p class="sd-subtitle">{% if leaf %}{{ leaf.system_name }} <span class="sep">›</span> {{ leaf.subsystem_name }}{% endif %}</p>
+  <p class="sd-subtitle">
+    {% if detail.type_name %}{{ detail.type_name }}{% endif %}
+    {% if leaf %} <span class="sep">·</span> {{ leaf.system_name }} <span class="sep">›</span> {{ leaf.subsystem_name }}{% endif %}
+  </p>
 
+  {% if is_shipping %}
   <div class="sd-chips">
-    <div class="sd-chip"><div class="sd-chip-l">Latest location</div><div class="sd-chip-v">{% if in_transit %}In Transit{% else %}{{ latest.location|default:"—" }}{% endif %}</div></div>
+    <div class="sd-chip"><div class="sd-chip-l">Latest location</div><div class="sd-chip-v">{% if detail.in_transit %}In Transit{% else %}{{ detail.timeline.0.location|default:"—" }}{% endif %}</div></div>
     <div class="sd-chip"><div class="sd-chip-l">Contents</div><div class="sd-chip-v">{{ detail.manifest|length }}</div></div>
     {% if box %}
     <div class="sd-chip"><div class="sd-chip-l">Shipped</div><div class="sd-chip-v">{% if box.shipped_date %}{{ box.shipped_date|date:"Y-m-d" }}{% else %}—{% endif %}</div></div>
     <div class="sd-chip"><div class="sd-chip-l">Received</div><div class="sd-chip-v">{% if box.received_date %}{{ box.received_date|date:"Y-m-d" }}{% else %}—{% endif %}</div></div>
     {% endif %}
   </div>
+  {% endif %}
 
   <div class="sd-grid">
     <div>
+      {% if detail.facts %}
+      <div class="sd-card">
+        <h2>Item</h2>
+        <table class="sd-kv">
+          {% for f in detail.facts %}<tr><td class="k">{{ f.label }}</td><td>{{ f.value }}</td></tr>{% endfor %}
+        </table>
+      </div>
+      {% endif %}
+
+      <div class="sd-card">
+        <h2>Tests</h2>
+        <table class="sd-table">
+          <thead><tr><th>Test type</th><th>Status</th><th>Latest</th><th>Data</th><th>Comments</th></tr></thead>
+          <tbody>
+          {% for t in detail.tests %}
+            <tr>
+              <td>{{ t.test_type }}</td>
+              <td>{{ t.status|default:"—" }}</td>
+              <td class="mono">{{ t.created|slice:":10"|default:"—" }}</td>
+              <td style="white-space:nowrap;">
+                {% if t.has_test_data %}<a href="{% url 'explore:test_data' part_id=part_id test_type_id=t.test_type_id %}" target="_blank" rel="noopener" title="View this test’s test_data as JSON (new tab)">JSON &#x2197;</a>{% endif %}
+                {% if t.test_id and t.has_data %}{% if t.has_test_data %} · {% endif %}<a href="{{ hwdb_ui_base }}/view/images/component_test/{{ t.test_id }}" target="_blank" rel="noopener" title="View this test’s uploaded files (CSV, plots) in the FNAL HWDB">files &#x2197;</a>{% endif %}
+                {% if not t.has_test_data and not t.has_data %}—{% endif %}
+              </td>
+              <td>{{ t.comments|default:"" }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="5" class="sd-empty">No tests recorded.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="sd-card">
+        <h2>Subcomponents ({{ detail.manifest|length }})</h2>
+        <table class="sd-table">
+          <thead><tr><th>Part</th><th>Type</th><th>Position</th></tr></thead>
+          <tbody>
+          {% for m in detail.manifest %}
+            <tr>
+              <td class="mono">{% if m.part_id %}<a href="{% url 'explore:part' part_id=m.part_id %}">{{ m.part_id }}</a>{% else %}—{% endif %}</td>
+              <td>{{ m.type_name|default:"—" }}</td>
+              <td>{{ m.functional_position|default:"—" }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="3" class="sd-empty">None.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if detail.has_location %}
       <div class="sd-card">
         <h2>Location timeline</h2>
         <table class="sd-table">
@@ -110,34 +172,15 @@
               <td>{{ e.creator|default:"—" }}</td>
               <td>{{ e.comments|default:"" }}</td>
             </tr>
-          {% empty %}
-            <tr><td colspan="4" class="sd-empty">No location history.</td></tr>
           {% endfor %}
           </tbody>
         </table>
       </div>
-
-      <div class="sd-card">
-        <h2>Contents ({{ detail.manifest|length }})</h2>
-        <table class="sd-table">
-          <thead><tr><th>Part</th><th>Type</th><th>Position</th></tr></thead>
-          <tbody>
-          {% for m in detail.manifest %}
-            <tr>
-              <td class="mono">{% if m.part_id %}<a href="{{ hwdb_ui_base }}/edit/component/{{ m.part_id }}" target="_blank" rel="noopener">{{ m.part_id }} &#x2197;</a>{% else %}—{% endif %}</td>
-              <td>{{ m.type_name|default:"—" }}</td>
-              <td>{{ m.functional_position|default:"—" }}</td>
-            </tr>
-          {% empty %}
-            <tr><td colspan="3" class="sd-empty">Empty box.</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </div>
+      {% endif %}
     </div>
 
     <div>
-      {% for sec in detail.details %}
+      {% for sec in detail.sections %}
       <div class="sd-card">
         <h2>{{ sec.title }}</h2>
         {% if sec.fields %}
@@ -164,7 +207,7 @@
 
       {% if other_attachments %}
       <div class="sd-card">
-        <h2>Attachments &amp; shipping label</h2>
+        <h2>Attachments</h2>
         <div class="sd-atts">
           {% for a in other_attachments %}
             {% if a.is_image %}
@@ -175,6 +218,10 @@
           {% endfor %}
         </div>
       </div>
+      {% endif %}
+
+      {% if not detail.sections and not other_attachments %}
+      <div class="sd-card"><div class="sd-empty">No specifications or attachments.</div></div>
       {% endif %}
     </div>
   </div>

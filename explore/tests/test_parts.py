@@ -1,0 +1,275 @@
+"""Tests for the generic part detail page (ADR-0014).
+
+The engine (parts.py) and the view for a *non-shipping* part — the shipping-box
+case is exercised in test_shipments.py (is_shipping=True). HWDB fetch is mocked.
+
+    python manage.py test explore
+"""
+
+from __future__ import annotations
+
+import json
+from unittest import mock
+
+from django.contrib.auth import get_user_model
+from django.test import TestCase
+from django.utils import timezone
+
+from explore import navigation, parts
+from explore.models import HierarchyNode as H
+from explore.models import HwdbComponentEvent
+from hwdb.fnal.bearer import FnalLinkRequired
+
+
+class SpecSectionsTest(TestCase):
+    def test_scalars_fold_into_one_specifications_card(self):
+        blob = {"Operating Voltage": "48V", "Channels": 64, "Notes": ""}
+        secs = parts.spec_sections(blob)
+        self.assertEqual([s["title"] for s in secs], ["Specifications"])
+        labels = {f["label"]: f["value"] for f in secs[0]["fields"]}
+        self.assertEqual(labels, {"Operating Voltage": "48V", "Channels": "64"})
+
+    def test_nested_keys_become_their_own_cards_with_image_peeling(self):
+        blob = {
+            "Calibration": [{"gain": "1.2", "Image ID for the trace": "img-7"}],
+            "Serial scan": {"barcode": "ABC123"},
+        }
+        secs = {s["title"]: s for s in parts.spec_sections(blob)}
+        self.assertEqual(secs["Calibration"]["fields"], [{"label": "gain", "value": "1.2"}])
+        self.assertEqual(secs["Calibration"]["attachments"], [{"label": "trace", "image_id": "img-7"}])
+        self.assertEqual(secs["Serial scan"]["fields"], [{"label": "barcode", "value": "ABC123"}])
+
+    def test_empty_blob(self):
+        self.assertEqual(parts.spec_sections(None), [])
+
+    def test_bare_list_blob_folds_into_one_card(self):
+        secs = parts.spec_sections([{"a": "1"}, {"b": "2"}])
+        self.assertEqual(secs[0]["title"], "Specifications")
+        self.assertEqual({f["label"]: f["value"] for f in secs[0]["fields"]},
+                         {"a": "1", "b": "2"})
+
+    def test_non_dict_blob_is_ignored(self):
+        self.assertEqual(parts.spec_sections("a string"), [])
+
+
+class TestSummaryTest(TestCase):
+    def test_latest_record_per_type_wins(self):
+        recs = [
+            {"test_type": "HV", "status": "Pass", "created": "2026-01-01T00:00:00"},
+            {"test_type": "HV", "status": "Fail", "created": "2026-05-01T00:00:00"},  # newer
+            {"test_type": "Cold", "status": "Pass", "created": "2026-03-01T00:00:00"},
+        ]
+        summary = {r["test_type"]: r for r in parts.test_summary(recs)}
+        self.assertEqual(summary["HV"]["status"], "Fail")          # newest HV
+        self.assertEqual([r["test_type"] for r in parts.test_summary(recs)], ["Cold", "HV"])
+
+    def test_handles_missing_fields(self):
+        self.assertEqual(parts.test_summary(None), [])
+
+    def test_unwraps_nested_test_type_and_status_refs(self):
+        # HWDB returns test_type/status as {id, name} refs for some parts —
+        # must not be used as an unhashable dict key.
+        recs = [{"test_type": {"id": 7, "name": "HV"},
+                 "status": {"name": "Pass"}, "created": "2026-01-01T00:00:00"}]
+        summary = parts.test_summary(recs)
+        self.assertEqual(summary[0]["test_type"], "HV")
+        self.assertEqual(summary[0]["status"], "Pass")
+
+
+class EnrichTestDataTest(TestCase):
+    """The list endpoint omits the test oid + status; we backfill them from the
+    per-type endpoint so the FNAL data link works."""
+
+    def _api(self):
+        api = mock.MagicMock()
+        api.get_component.return_value = {"data": {"specifications": []}}
+        api.get_locations.return_value = {"data": []}
+        api.get_subcomponents.return_value = {"data": []}
+        api.get_images.return_value = {"data": []}
+        api.get_test_types.return_value = {"data": [{"name": "HV QC Test", "id": 42}]}
+
+        def get_tests(pid, test_type_id=None, history=False):
+            if test_type_id is None:  # list endpoint — no id, no status, no files
+                return {"data": [{"test_type": {"name": "HV QC Test"},
+                                  "created": "2026-05-29T00:00:00", "comments": "Cold"}]}
+            return {"data": [{"id": 15023, "status": {"name": "Passed"},
+                              "created": "2026-05-29T00:00:00",
+                              "test_data": {"DATA": {"gain": 1.2}},
+                              "images": [{"image_id": "z", "image_name": "hv.csv"}]}]}
+        api.get_tests.side_effect = get_tests
+        return api
+
+    def test_oid_status_and_has_data_backfilled_from_per_type(self):
+        d = parts.part_detail(self._api(), "D08100100003-00226", is_shipping=False)
+        t = d["tests"][0]
+        self.assertEqual(t["test_id"], 15023)    # → FNAL component_test data link
+        self.assertEqual(t["test_type_id"], 42)  # → our test_data JSON download
+        self.assertEqual(t["status"], "Passed")  # real status, not the empty list value
+        self.assertTrue(t["has_data"])           # embedded files → show the link
+        self.assertTrue(t["has_test_data"])      # test_data present → JSON download
+
+    def test_no_files_means_no_data_link(self):
+        api = self._api()
+
+        def get_tests(pid, test_type_id=None, history=False):
+            if test_type_id is None:
+                return {"data": [{"test_type": {"name": "HV QC Test"},
+                                  "created": "2026-05-29T00:00:00"}]}
+            return {"data": [{"id": 15023, "status": {"name": "Passed"},
+                              "created": "2026-05-29T00:00:00"}]}  # no images
+        api.get_tests.side_effect = get_tests
+        t = parts.part_detail(api, "D08100100003-14194", is_shipping=False)["tests"][0]
+        self.assertEqual(t["test_id"], 15023)
+        self.assertFalse(t["has_data"])          # no files → link hidden
+
+
+class PartFactsTest(TestCase):
+    def test_skips_blanks_and_unwraps_named_refs(self):
+        comp = {
+            "serial_number": "SN-9",
+            "component_type": {"name": "ColdADC"},
+            "institution": {"name": "BNL"},
+            "manufacturer": "",                 # blank → skipped
+            "status": {"id": 3, "name": "QA/QC Tests - Passed All"},  # nested ref
+            "created": "2026-04-02T11:00:00",
+        }
+        facts = {f["label"]: f["value"] for f in parts.part_facts(comp)}
+        self.assertEqual(facts["Serial number"], "SN-9")
+        self.assertEqual(facts["Type"], "ColdADC")
+        self.assertEqual(facts["Institution"], "BNL")
+        self.assertEqual(facts["Status"], "QA/QC Tests - Passed All")  # name only, not the dict
+        self.assertEqual(facts["Created"], "2026-04-02")
+        self.assertNotIn("Manufacturer", facts)
+
+
+class PartViewTest(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("p", "p@p.io", "pw")
+        self.client.force_login(self.user)
+        self.url = "/explore/part/D05700600099-00007/"  # not a curated shipping type
+
+    def _api(self):
+        api = mock.MagicMock()
+        api.get_component.return_value = {"data": {
+            "serial_number": "SN-7", "status": "Passed",
+            "component_type": {"name": "ColdADC"},
+            "specifications": [{"DATA": {"Channels": 64}}]}}
+        api.get_locations.return_value = {"data": []}            # most parts have none
+        api.get_subcomponents.return_value = {"data": []}
+        api.get_images.return_value = {"data": [{"image_id": "i9", "image_name": "photo.jpg"}]}
+        api.get_test_types.return_value = {"data": [{"name": "RoomT", "id": 7}]}
+
+        def get_tests(pid, test_type_id=None, history=False):
+            if test_type_id is None:
+                return {"data": [{"test_type": {"name": "RoomT"},
+                                  "created": "2026-02-02T00:00:00"}]}
+            return {"data": [{"id": 15023, "status": {"name": "Pass"},
+                              "created": "2026-02-02T00:00:00",
+                              "images": [{"image_id": "z", "image_name": "t.csv"}]}]}
+        api.get_tests.side_effect = get_tests
+        return api
+
+    def test_a_failing_aux_endpoint_does_not_break_the_page(self):
+        # A part with no /tests (endpoint raises) must still render — the
+        # section just degrades to empty, not a 502 (ADR-0014 hardening).
+        api = self._api()
+        api.get_tests.side_effect = RuntimeError("404 from HWDB")
+        d = parts.part_detail(api, "X-1", is_shipping=False)
+        self.assertEqual(d["tests"], [])
+        self.assertEqual(d["facts"][0]["label"], "Serial number")  # rest still built
+
+    def test_renders_generic_part(self):
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=self._api()):
+            resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertIn("SN-7", body)             # item fact
+        self.assertIn("RoomT", body)            # test summary
+        self.assertIn("/view/images/component_test/15023", body)  # per-test data link to FNAL
+        self.assertIn("photo.jpg", body)        # downloadable attachment
+        self.assertIn("Specifications", body)   # generic spec card
+        self.assertNotIn("In Transit", body)    # no shipping framing for a normal part
+
+    def test_shipment_url_redirects_to_part(self):
+        resp = self.client.get("/explore/shipment/D05700600099-00007/")
+        self.assertEqual(resp.status_code, 301)
+        self.assertEqual(resp["Location"], self.url)
+
+
+class TestDataDownloadTest(TestCase):
+    """Per-test test_data JSON download (the dashboard's test-data export)."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("td", "t@d.io", "pw")
+        self.client.force_login(self.user)
+        self.url = "/explore/test-data/D08100100003-00226/42/"
+
+    def _api(self):
+        api = mock.MagicMock()
+        api.get_tests.return_value = {"data": [
+            {"created": "2026-05-29T00:00:00", "test_data": {"DATA": {"gain": 1.2}}}]}
+        return api
+
+    def test_renders_test_data_as_inline_json_text(self):
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=self._api()):
+            resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "text/plain; charset=utf-8")
+        self.assertNotIn("Content-Disposition", resp)        # inline, not a download
+        self.assertEqual(json.loads(resp.content), {"DATA": {"gain": 1.2}})
+        self.assertIn(b"\n", resp.content)                   # pretty-printed
+
+    def test_fnal_link_required_returns_409(self):
+        with mock.patch("explore.views.mint_for", side_effect=FnalLinkRequired()):
+            resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 409)
+
+
+def _comp_leaf(ptid="D05700600099"):
+    """A synced non-shipping leaf under FD CE (so leaf_path_for resolves)."""
+    sys, _ = H.objects.get_or_create(
+        level=H.LEVEL_SYSTEM, system_id=81, subsystem_id=None, part_type_id="",
+        defaults={"system_name": "FD CE", "name": "FD CE"})
+    sub, _ = H.objects.get_or_create(
+        level=H.LEVEL_SUBSYSTEM, system_id=81, subsystem_id=300, part_type_id="",
+        defaults={"parent": sys, "system_name": "FD CE",
+                  "subsystem_name": "ColdADC", "name": "ColdADC"})
+    return H.objects.create(
+        level=H.LEVEL_TYPE, parent=sub, system_id=81, system_name="FD CE",
+        subsystem_id=300, subsystem_name="ColdADC", name="ColdADC",
+        part_type_id=ptid, n_components=55,
+        full_name="D.FD CE.ColdADC.ColdADC", tests_synced_at=timezone.now())
+
+
+class LeafPartsTableTest(TestCase):
+    """The paginated parts table on a synced component-type leaf page."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("lp", "l@p.io", "pw")
+        self.client.force_login(self.user)
+        self.leaf = _comp_leaf()
+        for i in range(55):
+            HwdbComponentEvent.objects.create(
+                part_type_id=self.leaf.part_type_id,
+                part_id=f"{self.leaf.part_type_id}-{i:05d}", created=timezone.now())
+        self.url = navigation.leaf_path_for(self.leaf.part_type_id)
+
+    def test_lists_parts_paginated_50_with_part_links(self):
+        html = self.client.get(self.url).content.decode()
+        self.assertIn("Components (55)", html)
+        # 55 rows → 50 on page 1 (newest first), 5 on page 2.
+        self.assertIn(f"/explore/part/{self.leaf.part_type_id}-00054/", html)  # row → part page
+        self.assertIn('target="_blank"', html)                                 # opens new tab
+        self.assertIn("Page 1 of 2", html)
+        self.assertIn("Last »", html)                                          # first/last links
+        self.assertIn("?page=2", html)                                         # Last → page 2
+        self.assertNotIn(f"/explore/part/{self.leaf.part_type_id}-00000/", html)
+
+    def test_second_page_has_first_and_prev_links(self):
+        html = self.client.get(self.url + "?page=2").content.decode()
+        self.assertIn("Page 2 of 2", html)
+        self.assertIn(f"/explore/part/{self.leaf.part_type_id}-00000/", html)  # tail row
+        self.assertIn("« First", html)
+        self.assertIn('href="?page=1"', html)                                  # First → page 1
