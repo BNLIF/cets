@@ -44,7 +44,9 @@ def _loc(name, lid, arrived):
 
 def _fake_client(items, locs_by_pid):
     client = mock.MagicMock()
-    client.get_component_types.return_value = {"data": items}
+    # sync lists items via _make_request (paginated); return a single page.
+    client._make_request.side_effect = lambda method, endpoint, data=None, params=None: {
+        "data": items, "pagination": {"pages": 1}}
     client.get_locations.side_effect = lambda pid: {"data": locs_by_pid.get(pid, [])}
     return client
 
@@ -129,6 +131,18 @@ class SyncShipmentsTest(TestCase):
         b1 = ShipmentItem.objects.get(part_id="B1")
         self.assertIsNotNone(b1.shipped_date)
         self.assertIsNone(b1.received_date)  # still in transit
+
+    def test_paginates_all_pages(self):
+        client = mock.MagicMock()
+        pages = {1: {"data": [{"part_id": "B1"}], "pagination": {"pages": 2}},
+                 2: {"data": [{"part_id": "B2"}], "pagination": {"pages": 2}}}
+        client._make_request.side_effect = (
+            lambda method, endpoint, data=None, params=None: pages[params["page"]])
+        client.get_locations.side_effect = lambda pid: {"data": []}
+        with mock.patch("explore.shipments.FnalDbApiClient", return_value=client):
+            list(shipments.sync_shipments("http://api", "b", SHIP_PTID))
+        # Both pages' boxes mirrored — not just the first page.
+        self.assertEqual(ShipmentItem.objects.filter(part_type_id=SHIP_PTID).count(), 2)
 
     def test_wholesale_rewrite_no_duplicates(self):
         items = [{"part_id": "B1"}]

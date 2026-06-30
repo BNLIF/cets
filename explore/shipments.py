@@ -92,20 +92,36 @@ def box_detail(api, part_id: str) -> dict:
     return {"part_id": part_id, "timeline": timeline, "manifest": manifest}
 
 
+def _all_box_ids(api, part_type_id: str) -> list[str]:
+    """Every item's part_id for a component type, across all pages.
+
+    The listing endpoint paginates (default page is partial — the #46 live run
+    showed 100 of 326), so walk every page like ``events._list_part_ids``."""
+    ids, page = [], 1
+    while True:
+        body = api._make_request(
+            "GET", f"component-types/{part_type_id}/components",
+            params={"page": page, "size": 500},
+        )
+        rows = body.get("data") or []
+        ids.extend(r.get("part_id") or r.get("pid") for r in rows if r.get("part_id") or r.get("pid"))
+        pages = (body.get("pagination") or {}).get("pages", 1)
+        if page >= pages or not rows:
+            return ids
+        page += 1
+
+
 def sync_shipments(api_base_url: str, bearer: str, part_type_id: str) -> Iterator[str]:
     """Mirror the latest location of every box of one shipping type. Generator
     yielding progress lines; rewrites ``ShipmentItem`` rows for the type."""
     api = FnalDbApiClient(api_base_url, bearer)
 
     yield f"sync shipments: listing boxes for {part_type_id}\n"
-    items = api.get_component_types(part_type_id).get("data") or []
-    yield f"sync shipments: {len(items)} box(es)\n"
+    pids = _all_box_ids(api, part_type_id)
+    yield f"sync shipments: {len(pids)} box(es)\n"
 
     rows = []
-    for i, it in enumerate(items, 1):
-        pid = it.get("part_id") or it.get("pid")
-        if not pid:
-            continue
+    for i, pid in enumerate(pids, 1):
         locs = api.get_locations(pid).get("data") or []
         latest = latest_location(locs)
         loc = (latest or {}).get("location") or {}
@@ -120,7 +136,8 @@ def sync_shipments(api_base_url: str, bearer: str, part_type_id: str) -> Iterato
             received_date=received,
         ))
         where = "In Transit" if loc.get("id") == 0 else (loc.get("name") or "no location")
-        yield f"  [{i}/{len(items)}] {pid}: {where}\n"
+        if i % 25 == 0 or i == len(pids):
+            yield f"  [{i}/{len(pids)}] {pid}: {where}\n"
 
     ShipmentItem.objects.filter(part_type_id=part_type_id).delete()
     if rows:

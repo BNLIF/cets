@@ -50,3 +50,5 @@ regions:
 # Discover candidates with `python manage.py list_shippable` (issue #46).
 shipping_types:
   - D08120200001   # FD CE › CE Shipping Box › "CE Shipping box"
+  - D05700600003   # FD-VD TDE › Shipping › "Electronics box" (audit #46)
+  - D05700600006   # FD-VD TDE › Shipping › "FEB container" (audit #46)
