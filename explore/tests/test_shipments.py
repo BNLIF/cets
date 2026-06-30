@@ -70,6 +70,26 @@ class LatestLocationTest(TestCase):
         self.assertIsNone(shipments.latest_location([]))
 
 
+class ShippedReceivedTest(TestCase):
+    def test_in_transit_has_shipped_but_no_received(self):
+        locs = [_loc("BNL", 128, "2026-06-03T00:00:00-05:00"),
+                _loc("In Transit", 0, "2026-06-05T00:00:00-05:00")]
+        shipped, received = shipments.shipped_received(locs)
+        self.assertEqual(shipped.date().isoformat(), "2026-06-05")
+        self.assertIsNone(received)
+
+    def test_delivered_has_shipped_and_received(self):
+        locs = [_loc("FNAL", 1, "2026-05-01T00:00:00-05:00"),
+                _loc("In Transit", 0, "2026-05-02T00:00:00-05:00"),
+                _loc("CERN", 200, "2026-05-10T00:00:00-05:00")]
+        shipped, received = shipments.shipped_received(locs)
+        self.assertEqual(shipped.date().isoformat(), "2026-05-02")
+        self.assertEqual(received.date().isoformat(), "2026-05-10")
+
+    def test_empty_timeline(self):
+        self.assertEqual(shipments.shipped_received([]), (None, None))
+
+
 class SyncShipmentsTest(TestCase):
     def _run(self, items, locs_by_pid):
         client = _fake_client(items, locs_by_pid)
@@ -99,6 +119,16 @@ class SyncShipmentsTest(TestCase):
         self.assertEqual(b3.location_name, "")
         self.assertIsNone(b3.location_id)
         self.assertIsNone(b3.last_arrived)
+
+    def test_stores_shipped_received(self):
+        self._run(
+            items=[{"part_id": "B1"}],
+            locs_by_pid={"B1": [_loc("FNAL", 1, "2026-05-01T00:00:00-05:00"),
+                                _loc("In Transit", 0, "2026-05-02T00:00:00-05:00")]},
+        )
+        b1 = ShipmentItem.objects.get(part_id="B1")
+        self.assertIsNotNone(b1.shipped_date)
+        self.assertIsNone(b1.received_date)  # still in transit
 
     def test_wholesale_rewrite_no_duplicates(self):
         items = [{"part_id": "B1"}]
@@ -135,6 +165,19 @@ class ShipmentPanelViewTest(TestCase):
         leaf = _ship_leaf()
         html = self.client.get(navigation.leaf_path_for(leaf.part_type_id)).content.decode()
         self.assertIn('id="shipment-unsynced"', html)
+
+    def test_summary_cards_and_status_pills(self):
+        leaf = _ship_leaf()
+        ShipmentItem.objects.create(part_type_id=leaf.part_type_id, part_id="B1",
+                                    location_name="In Transit", location_id=0)
+        ShipmentItem.objects.create(part_type_id=leaf.part_type_id, part_id="B2",
+                                    location_name="CERN", location_id=200)
+        html = self.client.get(navigation.leaf_path_for(leaf.part_type_id)).content.decode()
+        self.assertIn("Total boxes", html)
+        self.assertIn("In transit", html)
+        self.assertIn("Delivered", html)
+        self.assertIn("ship-pill is-transit", html)
+        self.assertIn("ship-pill is-delivered", html)
 
     def test_rows_are_expandable_with_detail_url(self):
         leaf = _ship_leaf()

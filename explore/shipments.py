@@ -41,6 +41,29 @@ def latest_location(locations: list[dict]) -> dict | None:
     return max(locations, key=lambda e: e.get("arrived") or "")
 
 
+def shipped_received(locations: list[dict]) -> tuple[datetime | None, datetime | None]:
+    """Derive (shipped, received) from a box's full location timeline (#45).
+
+    shipped = the earliest time it entered transit (``location.id == 0``);
+    received = the arrival time of the latest event *iff* that event is a real
+    location (not in transit) — i.e. null while still moving. Guards against a
+    received earlier than shipped (treated as no valid receipt yet).
+    """
+    events = [
+        (_parse_dt(e.get("arrived")), (e.get("location") or {}).get("id"))
+        for e in locations
+    ]
+    events = sorted((e for e in events if e[0] is not None), key=lambda e: e[0])
+    if not events:
+        return None, None
+    shipped = next((dt for dt, lid in events if lid == 0), None)
+    last_dt, last_lid = events[-1]
+    received = last_dt if last_lid not in (0, None) else None
+    if shipped and received and received < shipped:
+        received = None
+    return shipped, received
+
+
 def box_detail(api, part_id: str) -> dict:
     """Live detail for one box: full location timeline + current manifest.
 
@@ -86,12 +109,15 @@ def sync_shipments(api_base_url: str, bearer: str, part_type_id: str) -> Iterato
         locs = api.get_locations(pid).get("data") or []
         latest = latest_location(locs)
         loc = (latest or {}).get("location") or {}
+        shipped, received = shipped_received(locs)
         rows.append(ShipmentItem(
             part_type_id=part_type_id,
             part_id=pid,
             location_name=loc.get("name") or "",
             location_id=loc.get("id"),
             last_arrived=_parse_dt((latest or {}).get("arrived")),
+            shipped_date=shipped,
+            received_date=received,
         ))
         where = "In Transit" if loc.get("id") == 0 else (loc.get("name") or "no location")
         yield f"  [{i}/{len(items)}] {pid}: {where}\n"

@@ -137,11 +137,16 @@ def explore_view(request, trail=None):
     charts = []
     leaf = view.get("leaf")
     is_shipping = bool(leaf and curation.is_shipping_type(leaf.part_type_id))
-    shipments = shipment_synced_at = None
+    shipments = shipment_synced_at = shipment_summary = None
     if is_shipping:
         rows = list(ShipmentItem.objects.filter(part_type_id=leaf.part_type_id))
         shipments = rows
         shipment_synced_at = max((r.synced_at for r in rows), default=None)
+        in_transit = sum(1 for r in rows if r.location_id == 0)
+        delivered = sum(1 for r in rows if r.location_id not in (0, None))
+        shipment_summary = {
+            "total": len(rows), "in_transit": in_transit, "delivered": delivered,
+        }
     elif leaf and leaf.tests_synced_at:
         ptid = leaf.part_type_id
         comp_chart = chart_config(
@@ -177,6 +182,7 @@ def explore_view(request, trail=None):
             "is_shipping": is_shipping,
             "shipments": shipments,
             "shipment_synced_at": shipment_synced_at,
+            "shipment_summary": shipment_summary,
             # Mirror is prod-sourced, so deep-link the part type to prod's UI.
             "hwdb_ui_base": settings.HWDB_PROFILES["prod"]["ui"],
             "sync_state": HierarchySyncState.get(),

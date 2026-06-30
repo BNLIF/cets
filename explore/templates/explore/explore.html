@@ -69,6 +69,20 @@
   .explore-empty { text-align: center; padding: 40px 16px; color: var(--faint); }
   .panel-meta { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin-top: 16px;
     border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg); padding: 16px 18px; }
+  /* shipments summary cards */
+  .ship-cards { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+  .ship-card { flex: 1 1 120px; border: 1px solid var(--rule); background: var(--page);
+    border-radius: var(--r-lg); padding: 14px 16px; border-left: 3px solid var(--rule-hard); }
+  .ship-card.is-transit { border-left-color: var(--accent); }
+  .ship-card.is-delivered { border-left-color: var(--good); }
+  .ship-card-n { font-size: 26px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .ship-card-l { font-size: 12px; color: var(--faint); margin-top: 2px; }
+  .ship-pill { font-size: 11px; font-weight: 600; padding: 1px 9px; border-radius: 999px;
+    border: 1px solid var(--rule); color: var(--dim); white-space: nowrap; }
+  .ship-pill.is-transit { color: var(--accent-ink); background: var(--accent-soft);
+    border-color: color-mix(in oklch, var(--accent) 30%, var(--rule)); }
+  .ship-pill.is-delivered { color: var(--good); background: var(--good-bg);
+    border-color: color-mix(in oklch, var(--good) 30%, var(--rule)); }
   /* shipments items table */
   .ship-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .ship-table th { text-align: left; font-weight: 600; color: var(--faint); font-size: 12px;
@@ -151,18 +165,25 @@
     </div>
     <pre id="shipment-sync-log"></pre>
     {% if shipments %}
+    <div class="ship-cards">
+        <div class="ship-card"><div class="ship-card-n">{{ shipment_summary.total }}</div><div class="ship-card-l">Total boxes</div></div>
+        <div class="ship-card is-transit"><div class="ship-card-n">{{ shipment_summary.in_transit }}</div><div class="ship-card-l">In transit</div></div>
+        <div class="ship-card is-delivered"><div class="ship-card-n">{{ shipment_summary.delivered }}</div><div class="ship-card-l">Delivered</div></div>
+    </div>
     <div class="chart-card">
         <div class="panel-title" style="font-size: 14px; margin-bottom: 10px;">Boxes ({{ shipments|length }})</div>
         <table class="ship-table">
-            <thead><tr><th>Box PID</th><th>Latest location</th><th>Last arrived</th></tr></thead>
+            <thead><tr><th>Box PID</th><th>Status</th><th>Latest location</th><th>Shipped</th><th>Received</th></tr></thead>
             <tbody>
             {% for s in shipments %}
                 <tr class="ship-row" data-detail-url="{% url 'explore:shipment_box' part_id=s.part_id %}">
                     <td class="mono"><span class="ship-caret" aria-hidden="true">▸</span>{{ s.part_id }}</td>
-                    <td>{% if s.is_in_transit %}<span class="ship-transit">In Transit</span>{% else %}{{ s.location_name|default:"—" }}{% endif %}</td>
-                    <td class="mono">{% if s.last_arrived %}{{ s.last_arrived|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+                    <td><span class="ship-pill {% if s.is_in_transit %}is-transit{% elif s.location_id is not None %}is-delivered{% else %}is-unknown{% endif %}">{{ s.status_label }}</span></td>
+                    <td>{{ s.location_name|default:"—" }}</td>
+                    <td class="mono">{% if s.shipped_date %}{{ s.shipped_date|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+                    <td class="mono">{% if s.received_date %}{{ s.received_date|date:"Y-m-d" }}{% else %}—{% endif %}</td>
                 </tr>
-                <tr class="ship-detail" hidden><td colspan="3"><div class="ship-detail-body" data-loaded="0">…</div></td></tr>
+                <tr class="ship-detail" hidden><td colspan="5"><div class="ship-detail-body" data-loaded="0">…</div></td></tr>
             {% endfor %}
             </tbody>
         </table>

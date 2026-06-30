@@ -133,6 +133,11 @@ class ShipmentItem(models.Model):
     location_name = models.CharField(max_length=200, blank=True, default="")
     location_id = models.IntegerField(null=True, blank=True)  # 0 = "In Transit"
     last_arrived = models.DateTimeField(null=True, blank=True)
+    # Derived from the full timeline at sync time (#45): shipped = first time it
+    # entered transit; received = arrival at its current real location (null
+    # while still in transit).
+    shipped_date = models.DateTimeField(null=True, blank=True)
+    received_date = models.DateTimeField(null=True, blank=True)
     synced_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -142,6 +147,14 @@ class ShipmentItem(models.Model):
     @property
     def is_in_transit(self) -> bool:
         return self.location_id == 0
+
+    @property
+    def status_label(self) -> str:
+        if self.location_id == 0:
+            return "In transit"
+        if self.location_id is not None:
+            return "Delivered"
+        return "Unknown"
 
     def __str__(self):
         return f"ShipmentItem({self.part_id}, {self.location_name})"
