@@ -132,6 +132,7 @@ class PartFactsTest(TestCase):
             "manufacturer": "",                 # blank → skipped
             "status": {"id": 3, "name": "QA/QC Tests - Passed All"},  # nested ref
             "created": "2026-04-02T11:00:00",
+            "creator": {"name": "Chao Zhang"},  # nested ref
         }
         facts = {f["label"]: f["value"] for f in parts.part_facts(comp)}
         self.assertEqual(facts["Serial number"], "SN-9")
@@ -139,6 +140,7 @@ class PartFactsTest(TestCase):
         self.assertEqual(facts["Institution"], "BNL")
         self.assertEqual(facts["Status"], "QA/QC Tests - Passed All")  # name only, not the dict
         self.assertEqual(facts["Created"], "2026-04-02")
+        self.assertEqual(facts["Created by"], "Chao Zhang")  # name only, not the dict
         self.assertNotIn("Manufacturer", facts)
 
 

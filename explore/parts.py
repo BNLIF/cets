@@ -111,6 +111,7 @@ def part_facts(comp: dict) -> list[dict]:
         ("Manufacturer", _named(comp.get("manufacturer"))),
         ("Country", comp.get("country_code")),
         ("Created", (comp.get("created") or "")[:10] or None),
+        ("Created by", _named(comp.get("creator"))),
         ("Comments", comp.get("comments")),
     ]
     return [{"label": k, "value": str(v)} for k, v in candidates if v not in (None, "", [])]
