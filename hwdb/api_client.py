@@ -106,6 +106,23 @@ class FnalDbApiClient:
             params = {"history": "True"} if history else None
         return self._make_request("GET", endpoint, params=params)
 
+    def get_locations(self, part_id):
+        """Location history for a component (the shipment journey).
+
+        Each entry: ``arrived`` (ISO datetime), ``location`` (name), ``creator``,
+        ``comments``, ``id``. The latest ``arrived`` is where the item is now.
+        Used by the shipment tracker (ADR-0013).
+        """
+        return self._make_request("GET", f"components/{part_id}/locations")
+
+    def get_subcomponents(self, part_id):
+        """Subcomponents attached to a component (its manifest / contents).
+
+        Maps functional position to the contained part. Used to show what a
+        shipping box holds (ADR-0013).
+        """
+        return self._make_request("GET", f"components/{part_id}/subcomponents")
+
     # ---- Writes ---------------------------------------------------------
 
     def create_component(self, part_type_id, payload):
