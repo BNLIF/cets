@@ -113,6 +113,40 @@ class HwdbComponentEvent(models.Model):
         return f"HwdbComponentEvent({self.part_type_id}, {self.updated:%Y-%m-%d})"
 
 
+class ShipmentItem(models.Model):
+    """One shipping box (an item of a curated shipping-type leaf), mirrored from
+    HWDB production (ADR-0013).
+
+    Holds **only the latest location** — enough to render the Shipments panel's
+    items list ("where is every box now") with zero live calls. The full
+    location timeline and the box's manifest (subcomponents) are *not* mirrored;
+    they're fetched live when a user expands a box (#44).
+
+    ``location_id == 0`` is the HWDB "In Transit" sentinel (settled by the #42
+    spike): ``is_in_transit`` keys off it. Rewritten wholesale per
+    ``part_type_id`` on each sync — a disposable cache, like the rest of the
+    mirror (ADR-0007).
+    """
+
+    part_type_id = models.CharField(max_length=20, db_index=True)
+    part_id = models.CharField(max_length=50)  # the box's PID
+    location_name = models.CharField(max_length=200, blank=True, default="")
+    location_id = models.IntegerField(null=True, blank=True)  # 0 = "In Transit"
+    last_arrived = models.DateTimeField(null=True, blank=True)
+    synced_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["part_id"]
+        indexes = [models.Index(fields=["part_type_id"])]
+
+    @property
+    def is_in_transit(self) -> bool:
+        return self.location_id == 0
+
+    def __str__(self):
+        return f"ShipmentItem({self.part_id}, {self.location_name})"
+
+
 class HierarchySyncState(models.Model):
     """Singleton recording the last hierarchy (skeleton) sync run.
 

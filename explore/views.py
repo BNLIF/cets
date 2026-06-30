@@ -22,8 +22,9 @@ from . import curation, navigation
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, sync_test_events
 from .hierarchy import sync_hierarchy
-from .models import HierarchyNode, HierarchySyncState
+from .models import HierarchyNode, HierarchySyncState, ShipmentItem
 from .queries import component_type_progress, component_update_progress
+from .shipments import sync_shipments
 
 logger = logging.getLogger(__name__)
 FNAL_UNAVAILABLE = "FNAL authentication service is unavailable. Please try again later."
@@ -135,7 +136,13 @@ def explore_view(request, trail=None):
 
     charts = []
     leaf = view.get("leaf")
-    if leaf and leaf.tests_synced_at:
+    is_shipping = bool(leaf and curation.is_shipping_type(leaf.part_type_id))
+    shipments = shipment_synced_at = None
+    if is_shipping:
+        rows = list(ShipmentItem.objects.filter(part_type_id=leaf.part_type_id))
+        shipments = rows
+        shipment_synced_at = max((r.synced_at for r in rows), default=None)
+    elif leaf and leaf.tests_synced_at:
         ptid = leaf.part_type_id
         comp_chart = chart_config(
             slug=f"{ptid}_comp", name="Components updated", href="",
@@ -167,6 +174,9 @@ def explore_view(request, trail=None):
             "sidebar": navigation.sidebar_tree(view["ctx"]),
             "leaf": leaf,
             "charts": charts,
+            "is_shipping": is_shipping,
+            "shipments": shipments,
+            "shipment_synced_at": shipment_synced_at,
             # Mirror is prod-sourced, so deep-link the part type to prod's UI.
             "hwdb_ui_base": settings.HWDB_PROFILES["prod"]["ui"],
             "sync_state": HierarchySyncState.get(),
@@ -235,5 +245,36 @@ def explore_node_sync_view(request, part_type_id):
         except Exception as e:
             logger.exception("explore_node_sync_view(%s) crashed", part_type_id)
             yield f"test sync: CRASH · {e}\n"
+
+    return StreamingHttpResponse(_iter(), content_type="text/plain; charset=utf-8")
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_shipment_sync_view(request, part_type_id):
+    """Stream a shipment (latest-location) sync for one shipping type (#43).
+
+    Mirrors the latest location of each box into ``ShipmentItem``. FNAL-gated;
+    reads production (canonical). Fired automatically on first visit to an
+    unsynced shipping leaf, and by the manual "Sync shipments" button.
+    """
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        nxt = f"{reverse('explore:home')}?node={part_type_id}"
+        return redirect(f"{link}?{urlencode({'next': nxt})}")
+    except FnalUnavailable:
+        return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
+
+    base_url = settings.HWDB_PROFILES["prod"]["api"]
+
+    def _iter():
+        try:
+            yield from sync_shipments(base_url, bearer, part_type_id)
+        except Exception as e:
+            logger.exception("explore_shipment_sync_view(%s) crashed", part_type_id)
+            yield f"shipment sync: CRASH · {e}\n"
 
     return StreamingHttpResponse(_iter(), content_type="text/plain; charset=utf-8")

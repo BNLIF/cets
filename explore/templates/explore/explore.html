@@ -69,6 +69,15 @@
   .explore-empty { text-align: center; padding: 40px 16px; color: var(--faint); }
   .panel-meta { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin-top: 16px;
     border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg); padding: 16px 18px; }
+  /* shipments items table */
+  .ship-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .ship-table th { text-align: left; font-weight: 600; color: var(--faint); font-size: 12px;
+    text-transform: uppercase; letter-spacing: .03em; padding: 6px 10px; border-bottom: 1px solid var(--rule); }
+  .ship-table td { padding: 8px 10px; border-bottom: 1px solid var(--rule); }
+  .ship-table tr:last-child td { border-bottom: none; }
+  .ship-table .mono { font-family: var(--font-mono); font-size: 12.5px; }
+  .ship-transit { color: var(--accent-ink); background: var(--accent-soft); font-weight: 600;
+    padding: 1px 8px; border-radius: 999px; font-size: 12px; }
   .panel-meta dt { color: var(--faint); }
   .panel-meta dd { margin: 0; font-family: var(--font-mono); }
   .panel-meta a { color: var(--accent-ink); }
@@ -114,6 +123,44 @@
 <pre id="sync-log"></pre>
 
 {% if view.kind == 'leaf' %}
+  {% if is_shipping %}
+    {# ---- Shipping-box leaf: Shipments panel (ADR-0013) ---- #}
+    <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;">
+        <div class="page-subtitle">{{ leaf.system_name }} <span class="crumbs-sep">›</span> {{ leaf.subsystem_name }}</div>
+        <div style="text-align: right; white-space: nowrap;">
+            <button class="btn btn-sm btn-primary" id="shipment-sync-btn" type="button"
+                    data-sync-url="{% url 'explore:shipment_sync' part_type_id=leaf.part_type_id %}"
+                    title="Re-read each box’s latest location from HWDB">Sync shipments</button>
+            <div class="cell-muted" style="font-size: 12px; margin-top: 6px;">
+                {% if shipment_synced_at %}synced {{ shipment_synced_at|timesince }} ago{% else %}never synced{% endif %}
+            </div>
+        </div>
+    </div>
+    <pre id="shipment-sync-log"></pre>
+    {% if shipments %}
+    <div class="chart-card">
+        <div class="panel-title" style="font-size: 14px; margin-bottom: 10px;">Boxes ({{ shipments|length }})</div>
+        <table class="ship-table">
+            <thead><tr><th>Box PID</th><th>Latest location</th><th>Last arrived</th></tr></thead>
+            <tbody>
+            {% for s in shipments %}
+                <tr>
+                    <td class="mono">{{ s.part_id }}</td>
+                    <td>{% if s.is_in_transit %}<span class="ship-transit">In Transit</span>{% else %}{{ s.location_name|default:"—" }}{% endif %}</td>
+                    <td class="mono">{% if s.last_arrived %}{{ s.last_arrived|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">Latest location only; expand a box for its full timeline &amp; contents (coming soon).</p>
+    </div>
+    {% else %}
+    <div class="explore-empty" id="shipment-unsynced" data-sync-url="{% url 'explore:shipment_sync' part_type_id=leaf.part_type_id %}">
+        <p>Shipments not synced yet.</p>
+        <p class="cell-muted">Syncing from HWDB now… (needs your FNAL link)</p>
+    </div>
+    {% endif %}
+  {% else %}
     {# ---- Component-type leaf: detail + plots ---- #}
     <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;">
         <div class="page-subtitle">{{ leaf.system_name }} <span class="crumbs-sep">›</span> {{ leaf.subsystem_name }}</div>
@@ -166,13 +213,14 @@
         <p class="cell-muted">Syncing from HWDB now… (needs your FNAL link)</p>
     </div>
     {% endif %}
+  {% endif %}
 
     <dl class="panel-meta">
         <dt>Part type ID</dt><dd><a href="{{ hwdb_ui_base }}/view/components?pa={{ leaf.part_type_id }}" target="_blank" rel="noopener" title="Open this component type in the FNAL HWDB">{{ leaf.part_type_id }} <span aria-hidden="true">&#x2197;</span></a></dd>
         <dt>System</dt><dd>{{ leaf.system_name }} ({{ leaf.system_id }})</dd>
         <dt>Subsystem</dt><dd>{{ leaf.subsystem_name }} ({{ leaf.subsystem_id }})</dd>
-        <dt>Components in HWDB</dt><dd>{{ leaf.n_components }}</dd>
-        <dt>Test events</dt><dd>{{ leaf.n_tests }}</dd>
+        <dt>{% if is_shipping %}Boxes in HWDB{% else %}Components in HWDB{% endif %}</dt><dd>{{ leaf.n_components }}</dd>
+        {% if not is_shipping %}<dt>Test events</dt><dd>{{ leaf.n_tests }}</dd>{% endif %}
     </dl>
 {% else %}
     {# ---- Folder: grid of child nodes ---- #}
@@ -251,6 +299,18 @@
     syncBtns.forEach(function (b) { b.addEventListener("click", function () { nodeSync(b.dataset.syncUrl, b.dataset.mode); }); });
     var unsynced = document.getElementById("node-unsynced");
     if (unsynced) { nodeSync(unsynced.dataset.syncUrl, "incremental"); }
+
+    // Shipments (latest-location) sync — same streaming pattern as node sync.
+    var shipLog = document.getElementById("shipment-sync-log");
+    var shipBtn = document.getElementById("shipment-sync-btn");
+    async function shipmentSync(url) {
+        if (shipBtn) shipBtn.disabled = true;
+        var ok = await stream(url, shipLog, "Syncing shipments…\n");
+        if (ok) { window.location.reload(); } else if (shipBtn) { shipBtn.disabled = false; }
+    }
+    if (shipBtn) shipBtn.addEventListener("click", function () { shipmentSync(shipBtn.dataset.syncUrl); });
+    var shipUnsynced = document.getElementById("shipment-unsynced");
+    if (shipUnsynced) { shipmentSync(shipUnsynced.dataset.syncUrl); }
 
     var cfgEl = document.getElementById("node-chart-config");
     if (cfgEl && window.Chart) {

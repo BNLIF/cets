@@ -44,3 +44,9 @@ regions:
     key: OT
     curated: false
     note: "Facilities · Computing · Prototypes · not curated"
+
+# Component-type leaves whose items are physical shipping boxes (ADR-0013).
+# Such a leaf shows a Shipments panel (location tracking) instead of test plots.
+# Discover candidates with `python manage.py list_shippable` (issue #46).
+shipping_types:
+  - D08120200001   # FD CE › CE Shipping Box › "CE Shipping box"

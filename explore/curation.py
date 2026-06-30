@@ -56,6 +56,15 @@ def family_is_flat(fam: dict) -> bool:
     return len(fam.get("systems") or []) == 1
 
 
+def shipping_types() -> set[str]:
+    """Component-type ids whose items are shipping boxes (ADR-0013)."""
+    return set(load_curation().get("shipping_types") or [])
+
+
+def is_shipping_type(part_type_id: str) -> bool:
+    return part_type_id in shipping_types()
+
+
 def curated_system_ids() -> set[int]:
     """All system ids the explorer browses/syncs — the union across browsable
     families in browsable regions."""
