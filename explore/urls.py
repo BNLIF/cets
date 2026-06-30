@@ -12,7 +12,8 @@ urlpatterns = [
     path("sync/", views.explore_sync_view, name="sync"),
     path("sync-tests/<str:part_type_id>/", views.explore_node_sync_view, name="node_sync"),
     path("sync-shipments/<str:part_type_id>/", views.explore_shipment_sync_view, name="shipment_sync"),
-    path("shipment-box/<str:part_id>/", views.explore_shipment_box_view, name="shipment_box"),
+    path("shipment-image/<str:image_id>/", views.explore_shipment_image_view, name="shipment_image"),
+    path("shipment/<str:part_id>/", views.explore_shipment_detail_view, name="shipment_detail"),
     # Drill-in node deep links (kept last so the specific routes above win).
     path("<path:trail>/", views.explore_view, name="node"),
 ]

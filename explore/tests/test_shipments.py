@@ -266,13 +266,13 @@ class ShipmentPanelViewTest(TestCase):
         self.assertIn("<th>Contents</th>", html)
         self.assertIn("details class=\"chart-card ship-boxes\"", html)  # collapsible
 
-    def test_rows_are_expandable_with_detail_url(self):
+    def test_rows_link_to_box_detail_page(self):
         leaf = _ship_leaf()
         ShipmentItem.objects.create(part_type_id=leaf.part_type_id, part_id="B1",
                                     location_name="FNAL", location_id=1, n_contents=1)
         html = self.client.get(navigation.leaf_path_for(leaf.part_type_id)).content.decode()
         self.assertIn('class="ship-row"', html)
-        self.assertIn("/explore/shipment-box/B1/", html)
+        self.assertIn("/explore/shipment/B1/", html)  # row click → detail page
 
     def test_box_pid_links_to_hwdb(self):
         leaf = _ship_leaf()
@@ -283,8 +283,53 @@ class ShipmentPanelViewTest(TestCase):
         self.assertIn("event.stopPropagation()", html)        # link doesn't toggle the row
 
 
+def _component(data_sections):
+    """A full item record whose spec DATA carries the given checklist sections."""
+    return {"data": {"specifications": [{"DATA": data_sections}]}}
+
+
+def _sec(details, title):
+    """The detail section with the given display title."""
+    return next(s for s in details if s["title"] == title)
+
+
+class ShipmentDetailsTest(TestCase):
+    def test_folds_single_field_entries_into_one_section(self):
+        # The blob stores each field as its own list entry — must NOT repeat
+        # the section title per field.
+        blob = {"Pre-Shipping Checklist": [
+            {"Origin of this shipment": "BNL"},
+            {"Destination of this shipment": "FNAL"},
+            {"Weight of this shipment": ""},                 # blank → skipped
+            {"Image ID for this Shipping Sheet": "img-9"},
+        ]}
+        secs = shipments.shipment_details(blob)
+        sec = secs[0]  # Pre-shipping is first
+        self.assertEqual(sec["title"], "Pre-shipping")
+        labels = {f["label"]: f["value"] for f in sec["fields"]}
+        self.assertEqual(labels, {"Origin of this shipment": "BNL",
+                                  "Destination of this shipment": "FNAL"})
+        self.assertEqual(sec["attachments"], [{"label": "Shipping Sheet", "image_id": "img-9"}])
+
+    def test_always_returns_all_three_sections_in_lifecycle_order(self):
+        # Even with only Warehouse populated, all three render (empty stages
+        # show just their title), in fixed lifecycle order.
+        blob = {"Warehouse": [{"SKU": "SKU-1"}], "Shipping Checklist": [{}]}
+        secs = shipments.shipment_details(blob)
+        self.assertEqual([s["title"] for s in secs],
+                         ["Pre-shipping", "Shipping", "Info @ Warehouse"])
+        self.assertEqual(secs[0]["fields"], [])               # Pre-shipping empty
+        self.assertEqual(secs[1]["fields"], [])               # Shipping empty
+        self.assertEqual(secs[2]["fields"], [{"label": "SKU", "value": "SKU-1"}])
+
+    def test_none_blob_returns_three_empty_sections(self):
+        secs = shipments.shipment_details(None)
+        self.assertEqual(len(secs), 3)
+        self.assertTrue(all(not s["fields"] and not s["attachments"] for s in secs))
+
+
 class BoxDetailTest(TestCase):
-    def test_timeline_sorted_desc_and_manifest_filters_unmount(self):
+    def _api(self, component=None, images=None):
         api = mock.MagicMock()
         api.get_locations.return_value = {"data": [
             _loc("BNL", 128, "2026-06-03T00:00:00-05:00"),
@@ -296,46 +341,137 @@ class BoxDetailTest(TestCase):
             {"part_id": "P2", "type_name": "FEMB", "functional_position": "Slot 2",
              "operation": "unmount"},  # excluded
         ]}
-        d = shipments.box_detail(api, "B1")
+        api.get_component.return_value = component or {"data": {"specifications": []}}
+        api.get_images.return_value = {"data": images or []}
+        return api
+
+    def test_timeline_sorted_desc_and_manifest_filters_unmount(self):
+        d = shipments.box_detail(self._api(), "B1")
         self.assertEqual(d["timeline"][0]["location"], "In Transit")
         self.assertEqual(d["timeline"][0]["location_id"], 0)
         self.assertEqual([m["part_id"] for m in d["manifest"]], ["P1"])
 
+    def test_includes_details_and_attachments(self):
+        api = self._api(
+            component=_component({"Warehouse": [{"SKU": "SKU-1", "PalletID": "PAL-7"}]}),
+            images=[{"image_id": "img-1", "image_name": "label.pdf"},
+                    {"image_id": None, "image_name": "broken"}],  # dropped (no id)
+        )
+        d = shipments.box_detail(api, "B1")
+        self.assertEqual(_sec(d["details"], "Info @ Warehouse")["fields"][0]["label"], "SKU")
+        self.assertEqual([a["image_id"] for a in d["attachments"]], ["img-1"])
 
-class ShipmentBoxViewTest(TestCase):
+    def test_flags_image_attachments_for_thumbnailing(self):
+        api = self._api(
+            component=_component({"Shipping Checklist": [
+                {"Image ID for the visual inspection photo": "img-jpg"},
+                {"Image ID for BoL": "img-pdf"}]}),
+            images=[{"image_id": "img-jpg", "image_name": "inspect.JPG"},
+                    {"image_id": "img-pdf", "image_name": "bol.pdf"}],
+        )
+        secs = shipments.box_detail(api, "B1")["details"]
+        atts = {a["image_id"]: a for a in _sec(secs, "Shipping")["attachments"]}
+        self.assertTrue(atts["img-jpg"]["is_image"])    # .JPG (case-insensitive)
+        self.assertFalse(atts["img-pdf"]["is_image"])   # .pdf → download chip
+
+    def test_attachment_filename_resolved_from_image_list(self):
+        # The spec gives only the image id; the real filename (with extension)
+        # comes from the /images listing and must drive the download name.
+        api = self._api(
+            component=_component(
+                {"Shipping Checklist": [{"Image ID for this Shipping Sheet": "img-1"}]}),
+            images=[{"image_id": "img-1", "image_name": "D08120200001-00002-shipping-label.pdf"}],
+        )
+        att = _sec(shipments.box_detail(api, "B1")["details"], "Shipping")["attachments"][0]
+        self.assertEqual(att["label"], "Shipping Sheet")
+        self.assertEqual(att["filename"], "D08120200001-00002-shipping-label.pdf")
+
+
+class ShipmentDetailPageTest(TestCase):
+    """The per-box detail page (one click from either table; renders live)."""
+
     def setUp(self):
         self.user = get_user_model().objects.create_user("box", "b@b.io", "pw")
         self.client.force_login(self.user)
-        self.url = "/explore/shipment-box/B1/"
+        self.leaf = _ship_leaf()
+        self.part_id = SHIP_PTID + "-00002"
+        ShipmentItem.objects.create(part_type_id=SHIP_PTID, part_id=self.part_id,
+                                    location_name="In Transit", location_id=0, n_contents=1)
+        self.url = "/explore/shipment/" + self.part_id + "/"
 
     def _api(self):
         api = mock.MagicMock()
-        api.get_locations.return_value = {"data": [_loc("FNAL", 1, "2026-05-21T00:00:00-05:00")]}
-        api.get_subcomponents.return_value = {"data": []}
+        api.get_locations.return_value = {"data": [_loc("In Transit", 0, "2026-06-10T00:00:00-05:00")]}
+        api.get_subcomponents.return_value = {"data": [_sub()]}
+        api.get_component.return_value = {"data": {"specifications": [
+            {"DATA": {"Shipping Checklist": [{"Image ID for this Shipping Sheet": "img-1"}]}}]}}
+        api.get_images.return_value = {"data": [{"image_id": "img-1", "image_name": "label.pdf"}]}
         return api
 
-    def test_returns_json_detail(self):
+    def test_renders_detail_with_checklist_and_download(self):
         with mock.patch("explore.views.mint_for", return_value="bearer"), \
              mock.patch("explore.views.FnalDbApiClient", return_value=self._api()):
             resp = self.client.get(self.url)
         self.assertEqual(resp.status_code, 200)
-        data = resp.json()
-        self.assertEqual(data["part_id"], "B1")
-        self.assertEqual(data["timeline"][0]["location"], "FNAL")
-        self.assertEqual(data["manifest"], [])
+        body = resp.content.decode()
+        self.assertIn(self.part_id, body)
+        # All three lifecycle sections render, even the empty ones.
+        self.assertIn("Pre-shipping", body)
+        self.assertIn("Info @ Warehouse", body)
+        self.assertIn("Not recorded yet.", body)           # empty stage placeholder
+        self.assertIn("Shipping Sheet", body)              # download chip label
+        self.assertIn("label.pdf", body)                   # real filename in ?name=
+        self.assertIn(navigation.leaf_path_for(SHIP_PTID), body)  # breadcrumb back to leaf
 
-    def test_fnal_link_required_returns_409_with_link(self):
+    def test_fnal_link_required_redirects(self):
+        with mock.patch("explore.views.mint_for", side_effect=FnalLinkRequired()):
+            resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn(reverse("hwdb:link"), resp["Location"])
+
+    def test_fnal_unavailable_shows_banner(self):
+        with mock.patch("explore.views.mint_for", side_effect=FnalUnavailable()):
+            resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Couldn", resp.content.decode())  # "Couldn't load …" banner
+
+
+class ShipmentImageViewTest(TestCase):
+    """Attachment/label download proxy (bearer-gated bytes streamed through)."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("img", "i@i.io", "pw")
+        self.client.force_login(self.user)
+        self.url = "/explore/shipment-image/img-7/"
+
+    def _api(self):
+        api = mock.MagicMock()
+        upstream = mock.MagicMock()
+        upstream.headers = {"Content-Type": "application/pdf"}
+        upstream.iter_content.return_value = iter([b"%PDF-", b"bytes"])
+        api.get_image_response.return_value = upstream
+        return api
+
+    def test_streams_bytes_with_sanitised_filename(self):
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=self._api()):
+            resp = self.client.get(self.url, {"name": 'la/be"l.pdf'})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "application/pdf")
+        self.assertEqual(resp["Content-Disposition"], 'attachment; filename="label.pdf"')
+        self.assertEqual(b"".join(resp.streaming_content), b"%PDF-bytes")
+
+    def test_inline_disposition_for_thumbnail_view(self):
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=self._api()):
+            resp = self.client.get(self.url, {"name": "photo.jpg", "inline": "1"})
+        self.assertEqual(resp["Content-Disposition"], 'inline; filename="photo.jpg"')
+
+    def test_fnal_link_required_returns_409(self):
         with mock.patch("explore.views.mint_for", side_effect=FnalLinkRequired()):
             resp = self.client.get(self.url)
         self.assertEqual(resp.status_code, 409)
         self.assertEqual(resp.json()["error"], "fnal_link")
-        self.assertIn("link", resp.json())
-
-    def test_fnal_unavailable_returns_502(self):
-        with mock.patch("explore.views.mint_for", side_effect=FnalUnavailable()):
-            resp = self.client.get(self.url)
-        self.assertEqual(resp.status_code, 502)
-        self.assertEqual(resp.json()["error"], "unavailable")
 
 
 class ShipmentsPageTest(TestCase):

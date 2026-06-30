@@ -123,6 +123,37 @@ class FnalDbApiClient:
         """
         return self._make_request("GET", f"components/{part_id}/subcomponents")
 
+    def get_component(self, part_id):
+        """Full item record, including the free-form ``specifications`` blob.
+
+        The FD shipping workflow writes its pre-shipping / shipping / warehouse
+        checklists into ``data.specifications[0].DATA`` — read back by the
+        shipment detail panel (ADR-0013). Read-only.
+        """
+        return self._make_request("GET", f"components/{part_id}")
+
+    def get_images(self, part_id):
+        """List images/attachments on a component: ``{image_id, image_name}``.
+
+        The shipping label, bill of lading and proforma invoice land here
+        (ADR-0013). Download each via ``get_image_response``.
+        """
+        return self._make_request("GET", f"components/{part_id}/images")
+
+    def get_image_response(self, image_id):
+        """Raw attachment bytes by id (``GET img/{id}``) as a streaming
+        ``requests.Response`` for the caller to proxy. The bytes are bearer-
+        gated, so we can't hand the browser a direct FNAL link (ADR-0013).
+        """
+        url = f"{self.base_url}/img/{image_id}"
+        try:
+            response = self.session.get(url, stream=True)
+            response.raise_for_status()
+            return response
+        except requests.exceptions.RequestException:
+            logger.exception("get_image_response from %s failed", url)
+            raise
+
     # ---- Writes ---------------------------------------------------------
 
     def create_component(self, part_type_id, payload):

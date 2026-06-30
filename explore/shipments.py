@@ -82,11 +82,79 @@ def current_manifest(subs: list[dict] | None) -> list[dict]:
     ]
 
 
+# The FD shipping workflow writes these checklists into the box item's
+# free-form spec DATA blob (see the Python dashboard). Each is (HWDB key,
+# display title); we render all three as a fixed lifecycle, even when empty.
+_DETAIL_SECTIONS = (
+    ("Pre-Shipping Checklist", "Pre-shipping"),
+    ("Shipping Checklist", "Shipping"),
+    ("Warehouse", "Info @ Warehouse"),
+)
+
+
+def _spec_data(component_body: dict | None) -> dict | None:
+    """The ``specifications[0].DATA`` blob off a full item record, or None."""
+    specs = ((component_body or {}).get("data") or {}).get("specifications") or []
+    return (specs[0] or {}).get("DATA") if specs else None
+
+
+_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+
+
+def _is_image(name: str | None) -> bool:
+    """Whether an attachment filename is a browser-previewable raster image
+    (so we can thumbnail it; PDFs/others get a download chip instead)."""
+    return bool(name) and name.lower().endswith(_IMAGE_EXTS)
+
+
+def _image_label(key: str) -> str:
+    """A clean button label from an ``Image ID for the/this X`` key."""
+    label = key.split("Image ID for", 1)[-1].strip()
+    for pre in ("this ", "the "):
+        if label.lower().startswith(pre):
+            label = label[len(pre):]
+    return label or key
+
+
+def shipment_details(data_blob: dict | None) -> list[dict]:
+    """Parse the box's spec DATA into the three lifecycle detail sections.
+
+    The FD shipping workflow stores pre-shipping / shipping / warehouse
+    checklists in ``specifications[0].DATA``; each is a *list of single-field
+    entries*. We fold all entries of one checklist into **one** section of
+    ordered key/value ``fields``, peeling any ``Image ID for …`` key into a
+    downloadable ``attachment`` (bill of lading, proforma invoice, approval
+    message, label). Field names are taken verbatim from HWDB — no hardcoded
+    schema. All three sections are **always** returned in lifecycle order (a
+    stage not yet reached has empty ``fields``/``attachments``), so the page
+    can show the whole timeline (ADR-0013).
+    """
+    out = []
+    for key, title in _DETAIL_SECTIONS:
+        entries = (data_blob or {}).get(key)
+        fields, attachments = [], []
+        if isinstance(entries, list):
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                for k, v in entry.items():
+                    if v in (None, "", [], {}):
+                        continue
+                    if "Image ID" in k:
+                        attachments.append({"label": _image_label(k), "image_id": str(v)})
+                    else:
+                        fields.append({"label": k, "value": str(v)})
+        out.append({"title": title, "fields": fields, "attachments": attachments})
+    return out
+
+
 def box_detail(api, part_id: str) -> dict:
-    """Live detail for one box: full location timeline + current manifest.
+    """Live detail for one box: location timeline, manifest, the FD shipping
+    checklists, and downloadable attachments.
 
     Read live on expand (ADR-0013, #44) — not mirrored. ``timeline`` is newest
-    first; ``manifest`` is the current contents.
+    first; ``manifest`` is the current contents; ``details`` are the spec-blob
+    checklists; ``attachments`` is every image on the box (label, BoL, …).
     """
     locs = api.get_locations(part_id).get("data") or []
     timeline = sorted(
@@ -99,7 +167,21 @@ def box_detail(api, part_id: str) -> dict:
         key=lambda e: e["arrived"] or "", reverse=True,
     )
     manifest = current_manifest(api.get_subcomponents(part_id).get("data"))
-    return {"part_id": part_id, "timeline": timeline, "manifest": manifest}
+
+    images = [i for i in (api.get_images(part_id).get("data") or []) if i.get("image_id")]
+    name_by_id = {str(i["image_id"]): i.get("image_name") for i in images}
+    details = shipment_details(_spec_data(api.get_component(part_id)))
+    # Carry the real HWDB filename so downloads keep their extension; the spec
+    # only gives the image *id*, not the name (e.g. "…-shipping-label.pdf").
+    for sec in details:
+        for a in sec["attachments"]:
+            a["filename"] = name_by_id.get(a["image_id"]) or a["label"]
+            a["is_image"] = _is_image(a["filename"])
+    attachments = [{"image_id": str(i["image_id"]), "image_name": i.get("image_name"),
+                    "is_image": _is_image(i.get("image_name"))}
+                   for i in images]
+    return {"part_id": part_id, "timeline": timeline, "manifest": manifest,
+            "details": details, "attachments": attachments}
 
 
 def _list_boxes(api, part_type_id: str) -> list[tuple[str, str | None]]:

@@ -344,13 +344,13 @@ def explore_shipment_sync_view(request, part_type_id):
 
 @login_not_required
 @fnal_login_required
-def explore_shipment_box_view(request, part_id):
-    """Live detail (timeline + manifest) for one box, as JSON (#44).
+def explore_shipment_image_view(request, image_id):
+    """Proxy one box attachment — shipping label, bill of lading, proforma
+    invoice — straight from HWDB (ADR-0013).
 
-    The deliberate live-on-render carve-out (ADR-0013): fetched from HWDB prod
-    on demand when a user expands a box, never mirrored. FNAL-gated; returns a
-    JSON ``error`` (not a redirect) so the panel can degrade gracefully without
-    losing the page.
+    The bytes are bearer-gated, so we mint and stream them through rather than
+    handing the browser a direct FNAL link. ``?name=`` sets the download
+    filename (sanitised).
     """
     try:
         bearer = mint_for(request)
@@ -363,7 +363,68 @@ def explore_shipment_box_view(request, part_id):
 
     api = FnalDbApiClient(settings.HWDB_PROFILES["prod"]["api"], bearer)
     try:
-        return JsonResponse(box_detail(api, part_id))
+        upstream = api.get_image_response(image_id)
     except Exception:
-        logger.exception("explore_shipment_box_view(%s) crashed", part_id)
+        logger.exception("explore_shipment_image_view(%s) crashed", image_id)
         return JsonResponse({"error": "fetch_failed"}, status=502)
+
+    raw = request.GET.get("name") or f"hwdb-{image_id}"
+    safe = "".join(c for c in raw if c.isalnum() or c in " ._-").strip() or f"hwdb-{image_id}"
+    # ?inline=1 → view in the browser (thumbnail click); default → download.
+    disposition = "inline" if request.GET.get("inline") else "attachment"
+    resp = StreamingHttpResponse(
+        upstream.iter_content(chunk_size=65536),
+        content_type=upstream.headers.get("Content-Type", "application/octet-stream"),
+    )
+    resp["Content-Disposition"] = f'{disposition}; filename="{safe}"'
+    return resp
+
+
+@login_not_required
+@fnal_login_required
+def explore_shipment_detail_view(request, part_id):
+    """Full page for one shipping box — timeline, manifest, FD shipping
+    checklists and downloadable label/attachments — so a box's details open in
+    one click instead of drilling into the leaf and expanding inline (ADR-0013).
+
+    Live from HWDB on render (the detail isn't mirrored); FNAL-gated, so an
+    unlinked user is bounced to the link page with a ?next back here.
+    """
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': request.get_full_path()})}")
+    except FnalUnavailable:
+        return render(request, "explore/shipment_detail.html",
+                      {"part_id": part_id, "active_nav": "shipments", "unavailable": True})
+
+    api = FnalDbApiClient(settings.HWDB_PROFILES["prod"]["api"], bearer)
+    try:
+        detail = box_detail(api, part_id)
+    except Exception:
+        logger.exception("explore_shipment_detail_view(%s) crashed", part_id)
+        return render(request, "explore/shipment_detail.html",
+                      {"part_id": part_id, "active_nav": "shipments", "unavailable": True})
+
+    # Catch-all attachments minus the ones already shown in a checklist section.
+    shown = {a["image_id"] for sec in detail["details"] for a in sec["attachments"]}
+    other_attachments = [a for a in detail["attachments"] if a["image_id"] not in shown]
+
+    ptid = part_id.rsplit("-", 1)[0]
+    leaf = HierarchyNode.objects.filter(
+        level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
+    box = ShipmentItem.objects.filter(part_id=part_id).first()
+    latest = detail["timeline"][0] if detail["timeline"] else None
+    return render(request, "explore/shipment_detail.html", {
+        "active_nav": "shipments",
+        "part_id": part_id,
+        "detail": detail,
+        "other_attachments": other_attachments,
+        "leaf": leaf,
+        "leaf_path": navigation.leaf_path_for(ptid) if leaf else None,
+        "box": box,
+        "latest": latest,
+        "in_transit": bool(latest and latest["location_id"] == 0),
+        "hwdb_ui_base": settings.HWDB_PROFILES["prod"]["ui"],
+    })
