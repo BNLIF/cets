@@ -78,6 +78,19 @@
   .ship-table .mono { font-family: var(--font-mono); font-size: 12.5px; }
   .ship-transit { color: var(--accent-ink); background: var(--accent-soft); font-weight: 600;
     padding: 1px 8px; border-radius: 999px; font-size: 12px; }
+  tr.ship-row { cursor: pointer; }
+  tr.ship-row:hover { background: var(--surface); }
+  .ship-caret { display: inline-block; width: 14px; color: var(--faint); transition: transform .12s; }
+  tr.ship-row.is-open .ship-caret { transform: rotate(90deg); }
+  tr.ship-detail > td { padding: 0 10px 14px; background: var(--surface); }
+  .ship-detail-grid { display: grid; grid-template-columns: minmax(0,1.4fr) minmax(0,1fr); gap: 20px; padding: 12px 4px; }
+  .ship-detail-h { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--faint); margin-bottom: 6px; }
+  .ship-sub { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .ship-sub th { text-align: left; font-weight: 500; color: var(--faint); font-size: 11px; padding: 3px 8px; }
+  .ship-sub td { padding: 4px 8px; border-top: 1px solid var(--rule); vertical-align: top; }
+  .ship-sub .mono { font-family: var(--font-mono); font-size: 11.5px; }
+  @media (max-width: 760px) { .ship-detail-grid { grid-template-columns: 1fr; } }
   .panel-meta dt { color: var(--faint); }
   .panel-meta dd { margin: 0; font-family: var(--font-mono); }
   .panel-meta a { color: var(--accent-ink); }
@@ -144,15 +157,16 @@
             <thead><tr><th>Box PID</th><th>Latest location</th><th>Last arrived</th></tr></thead>
             <tbody>
             {% for s in shipments %}
-                <tr>
-                    <td class="mono">{{ s.part_id }}</td>
+                <tr class="ship-row" data-detail-url="{% url 'explore:shipment_box' part_id=s.part_id %}">
+                    <td class="mono"><span class="ship-caret" aria-hidden="true">▸</span>{{ s.part_id }}</td>
                     <td>{% if s.is_in_transit %}<span class="ship-transit">In Transit</span>{% else %}{{ s.location_name|default:"—" }}{% endif %}</td>
                     <td class="mono">{% if s.last_arrived %}{{ s.last_arrived|date:"Y-m-d" }}{% else %}—{% endif %}</td>
                 </tr>
+                <tr class="ship-detail" hidden><td colspan="3"><div class="ship-detail-body" data-loaded="0">…</div></td></tr>
             {% endfor %}
             </tbody>
         </table>
-        <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">Latest location only; expand a box for its full timeline &amp; contents (coming soon).</p>
+        <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">Latest location is mirrored; expand a box for its full timeline &amp; contents (fetched live from HWDB).</p>
     </div>
     {% else %}
     <div class="explore-empty" id="shipment-unsynced" data-sync-url="{% url 'explore:shipment_sync' part_type_id=leaf.part_type_id %}">
@@ -311,6 +325,54 @@
     if (shipBtn) shipBtn.addEventListener("click", function () { shipmentSync(shipBtn.dataset.syncUrl); });
     var shipUnsynced = document.getElementById("shipment-unsynced");
     if (shipUnsynced) { shipmentSync(shipUnsynced.dataset.syncUrl); }
+
+    // Box expand → live-fetch timeline + manifest (ADR-0013 #44).
+    function esc(s) { var d = document.createElement("div"); d.textContent = (s == null ? "" : s); return d.innerHTML; }
+    function renderBoxDetail(d) {
+        var tl = (d.timeline || []).map(function (e) {
+            var loc = e.location_id === 0 ? '<span class="ship-transit">In Transit</span>' : esc(e.location || "—");
+            var when = (e.arrived || "").slice(0, 10);
+            return "<tr><td class='mono'>" + esc(when) + "</td><td>" + loc + "</td><td>" + esc(e.creator) +
+                   "</td><td>" + esc(e.comments) + "</td></tr>";
+        }).join("");
+        var mf = (d.manifest || []).map(function (m) {
+            return "<tr><td class='mono'>" + esc(m.part_id) + "</td><td>" + esc(m.type_name) +
+                   "</td><td>" + esc(m.functional_position) + "</td></tr>";
+        }).join("");
+        return "<div class='ship-detail-grid'>" +
+            "<div><div class='ship-detail-h'>Location timeline</div><table class='ship-sub'>" +
+              "<thead><tr><th>Arrived</th><th>Location</th><th>By</th><th>Comments</th></tr></thead>" +
+              "<tbody>" + (tl || "<tr><td colspan='4' class='cell-muted'>No location history.</td></tr>") + "</tbody></table></div>" +
+            "<div><div class='ship-detail-h'>Contents (" + (d.manifest || []).length + ")</div><table class='ship-sub'>" +
+              "<thead><tr><th>Part</th><th>Type</th><th>Position</th></tr></thead>" +
+              "<tbody>" + (mf || "<tr><td colspan='3' class='cell-muted'>Empty box.</td></tr>") + "</tbody></table></div>" +
+            "</div>";
+    }
+    document.querySelectorAll("tr.ship-row").forEach(function (row) {
+        row.addEventListener("click", async function () {
+            var detail = row.nextElementSibling;
+            if (!detail) return;
+            var open = !detail.hidden;
+            detail.hidden = open;
+            row.classList.toggle("is-open", !open);
+            if (open) return;
+            var body = detail.querySelector(".ship-detail-body");
+            if (body.dataset.loaded === "1") return;
+            body.textContent = "Loading…";
+            try {
+                var resp = await fetch(row.dataset.detailUrl, { headers: { "X-Requested-With": "fetch" } });
+                var data = await resp.json();
+                if (!resp.ok) {
+                    body.innerHTML = data.error === "fnal_link"
+                        ? "Link your FNAL account to load box details — <a href='" + esc(data.link) + "'>link now</a>."
+                        : "Could not load box details (HWDB unavailable).";
+                    return;
+                }
+                body.innerHTML = renderBoxDetail(data);
+                body.dataset.loaded = "1";
+            } catch (e) { body.textContent = "Network error loading box details."; }
+        });
+    });
 
     var cfgEl = document.getElementById("node-chart-config");
     if (cfgEl && window.Chart) {

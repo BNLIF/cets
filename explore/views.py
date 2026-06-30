@@ -24,7 +24,7 @@ from .events import physics_date_field, sync_test_events
 from .hierarchy import sync_hierarchy
 from .models import HierarchyNode, HierarchySyncState, ShipmentItem
 from .queries import component_type_progress, component_update_progress
-from .shipments import sync_shipments
+from .shipments import box_detail, sync_shipments
 
 logger = logging.getLogger(__name__)
 FNAL_UNAVAILABLE = "FNAL authentication service is unavailable. Please try again later."
@@ -278,3 +278,30 @@ def explore_shipment_sync_view(request, part_type_id):
             yield f"shipment sync: CRASH · {e}\n"
 
     return StreamingHttpResponse(_iter(), content_type="text/plain; charset=utf-8")
+
+
+@login_not_required
+@fnal_login_required
+def explore_shipment_box_view(request, part_id):
+    """Live detail (timeline + manifest) for one box, as JSON (#44).
+
+    The deliberate live-on-render carve-out (ADR-0013): fetched from HWDB prod
+    on demand when a user expands a box, never mirrored. FNAL-gated; returns a
+    JSON ``error`` (not a redirect) so the panel can degrade gracefully without
+    losing the page.
+    """
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        return JsonResponse(
+            {"error": "fnal_link", "link": reverse("hwdb:link")}, status=409
+        )
+    except FnalUnavailable:
+        return JsonResponse({"error": "unavailable"}, status=502)
+
+    api = FnalDbApiClient(settings.HWDB_PROFILES["prod"]["api"], bearer)
+    try:
+        return JsonResponse(box_detail(api, part_id))
+    except Exception:
+        logger.exception("explore_shipment_box_view(%s) crashed", part_id)
+        return JsonResponse({"error": "fetch_failed"}, status=502)

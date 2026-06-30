@@ -41,6 +41,34 @@ def latest_location(locations: list[dict]) -> dict | None:
     return max(locations, key=lambda e: e.get("arrived") or "")
 
 
+def box_detail(api, part_id: str) -> dict:
+    """Live detail for one box: full location timeline + current manifest.
+
+    Read live on expand (ADR-0013, #44) — not mirrored. ``timeline`` is newest
+    first. ``manifest`` lists current contents: subcomponent rows whose latest
+    state is mounted (``operation`` of ``unmount`` is excluded), each with its
+    part id, component-type name, and functional position.
+    """
+    locs = api.get_locations(part_id).get("data") or []
+    timeline = sorted(
+        ({"arrived": e.get("arrived"),
+          "location": (e.get("location") or {}).get("name"),
+          "location_id": (e.get("location") or {}).get("id"),
+          "creator": e.get("creator"),
+          "comments": e.get("comments")}
+         for e in locs),
+        key=lambda e: e["arrived"] or "", reverse=True,
+    )
+    subs = api.get_subcomponents(part_id).get("data") or []
+    manifest = [
+        {"part_id": s.get("part_id"),
+         "type_name": s.get("type_name"),
+         "functional_position": s.get("functional_position")}
+        for s in subs if s.get("operation") != "unmount"
+    ]
+    return {"part_id": part_id, "timeline": timeline, "manifest": manifest}
+
+
 def sync_shipments(api_base_url: str, bearer: str, part_type_id: str) -> Iterator[str]:
     """Mirror the latest location of every box of one shipping type. Generator
     yielding progress lines; rewrites ``ShipmentItem`` rows for the type."""

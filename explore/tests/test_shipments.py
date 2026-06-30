@@ -16,6 +16,7 @@ from django.test import TestCase
 from explore import curation, navigation, shipments
 from explore.models import HierarchyNode as H
 from explore.models import ShipmentItem
+from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable
 
 SHIP_PTID = "D08120200001"  # curated CE Shipping box (FD CE › CE Shipping Box)
 
@@ -134,3 +135,66 @@ class ShipmentPanelViewTest(TestCase):
         leaf = _ship_leaf()
         html = self.client.get(navigation.leaf_path_for(leaf.part_type_id)).content.decode()
         self.assertIn('id="shipment-unsynced"', html)
+
+    def test_rows_are_expandable_with_detail_url(self):
+        leaf = _ship_leaf()
+        ShipmentItem.objects.create(part_type_id=leaf.part_type_id, part_id="B1",
+                                    location_name="FNAL", location_id=1)
+        html = self.client.get(navigation.leaf_path_for(leaf.part_type_id)).content.decode()
+        self.assertIn('class="ship-row"', html)
+        self.assertIn("/explore/shipment-box/B1/", html)
+
+
+class BoxDetailTest(TestCase):
+    def test_timeline_sorted_desc_and_manifest_filters_unmount(self):
+        api = mock.MagicMock()
+        api.get_locations.return_value = {"data": [
+            _loc("BNL", 128, "2026-06-03T00:00:00-05:00"),
+            _loc("In Transit", 0, "2026-06-10T00:00:00-05:00"),  # newest
+        ]}
+        api.get_subcomponents.return_value = {"data": [
+            {"part_id": "P1", "type_name": "FEMB", "functional_position": "Slot 1",
+             "operation": "mount"},
+            {"part_id": "P2", "type_name": "FEMB", "functional_position": "Slot 2",
+             "operation": "unmount"},  # excluded
+        ]}
+        d = shipments.box_detail(api, "B1")
+        self.assertEqual(d["timeline"][0]["location"], "In Transit")
+        self.assertEqual(d["timeline"][0]["location_id"], 0)
+        self.assertEqual([m["part_id"] for m in d["manifest"]], ["P1"])
+
+
+class ShipmentBoxViewTest(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("box", "b@b.io", "pw")
+        self.client.force_login(self.user)
+        self.url = "/explore/shipment-box/B1/"
+
+    def _api(self):
+        api = mock.MagicMock()
+        api.get_locations.return_value = {"data": [_loc("FNAL", 1, "2026-05-21T00:00:00-05:00")]}
+        api.get_subcomponents.return_value = {"data": []}
+        return api
+
+    def test_returns_json_detail(self):
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=self._api()):
+            resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["part_id"], "B1")
+        self.assertEqual(data["timeline"][0]["location"], "FNAL")
+        self.assertEqual(data["manifest"], [])
+
+    def test_fnal_link_required_returns_409_with_link(self):
+        with mock.patch("explore.views.mint_for", side_effect=FnalLinkRequired()):
+            resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(resp.json()["error"], "fnal_link")
+        self.assertIn("link", resp.json())
+
+    def test_fnal_unavailable_returns_502(self):
+        with mock.patch("explore.views.mint_for", side_effect=FnalUnavailable()):
+            resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 502)
+        self.assertEqual(resp.json()["error"], "unavailable")
