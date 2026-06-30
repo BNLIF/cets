@@ -40,7 +40,7 @@ _FORBIDDEN_HTML = (
     "<h1 style='font-size:1.3rem'>Not available</h1>"
     "<p>This page is part of the cold-electronics tracking system and isn’t "
     "available to your account.</p>"
-    "<p><a href='{explore}'>← Back to DUNE Hardware Explorer</a></p></div>"
+    "<p><a href='{explore}'>← Back to HWDB Explorer</a></p></div>"
 )
 
 

@@ -1,4 +1,4 @@
-/* DUNE Hardware Explorer — standalone chrome + design system (ADR-0011, #35).
+/* HWDB Explorer — standalone chrome + design system (ADR-0011, #35).
  *
  * Visual language ported from ~/Code/dunecat (tokens.css + base.css + the
  * AppHeader/PageFrame/Btn chrome): warm cream/amber, IBM Plex. Self-contained —
@@ -88,7 +88,7 @@ a { color: inherit; }
   display: flex;
   align-items: center;
   gap: 22px;
-  height: 56px;
+  height: 50px;
   padding: 0 22px;
   background: var(--page);
   border-bottom: 1px solid var(--rule);
@@ -105,12 +105,9 @@ a { color: inherit; }
   letter-spacing: -0.01em;
 }
 .eh-brand-mark {
-  width: 26px; height: 26px;
-  border-radius: 7px;
-  background: var(--accent);
-  color: #fff;
-  display: inline-flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 14px;
+  width: 46px; height: 46px;
+  object-fit: contain;
+  display: inline-block;
 }
 .eh-nav { display: flex; gap: 22px; flex-shrink: 0; }
 .eh-nav-item {

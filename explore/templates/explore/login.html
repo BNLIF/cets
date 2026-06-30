@@ -4,8 +4,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sign in &middot; DUNE HWDB Explorer</title>
-  <link rel="icon" href="{% static 'core/images/favicon.png' %}">
+  <title>Sign in &middot; HWDB Explorer</title>
+  <link rel="icon" href="{% static 'explore/img/favicon.png' %}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -17,7 +17,7 @@
       border-radius: var(--r-lg); padding: 32px; box-shadow: var(--shadow-card);
     }
     .login-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
-    .login-brand .eh-brand-mark { width: 30px; height: 30px; font-size: 16px; }
+    .login-brand .eh-brand-mark { width: 44px; height: 44px; }
     .login-brand span.t { font-weight: 600; font-size: 17px; color: var(--ink); }
     .login-card h1 { font-size: 1.25rem; margin: 0 0 6px; color: var(--ink); letter-spacing: -0.01em; }
     .login-card p { color: var(--dim); margin: 0 0 14px; }
@@ -38,8 +38,8 @@
   <div class="login-wrap">
     <div class="login-card">
       <div class="login-brand">
-        <span class="eh-brand-mark">D</span>
-        <span class="t">DUNE HWDB Explorer</span>
+        <img class="eh-brand-mark" src="{% static 'explore/img/explorer-mark.png' %}" alt="">
+        <span class="t">HWDB Explorer</span>
       </div>
       <h1>Sign in with Fermilab</h1>
       <p>Access uses your Fermilab credentials via CILogon.</p>
