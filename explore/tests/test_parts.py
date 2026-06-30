@@ -273,3 +273,34 @@ class LeafPartsTableTest(TestCase):
         self.assertIn(f"/explore/part/{self.leaf.part_type_id}-00000/", html)  # tail row
         self.assertIn("« First", html)
         self.assertIn('href="?page=1"', html)                                  # First → page 1
+
+
+class SearchTest(TestCase):
+    """Instant mirror search → component-type leaf or part page."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("sx", "s@x.io", "pw")
+        self.client.force_login(self.user)
+        self.leaf = _comp_leaf()  # ColdADC, D05700600099, under browsable FD CE
+        HwdbComponentEvent.objects.create(
+            part_type_id="D05700600099", part_id="D05700600099-00001",
+            created=timezone.now())
+
+    def test_page_renders(self):
+        resp = self.client.get("/explore/search/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Advanced search")  # the future-seam note
+
+    def test_api_finds_component_type_by_name_with_leaf_path(self):
+        d = self.client.get("/explore/search/api/", {"q": "ColdADC"}).json()
+        match = next(t for t in d["types"] if t["part_type_id"] == "D05700600099")
+        self.assertTrue(match["path"])  # reachable leaf page
+
+    def test_api_finds_mirrored_part_and_flags_direct_pid(self):
+        d = self.client.get("/explore/search/api/", {"q": "D05700600099-00001"}).json()
+        self.assertEqual(d["direct_part"], "D05700600099-00001")
+        self.assertTrue(any(p["part_id"] == "D05700600099-00001" for p in d["parts"]))
+
+    def test_short_query_returns_empty(self):
+        d = self.client.get("/explore/search/api/", {"q": "a"}).json()
+        self.assertEqual(d, {"types": [], "parts": [], "direct_part": None})

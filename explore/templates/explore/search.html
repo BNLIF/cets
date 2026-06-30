@@ -1,0 +1,114 @@
+{% extends 'explore/base.html' %}
+{% block title %}Search · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .sx-page { padding: 26px 30px 56px; max-width: 820px; margin: 0 auto; }
+  .sx-page h1 { font-size: 1.5rem; color: var(--ink); margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sx-sub { color: var(--dim); font-size: 13.5px; margin: 0 0 18px; }
+  .sx-input { width: 100%; box-sizing: border-box; font: inherit; font-size: 16px;
+    padding: 12px 16px; border: 1px solid var(--rule-hard); border-radius: var(--r-lg);
+    background: var(--page); color: var(--ink); }
+  .sx-input:focus { outline: none; border-color: var(--accent); }
+
+  .sx-group { margin-top: 22px; }
+  .sx-group h2 { font-size: 12px; color: var(--faint); text-transform: uppercase;
+    letter-spacing: .04em; margin: 0 0 8px; }
+  .sx-list { border: 1px solid var(--rule); border-radius: var(--r-lg);
+    background: var(--page); overflow: hidden; }
+  .sx-row { display: flex; align-items: center; gap: 12px; padding: 11px 15px;
+    text-decoration: none; color: inherit; border-top: 1px solid var(--rule); }
+  .sx-row:first-child { border-top: none; }
+  .sx-row:hover { background: var(--surface); }
+  .sx-name { font-weight: 600; color: var(--ink); }
+  .sx-meta { font-size: 12px; color: var(--faint); }
+  .sx-id { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--faint);
+    white-space: nowrap; }
+  .sx-chip { font-size: 10px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+    color: var(--accent-ink); background: var(--accent-soft); padding: 2px 7px; border-radius: 999px; }
+  .sx-chip.leaf { color: var(--good); background: var(--good-bg); }
+  .sx-direct { display: block; border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--rule));
+    background: var(--accent-soft); color: var(--accent-ink); border-radius: var(--r-lg);
+    padding: 12px 15px; text-decoration: none; font-family: var(--font-mono); font-size: 14px; }
+  .sx-direct:hover { border-color: var(--accent); }
+  .sx-empty { color: var(--faint); font-size: 13.5px; padding: 18px 2px; }
+  .sx-advanced { margin-top: 30px; border-top: 1px dashed var(--rule); padding-top: 16px;
+    color: var(--faint); font-size: 12.5px; }
+</style>
+
+<div class="sx-page">
+  <h1>Search</h1>
+  <p class="sx-sub">Find a component type or a part across the mirrored hierarchy. Matches names, IDs and part IDs — instantly, from the local mirror.</p>
+
+  <input class="sx-input" id="sx-q" type="text" autocomplete="off" spellcheck="false"
+         placeholder="e.g. LArASIC, ColdADC, D08100100003, D08100100003-00226"
+         value="{{ q }}" aria-label="Search">
+
+  <div id="sx-results"></div>
+
+  <div class="sx-advanced">
+    Looking for a part by serial number or another field? <strong>Advanced search</strong>
+    (live, across all HWDB fields) is coming. For now, open the part’s component
+    type and browse its parts table, or paste a full part ID above.
+  </div>
+</div>
+
+<script>
+(function () {
+  var apiUrl = "{% url 'explore:search_api' %}";
+  var input = document.getElementById("sx-q");
+  var out = document.getElementById("sx-results");
+  function esc(s) { var d = document.createElement("div"); d.textContent = (s == null ? "" : s); return d.innerHTML; }
+
+  function render(d, q) {
+    var html = "";
+    if (d.direct_part) {
+      html += "<div class='sx-group'><h2>Open part</h2>" +
+        "<a class='sx-direct' href='/explore/part/" + encodeURIComponent(d.direct_part) + "/'>" +
+        esc(d.direct_part) + " &rarr;</a></div>";
+    }
+    if (d.types && d.types.length) {
+      html += "<div class='sx-group'><h2>Component types (" + d.types.length + ")</h2><div class='sx-list'>";
+      d.types.forEach(function (t) {
+        html += "<a class='sx-row' href='" + esc(t.path) + "'>" +
+          "<span class='sx-chip leaf'>type</span>" +
+          "<span><span class='sx-name'>" + esc(t.name) + "</span>" +
+          "<div class='sx-meta'>" + esc(t.sub) + " · " + t.n_components + " components</div></span>" +
+          "<span class='sx-id'>" + esc(t.part_type_id) + "</span></a>";
+      });
+      html += "</div></div>";
+    }
+    if (d.parts && d.parts.length) {
+      html += "<div class='sx-group'><h2>Parts (" + d.parts.length + ")</h2><div class='sx-list'>";
+      d.parts.forEach(function (p) {
+        html += "<a class='sx-row' href='" + esc(p.path) + "'>" +
+          "<span class='sx-chip'>part</span>" +
+          "<span class='sx-name' style='font-family:var(--font-mono);font-weight:500;'>" + esc(p.part_id) + "</span>" +
+          "<span class='sx-id'>" + esc(p.part_type_id) + "</span></a>";
+      });
+      html += "</div></div>";
+    }
+    if (!html) {
+      html = "<div class='sx-empty'>No component types or mirrored parts match “" + esc(q) + "”.</div>";
+    }
+    out.innerHTML = html;
+  }
+
+  var timer = null, lastQ = null;
+  async function run() {
+    var q = input.value.trim();
+    if (q === lastQ) return;
+    lastQ = q;
+    if (q.length < 2) { out.innerHTML = ""; return; }
+    try {
+      var resp = await fetch(apiUrl + "?q=" + encodeURIComponent(q), { headers: { "X-Requested-With": "fetch" } });
+      var data = await resp.json();
+      if (input.value.trim() === q) render(data, q);
+    } catch (e) { out.innerHTML = "<div class='sx-empty'>Search failed — try again.</div>"; }
+  }
+  input.addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(run, 150); });
+  input.focus();
+  if (input.value.trim().length >= 2) run();
+})();
+</script>
+{% endblock %}

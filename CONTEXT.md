@@ -140,6 +140,46 @@ The whole tree is live in production HWDB and walkable via the API
 subsystems (the three chip families); the dashboard expansion is about
 navigating the rest read-only. See [[0007-hwdb-mirror-separation]].
 
+### Type vs. instance (and the terms around it)
+
+The most confused distinction in HWDB. **System / Subsystem / Component Type
+are kinds** (folders); below the Component Type live the actual physical units.
+
+- **Component Type** = the *kind / template* (`part_type_id`, e.g.
+  `D08100100003`). One of these. It defines the specs and the test types that
+  apply. Also called **part type**.
+- **Part / component / item** = *one physical unit* (`part_id`, e.g.
+  `D08100100003-00226`). Thousands of these. A `part_id` is literally
+  `part_type_id` + `-` + a sequence number. It has a serial number, status,
+  location, test results and attachments.
+
+The naming is overloaded — pin it down:
+
+- HWDB's **REST API** uses **"component" for an *instance***:
+  `component-types/{type}/components` returns the *parts*, and
+  `components/{pid}` is *one* part.
+- HWDB's **web UI** calls that same instance an **"Item"**.
+- Colloquial "component" can mean the *kind* — so when someone says
+  "component", confirm whether they mean the Component Type or one unit.
+
+Related instance-level terms:
+
+- **Test type** — a *kind* of test defined on a Component Type (e.g.
+  `RoomT QC Test`). The template.
+- **Test** (record) — one *run* of a test type on one part: a status, a date,
+  a `test_data` JSON payload, and sometimes attached files. The list endpoint
+  (`components/{pid}/tests`) omits the test's oid/status/files; the per-type
+  endpoint (`components/{pid}/tests/{test_type_id}`) carries them.
+- **Specifications** — a free-form data blob on a part (or type). For shipping
+  boxes it holds the pre-shipping/shipping/warehouse checklists; for other
+  parts, whatever fields that type defines.
+- **Subcomponents / manifest** — parts mounted *inside* another part (chips on
+  a FEMB; contents of a shipping box). Each is itself a part with its own page.
+- **Shipping box** — not a special entity: a part whose Component Type is
+  curated as a shipping type, so its page is the generic part page plus
+  shipment sections. See [[0013-shipment-tracker-on-shipping-leaves]] and
+  [[0014-generic-part-detail-page]].
+
 ### Simple vs detailed QC record
 
 A LArASIC QC test (RoomT or CryoT) can be uploaded in two shapes:

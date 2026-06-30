@@ -10,6 +10,31 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link href="{% static 'explore/explore.css' %}" rel="stylesheet">
+    <style>
+      .eh-find { position: relative; }
+      .eh-find input { font: inherit; font-size: 13px; padding: 5px 12px; width: 190px;
+        border: 1px solid var(--rule); border-radius: 999px; background: var(--page); color: var(--ink); }
+      .eh-find input:focus { outline: none; border-color: var(--accent); }
+      .eh-find-menu { position: absolute; top: calc(100% + 6px); right: 0; width: 360px;
+        max-height: 60vh; overflow: auto; background: var(--page); border: 1px solid var(--rule-hard);
+        border-radius: var(--r-lg); box-shadow: 0 10px 30px rgba(0,0,0,.14); z-index: 60; padding: 4px; }
+      .eh-find-h { font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
+        color: var(--faint); padding: 8px 10px 4px; }
+      .eh-find-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+        text-decoration: none; color: inherit; border-radius: var(--r-sm); }
+      .eh-find-row:hover, .eh-find-row.is-active { background: var(--surface); }
+      .eh-find-name { font-weight: 600; color: var(--ink); font-size: 13px; }
+      .eh-find-name.mono { font-family: var(--font-mono); font-weight: 500; }
+      .eh-find-meta { font-size: 11px; color: var(--faint); }
+      .eh-find-id { margin-left: auto; font-family: var(--font-mono); font-size: 11px;
+        color: var(--faint); white-space: nowrap; }
+      .eh-find-chip { font-size: 9.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+        color: var(--accent-ink); background: var(--accent-soft); padding: 2px 6px; border-radius: 999px; }
+      .eh-find-chip.leaf { color: var(--good); background: var(--good-bg); }
+      .eh-find-empty, .eh-find-all { padding: 9px 10px; color: var(--faint); font-size: 12px; }
+      .eh-find-all { display: block; text-decoration: none; color: var(--accent-ink); border-top: 1px solid var(--rule); }
+      .eh-find-all:hover { background: var(--surface); }
+    </style>
 </head>
 <body>
     <header class="eh-header">
@@ -20,18 +45,18 @@
             HWDB Explorer
         </a>
         <nav class="eh-nav">
-            <a class="eh-nav-item{% if active_nav != 'shipments' %} active{% endif %}" href="{% url 'explore:home' %}">Hardware</a>
+            <a class="eh-nav-item{% if active_nav != 'shipments' and active_nav != 'search' %} active{% endif %}" href="{% url 'explore:home' %}">Hardware</a>
             <a class="eh-nav-item{% if active_nav == 'shipments' %} active{% endif %}" href="{% url 'explore:shipments' %}">Shipments</a>
+            <a class="eh-nav-item{% if active_nav == 'search' %} active{% endif %}" href="{% url 'explore:search' %}">Search</a>
         </nav>
         <div class="eh-right">
             {% if user.is_authenticated %}
-            <form class="eh-find" role="search"
-                  onsubmit="event.preventDefault(); var v=this.pid.value.trim(); if(v){location.href='{% url 'explore:part' part_id='__PID__' %}'.replace('__PID__', encodeURIComponent(v));}">
-                <input name="pid" type="text" placeholder="Go to PID…" aria-label="Open a part by PID"
-                       autocomplete="off" spellcheck="false"
-                       style="font:inherit;font-size:13px;padding:5px 11px;border:1px solid var(--rule);
-                              border-radius:999px;background:var(--page);color:var(--ink);width:140px;">
-            </form>
+            <div class="eh-find" id="eh-find" data-api="{% url 'explore:search_api' %}" data-search="{% url 'explore:search' %}">
+                <input id="eh-find-q" type="text" placeholder="Search…" autocomplete="off" spellcheck="false"
+                       role="combobox" aria-expanded="false" aria-controls="eh-find-menu"
+                       aria-label="Search component types and parts">
+                <div class="eh-find-menu" id="eh-find-menu" role="listbox" hidden></div>
+            </div>
             {% endif %}
             {% if fnal_credkey %}
             <span class="eh-user" title="Signed in via FNAL">
@@ -55,5 +80,85 @@
     <main class="eh-main">
         {% block content %}{% endblock %}
     </main>
+
+    <script>
+    (function () {
+      var box = document.getElementById("eh-find");
+      if (!box) return;
+      var input = document.getElementById("eh-find-q");
+      var menu = document.getElementById("eh-find-menu");
+      var apiUrl = box.dataset.api, searchUrl = box.dataset.search;
+      function esc(s) { var d = document.createElement("div"); d.textContent = (s == null ? "" : s); return d.innerHTML; }
+      var rows = [], active = -1;
+
+      function close() { menu.hidden = true; input.setAttribute("aria-expanded", "false"); active = -1; }
+      function open() { menu.hidden = false; input.setAttribute("aria-expanded", "true"); }
+
+      function render(d, q) {
+        var html = "";
+        if (d.direct_part) {
+          html += "<a class='eh-find-row' href='/explore/part/" + encodeURIComponent(d.direct_part) + "/'>" +
+            "<span class='eh-find-chip'>part</span><span class='eh-find-name mono'>" + esc(d.direct_part) + "</span></a>";
+        }
+        if (d.types && d.types.length) {
+          html += "<div class='eh-find-h'>Component types</div>";
+          d.types.forEach(function (t) {
+            html += "<a class='eh-find-row' href='" + esc(t.path) + "'>" +
+              "<span class='eh-find-chip leaf'>type</span>" +
+              "<span><span class='eh-find-name'>" + esc(t.name) + "</span>" +
+              "<div class='eh-find-meta'>" + esc(t.sub) + "</div></span>" +
+              "<span class='eh-find-id'>" + esc(t.part_type_id) + "</span></a>";
+          });
+        }
+        if (d.parts && d.parts.length) {
+          html += "<div class='eh-find-h'>Parts</div>";
+          d.parts.forEach(function (p) {
+            html += "<a class='eh-find-row' href='" + esc(p.path) + "'>" +
+              "<span class='eh-find-chip'>part</span>" +
+              "<span class='eh-find-name mono'>" + esc(p.part_id) + "</span>" +
+              "<span class='eh-find-id'>" + esc(p.part_type_id) + "</span></a>";
+          });
+        }
+        if (!html) { html = "<div class='eh-find-empty'>No matches in the mirror.</div>"; }
+        html += "<a class='eh-find-all' href='" + searchUrl + "?q=" + encodeURIComponent(q) + "'>Open full search &rarr;</a>";
+        menu.innerHTML = html;
+        rows = Array.prototype.slice.call(menu.querySelectorAll(".eh-find-row, .eh-find-all"));
+        active = -1;
+        open();
+      }
+
+      var timer = null, lastQ = null;
+      async function run() {
+        var q = input.value.trim();
+        if (q === lastQ) return;
+        lastQ = q;
+        if (q.length < 2) { close(); return; }
+        try {
+          var resp = await fetch(apiUrl + "?q=" + encodeURIComponent(q), { headers: { "X-Requested-With": "fetch" } });
+          var data = await resp.json();
+          if (input.value.trim() === q) render(data, q);
+        } catch (e) { close(); }
+      }
+      function setActive(i) {
+        if (!rows.length) return;
+        active = (i + rows.length) % rows.length;
+        rows.forEach(function (r, j) { r.classList.toggle("is-active", j === active); });
+        rows[active].scrollIntoView({ block: "nearest" });
+      }
+
+      input.addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(run, 150); });
+      input.addEventListener("keydown", function (e) {
+        if (e.key === "ArrowDown") { e.preventDefault(); if (menu.hidden) run(); else setActive(active + 1); }
+        else if (e.key === "ArrowUp") { e.preventDefault(); setActive(active - 1); }
+        else if (e.key === "Enter") {
+          var q = input.value.trim();
+          if (active >= 0 && rows[active]) { location.href = rows[active].href; }
+          else if (q) { location.href = searchUrl + "?q=" + encodeURIComponent(q); }
+        } else if (e.key === "Escape") { close(); input.blur(); }
+      });
+      input.addEventListener("focus", function () { if (rows.length && input.value.trim().length >= 2) open(); });
+      document.addEventListener("click", function (e) { if (!box.contains(e.target)) close(); });
+    })();
+    </script>
 </body>
 </html>

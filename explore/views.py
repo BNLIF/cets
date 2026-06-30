@@ -1,12 +1,13 @@
 import json
 import logging
+import re
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_not_required
 from django.core.paginator import Paginator
-from django.db.models import F
+from django.db.models import F, Q
 from django.http import HttpResponse, JsonResponse, StreamingHttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -476,3 +477,54 @@ def explore_part_view(request, part_id):
         "box": box,
         "hwdb_ui_base": settings.HWDB_PROFILES["prod"]["ui"],
     })
+
+
+# A full part id, e.g. ``D08100100003-00226`` — type-id segment then a sequence.
+_PID_RE = re.compile(r"^[A-Za-z0-9]{8,}-\w+$")
+
+
+@login_not_required
+@fnal_login_required
+def explore_search_view(request):
+    """Instant search over the local mirror (ADR-0014): jump to a component
+    type's leaf page or a part's detail page by name / id. Mirror-only, so no
+    FNAL needed; live cross-field 'advanced' search is a later addition."""
+    return render(request, "explore/search.html",
+                  {"active_nav": "search", "q": request.GET.get("q", "")})
+
+
+@login_not_required
+@fnal_login_required
+def explore_search_api_view(request):
+    """JSON results for the instant search box — component types + mirrored
+    parts matching ``q`` (substring, case-insensitive), plus a direct-open hint
+    when ``q`` looks like a full part id. Reads only the mirror."""
+    q = (request.GET.get("q") or "").strip()
+    if len(q) < 2:
+        return JsonResponse({"types": [], "parts": [], "direct_part": None})
+
+    types = []
+    type_qs = (HierarchyNode.objects
+               .filter(level=HierarchyNode.LEVEL_TYPE)
+               .filter(Q(name__icontains=q) | Q(part_type_id__icontains=q)
+                       | Q(full_name__icontains=q))
+               .order_by("system_name", "subsystem_name", "name")[:25])
+    for n in type_qs:
+        path = navigation.leaf_path_for(n.part_type_id)
+        if path:  # only types whose curated family is browsable are reachable
+            types.append({
+                "name": n.name, "part_type_id": n.part_type_id,
+                "sub": f"{n.system_name} › {n.subsystem_name}",
+                "n_components": n.n_components, "path": path,
+            })
+
+    parts = [
+        {"part_id": pid, "part_type_id": ptid,
+         "path": reverse("explore:part", args=[pid])}
+        for pid, ptid in (HwdbComponentEvent.objects
+                          .filter(part_id__icontains=q)
+                          .order_by("part_id")
+                          .values_list("part_id", "part_type_id")[:25])
+    ]
+    direct = q if _PID_RE.match(q) else None
+    return JsonResponse({"types": types, "parts": parts, "direct_part": direct})
