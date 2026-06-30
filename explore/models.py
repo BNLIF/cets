@@ -112,6 +112,11 @@ class HwdbComponentEvent(models.Model):
     updated = models.DateTimeField(null=True, blank=True)   # HWDB last-modified
     serial_number = models.CharField(max_length=120, blank=True, default="")
     created_by = models.CharField(max_length=120, blank=True, default="")  # HWDB creator
+    # Categorical facets off the same detail record, for the component-breakdown
+    # bar charts (mirror-only, no extra fetch). Empty when not (yet) synced.
+    status = models.CharField(max_length=120, blank=True, default="")
+    manufacturer = models.CharField(max_length=160, blank=True, default="")
+    institution = models.CharField(max_length=160, blank=True, default="")
 
     class Meta:
         indexes = [models.Index(fields=["part_type_id", "updated"])]

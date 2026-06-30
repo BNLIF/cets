@@ -144,6 +144,70 @@ class PartFactsTest(TestCase):
         self.assertNotIn("Manufacturer", facts)
 
 
+class AssemblyTreeTest(TestCase):
+    """parts.assembly_children — one level of the assembly tree with QC status
+    (ADR-0015)."""
+
+    def _api(self, status_by_pid):
+        api = mock.MagicMock()
+        api.get_subcomponents.return_value = {"data": [
+            {"part_id": "P1", "type_name": "FEMB", "functional_position": "Slot 1",
+             "operation": "mount"},
+            {"part_id": "P2", "type_name": "FEMB", "functional_position": "Slot 2",
+             "operation": "unmount"},  # excluded by current_manifest
+        ]}
+        api.get_component.side_effect = lambda pid: {"data": status_by_pid.get(pid, {})}
+        return api
+
+    def test_children_carry_status(self):
+        api = self._api({"P1": {"status": {"name": "Passed"}}})
+        kids = parts.assembly_children(api, "B1")
+        self.assertEqual([k["part_id"] for k in kids], ["P1"])     # unmount filtered
+        self.assertEqual(kids[0]["status"], "Passed")              # nested ref unwrapped
+
+    def test_failed_status_fetch_degrades_to_none(self):
+        api = self._api({})
+        api.get_component.side_effect = RuntimeError("502")
+        self.assertIsNone(parts.assembly_children(api, "B1")[0]["status"])
+
+    def test_status_fetch_capped(self):
+        api = mock.MagicMock()
+        api.get_subcomponents.return_value = {"data": [
+            {"part_id": f"P{i}", "operation": "mount"} for i in range(parts._STATUS_FETCH_CAP + 5)]}
+        api.get_component.return_value = {"data": {"status": "Passed"}}
+        kids = parts.assembly_children(api, "B1")
+        self.assertEqual(api.get_component.call_count, parts._STATUS_FETCH_CAP)  # capped
+        self.assertEqual(kids[0]["status"], "Passed")
+        self.assertIsNone(kids[-1]["status"])  # beyond the cap → listed, no status
+
+
+class AssemblyViewTest(TestCase):
+    """The lazy-expand endpoint /explore/assembly/<pid>/."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("a", "a@a.io", "pw")
+        self.client.force_login(self.user)
+
+    def test_returns_children_with_part_urls(self):
+        api = mock.MagicMock()
+        api.get_subcomponents.return_value = {"data": [
+            {"part_id": "C1", "type_name": "ColdADC", "operation": "mount"}]}
+        api.get_component.return_value = {"data": {"status": "Available"}}
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            resp = self.client.get("/explore/assembly/B1/")
+        self.assertEqual(resp.status_code, 200)
+        child = json.loads(resp.content)["children"][0]
+        self.assertEqual(child["part_id"], "C1")
+        self.assertEqual(child["url"], "/explore/part/C1/")
+        self.assertEqual(child["status"], "Available")
+
+    def test_fnal_link_required_returns_409(self):
+        with mock.patch("explore.views.mint_for", side_effect=FnalLinkRequired()):
+            resp = self.client.get("/explore/assembly/B1/")
+        self.assertEqual(resp.status_code, 409)
+
+
 class PartViewTest(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user("p", "p@p.io", "pw")
@@ -281,6 +345,16 @@ class LeafPartsTableTest(TestCase):
         self.assertIn(f"/explore/part/{self.leaf.part_type_id}-00000/", html)  # tail row
         self.assertIn("« First", html)
         self.assertIn('href="?page=1"', html)                                  # First → page 1
+
+    def test_component_breakdown_panel_when_facets_present(self):
+        # Mirror-only breakdown bar charts appear once components carry a facet.
+        HwdbComponentEvent.objects.filter(part_type_id=self.leaf.part_type_id).update(
+            status="QA/QC Passed", manufacturer="BNL")
+        html = self.client.get(self.url).content.decode()
+        self.assertIn("Component breakdown", html)
+        self.assertIn('id="breakdown-config"', html)
+        self.assertIn("QA/QC Passed", html)
+        self.assertIn("BNL", html)
 
 
 class SearchTest(TestCase):

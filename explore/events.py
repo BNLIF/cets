@@ -91,6 +91,15 @@ def _list_part_ids(api, part_type_id: str) -> Iterator[str]:
         page += 1
 
 
+def _ref_name(v) -> str:
+    """HWDB nested ``{id, name}`` ref (or plain scalar) → its display name as a
+    string; ``""`` when missing. Used for the categorical facets (creator,
+    status, manufacturer, institution)."""
+    if isinstance(v, dict):
+        v = v.get("name")
+    return str(v) if v else ""
+
+
 def _fetch_component(api, part_id: str, date_field: str | None,
                      test_type_ids: dict[str, int], *,
                      need_detail: bool, need_tests: bool) -> dict:
@@ -121,19 +130,22 @@ def _fetch_component(api, part_id: str, date_field: str | None,
                         tests.append((name, dt))
 
     created = updated = None
-    serial = created_by = ""
+    serial = created_by = status = manufacturer = institution = ""
     if need_detail:
         detail = api._make_request("GET", f"components/{part_id}")
         d = detail.get("data") if isinstance(detail.get("data"), dict) else {}
         created = _parse_created(d.get("created"))
         updated = _parse_created(d.get("updated"))
         serial = d.get("serial_number") or ""
-        creator = d.get("creator")
-        created_by = (creator.get("name") if isinstance(creator, dict) else creator) or ""
+        created_by = _ref_name(d.get("creator"))
+        status = _ref_name(d.get("status"))
+        manufacturer = _ref_name(d.get("manufacturer"))
+        institution = _ref_name(d.get("institution"))
 
     return {
         "part_id": part_id, "created": created, "updated": updated,
-        "serial_number": serial, "created_by": created_by,
+        "serial_number": serial, "created_by": created_by, "status": status,
+        "manufacturer": manufacturer, "institution": institution,
         "tests": tests, "has_detail": need_detail, "has_tests": need_tests,
     }
 
@@ -261,6 +273,9 @@ def sync_test_events(
                     created=r["created"], updated=r["updated"],
                     serial_number=r.get("serial_number", ""),
                     created_by=r.get("created_by", ""),
+                    status=r.get("status", ""),
+                    manufacturer=r.get("manufacturer", ""),
+                    institution=r.get("institution", ""),
                 )
                 for r in results if r["has_detail"]
             ],

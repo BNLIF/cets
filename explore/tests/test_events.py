@@ -90,6 +90,28 @@ class SyncTestEventsTest(TestCase):
         self.assertIsNotNone(node.tests_synced_at)
         self.assertEqual(node.n_components, 2)
 
+    def test_mirrors_status_manufacturer_institution_facets(self):
+        # The categorical facets ride along on the detail record already fetched;
+        # nested {id,name} refs are unwrapped, plain scalars pass through.
+        client = mock.MagicMock()
+
+        def _make_request(method, endpoint, data=None, params=None):
+            if endpoint.startswith("component-types/"):
+                return {"data": [{"part_id": "P1"}], "pagination": {"pages": 1}}
+            return {"data": {"created": "2025-02-01T00:00:00+00:00",
+                             "updated": "2025-03-15T00:00:00+00:00",
+                             "status": {"id": 3, "name": "QA/QC Passed"},
+                             "manufacturer": {"id": 5, "name": "BNL"},
+                             "institution": "Yale"}}
+        client._make_request.side_effect = _make_request
+        client.get_tests.side_effect = lambda pid: {"data": []}
+        with mock.patch("explore.events.FnalDbApiClient", return_value=client):
+            list(events.sync_test_events("https://x", "bearer", "D05700200001", mode="full"))
+        row = HwdbComponentEvent.objects.get(part_type_id="D05700200001", part_id="P1")
+        self.assertEqual(row.status, "QA/QC Passed")   # nested ref → name
+        self.assertEqual(row.manufacturer, "BNL")
+        self.assertEqual(row.institution, "Yale")      # plain scalar
+
     def test_component_events_synced_even_with_no_tests(self):
         # 350-components-0-tests case (e.g. CRU Anode): registration plot
         # still has data while the test plot is empty.
@@ -148,6 +170,26 @@ class ComponentTypeProgressTest(TestCase):
         names = [s["name"] for s in ranges["all"]["series"]]
         self.assertEqual(names, ["a", "b"])  # sorted
         self.assertEqual(sum(sum(s["counts"]) for s in ranges["all"]["series"]), 3)
+
+
+class ComponentBreakdownTest(TestCase):
+    def test_counts_per_facet_buckets_unset_and_skips_all_blank(self):
+        from explore.queries import component_breakdowns
+        ptid = "D05700299999"
+
+        def mk(pid, status="", manu="", inst=""):
+            HwdbComponentEvent.objects.create(part_type_id=ptid, part_id=pid,
+                                              status=status, manufacturer=manu, institution=inst)
+        mk("P1", status="Passed", manu="BNL")
+        mk("P2", status="Passed", manu="BNL")
+        mk("P3", status="Failed")               # no manufacturer → (unset)
+        bd = {b["field"]: b for b in component_breakdowns(ptid)}
+        self.assertEqual(set(bd), {"status", "manufacturer"})   # institution all-blank → skipped
+        self.assertEqual(bd["status"]["total"], 3)
+        self.assertEqual({r["value"]: r["n"] for r in bd["status"]["rows"]},
+                         {"Passed": 2, "Failed": 1})
+        self.assertEqual({r["value"]: r["n"] for r in bd["manufacturer"]["rows"]},
+                         {"BNL": 2, "(unset)": 1})
 
 
 class PhysicsDatePathTest(TestCase):

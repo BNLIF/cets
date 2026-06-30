@@ -29,8 +29,10 @@ from .hierarchy import sync_hierarchy
 from .models import (
     HierarchyNode, HierarchySyncState, HwdbComponentEvent, ShipmentItem,
 )
-from .queries import component_type_progress, component_update_progress
-from .parts import part_detail
+from .queries import (
+    component_breakdowns, component_type_progress, component_update_progress,
+)
+from .parts import assembly_children, part_detail
 from .shipments import sync_shipments
 
 logger = logging.getLogger(__name__)
@@ -194,12 +196,15 @@ def explore_view(request, trail=None):
     # the type from the mirror (HwdbComponentEvent), each row opening its part
     # page. Mirror-backed like the box table, so no live HWDB on render.
     parts_page = None
+    breakdowns = []
     if leaf and not is_shipping and leaf.tests_synced_at:
         part_rows = (HwdbComponentEvent.objects
                      .filter(part_type_id=leaf.part_type_id)
                      .order_by(F("updated").desc(nulls_last=True),
                                F("created").desc(nulls_last=True), "part_id"))
         parts_page = Paginator(part_rows, 50).get_page(request.GET.get("page"))
+        # Mirror-only categorical breakdowns (status / manufacturer / institution).
+        breakdowns = component_breakdowns(leaf.part_type_id)
 
     return render(
         request,
@@ -210,6 +215,7 @@ def explore_view(request, trail=None):
             "leaf": leaf,
             "charts": charts,
             "parts_page": parts_page,
+            "breakdowns": breakdowns,
             "is_shipping": is_shipping,
             "shipments": shipments,
             "shipment_synced_at": shipment_synced_at,
@@ -477,6 +483,31 @@ def explore_part_view(request, part_id):
         "box": box,
         "hwdb_ui_base": settings.HWDB_PROFILES["prod"]["ui"],
     })
+
+
+@login_not_required
+@fnal_login_required
+def explore_assembly_view(request, part_id):
+    """One level of a part's assembly tree as JSON — a node's direct children
+    with their live QC flags (ADR-0015). Lazy-load target for deeper expansion
+    on the part page; the first level is rendered server-side. FNAL-gated."""
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        return JsonResponse({"error": "fnal_link", "link": reverse("hwdb:link")}, status=409)
+    except FnalUnavailable:
+        return JsonResponse({"error": "unavailable"}, status=502)
+
+    api = FnalDbApiClient(settings.HWDB_PROFILES["prod"]["api"], bearer)
+    try:
+        children = assembly_children(api, part_id)
+    except Exception:
+        logger.exception("explore_assembly_view(%s) crashed", part_id)
+        return JsonResponse({"error": "fetch_failed"}, status=502)
+
+    for c in children:
+        c["url"] = reverse("explore:part", args=[c["part_id"]]) if c.get("part_id") else None
+    return JsonResponse({"children": children})
 
 
 # A full part id, e.g. ``D08100100003-00226`` — type-id segment then a sequence.

@@ -71,8 +71,10 @@
   .chart-card { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg); padding: 16px 18px; margin-top: 16px; }
 
   .explore-empty { text-align: center; padding: 40px 16px; color: var(--faint); }
-  .panel-meta { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin-top: 16px;
-    border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg); padding: 16px 18px; }
+  .panel-meta { display: grid; grid-template-columns: max-content 1fr max-content 1fr;
+    gap: 6px 18px; margin-top: 16px; border: 1px solid var(--rule); background: var(--page);
+    border-radius: var(--r-lg); padding: 16px 18px; }
+  @media (max-width: 700px) { .panel-meta { grid-template-columns: max-content 1fr; } }
   /* shipments summary cards */
   .ship-cards { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
   .ship-card { flex: 1 1 120px; border: 1px solid var(--rule); background: var(--page);
@@ -244,6 +246,14 @@
     {% endif %}
     <pre id="node-sync-log"></pre>
 
+    <dl class="panel-meta">
+        <dt>Part type ID</dt><dd><a href="{{ hwdb_ui_base }}/view/components?pa={{ leaf.part_type_id }}" target="_blank" rel="noopener" title="Open this component type in the FNAL HWDB">{{ leaf.part_type_id }} <span aria-hidden="true">&#x2197;</span></a></dd>
+        <dt>System</dt><dd>{{ leaf.system_name }} ({{ leaf.system_id }})</dd>
+        <dt>Subsystem</dt><dd>{{ leaf.subsystem_name }} ({{ leaf.subsystem_id }})</dd>
+        <dt>{% if is_shipping %}Boxes in HWDB{% else %}Components in HWDB{% endif %}</dt><dd>{{ leaf.n_components }}</dd>
+        {% if not is_shipping %}<dt>Test events</dt><dd>{{ leaf.n_tests }}</dd>{% endif %}
+    </dl>
+
     {% if leaf.tests_synced_at %}
         {% for c in charts %}
         <div class="chart-card" data-chart-panel="{{ c.slug }}">
@@ -264,6 +274,27 @@
             <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">{{ c.caption }}</p>
         </div>
         {% endfor %}
+
+        {% if breakdowns %}
+        <div class="chart-card" id="breakdown-card">
+            <div class="panel-title" style="font-size: 14px; margin-bottom: 4px;">Component breakdown</div>
+            <p class="cell-muted" style="margin: 0 0 14px; font-size: 12px;">Components by category, counted from the local mirror — no live fetch. Re-sync the type to refresh.</p>
+            <div class="bd-grid">
+                {% for b in breakdowns %}
+                <div class="bd-item">
+                    <div class="bd-title">{{ b.label }} <span class="cell-muted" style="font-weight: 400;">· {{ b.rows|length }} value{{ b.rows|length|pluralize }}{% if b.rows|length > 15 %}, top 15{% endif %}</span></div>
+                    <div class="bd-chart-wrap"><canvas id="bd_{{ b.field }}"></canvas></div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {{ breakdowns|json_script:"breakdown-config" }}
+        <style>
+          .bd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+          .bd-title { font-size: 13px; color: var(--ink); font-weight: 600; margin-bottom: 8px; }
+          .bd-chart-wrap { position: relative; height: 200px; }
+        </style>
+        {% endif %}
     {% else %}
     <div class="explore-empty" id="node-unsynced" data-sync-url="{% url 'explore:node_sync' part_type_id=leaf.part_type_id %}">
         <p>Test events not synced yet.</p>
@@ -271,14 +302,6 @@
     </div>
     {% endif %}
   {% endif %}
-
-    <dl class="panel-meta">
-        <dt>Part type ID</dt><dd><a href="{{ hwdb_ui_base }}/view/components?pa={{ leaf.part_type_id }}" target="_blank" rel="noopener" title="Open this component type in the FNAL HWDB">{{ leaf.part_type_id }} <span aria-hidden="true">&#x2197;</span></a></dd>
-        <dt>System</dt><dd>{{ leaf.system_name }} ({{ leaf.system_id }})</dd>
-        <dt>Subsystem</dt><dd>{{ leaf.subsystem_name }} ({{ leaf.subsystem_id }})</dd>
-        <dt>{% if is_shipping %}Boxes in HWDB{% else %}Components in HWDB{% endif %}</dt><dd>{{ leaf.n_components }}</dd>
-        {% if not is_shipping %}<dt>Test events</dt><dd>{{ leaf.n_tests }}</dd>{% endif %}
-    </dl>
 
     {% if parts_page %}
     <details class="chart-card ship-boxes" open>
@@ -421,6 +444,26 @@
                     barChart.data.labels = r.labels; barChart.data.datasets = r.bar_datasets; barChart.update();
                     lineChart.data.labels = r.labels; lineChart.data.datasets = r.line_datasets; lineChart.update();
                 });
+            });
+        });
+    }
+
+    // Component breakdown bar charts — mirror-only categorical counts.
+    var bdEl = document.getElementById("breakdown-config");
+    if (bdEl && window.Chart) {
+        JSON.parse(bdEl.textContent).forEach(function (b) {
+            var canvas = document.getElementById("bd_" + b.field);
+            if (!canvas) return;
+            var rows = b.rows.slice(0, 15);
+            canvas.parentElement.style.height = (rows.length * 26 + 38) + "px";
+            new Chart(canvas, {
+                type: "bar",
+                data: { labels: rows.map(function (r) { return r.value; }),
+                        datasets: [{ data: rows.map(function (r) { return r.n; }), backgroundColor: '#5b8def' }] },
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: { x: { beginAtZero: true, ticks: { precision: 0, font: { size: 11 }, color: '#3a414b' } },
+                              y: { ticks: { font: { size: 11 }, color: '#3a414b', autoSkip: false } } } }
             });
         });
     }

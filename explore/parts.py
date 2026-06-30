@@ -99,6 +99,32 @@ def _named(v):
     return v.get("name") if isinstance(v, dict) else v
 
 
+# Above this many direct children we skip the per-child status fetch so the page
+# render stays fast; the children still list, just without a status until
+# expanded (ADR-0015).
+_STATUS_FETCH_CAP = 40
+
+
+def assembly_children(api, parent_pid: str) -> list[dict]:
+    """One level of the assembly tree: a part's current subcomponents, each with
+    its live QC ``status`` (ADR-0015).
+
+    The manifest (``/subcomponents``) gives id / type / position; the per-child
+    component record adds ``status``. The fetch is best-effort and capped
+    (``_STATUS_FETCH_CAP``) — a child whose record fails or is skipped just
+    renders with no status (``None``)."""
+    kids = current_manifest(_safe_data("subcomponents", lambda: api.get_subcomponents(parent_pid)))
+    for i, k in enumerate(kids):
+        status = None
+        if k.get("part_id") and i < _STATUS_FETCH_CAP:
+            try:
+                status = _named((api.get_component(k["part_id"]).get("data") or {}).get("status"))
+            except Exception as e:
+                logger.warning("assembly: status for %s failed: %s", k["part_id"], e)
+        k["status"] = status
+    return kids
+
+
 def part_facts(comp: dict) -> list[dict]:
     """Ordered (label, value) item facts, skipping blanks. Defensive about the
     nested-ref vs scalar shapes HWDB uses for institution/manufacturer."""
@@ -176,7 +202,7 @@ def part_detail(api, part_id: str, is_shipping: bool) -> dict:
          for e in locs),
         key=lambda e: e["arrived"] or "", reverse=True,
     )
-    manifest = current_manifest(_safe_data("subcomponents", lambda: api.get_subcomponents(part_id)))
+    manifest = assembly_children(api, part_id)  # direct children + their QC flags
     tests = test_summary(_safe_data("tests", lambda: api.get_tests(part_id)))
     _enrich_test_ids(api, part_id, tests)
 

@@ -63,6 +63,18 @@
   .sd-thumb-l { font-size: 11px; color: var(--dim); text-align: center; line-height: 1.25;
     overflow: hidden; text-overflow: ellipsis; max-width: 96px; }
   .sd-empty { color: var(--faint); font-size: 13px; padding: 6px 2px; }
+
+  .asm-lead { white-space: nowrap; }
+  .asm-caret { font-family: inherit; font-size: 11px; line-height: 1; color: var(--faint);
+    background: none; border: none; cursor: pointer; padding: 2px 4px; margin-right: 2px;
+    border-radius: var(--r-sm); transition: transform .12s, color .12s; display: inline-block; }
+  .asm-caret:hover { color: var(--accent-ink); background: var(--surface); }
+  .asm-caret.is-open { transform: rotate(90deg); }
+  .asm-caret.is-leaf { color: var(--rule-hard); cursor: default; }
+  .asm-caret.is-leaf:hover { background: none; color: var(--rule-hard); }
+  .asm-caret.is-busy { opacity: .5; }
+  .asm-caret-spacer { display: inline-block; width: 18px; }
+  .asm-row.is-child td { background: color-mix(in oklch, var(--surface) 55%, var(--page)); }
   .sd-banner { border: 1px solid color-mix(in oklch, var(--warn, #b8860b) 40%, var(--rule));
     background: var(--good-bg); border-radius: var(--r-lg); padding: 16px 18px; color: var(--dim); }
 </style>
@@ -142,18 +154,21 @@
       </div>
 
       <div class="sd-card">
-        <h2>Subcomponents ({{ detail.manifest|length }})</h2>
-        <table class="sd-table">
-          <thead><tr><th>Part</th><th>Type</th><th>Position</th></tr></thead>
+        <h2>Assembly ({{ detail.manifest|length }})</h2>
+        <table class="sd-table asm-table" data-assembly-base="/explore/assembly/">
+          <thead><tr><th>Part</th><th>Type</th><th>Position</th><th>Status</th></tr></thead>
           <tbody>
           {% for m in detail.manifest %}
-            <tr>
-              <td class="mono">{% if m.part_id %}<a href="{% url 'explore:part' part_id=m.part_id %}">{{ m.part_id }}</a>{% else %}—{% endif %}</td>
+            <tr class="asm-row" data-pid="{{ m.part_id }}" data-depth="0">
+              <td class="mono asm-lead">
+                {% if m.part_id %}<button type="button" class="asm-caret" aria-label="Expand subcomponents">▸</button><a href="{% url 'explore:part' part_id=m.part_id %}">{{ m.part_id }}</a>{% else %}<span class="asm-caret-spacer"></span>—{% endif %}
+              </td>
               <td>{{ m.type_name|default:"—" }}</td>
               <td>{{ m.functional_position|default:"—" }}</td>
+              <td>{{ m.status|default:"—" }}</td>
             </tr>
           {% empty %}
-            <tr><td colspan="3" class="sd-empty">None.</td></tr>
+            <tr><td colspan="4" class="sd-empty">None.</td></tr>
           {% endfor %}
           </tbody>
         </table>
@@ -227,4 +242,66 @@
   </div>
   {% endif %}
 </div>
+
+<script>
+(function () {
+  var table = document.querySelector(".asm-table");
+  if (!table) return;
+  var base = table.dataset.assemblyBase;
+  function esc(s) { var d = document.createElement("div"); d.textContent = (s == null ? "" : s); return d.innerHTML; }
+
+  function buildRow(c, depth) {
+    var tr = document.createElement("tr");
+    tr.className = "asm-row is-child";
+    tr.dataset.pid = c.part_id || "";
+    tr.dataset.depth = depth;
+    var lead = c.part_id
+      ? "<button type='button' class='asm-caret' aria-label='Expand subcomponents'>▸</button>" +
+        "<a href='" + esc(c.url) + "'>" + esc(c.part_id) + "</a>"
+      : "<span class='asm-caret-spacer'></span>—";
+    tr.innerHTML =
+      "<td class='mono asm-lead' style='padding-left:" + (8 + depth * 18) + "px'>" + lead + "</td>" +
+      "<td>" + esc(c.type_name || "—") + "</td>" +
+      "<td>" + esc(c.functional_position || "—") + "</td>" +
+      "<td>" + esc(c.status || "—") + "</td>";
+    return tr;
+  }
+
+  // Remove every row that sits below `row` and is indented deeper than it.
+  function collapse(row) {
+    var depth = +row.dataset.depth;
+    var n = row.nextElementSibling;
+    while (n && +n.dataset.depth > depth) { var next = n.nextElementSibling; n.remove(); n = next; }
+  }
+
+  table.addEventListener("click", function (e) {
+    var caret = e.target.closest(".asm-caret");
+    if (!caret || caret.classList.contains("is-leaf") || caret.classList.contains("is-busy")) return;
+    var row = caret.closest(".asm-row");
+    var pid = row.dataset.pid, depth = +row.dataset.depth;
+    if (!pid) return;
+
+    if (caret.classList.contains("is-open")) {       // collapse
+      collapse(row);
+      caret.classList.remove("is-open");
+      return;
+    }
+    caret.classList.add("is-busy");                  // expand (always fresh fetch)
+    fetch(base + encodeURIComponent(pid) + "/", { headers: { "X-Requested-With": "fetch" } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        caret.classList.remove("is-busy");
+        var kids = (d && d.children) || [];
+        if (!kids.length) { caret.classList.add("is-leaf"); caret.textContent = "·"; return; }
+        var anchor = row;
+        kids.forEach(function (c) {
+          var tr = buildRow(c, depth + 1);
+          anchor.after(tr); anchor = tr;
+        });
+        caret.classList.add("is-open");
+      })
+      .catch(function () { caret.classList.remove("is-busy"); });
+  });
+})();
+</script>
 {% endblock %}

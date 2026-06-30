@@ -6,9 +6,15 @@ the palettes, ``chart_config``) stays shared in ``core.queries``; only these
 two explore-specific aggregations live here.
 """
 
+from django.db.models import Count
+
 from core.queries import COLD_COLOR, TEST_TYPE_PALETTE, _ranges_for_series
 
 from .models import HwdbComponentEvent, HwdbTestEvent
+
+# Categorical component facets the breakdown panel charts (mirror-only).
+COMPONENT_FACETS = (("status", "Status"), ("manufacturer", "Manufacturer"),
+                    ("institution", "Institution"))
 
 
 def component_type_progress(part_type_id):
@@ -47,3 +53,20 @@ def component_update_progress(part_type_id):
     ]
     series = [("Components updated", COLD_COLOR, dates)]
     return _ranges_for_series(series)
+
+
+def component_breakdowns(part_type_id):
+    """Count of components per category value for each facet (status,
+    manufacturer, institution), straight from ``HwdbComponentEvent`` — the
+    mirror-only bar charts. Blank values fold into an "(unset)" bucket so a
+    not-yet-resynced type still reads honestly. Returns one entry per facet that
+    has any non-blank value; facets that are entirely blank are skipped."""
+    out = []
+    qs = HwdbComponentEvent.objects.filter(part_type_id=part_type_id)
+    for field, label in COMPONENT_FACETS:
+        counts = (qs.values(field).annotate(n=Count("id")).order_by("-n"))
+        rows = [{"value": c[field] or "(unset)", "n": c["n"]} for c in counts]
+        if any(c[field] for c in counts):       # at least one real value
+            out.append({"field": field, "label": label, "total": qs.count(),
+                        "rows": rows})
+    return out
