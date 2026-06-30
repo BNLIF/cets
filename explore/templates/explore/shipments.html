@@ -1,0 +1,116 @@
+{% extends 'explore/base.html' %}
+{% block title %}Shipments · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .ship-page { padding: 26px 30px 56px; max-width: 1100px; }
+  .ship-page h1 { font-size: 1.5rem; color: var(--ink); margin: 0 0 4px; letter-spacing: -0.01em; }
+  .ship-page .subtitle { color: var(--dim); margin: 0 0 20px; font-size: 14px; }
+  .ship-page h2 { font-size: 14px; color: var(--faint); text-transform: uppercase;
+    letter-spacing: .04em; margin: 30px 0 12px; }
+
+  .ship-cards { display: flex; gap: 12px; margin-bottom: 22px; flex-wrap: wrap; }
+  .ship-card { flex: 1 1 130px; border: 1px solid var(--rule); background: var(--page);
+    border-radius: var(--r-lg); padding: 14px 16px; border-left: 3px solid var(--rule-hard); }
+  .ship-card.is-transit { border-left-color: var(--accent); }
+  .ship-card.is-delivered { border-left-color: var(--good); }
+  .ship-card-n { font-size: 26px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .ship-card-l { font-size: 12px; color: var(--faint); margin-top: 2px; }
+
+  .ship-table-wrap { border: 1px solid var(--rule); border-radius: var(--r-lg);
+    background: var(--page); overflow-x: auto; }
+  .ship-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .ship-table th { text-align: left; font-weight: 600; color: var(--faint); font-size: 12px;
+    text-transform: uppercase; letter-spacing: .03em; padding: 9px 12px; border-bottom: 1px solid var(--rule); }
+  .ship-table td { padding: 9px 12px; border-bottom: 1px solid var(--rule); }
+  .ship-table tbody tr { cursor: pointer; }
+  .ship-table tbody tr:hover { background: var(--surface); }
+  .ship-table tr:last-child td { border-bottom: none; }
+  .ship-table .mono { font-family: var(--font-mono); font-size: 12.5px; }
+  .ship-pill { font-size: 11px; font-weight: 600; padding: 1px 9px; border-radius: 999px;
+    border: 1px solid var(--rule); color: var(--dim); white-space: nowrap; }
+  .ship-pill.is-transit { color: var(--accent-ink); background: var(--accent-soft);
+    border-color: color-mix(in oklch, var(--accent) 30%, var(--rule)); }
+  .ship-pill.is-delivered { color: var(--good); background: var(--good-bg);
+    border-color: color-mix(in oklch, var(--good) 30%, var(--rule)); }
+  .ship-link { color: var(--accent-ink); text-decoration: none; }
+  .ship-link:hover { text-decoration: underline; }
+
+  .type-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+  .type-card { display: block; text-decoration: none; color: inherit; border: 1px solid var(--rule);
+    background: var(--page); border-radius: var(--r-lg); padding: 14px 16px; transition: border-color .12s; }
+  .type-card:hover { border-color: var(--rule-hard); }
+  .type-card .tc-name { font-size: 14.5px; font-weight: 600; color: var(--ink); }
+  .type-card .tc-path { font-size: 11.5px; color: var(--faint); margin: 2px 0 8px; }
+  .type-card .tc-stat { font-size: 12.5px; color: var(--dim); }
+  .type-card .tc-sync { font-size: 11.5px; color: var(--faint); margin-top: 4px; }
+  .pager { display: flex; align-items: center; justify-content: center; gap: 18px;
+    margin-top: 14px; font-size: 13px; }
+  .pager a { color: var(--accent-ink); text-decoration: none; padding: 4px 10px;
+    border: 1px solid var(--rule); border-radius: var(--r-sm); }
+  .pager a:hover { border-color: var(--rule-hard); background: var(--surface); }
+  .pager .off { color: var(--faint); padding: 4px 10px; }
+  .pager-mid { color: var(--dim); font-variant-numeric: tabular-nums; }
+  .empty { text-align: center; padding: 40px 16px; color: var(--faint); }
+</style>
+
+<div class="ship-page">
+  <h1>Shipments</h1>
+  <p class="subtitle">Boxes in transit and delivered across {{ sections|length }} curated shipping type{{ sections|length|pluralize }}. Click a box to open its full timeline &amp; contents.</p>
+
+  <div class="ship-cards">
+    <div class="ship-card"><div class="ship-card-n">{{ summary.total }}</div><div class="ship-card-l">Boxes with contents</div></div>
+    <div class="ship-card is-transit"><div class="ship-card-n">{{ summary.in_transit }}</div><div class="ship-card-l">In transit</div></div>
+    <div class="ship-card is-delivered"><div class="ship-card-n">{{ summary.delivered }}</div><div class="ship-card-l">Delivered</div></div>
+  </div>
+
+  {% if page_obj.paginator.count %}
+  <div class="ship-table-wrap">
+    <table class="ship-table">
+      <thead><tr><th>Box PID</th><th>Type</th><th>Status</th><th>Latest location</th><th>Contents</th><th>Shipped</th><th>Received</th></tr></thead>
+      <tbody>
+      {% for item in page_obj %}
+        <tr onclick="location.href='{{ item.path }}'">
+          <td class="mono"><a class="ship-link" href="{{ hwdb_ui_base }}/edit/component/{{ item.box.part_id }}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open this box in the FNAL HWDB">{{ item.box.part_id }} <span aria-hidden="true">&#x2197;</span></a></td>
+          <td><a class="ship-link" href="{{ item.path }}" onclick="event.stopPropagation()">{{ item.type_name }}</a></td>
+          <td><span class="ship-pill {% if item.box.is_in_transit %}is-transit{% elif item.box.location_id is not None %}is-delivered{% endif %}">{{ item.box.status_label }}</span></td>
+          <td>{{ item.box.location_name|default:"—" }}</td>
+          <td class="mono">{{ item.box.n_contents }}</td>
+          <td class="mono">{% if item.box.shipped_date %}{{ item.box.shipped_date|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+          <td class="mono">{% if item.box.received_date %}{{ item.box.received_date|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if page_obj.paginator.num_pages > 1 %}
+  <div class="pager">
+    {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}">← Prev</a>{% else %}<span class="off">← Prev</span>{% endif %}
+    <span class="pager-mid">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }} · {{ page_obj.paginator.count }} boxes</span>
+    {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}">Next →</a>{% else %}<span class="off">Next →</span>{% endif %}
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="empty">
+    <p>No shipments mirrored yet.</p>
+    <p>Open a shipping type below and click <strong>Sync shipments</strong> to pull its boxes from HWDB.</p>
+  </div>
+  {% endif %}
+
+  <h2>Tracked shipping types</h2>
+  {% if sections %}
+  <div class="type-cards">
+    {% for s in sections %}
+    <a class="type-card" href="{{ s.path }}">
+      <div class="tc-name">{{ s.leaf.name }}</div>
+      <div class="tc-path">{{ s.leaf.system_name }} › {{ s.leaf.subsystem_name }}</div>
+      <div class="tc-stat">{{ s.n }} box{{ s.n|pluralize:"es" }} · {{ s.in_transit }} in transit · {{ s.delivered }} delivered</div>
+      <div class="tc-sync">{% if s.synced_at %}synced {{ s.synced_at|timesince }} ago{% else %}not synced yet{% endif %}</div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty"><p>No shipping types are curated and refreshed yet.</p></div>
+  {% endif %}
+</div>
+{% endblock %}

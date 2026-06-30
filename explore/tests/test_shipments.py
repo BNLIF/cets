@@ -12,6 +12,7 @@ from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from explore import curation, navigation, shipments
@@ -335,3 +336,58 @@ class ShipmentBoxViewTest(TestCase):
             resp = self.client.get(self.url)
         self.assertEqual(resp.status_code, 502)
         self.assertEqual(resp.json()["error"], "unavailable")
+
+
+class ShipmentsPageTest(TestCase):
+    """Top-level Shipments dashboard (Hajime's ask)."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("sp", "s@p.io", "pw")
+        self.client.force_login(self.user)
+        self.leaf = _ship_leaf()
+        ShipmentItem.objects.create(part_type_id=self.leaf.part_type_id, part_id="B1",
+                                    location_name="In Transit", location_id=0, n_contents=3)
+        ShipmentItem.objects.create(part_type_id=self.leaf.part_type_id, part_id="B2",
+                                    location_name="CERN", location_id=200, n_contents=5)
+
+    def test_requires_login(self):
+        self.client.logout()
+        resp = self.client.get(reverse("explore:shipments"))
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn(reverse("explore:login"), resp["Location"])
+
+    def test_lists_boxes_with_summary_and_leaf_links(self):
+        html = self.client.get(reverse("explore:shipments")).content.decode()
+        self.assertIn("B1", html)
+        self.assertIn("B2", html)
+        # each box links into the existing leaf node view
+        self.assertIn(navigation.leaf_path_for(self.leaf.part_type_id), html)
+        self.assertIn("ship-pill is-transit", html)
+        self.assertIn("ship-pill is-delivered", html)
+
+    def test_nav_has_shipments_tab_active(self):
+        html = self.client.get(reverse("explore:shipments")).content.decode()
+        self.assertIn("eh-nav-item active", html)
+        self.assertIn(">Shipments<", html)
+
+    def test_skips_empty_boxes(self):
+        ShipmentItem.objects.create(part_type_id=self.leaf.part_type_id, part_id="EMPTYBOX",
+                                    location_name="FNAL", location_id=1, n_contents=0)
+        html = self.client.get(reverse("explore:shipments")).content.decode()
+        self.assertNotIn("EMPTYBOX", html)
+
+    def test_paginated_50_per_page(self):
+        # setUp already made 2 non-empty boxes; add 53 → 55 total across 2 pages.
+        ShipmentItem.objects.bulk_create([
+            ShipmentItem(part_type_id=self.leaf.part_type_id, part_id=f"X{i}",
+                         location_name="FNAL", location_id=1, n_contents=1)
+            for i in range(53)
+        ])
+        pg = self.client.get(reverse("explore:shipments")).context["page_obj"]
+        self.assertEqual(pg.paginator.count, 55)
+        self.assertEqual(pg.paginator.num_pages, 2)
+        self.assertEqual(len(pg.object_list), 50)
+        pg2 = self.client.get(reverse("explore:shipments") + "?page=2").context["page_obj"]
+        self.assertEqual(len(pg2.object_list), 5)
+        # summary still counts all boxes, not just the page
+        self.assertEqual(pg.paginator.count, 55)

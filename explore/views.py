@@ -4,6 +4,7 @@ from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_not_required
+from django.core.paginator import Paginator
 from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -201,6 +202,49 @@ def explore_view(request, trail=None):
             "active_instance": active_instance(request),
         },
     )
+
+
+@login_not_required
+@fnal_login_required
+def shipments_view(request):
+    """Top-level Shipments dashboard (Hajime's ask): all boxes across the
+    curated shipping types in one view, each linking into the box's existing
+    leaf node view. Reads the mirror (skip-empties, like the leaf panel)."""
+    sections, boxes = [], []
+    agg = {"total": 0, "in_transit": 0, "delivered": 0}
+    for ptid in sorted(curation.shipping_types()):
+        leaf = HierarchyNode.objects.filter(
+            level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
+        if not leaf:  # curated but not yet refreshed into the mirror
+            continue
+        path = navigation.leaf_path_for(ptid)
+        rows = list(ShipmentItem.objects.filter(part_type_id=ptid, n_contents__gt=0))
+        in_transit = sum(1 for r in rows if r.location_id == 0)
+        delivered = sum(1 for r in rows if r.location_id not in (0, None))
+        agg["total"] += len(rows)
+        agg["in_transit"] += in_transit
+        agg["delivered"] += delivered
+        sections.append({
+            "leaf": leaf, "path": path, "n": len(rows),
+            "in_transit": in_transit, "delivered": delivered,
+            "synced_at": leaf.shipments_synced_at,
+        })
+        for r in rows:
+            boxes.append({"box": r, "type_name": leaf.name, "path": path})
+
+    # In-transit first, then most-recently-arrived first.
+    boxes.sort(key=lambda x: (
+        0 if x["box"].location_id == 0 else 1,
+        -(x["box"].last_arrived.timestamp() if x["box"].last_arrived else 0),
+    ))
+    page_obj = Paginator(boxes, 50).get_page(request.GET.get("page"))
+    return render(request, "explore/shipments.html", {
+        "active_nav": "shipments",
+        "sections": sections,
+        "page_obj": page_obj,
+        "summary": agg,
+        "hwdb_ui_base": settings.HWDB_PROFILES["prod"]["ui"],
+    })
 
 
 @login_not_required

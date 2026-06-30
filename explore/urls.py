@@ -6,6 +6,7 @@ app_name = "explore"
 
 urlpatterns = [
     path("", views.explore_view, name="home"),
+    path("shipments/", views.shipments_view, name="shipments"),
     path("login/", views.login_view, name="login"),
     path("login/poll/", views.login_poll_view, name="login_poll"),
     path("sync/", views.explore_sync_view, name="sync"),
