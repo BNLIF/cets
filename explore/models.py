@@ -50,6 +50,11 @@ class HierarchyNode(models.Model):
     tests_synced_at = models.DateTimeField(null=True, blank=True)
     n_tests = models.PositiveIntegerField(default=0)
     tests_sync_error = models.TextField(blank=True, default="")
+    # Set once a shipment sync has run for a shipping-type leaf (#43+). Distinct
+    # from tests_synced_at; NULL = never synced, so "synced with 0 non-empty
+    # boxes" is not mistaken for "never synced" (which would re-trigger the
+    # auto-sync and loop).
+    shipments_synced_at = models.DateTimeField(null=True, blank=True)
 
     synced_at = models.DateTimeField(auto_now=True)
 
@@ -132,6 +137,7 @@ class ShipmentItem(models.Model):
     part_id = models.CharField(max_length=50)  # the box's PID
     location_name = models.CharField(max_length=200, blank=True, default="")
     location_id = models.IntegerField(null=True, blank=True)  # 0 = "In Transit"
+    n_contents = models.PositiveIntegerField(default=0)  # current subcomponents (#45+)
     last_arrived = models.DateTimeField(null=True, blank=True)
     # Derived from the full timeline at sync time (#45): shipped = first time it
     # entered transit; received = arrival at its current real location (null

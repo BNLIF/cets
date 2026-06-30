@@ -83,6 +83,13 @@
     border-color: color-mix(in oklch, var(--accent) 30%, var(--rule)); }
   .ship-pill.is-delivered { color: var(--good); background: var(--good-bg);
     border-color: color-mix(in oklch, var(--good) 30%, var(--rule)); }
+  /* collapsible boxes card */
+  details.ship-boxes > summary { cursor: pointer; font-size: 14px; font-weight: 600;
+    color: var(--ink); list-style: none; margin-bottom: 12px; }
+  details.ship-boxes > summary::-webkit-details-marker { display: none; }
+  details.ship-boxes > summary::before { content: "▾"; display: inline-block;
+    width: 16px; color: var(--faint); }
+  details.ship-boxes:not([open]) > summary::before { content: "▸"; }
   /* shipments items table */
   .ship-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .ship-table th { text-align: left; font-weight: 600; color: var(--faint); font-size: 12px;
@@ -164,35 +171,60 @@
         </div>
     </div>
     <pre id="shipment-sync-log"></pre>
-    {% if shipments %}
-    <div class="ship-cards">
-        <div class="ship-card"><div class="ship-card-n">{{ shipment_summary.total }}</div><div class="ship-card-l">Total boxes</div></div>
-        <div class="ship-card is-transit"><div class="ship-card-n">{{ shipment_summary.in_transit }}</div><div class="ship-card-l">In transit</div></div>
-        <div class="ship-card is-delivered"><div class="ship-card-n">{{ shipment_summary.delivered }}</div><div class="ship-card-l">Delivered</div></div>
-    </div>
-    <div class="chart-card">
-        <div class="panel-title" style="font-size: 14px; margin-bottom: 10px;">Boxes ({{ shipments|length }})</div>
-        <table class="ship-table">
-            <thead><tr><th>Box PID</th><th>Status</th><th>Latest location</th><th>Shipped</th><th>Received</th></tr></thead>
-            <tbody>
-            {% for s in shipments %}
-                <tr class="ship-row" data-detail-url="{% url 'explore:shipment_box' part_id=s.part_id %}">
-                    <td class="mono"><span class="ship-caret" aria-hidden="true">▸</span>{{ s.part_id }}</td>
-                    <td><span class="ship-pill {% if s.is_in_transit %}is-transit{% elif s.location_id is not None %}is-delivered{% else %}is-unknown{% endif %}">{{ s.status_label }}</span></td>
-                    <td>{{ s.location_name|default:"—" }}</td>
-                    <td class="mono">{% if s.shipped_date %}{{ s.shipped_date|date:"Y-m-d" }}{% else %}—{% endif %}</td>
-                    <td class="mono">{% if s.received_date %}{{ s.received_date|date:"Y-m-d" }}{% else %}—{% endif %}</td>
-                </tr>
-                <tr class="ship-detail" hidden><td colspan="5"><div class="ship-detail-body" data-loaded="0">…</div></td></tr>
-            {% endfor %}
-            </tbody>
-        </table>
-        <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">Latest location is mirrored; expand a box for its full timeline &amp; contents (fetched live from HWDB).</p>
-    </div>
-    {% else %}
+    {% if not shipment_synced_at %}
     <div class="explore-empty" id="shipment-unsynced" data-sync-url="{% url 'explore:shipment_sync' part_type_id=leaf.part_type_id %}">
         <p>Shipments not synced yet.</p>
         <p class="cell-muted">Syncing from HWDB now… (needs your FNAL link)</p>
+    </div>
+    {% elif shipments %}
+    <div class="ship-cards">
+        <div class="ship-card"><div class="ship-card-n">{{ shipment_summary.total }}</div><div class="ship-card-l">Boxes with contents</div></div>
+        <div class="ship-card is-transit"><div class="ship-card-n">{{ shipment_summary.in_transit }}</div><div class="ship-card-l">In transit</div></div>
+        <div class="ship-card is-delivered"><div class="ship-card-n">{{ shipment_summary.delivered }}</div><div class="ship-card-l">Delivered</div></div>
+    </div>
+    {% for c in charts %}
+    <div class="chart-card" data-chart-panel="{{ c.slug }}">
+        <div class="panel-title" style="font-size: 14px; margin-bottom: 8px;">{{ c.name }}</div>
+        {% if c.empty %}
+        <div class="explore-empty" style="padding: 24px 16px;">No box history yet.</div>
+        {% else %}
+        <div class="chart-range-toggle" role="tablist" style="margin-bottom: 12px;">
+            <button type="button" data-range="month" class="chart-range-btn">Last month · daily</button>
+            <button type="button" data-range="3month" class="chart-range-btn">Last 3 months · daily</button>
+            <button type="button" data-range="all" class="chart-range-btn is-active">All · monthly</button>
+        </div>
+        <div style="display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px;">
+            <div><div style="font-size: 13px; color: var(--faint); margin-bottom: 6px; font-family: var(--font-mono);">Per period</div><div style="position: relative; height: 260px;"><canvas id="bar_{{ c.slug }}"></canvas></div></div>
+            <div><div style="font-size: 13px; color: var(--faint); margin-bottom: 6px; font-family: var(--font-mono);">Cumulative</div><div style="position: relative; height: 260px;"><canvas id="line_{{ c.slug }}"></canvas></div></div>
+        </div>
+        {% endif %}
+        <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">{{ c.caption }}</p>
+    </div>
+    {% endfor %}
+    <details class="chart-card ship-boxes" open>
+        <summary class="ship-boxes-sum">Boxes ({{ shipments|length }}) <span class="cell-muted" style="font-weight:400;">— click to collapse</span></summary>
+        <table class="ship-table">
+            <thead><tr><th>Box PID</th><th>Status</th><th>Latest location</th><th>Contents</th><th>Shipped</th><th>Received</th></tr></thead>
+            <tbody>
+            {% for s in shipments %}
+                <tr class="ship-row" data-detail-url="{% url 'explore:shipment_box' part_id=s.part_id %}">
+                    <td class="mono"><span class="ship-caret" aria-hidden="true">▸</span><a href="{{ hwdb_ui_base }}/edit/component/{{ s.part_id }}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open this box in the FNAL HWDB">{{ s.part_id }} <span aria-hidden="true">&#x2197;</span></a></td>
+                    <td><span class="ship-pill {% if s.is_in_transit %}is-transit{% elif s.location_id is not None %}is-delivered{% else %}is-unknown{% endif %}">{{ s.status_label }}</span></td>
+                    <td>{{ s.location_name|default:"—" }}</td>
+                    <td class="mono">{{ s.n_contents }}</td>
+                    <td class="mono">{% if s.shipped_date %}{{ s.shipped_date|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+                    <td class="mono">{% if s.received_date %}{{ s.received_date|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+                </tr>
+                <tr class="ship-detail" hidden><td colspan="6"><div class="ship-detail-body" data-loaded="0">…</div></td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">Empty boxes are hidden. Latest location + contents count are mirrored; expand a box for its full timeline &amp; manifest (fetched live from HWDB).</p>
+    </details>
+    {% else %}
+    <div class="explore-empty">
+        <p>No boxes with contents here.</p>
+        <p class="cell-muted">All boxes of this type are currently empty (or none are registered). Re-sync after they're packed.</p>
     </div>
     {% endif %}
   {% else %}
@@ -345,10 +377,16 @@
     }
     if (shipBtn) shipBtn.addEventListener("click", function () { shipmentSync(shipBtn.dataset.syncUrl); });
     var shipUnsynced = document.getElementById("shipment-unsynced");
-    if (shipUnsynced) { shipmentSync(shipUnsynced.dataset.syncUrl); }
+    if (shipUnsynced) {
+        // One-shot per tab+path: even if a sync writes no marker, never loop.
+        var k = "shipAutoSynced:" + location.pathname;
+        if (!sessionStorage.getItem(k)) { sessionStorage.setItem(k, "1"); shipmentSync(shipUnsynced.dataset.syncUrl); }
+    }
 
     // Box expand → live-fetch timeline + manifest (ADR-0013 #44).
+    var hwdbUiBase = "{{ hwdb_ui_base }}";
     function esc(s) { var d = document.createElement("div"); d.textContent = (s == null ? "" : s); return d.innerHTML; }
+    function itemLink(pid) { return hwdbUiBase + "/edit/component/" + encodeURIComponent(pid); }
     function renderBoxDetail(d) {
         var tl = (d.timeline || []).map(function (e) {
             var loc = e.location_id === 0 ? '<span class="ship-transit">In Transit</span>' : esc(e.location || "—");
@@ -357,7 +395,11 @@
                    "</td><td>" + esc(e.comments) + "</td></tr>";
         }).join("");
         var mf = (d.manifest || []).map(function (m) {
-            return "<tr><td class='mono'>" + esc(m.part_id) + "</td><td>" + esc(m.type_name) +
+            var part = m.part_id
+                ? "<a href='" + esc(itemLink(m.part_id)) + "' target='_blank' rel='noopener'>" +
+                  esc(m.part_id) + " &#x2197;</a>"
+                : "—";
+            return "<tr><td class='mono'>" + part + "</td><td>" + esc(m.type_name) +
                    "</td><td>" + esc(m.functional_position) + "</td></tr>";
         }).join("");
         return "<div class='ship-detail-grid'>" +

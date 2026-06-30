@@ -14,14 +14,20 @@ live on expand (#44), not here.
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from threading import local as _thread_local_cls
 from typing import Iterator
+
+from django.utils import timezone
 
 from hwdb.api_client import FnalDbApiClient
 
-from .models import ShipmentItem
+from .models import HierarchyNode, HwdbComponentEvent, ShipmentItem
 
 logger = logging.getLogger(__name__)
+
+_WORKERS = 20
 
 
 def _parse_dt(s) -> datetime | None:
@@ -64,13 +70,23 @@ def shipped_received(locations: list[dict]) -> tuple[datetime | None, datetime |
     return shipped, received
 
 
+def current_manifest(subs: list[dict] | None) -> list[dict]:
+    """A box's current contents from its raw ``/subcomponents`` rows: those whose
+    latest state is mounted (``operation`` of ``unmount`` excluded), each as
+    part id / component-type name / functional position."""
+    return [
+        {"part_id": s.get("part_id"),
+         "type_name": s.get("type_name"),
+         "functional_position": s.get("functional_position")}
+        for s in (subs or []) if s.get("operation") != "unmount"
+    ]
+
+
 def box_detail(api, part_id: str) -> dict:
     """Live detail for one box: full location timeline + current manifest.
 
     Read live on expand (ADR-0013, #44) — not mirrored. ``timeline`` is newest
-    first. ``manifest`` lists current contents: subcomponent rows whose latest
-    state is mounted (``operation`` of ``unmount`` is excluded), each with its
-    part id, component-type name, and functional position.
+    first; ``manifest`` is the current contents.
     """
     locs = api.get_locations(part_id).get("data") or []
     timeline = sorted(
@@ -82,69 +98,105 @@ def box_detail(api, part_id: str) -> dict:
          for e in locs),
         key=lambda e: e["arrived"] or "", reverse=True,
     )
-    subs = api.get_subcomponents(part_id).get("data") or []
-    manifest = [
-        {"part_id": s.get("part_id"),
-         "type_name": s.get("type_name"),
-         "functional_position": s.get("functional_position")}
-        for s in subs if s.get("operation") != "unmount"
-    ]
+    manifest = current_manifest(api.get_subcomponents(part_id).get("data"))
     return {"part_id": part_id, "timeline": timeline, "manifest": manifest}
 
 
-def _all_box_ids(api, part_type_id: str) -> list[str]:
-    """Every item's part_id for a component type, across all pages.
+def _list_boxes(api, part_type_id: str) -> list[tuple[str, str | None]]:
+    """Every box as ``(part_id, created)`` across all pages.
 
-    The listing endpoint paginates (default page is partial — the #46 live run
-    showed 100 of 326), so walk every page like ``events._list_part_ids``."""
-    ids, page = [], 1
+    The listing paginates (the #46 run showed 100 of 326) and carries
+    ``created`` (used for the boxes-over-time chart) but not ``updated``."""
+    out, page = [], 1
     while True:
         body = api._make_request(
             "GET", f"component-types/{part_type_id}/components",
             params={"page": page, "size": 500},
         )
         rows = body.get("data") or []
-        ids.extend(r.get("part_id") or r.get("pid") for r in rows if r.get("part_id") or r.get("pid"))
+        for r in rows:
+            pid = r.get("part_id") or r.get("pid")
+            if pid:
+                out.append((pid, r.get("created")))
         pages = (body.get("pagination") or {}).get("pages", 1)
         if page >= pages or not rows:
-            return ids
+            return out
         page += 1
 
 
 def sync_shipments(api_base_url: str, bearer: str, part_type_id: str) -> Iterator[str]:
-    """Mirror the latest location of every box of one shipping type. Generator
-    yielding progress lines; rewrites ``ShipmentItem`` rows for the type."""
-    api = FnalDbApiClient(api_base_url, bearer)
+    """Mirror non-empty boxes of one shipping type. Generator yielding progress.
+
+    For each box (in parallel) reads its latest location + current contents;
+    **empty boxes (0 contents) are skipped** — not mirrored, not counted.
+    Rewrites ``ShipmentItem`` (latest location, dates, contents count) and
+    ``HwdbComponentEvent`` (box created date → the boxes-over-time chart) for
+    the type.
+    """
+    bootstrap = FnalDbApiClient(api_base_url, bearer)
 
     yield f"sync shipments: listing boxes for {part_type_id}\n"
-    pids = _all_box_ids(api, part_type_id)
-    yield f"sync shipments: {len(pids)} box(es)\n"
+    boxes = _list_boxes(bootstrap, part_type_id)
+    created_by_pid = dict(boxes)
+    yield f"sync shipments: {len(boxes)} box(es); fetching locations + contents…\n"
 
-    rows = []
-    for i, pid in enumerate(pids, 1):
-        locs = api.get_locations(pid).get("data") or []
+    tls = _thread_local_cls()
+
+    def _init():
+        tls.client = FnalDbApiClient(api_base_url, bearer)
+
+    def _fetch(pid):
+        locs = tls.client.get_locations(pid).get("data") or []
+        manifest = current_manifest(tls.client.get_subcomponents(pid).get("data"))
+        return pid, locs, manifest
+
+    results, done = [], 0
+    if boxes:
+        with ThreadPoolExecutor(max_workers=_WORKERS, initializer=_init) as pool:
+            futs = {pool.submit(_fetch, pid): pid for pid, _ in boxes}
+            for fut in as_completed(futs):
+                try:
+                    results.append(fut.result())
+                except Exception as e:
+                    logger.warning("sync shipments: %s failed: %s", futs[fut], e)
+                done += 1
+                if done % 50 == 0 or done == len(boxes):
+                    yield f"  fetched {done}/{len(boxes)}\n"
+
+    ship_rows, comp_rows = [], []
+    for pid, locs, manifest in results:
+        if not manifest:  # empty box → skip everywhere
+            continue
         latest = latest_location(locs)
         loc = (latest or {}).get("location") or {}
         shipped, received = shipped_received(locs)
-        rows.append(ShipmentItem(
-            part_type_id=part_type_id,
-            part_id=pid,
-            location_name=loc.get("name") or "",
-            location_id=loc.get("id"),
+        ship_rows.append(ShipmentItem(
+            part_type_id=part_type_id, part_id=pid,
+            location_name=loc.get("name") or "", location_id=loc.get("id"),
+            n_contents=len(manifest),
             last_arrived=_parse_dt((latest or {}).get("arrived")),
-            shipped_date=shipped,
-            received_date=received,
+            shipped_date=shipped, received_date=received,
         ))
-        where = "In Transit" if loc.get("id") == 0 else (loc.get("name") or "no location")
-        if i % 25 == 0 or i == len(pids):
-            yield f"  [{i}/{len(pids)}] {pid}: {where}\n"
+        comp_rows.append(HwdbComponentEvent(
+            part_type_id=part_type_id, part_id=pid,
+            created=_parse_dt(created_by_pid.get(pid)), updated=None,
+        ))
 
     ShipmentItem.objects.filter(part_type_id=part_type_id).delete()
-    if rows:
-        ShipmentItem.objects.bulk_create(rows)
+    if ship_rows:
+        ShipmentItem.objects.bulk_create(ship_rows, batch_size=1000)
+    HwdbComponentEvent.objects.filter(part_type_id=part_type_id).delete()
+    if comp_rows:
+        HwdbComponentEvent.objects.bulk_create(comp_rows, batch_size=1000)
 
-    in_transit = sum(1 for r in rows if r.location_id == 0)
+    # Mark the leaf synced even when 0 non-empty boxes — so the page stops
+    # auto-syncing (NULL would read as "never synced" and re-trigger forever).
+    HierarchyNode.objects.filter(
+        level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id
+    ).update(shipments_synced_at=timezone.now())
+
+    in_transit = sum(1 for r in ship_rows if r.location_id == 0)
     yield (
-        f"done: {len(rows)} box(es) mirrored · {in_transit} in transit · "
-        f"{len(rows) - in_transit} at a location\n"
+        f"done: {len(ship_rows)} non-empty box(es) mirrored · {in_transit} in transit · "
+        f"{len(boxes) - len(ship_rows)} empty skipped\n"
     )

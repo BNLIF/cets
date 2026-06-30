@@ -139,14 +139,26 @@ def explore_view(request, trail=None):
     is_shipping = bool(leaf and curation.is_shipping_type(leaf.part_type_id))
     shipments = shipment_synced_at = shipment_summary = None
     if is_shipping:
-        rows = list(ShipmentItem.objects.filter(part_type_id=leaf.part_type_id))
+        ptid = leaf.part_type_id
+        # Only non-empty boxes are mirrored; n_contents>0 guard covers stale rows.
+        rows = list(ShipmentItem.objects.filter(part_type_id=ptid, n_contents__gt=0))
         shipments = rows
-        shipment_synced_at = max((r.synced_at for r in rows), default=None)
+        # Sync marker on the leaf — NOT inferred from rows, so a synced type with
+        # 0 non-empty boxes reads as synced (no auto-sync loop).
+        shipment_synced_at = leaf.shipments_synced_at
         in_transit = sum(1 for r in rows if r.location_id == 0)
         delivered = sum(1 for r in rows if r.location_id not in (0, None))
         shipment_summary = {
             "total": len(rows), "in_transit": in_transit, "delivered": delivered,
         }
+        # Boxes-over-time chart (reuses the components-updated machinery; boxes
+        # have no 'updated' so it bins on each box's created date).
+        box_chart = chart_config(
+            slug=f"{ptid}_comp", name="Boxes over time", href="",
+            ranges=component_update_progress(ptid),
+        )
+        box_chart["caption"] = "Non-empty shipping boxes by HWDB created date."
+        charts = [box_chart]
     elif leaf and leaf.tests_synced_at:
         ptid = leaf.part_type_id
         comp_chart = chart_config(
