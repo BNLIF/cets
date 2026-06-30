@@ -71,7 +71,7 @@
       <tbody>
       {% for item in page_obj %}
         <tr onclick="if(!getSelection().toString())location.href='{% url 'explore:part' part_id=item.box.part_id %}'" title="Open shipping details for {{ item.box.part_id }}">
-          <td class="mono"><a class="ship-link" href="{{ hwdb_ui_base }}/edit/component/{{ item.box.part_id }}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open this box in the FNAL HWDB">{{ item.box.part_id }} <span aria-hidden="true">&#x2197;</span></a></td>
+          <td class="mono"><a class="ship-link" href="{% url 'explore:part' part_id=item.box.part_id %}" onclick="event.stopPropagation()" title="Open this box’s detail page">{{ item.box.part_id }}</a></td>
           <td><a class="ship-link" href="{{ item.path }}" onclick="event.stopPropagation()" title="Open the component type page">{{ item.type_name }}</a></td>
           <td><span class="ship-pill {% if item.box.is_in_transit %}is-transit{% elif item.box.location_id is not None %}is-delivered{% endif %}">{{ item.box.status_label }}</span></td>
           <td>{{ item.box.location_name|default:"—" }}</td>

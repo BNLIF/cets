@@ -274,13 +274,14 @@ class ShipmentPanelViewTest(TestCase):
         self.assertIn('class="ship-row"', html)
         self.assertIn("/explore/part/B1/", html)  # row click → part detail page
 
-    def test_box_pid_links_to_hwdb(self):
+    def test_box_pid_links_to_part_page(self):
         leaf = _ship_leaf()
         ShipmentItem.objects.create(part_type_id=leaf.part_type_id, part_id="B1",
                                     location_name="FNAL", location_id=1, n_contents=1)
         html = self.client.get(navigation.leaf_path_for(leaf.part_type_id)).content.decode()
-        self.assertIn("/edit/component/B1", html)             # box PID → HWDB item
-        self.assertIn("event.stopPropagation()", html)        # link doesn't toggle the row
+        self.assertIn("/explore/part/B1/", html)              # box PID → local part page
+        self.assertNotIn("/edit/component/B1", html)          # not the FNAL deep link
+        self.assertIn("event.stopPropagation()", html)        # link doesn't trigger the row
 
 
 def _component(data_sections):
