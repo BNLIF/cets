@@ -57,6 +57,10 @@
   .extree-row.is-cur, .extree-leaf.is-cur { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
   .extree-row.dim { color: var(--faint); cursor: default; }
   .extree-row.dim:hover { background: none; }
+  /* no components → muted; synced count → green (state at a glance) */
+  .extree-leaf.is-empty, summary.extree-row.is-empty, a.extree-row.is-empty { color: var(--faint); }
+  .extree-leaf.is-empty .extree-name, .extree-row.is-empty .extree-name { opacity: .65; }
+  .ex-count.is-synced { color: var(--good); }
   .extree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   summary.extree-row a.extree-name { text-decoration: none; color: inherit; }
   summary.extree-row a.extree-name:hover { text-decoration: underline; }

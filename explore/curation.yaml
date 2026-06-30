@@ -27,13 +27,11 @@ regions:
       - name: FD-HD
         key: FD-HD
         sub: Horizontal Drift
-        curated: false
-        note: "6 systems in HWDB · not curated"
+        systems: [1, 3, 4, 5, 8, 9]
       - name: FD shared
         key: FD-shared
         sub: DAQ · Slow Control · Cryostat · Integration
-        curated: false
-        note: "5 systems in HWDB · not curated"
+        systems: [82, 83, 85, 86, 600]
 
   - name: Near Detector
     key: ND

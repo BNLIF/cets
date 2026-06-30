@@ -13,14 +13,60 @@ the engine.
 from __future__ import annotations
 
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import local as _thread_local_cls
 from typing import Iterator
 
 from django.utils import timezone
+
+from hwdb.api_client import FnalDbApiClient
 
 from . import curation
 from .models import HierarchyNode, HierarchySyncState
 
 logger = logging.getLogger(__name__)
+
+_WORKERS = 10
+_RETRIES = 3
+
+
+def _with_retry(fn, item):
+    """Call ``fn(item)`` with a few backoff retries for transient HWDB blips
+    (timeouts, 429/503 under burst). Re-raises the last error if all fail."""
+    last = None
+    for attempt in range(_RETRIES):
+        try:
+            return fn(item)
+        except Exception as e:  # noqa: BLE001 — transient HTTP/network
+            last = e
+            time.sleep(0.4 * (attempt + 1))
+    raise last
+
+
+def _pool_map(fn, items):
+    """Run ``fn(item)`` over ``items`` across the worker pool (with retries);
+    return ``[(item, result), …]``. If **any** item still fails after retries,
+    raise — so the caller aborts before pruning rather than overwriting good
+    data with a partial walk (the serial walk's all-or-nothing safety). ORM
+    writes stay on the main thread (SQLite-safe), as in ``events``."""
+    out, errors = [], []
+    if not items:
+        return out
+    with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
+        futs = {pool.submit(_with_retry, fn, it): it for it in items}
+        for fut in as_completed(futs):
+            try:
+                out.append((futs[fut], fut.result()))
+            except Exception as e:  # noqa: BLE001
+                errors.append((futs[fut], e))
+    if errors:
+        raise RuntimeError(
+            f"{len(errors)}/{len(items)} hierarchy fetch(es) failed after retries "
+            f"(e.g. {errors[0][0]!r}: {errors[0][1]}); aborting so the prune step "
+            f"can't delete un-refetched nodes"
+        )
+    return out
 
 
 def _count_components(api, part_type_id: str) -> int:
@@ -54,6 +100,20 @@ def sync_hierarchy(api, project: str = "D") -> Iterator[str]:
     state.last_error = ""
     state.save()
 
+    # Per-thread clients for the parallel read phases (a Session isn't fully
+    # thread-safe — same rule as events.sync_test_events). Derived from the
+    # passed client; tests patch ``FnalDbApiClient`` to return their mock.
+    base_url = api.base_url
+    auth = api.session.headers.get("Authorization", "")
+    bearer = auth[len("Bearer "):] if isinstance(auth, str) and auth.startswith("Bearer ") else ""
+    tls = _thread_local_cls()
+
+    def _client():
+        c = getattr(tls, "client", None)
+        if c is None:
+            c = tls.client = FnalDbApiClient(base_url, bearer)
+        return c
+
     seen: set[int] = set()
     systems_done = 0
     leaves = 0
@@ -67,6 +127,34 @@ def sync_hierarchy(api, project: str = "D") -> Iterator[str]:
         systems.sort(key=lambda s: s.get("id") or 0)
         yield f"hierarchy: {len(systems)} curated systems to walk\n"
 
+        # --- Parallel read phases (no ORM here) ---
+        # Phase 1: subsystems per system.
+        def _fetch_subs(s):
+            return _client().get_subsystems(project, f"{s['id']:03d}").get("data") or []
+        subs_by_sys = {}
+        for s, subs in _pool_map(_fetch_subs, systems):
+            subs_by_sys[s["id"]] = sorted(subs, key=lambda x: x.get("subsystem_id") or 0)
+        yield f"  subsystems fetched for {len(systems)} systems\n"
+
+        # Phase 2: component types per (system, subsystem).
+        sub_tasks = [(s, ss) for s in systems for ss in subs_by_sys.get(s["id"], [])]
+
+        def _fetch_cts(task):
+            s, ss = task
+            return (_client().get_part_types_for_subsystem(
+                project, f"{s['id']:03d}", ss.get("subsystem_id")).get("data") or [])
+        cts_by_sub = {}
+        for (s, ss), cts in _pool_map(_fetch_cts, sub_tasks):
+            cts_by_sub[(s["id"], ss.get("subsystem_id"))] = cts
+        all_ptids = [ct["part_type_id"] for cts in cts_by_sub.values()
+                     for ct in cts if ct.get("part_type_id")]
+        yield f"  {len(all_ptids)} component types across {len(sub_tasks)} subsystems\n"
+
+        # Phase 3: true component count per leaf (the bulk of the calls).
+        counts = {p: n for p, n in _pool_map(lambda p: _count_components(_client(), p), all_ptids)}
+        yield f"  counted components for {len(all_ptids)} types\n"
+
+        # --- Serial write phase (main thread — SQLite-safe) ---
         for s in systems:
             sid = s.get("id")
             sname = s.get("name") or ""
@@ -77,14 +165,7 @@ def sync_hierarchy(api, project: str = "D") -> Iterator[str]:
             )
             seen.add(sys_node.pk)
 
-            sub_body = api.get_subsystems(project, f"{sid:03d}")
-            subs = sorted(
-                sub_body.get("data") or [],
-                key=lambda x: x.get("subsystem_id") or 0,
-            )
-            yield f"  [{sid:03d}] {sname}: {len(subs)} subsystems\n"
-
-            for ss in subs:
+            for ss in subs_by_sys.get(sid, []):
                 ssid = ss.get("subsystem_id")
                 ssname = ss.get("subsystem_name") or ""
                 sub_node, _ = HierarchyNode.objects.update_or_create(
@@ -97,15 +178,13 @@ def sync_hierarchy(api, project: str = "D") -> Iterator[str]:
                 )
                 seen.add(sub_node.pk)
 
-                ct_body = api.get_part_types_for_subsystem(project, f"{sid:03d}", ssid)
-                cts = ct_body.get("data") or []
+                cts = cts_by_sub.get((sid, ssid), [])
                 for ct in cts:
                     ptid = ct.get("part_type_id")
                     if not ptid:
                         continue
                     full = ct.get("full_name") or ""
                     leaf = full.split(".")[-1].strip() if full else ptid
-                    n = _count_components(api, ptid)
                     # defaults exclude the test-sync fields so they survive re-sync.
                     type_node, _ = HierarchyNode.objects.update_or_create(
                         level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid,
@@ -113,7 +192,8 @@ def sync_hierarchy(api, project: str = "D") -> Iterator[str]:
                             "parent": sub_node, "project": project,
                             "system_id": sid, "system_name": sname,
                             "subsystem_id": ssid, "subsystem_name": ssname,
-                            "name": leaf, "full_name": full, "n_components": n,
+                            "name": leaf, "full_name": full,
+                            "n_components": counts.get(ptid, 0),
                         },
                     )
                     seen.add(type_node.pk)

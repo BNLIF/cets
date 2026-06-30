@@ -51,12 +51,13 @@ def _fake_api(systems, subsystems, part_types, counts):
 
 class CurationTest(TestCase):
     def test_curated_systems_from_yaml(self):
-        # The real curation.yaml: FD-VD systems + FD CE curated; FD-HD/ND not.
+        # The real curation.yaml: FD-VD, FD CE, FD-HD, and FD shared curated; ND not.
         ids = curation.curated_system_ids()
         self.assertIn(57, ids)   # FD-VD TDE
         self.assertIn(81, ids)   # FD CE
-        self.assertNotIn(1, ids)    # FD-HD Complete Detector
-        self.assertNotIn(100, ids)  # ND
+        self.assertIn(1, ids)    # FD-HD Complete Detector
+        self.assertIn(82, ids)   # FD shared (FD DAQ)
+        self.assertNotIn(100, ids)  # ND — still not curated
 
 
 class SyncHierarchyTest(TestCase):
@@ -66,6 +67,11 @@ class SyncHierarchyTest(TestCase):
                        return_value={57, 60})
         p.start()
         self.addCleanup(p.stop)
+
+    def _run(self, api):
+        # Threads build clients via FnalDbApiClient; patch it to reuse the mock.
+        with mock.patch("explore.hierarchy.FnalDbApiClient", return_value=api):
+            list(hierarchy.sync_hierarchy(api))
 
     def _api(self):
         return _fake_api(
@@ -89,7 +95,7 @@ class SyncHierarchyTest(TestCase):
         )
 
     def test_populates_levels_with_true_counts_and_leaf_names(self):
-        list(hierarchy.sync_hierarchy(self._api()))
+        self._run(self._api())
         self.assertEqual(H.objects.filter(level=H.LEVEL_TYPE).count(), 2)
         amc = H.objects.get(level=H.LEVEL_TYPE, part_type_id="D05700200001")
         self.assertEqual(amc.name, "AMC")              # last full_name segment
@@ -103,7 +109,7 @@ class SyncHierarchyTest(TestCase):
     def test_empty_system_is_navigable(self):
         # The #37 fix: a whitelisted system with no component types still gets a
         # node (and its empty subsystem), so it shows up in the tree.
-        list(hierarchy.sync_hierarchy(self._api()))
+        self._run(self._api())
         empty = H.objects.get(level=H.LEVEL_SYSTEM, system_id=60)
         self.assertEqual(empty.name, "FD-VD Empty")
         self.assertEqual(empty.children.filter(level=H.LEVEL_SUBSYSTEM).count(), 1)
@@ -111,23 +117,38 @@ class SyncHierarchyTest(TestCase):
 
     def test_excluded_systems_never_walked(self):
         api = self._api()
-        list(hierarchy.sync_hierarchy(api))
-        called = [c.args for c in api.get_subsystems.call_args_list]
-        self.assertEqual(called, [("D", "057"), ("D", "060")])  # not 099
+        self._run(api)
+        # Parallel walk → order isn't guaranteed; compare the set.
+        called = {c.args for c in api.get_subsystems.call_args_list}
+        self.assertEqual(called, {("D", "057"), ("D", "060")})  # not 099
 
     def test_updates_sync_state(self):
-        list(hierarchy.sync_hierarchy(self._api()))
+        self._run(self._api())
         st = HierarchySyncState.get()
         self.assertEqual(st.nodes_count, 2)     # component types
         self.assertEqual(st.systems_count, 2)   # 057 + 060
         self.assertIsNotNone(st.finished_at)
         self.assertEqual(st.last_error, "")
 
+    def test_persistent_fetch_failure_aborts_without_pruning(self):
+        # Regression for the FD-CE wipe: a dropped fetch must NOT lead to pruning
+        # good data. A persistently-failing subsystem fetch aborts the whole sync
+        # (after retries), leaving existing nodes intact and recording the error.
+        _chain("D05700200001", tname="AMC")  # pre-existing good data
+        api = self._api()
+        api.get_subsystems.side_effect = RuntimeError("HWDB 503")
+        with mock.patch("explore.hierarchy.time.sleep"), \
+             mock.patch("explore.hierarchy.FnalDbApiClient", return_value=api):
+            with self.assertRaises(Exception):
+                list(hierarchy.sync_hierarchy(api))
+        self.assertTrue(H.objects.filter(part_type_id="D05700200001").exists())  # not pruned
+        self.assertNotEqual(HierarchySyncState.get().last_error, "")
+
     def test_second_run_prunes_disappeared_nodes(self):
-        list(hierarchy.sync_hierarchy(self._api()))
+        self._run(self._api())
         _chain("D05700200099", tname="GHOST")  # a leftover not in the walk
         self.assertEqual(H.objects.filter(level=H.LEVEL_TYPE).count(), 3)
-        list(hierarchy.sync_hierarchy(self._api()))
+        self._run(self._api())
         self.assertEqual(H.objects.filter(level=H.LEVEL_TYPE).count(), 2)
         self.assertFalse(H.objects.filter(part_type_id="D05700200099").exists())
 
@@ -249,6 +270,22 @@ class SidebarTest(TestCase):
     def test_counts_on_nodes(self):
         tree = self._tree("")
         self.assertGreater(self._find(tree, "FD-VD TDE")["count"], 0)
+
+    def test_node_state_empty_unsynced_synced(self):
+        from django.utils import timezone
+        _chain("D05700200090", tname="SYNCEDLEAF", n_components=5,
+               tests_synced_at=timezone.now())
+        _chain("D05700200091", tname="EMPTYLEAF", n_components=0)
+        tree = self._tree("")
+        amc = self._find(tree, "AMC")            # 42 components, never synced
+        self.assertFalse(amc["empty"]); self.assertFalse(amc["synced"])
+        syn = self._find(tree, "SYNCEDLEAF")     # has components, synced → green
+        self.assertFalse(syn["empty"]); self.assertTrue(syn["synced"])
+        emp = self._find(tree, "EMPTYLEAF")      # no components → greyed
+        self.assertTrue(emp["empty"]); self.assertFalse(emp["synced"])
+        # subsystem with a not-fully-synced mix is neither empty nor synced
+        digi = self._find(tree, "Digital electronics")
+        self.assertFalse(digi["empty"]); self.assertFalse(digi["synced"])
 
     def test_non_curated_is_dim_and_unlinked(self):
         nd = self._find(self._tree(""), "Near Detector")

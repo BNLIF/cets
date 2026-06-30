@@ -246,9 +246,25 @@ def _component_totals():
     return by_sys, by_sub
 
 
-def _tnode(label, url, count, current, open_, dim=False, children=None, is_leaf=False):
+def _tnode(label, url, count, current, open_, dim=False, children=None, is_leaf=False,
+           empty=False, synced=False):
     return {"label": label, "url": url, "count": count, "current": current,
-            "open": open_, "dim": dim, "children": children or [], "is_leaf": is_leaf}
+            "open": open_, "dim": dim, "children": children or [], "is_leaf": is_leaf,
+            "empty": empty, "synced": synced}
+
+
+def _leaf_synced(leaf) -> bool:
+    """A component-type leaf counts as synced once its events have been pulled —
+    test events, or (for shipping leaves) shipments."""
+    return bool(leaf.tests_synced_at or leaf.shipments_synced_at)
+
+
+def _state(n_with_comp: int, n_synced: int) -> tuple[bool, bool]:
+    """(empty, synced) for a node from its subtree leaf counts: empty = no
+    component-bearing leaves; synced = has some and *all* of them are synced."""
+    if n_with_comp == 0:
+        return True, False
+    return False, n_synced == n_with_comp
 
 
 def sidebar_tree(ctx: dict) -> list[dict]:
@@ -267,24 +283,42 @@ def sidebar_tree(ctx: dict) -> list[dict]:
         else:
             leaves_by_sub.setdefault((n.system_id, n.subsystem_id), []).append(n)
 
+    # Sync/empty stats per scope: (#leaves with components, #of those synced).
+    sub_stats, sys_stats = {}, {}
+    for (sid, ssid), leaves in leaves_by_sub.items():
+        w = sum(1 for l in leaves if l.n_components > 0)
+        s = sum(1 for l in leaves if l.n_components > 0 and _leaf_synced(l))
+        sub_stats[(sid, ssid)] = (w, s)
+        cw, cs = sys_stats.get(sid, (0, 0))
+        sys_stats[sid] = (cw + w, cs + s)
+
+    def _agg(system_ids):
+        w = sum(sys_stats.get(i, (0, 0))[0] for i in system_ids)
+        s = sum(sys_stats.get(i, (0, 0))[1] for i in system_ids)
+        return w, s
+
     def subs_of(rk, fk, flat, sid):
         out = []
         for sub in subs_by_sys.get(sid, []):
             ssid = sub.subsystem_id
             on = ctx.get("system_id") == sid and ctx.get("subsystem_id") == ssid
-            leaves = [
-                _tnode(l.name,
-                       node_path(rk, fk, system_id=None if flat else sid,
-                                 subsystem_id=ssid, part_type_id=l.part_type_id),
-                       l.n_components,
-                       ctx.get("kind") == "leaf" and ctx.get("part_type_id") == l.part_type_id,
-                       False, is_leaf=True)
-                for l in leaves_by_sub.get((sid, ssid), [])
-            ]
+            leaves = []
+            for l in leaves_by_sub.get((sid, ssid), []):
+                lempty = l.n_components == 0
+                leaves.append(_tnode(
+                    l.name,
+                    node_path(rk, fk, system_id=None if flat else sid,
+                              subsystem_id=ssid, part_type_id=l.part_type_id),
+                    l.n_components,
+                    ctx.get("kind") == "leaf" and ctx.get("part_type_id") == l.part_type_id,
+                    False, is_leaf=True,
+                    empty=lempty, synced=not lempty and _leaf_synced(l)))
+            sempty, ssynced = _state(*sub_stats.get((sid, ssid), (0, 0)))
             out.append(_tnode(sub.subsystem_name,
                               node_path(rk, fk, system_id=None if flat else sid, subsystem_id=ssid),
                               by_sub.get((sid, ssid), 0),
-                              ctx.get("kind") == "subsystem" and on, on, children=leaves))
+                              ctx.get("kind") == "subsystem" and on, on, children=leaves,
+                              empty=sempty, synced=ssynced))
         return out
 
     tree = []
@@ -310,20 +344,33 @@ def sidebar_tree(ctx: dict) -> list[dict]:
                             sn = sys_by_id.get(sid)
                             if not sn:
                                 continue
+                            sysempty, syssynced = _state(*sys_stats.get(sid, (0, 0)))
                             children.append(_tnode(
                                 sn.system_name, node_path(rk, fk, system_id=sid),
                                 by_sys.get(sid, 0),
                                 ctx.get("kind") == "system" and ctx.get("system_id") == sid,
                                 ctx.get("system_id") == sid,
-                                children=subs_of(rk, fk, False, sid)))
+                                children=subs_of(rk, fk, False, sid),
+                                empty=sysempty, synced=syssynced))
+                    fempty, fsynced = _state(*_agg(fam.get("systems") or []))
+                else:
+                    fempty, fsynced = False, False
                 fams.append(_tnode(
                     fam["name"], node_path(rk, fk) if fbr else None, fcount,
                     ctx.get("kind") == "family" and ctx.get("family_key") == fk,
-                    ctx.get("family_key") == fk, dim=not fbr, children=children))
+                    ctx.get("family_key") == fk, dim=not fbr, children=children,
+                    empty=fbr and fempty, synced=fsynced))
+        rempty, rsynced = (False, False)
+        if rbr:
+            r_systems = [i for fam in region.get("families", []) or []
+                         if curation.family_is_browsable(fam)
+                         for i in fam.get("systems") or []]
+            rempty, rsynced = _state(*_agg(r_systems))
         tree.append(_tnode(
             region["name"], node_path(rk) if rbr else None, rcount if rbr else None,
             ctx.get("kind") == "region" and ctx.get("region_key") == rk,
-            ctx.get("region_key") == rk, dim=not rbr, children=fams))
+            ctx.get("region_key") == rk, dim=not rbr, children=fams,
+            empty=rbr and rempty, synced=rsynced))
     return tree
 
 

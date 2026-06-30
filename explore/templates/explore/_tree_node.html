@@ -1,19 +1,19 @@
 {# One sidebar tree node (recursive). Expects `node`. #}
 {% if node.is_leaf %}
-<a class="extree-leaf{% if node.current %} is-cur{% endif %}" href="{{ node.url }}" title="{{ node.label }}">
-  <span class="extree-name">{{ node.label }}</span>{% if node.count %}<span class="ex-count">{{ node.count }}</span>{% endif %}
+<a class="extree-leaf{% if node.current %} is-cur{% endif %}{% if node.empty %} is-empty{% endif %}" href="{{ node.url }}" title="{{ node.label }}">
+  <span class="extree-name">{{ node.label }}</span>{% if node.count %}<span class="ex-count{% if node.synced %} is-synced{% endif %}">{{ node.count }}</span>{% endif %}
 </a>
 {% elif node.children %}
 <details class="extree-folder"{% if node.open %} open{% endif %}>
-  <summary class="extree-row{% if node.current %} is-cur{% endif %}">
+  <summary class="extree-row{% if node.current %} is-cur{% endif %}{% if node.empty %} is-empty{% endif %}">
     {% if node.url %}<a class="extree-name" href="{{ node.url }}" title="{{ node.label }}">{{ node.label }}</a>{% else %}<span class="extree-name">{{ node.label }}</span>{% endif %}
-    {% if node.count %}<span class="ex-count">{{ node.count }}</span>{% endif %}
+    {% if node.count %}<span class="ex-count{% if node.synced %} is-synced{% endif %}">{{ node.count }}</span>{% endif %}
   </summary>
   <div class="extree-kids">
     {% for child in node.children %}{% include "explore/_tree_node.html" with node=child %}{% endfor %}
   </div>
 </details>
 {% else %}
-  {% if node.url %}<a class="extree-row extree-flat{% if node.current %} is-cur{% endif %}" href="{{ node.url }}" title="{{ node.label }}"><span class="extree-name">{{ node.label }}</span>{% if node.count %}<span class="ex-count">{{ node.count }}</span>{% endif %}</a>
+  {% if node.url %}<a class="extree-row extree-flat{% if node.current %} is-cur{% endif %}{% if node.empty %} is-empty{% endif %}" href="{{ node.url }}" title="{{ node.label }}"><span class="extree-name">{{ node.label }}</span>{% if node.count %}<span class="ex-count{% if node.synced %} is-synced{% endif %}">{{ node.count }}</span>{% endif %}</a>
   {% else %}<span class="extree-row extree-flat dim" title="{{ node.label }}"><span class="extree-name">{{ node.label }}</span></span>{% endif %}
 {% endif %}
