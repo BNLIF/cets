@@ -253,7 +253,8 @@ class LeafPartsTableTest(TestCase):
         for i in range(55):
             HwdbComponentEvent.objects.create(
                 part_type_id=self.leaf.part_type_id,
-                part_id=f"{self.leaf.part_type_id}-{i:05d}", created=timezone.now())
+                part_id=f"{self.leaf.part_type_id}-{i:05d}", created=timezone.now(),
+                serial_number=f"SN-{i:05d}", created_by="Alex Wagner")
         self.url = navigation.leaf_path_for(self.leaf.part_type_id)
 
     def test_lists_parts_paginated_50_with_part_links(self):
@@ -262,6 +263,11 @@ class LeafPartsTableTest(TestCase):
         # 55 rows → 50 on page 1 (newest first), 5 on page 2.
         self.assertIn(f"/explore/part/{self.leaf.part_type_id}-00054/", html)  # row → part page
         self.assertIn('target="_blank"', html)                                 # opens new tab
+        self.assertIn("SN-00054", html)                                        # serial column
+        self.assertIn("<th>Serial number</th>", html)
+        self.assertIn("<th>Created by</th>", html)                             # creator column
+        self.assertIn("Alex Wagner", html)
+        self.assertNotIn("<th>Created</th>", html)                             # created date dropped
         self.assertIn("Page 1 of 2", html)
         self.assertIn("Last »", html)                                          # first/last links
         self.assertIn("?page=2", html)                                         # Last → page 2
@@ -284,7 +290,7 @@ class SearchTest(TestCase):
         self.leaf = _comp_leaf()  # ColdADC, D05700600099, under browsable FD CE
         HwdbComponentEvent.objects.create(
             part_type_id="D05700600099", part_id="D05700600099-00001",
-            created=timezone.now())
+            created=timezone.now(), serial_number="2502-18564")
 
     def test_page_renders(self):
         resp = self.client.get("/explore/search/")
@@ -300,6 +306,11 @@ class SearchTest(TestCase):
         d = self.client.get("/explore/search/api/", {"q": "D05700600099-00001"}).json()
         self.assertEqual(d["direct_part"], "D05700600099-00001")
         self.assertTrue(any(p["part_id"] == "D05700600099-00001" for p in d["parts"]))
+
+    def test_api_finds_part_by_serial_number(self):
+        d = self.client.get("/explore/search/api/", {"q": "2502-18564"}).json()
+        match = next(p for p in d["parts"] if p["part_id"] == "D05700600099-00001")
+        self.assertEqual(match["serial_number"], "2502-18564")
 
     def test_short_query_returns_empty(self):
         d = self.client.get("/explore/search/api/", {"q": "a"}).json()

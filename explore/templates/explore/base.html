@@ -115,7 +115,8 @@
           d.parts.forEach(function (p) {
             html += "<a class='eh-find-row' href='" + esc(p.path) + "'>" +
               "<span class='eh-find-chip'>part</span>" +
-              "<span class='eh-find-name mono'>" + esc(p.part_id) + "</span>" +
+              "<span><span class='eh-find-name mono'>" + esc(p.part_id) + "</span>" +
+              (p.serial_number ? "<div class='eh-find-meta'>SN " + esc(p.serial_number) + "</div>" : "") + "</span>" +
               "<span class='eh-find-id'>" + esc(p.part_type_id) + "</span></a>";
           });
         }

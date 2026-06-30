@@ -110,6 +110,8 @@ class HwdbComponentEvent(models.Model):
     part_id = models.CharField(max_length=50)
     created = models.DateTimeField(null=True, blank=True)   # HWDB mint date
     updated = models.DateTimeField(null=True, blank=True)   # HWDB last-modified
+    serial_number = models.CharField(max_length=120, blank=True, default="")
+    created_by = models.CharField(max_length=120, blank=True, default="")  # HWDB creator
 
     class Meta:
         indexes = [models.Index(fields=["part_type_id", "updated"])]

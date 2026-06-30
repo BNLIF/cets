@@ -519,12 +519,13 @@ def explore_search_api_view(request):
             })
 
     parts = [
-        {"part_id": pid, "part_type_id": ptid,
+        {"part_id": pid, "part_type_id": ptid, "serial_number": serial,
          "path": reverse("explore:part", args=[pid])}
-        for pid, ptid in (HwdbComponentEvent.objects
-                          .filter(part_id__icontains=q)
-                          .order_by("part_id")
-                          .values_list("part_id", "part_type_id")[:25])
+        for pid, ptid, serial in (HwdbComponentEvent.objects
+                                  .filter(Q(part_id__icontains=q)
+                                          | Q(serial_number__icontains=q))
+                                  .order_by("part_id")
+                                  .values_list("part_id", "part_type_id", "serial_number")[:25])
     ]
     direct = q if _PID_RE.match(q) else None
     return JsonResponse({"types": types, "parts": parts, "direct_part": direct})

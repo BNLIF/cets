@@ -38,11 +38,12 @@
 
 <div class="sx-page">
   <h1>Search</h1>
-  <p class="sx-sub">Find a component type or a part across the mirrored hierarchy. Matches names, IDs and part IDs — instantly, from the local mirror.</p>
+  <p class="sx-sub">Find a component type or a part across the mirrored hierarchy. Matches type names, part-type IDs, part IDs and serial numbers — instantly, from the local mirror.</p>
 
   <input class="sx-input" id="sx-q" type="text" autocomplete="off" spellcheck="false"
-         placeholder="e.g. LArASIC, ColdADC, D08100100003, D08100100003-00226"
+         placeholder="e.g. LArASIC · D08100100003 · D08100100003-00226 · serial 2502-18564"
          value="{{ q }}" aria-label="Search">
+  <p class="sx-sub" style="margin: 8px 2px 0; font-size: 12.5px;">Tip: serial numbers are matched too, but only for parts already pulled into the mirror — open a component type and sync it first if a serial isn’t found.</p>
 
   <div id="sx-results"></div>
 
@@ -83,7 +84,8 @@
       d.parts.forEach(function (p) {
         html += "<a class='sx-row' href='" + esc(p.path) + "'>" +
           "<span class='sx-chip'>part</span>" +
-          "<span class='sx-name' style='font-family:var(--font-mono);font-weight:500;'>" + esc(p.part_id) + "</span>" +
+          "<span><span class='sx-name' style='font-family:var(--font-mono);font-weight:500;'>" + esc(p.part_id) + "</span>" +
+          (p.serial_number ? "<div class='sx-meta'>SN " + esc(p.serial_number) + "</div>" : "") + "</span>" +
           "<span class='sx-id'>" + esc(p.part_type_id) + "</span></a>";
       });
       html += "</div></div>";
