@@ -185,7 +185,7 @@ class NavigationTest(TestCase):
 
     def test_home_is_hierarchy_tree_with_leaf_links(self):
         html = self._html(reverse("explore:home"))
-        self.assertIn("DUNE Hardware Hierarchy", html)   # the tree page, not the card root
+        self.assertIn("DUNE Hardware Overview", html)   # the tree page, not the card root
         self.assertIn("tr-data", html)                   # embedded tree json
         self.assertIn("Far Detector", html)
         self.assertIn("not curated", html)               # ND/Other placeholders present

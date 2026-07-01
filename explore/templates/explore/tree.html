@@ -1,9 +1,9 @@
 {% extends 'explore/base.html' %}
-{% block title %}DUNE Hardware Hierarchy · HWDB Explorer{% endblock %}
+{% block title %}DUNE Hardware Overview · HWDB Explorer{% endblock %}
 
 {% block content %}
 <style>
-  .tr-page { max-width: 980px; margin: 0 auto; padding: 34px 30px 64px; }
+  .tr-page { max-width: 1080px; padding: 26px 30px 56px; }
   .tr-page h1 { font-size: clamp(24px, 3vw, 34px); line-height: 1.06; letter-spacing: -.02em;
     margin: 0 0 4px; font-weight: 680; color: var(--ink); }
   .tr-stats { display: flex; flex-wrap: wrap; gap: 12px 28px; margin: 22px 0 2px; }
@@ -95,7 +95,7 @@
 <div class="tr-page">
   <div class="tr-head">
     <div>
-      <h1>DUNE Hardware Hierarchy</h1>
+      <h1>DUNE Hardware Overview</h1>
       <div class="tr-refreshed">{% if sync_state.finished_at %}refreshed {{ sync_state.finished_at|timesince }} ago{% else %}never refreshed{% endif %} · <span class="mono">prod</span></div>
     </div>
     <button id="tr-refresh" class="btn btn-primary" type="button" title="Walk the curated systems into the local mirror">
