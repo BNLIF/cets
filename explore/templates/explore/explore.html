@@ -240,7 +240,7 @@
         {% if breakdowns %}
         <div class="chart-card" id="breakdown-card">
             <div class="panel-title" style="font-size: 14px; margin-bottom: 4px;">Component breakdown</div>
-            <p class="cell-muted" style="margin: 0 0 14px; font-size: 12px;">Components by category, counted from the local mirror — no live fetch. Re-sync the type to refresh.</p>
+            <p class="cell-muted" style="margin: 0 0 14px; font-size: 12px;">Components by category, counted from the local mirror — no live fetch. A large <em>(unset)</em> slice usually means those rows were synced before the field was captured; a <strong>Full re-sync</strong> refreshes them.</p>
             <div class="bd-grid">
                 {% for b in breakdowns %}
                 <div class="bd-item">

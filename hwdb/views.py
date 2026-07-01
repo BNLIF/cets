@@ -428,6 +428,7 @@ def fnal_link_view(request):
             "auth_url": start.auth_url,
             "user_code": start.user_code,
             "poll_url": reverse("hwdb:link_poll"),
+            "reason": request.GET.get("reason"),
         },
     )
 

@@ -12,9 +12,11 @@
   .tr-stat .l { font-size: 12px; color: var(--faint); margin-top: 5px; }
   .tr-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 22px;
     margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--rule); }
-  .tr-legend { display: flex; flex-wrap: wrap; gap: 6px 15px; }
   .tr-lg { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--dim); }
   .tr-lg i { width: 10px; height: 10px; border-radius: 3px; background: var(--rc); }
+  .tr-statekey { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+  .tr-statekey .tr-lg i.grey { background: var(--faint); }
+  .tr-statekey .tr-lg i.green { background: var(--good); }
   .tr-controls { display: flex; gap: 7px; margin-left: auto; }
   .tr-btn { font: inherit; font-size: 12.5px; color: var(--dim); background: var(--surface);
     border: 1px solid var(--rule); border-radius: 8px; padding: 7px 12px; cursor: pointer;
@@ -70,6 +72,10 @@
   .tr-warn { margin: 12px 0 0; padding: 10px 12px; border-radius: 8px; font-size: 13px;
     color: #8a6d10; background: color-mix(in oklab, #b8860b 9%, var(--surface));
     border: 1px solid color-mix(in oklab, #b8860b 30%, var(--rule)); }
+  .tr-firstrun { display: none; margin: 16px 0 0; padding: 13px 15px; border-radius: 10px;
+    font-size: 13.5px; line-height: 1.5; color: var(--body);
+    background: var(--accent-soft); border: 1px solid color-mix(in oklab, var(--accent) 24%, var(--rule)); }
+  .tr-firstrun strong { color: var(--accent-ink); }
 
   .tr-row--root { min-height: 44px; padding: 6px 14px 6px 10px; border-radius: 10px; margin-bottom: 4px;
     background: color-mix(in oklab, var(--accent) 6%, var(--surface));
@@ -104,11 +110,18 @@
     </button>
   </div>
   {% if sync_state.last_error %}<div class="tr-warn">Last refresh error: {{ sync_state.last_error }}</div>{% endif %}
+  <div class="tr-firstrun" id="tr-firstrun">
+    <strong>The mirror is empty.</strong> Click <strong>Refresh hierarchy</strong> to walk the curated
+    systems from HWDB (needs your FNAL link). Then open a component type to sync its details on demand.
+  </div>
   <pre id="tr-sync-log" class="tr-log"></pre>
 
   <div class="tr-stats" id="tr-stats"></div>
   <div class="tr-bar">
-    <div class="tr-legend" id="tr-legend"></div>
+    <div class="tr-statekey">
+      <span class="tr-lg"><i class="grey"></i>empty / not synced</span>
+      <span class="tr-lg"><i class="green"></i>synced from HWDB</span>
+    </div>
     <div class="tr-controls">
       <button class="tr-btn" id="tr-fam" type="button">Families</button>
       <button class="tr-btn on" id="tr-sys" type="button">Systems</button>
@@ -155,6 +168,8 @@
   var GUIDE = function (rc) { return "color-mix(in oklab, " + rc + " 34%, var(--rule))"; };
   var root = JSON.parse(document.getElementById("tr-data").textContent);
   var fmt = function (n) { return (n || 0).toLocaleString("en-US"); };
+  // First-run hint: mirror has no components anywhere yet.
+  if (!root.n) { var fr = document.getElementById("tr-firstrun"); if (fr) fr.style.display = "block"; }
   var esc = function (s) { var d = document.createElement("div"); d.textContent = s == null ? "" : s; return d.innerHTML; };
 
   // ---- stats ----
@@ -173,13 +188,6 @@
   ];
   document.getElementById("tr-stats").innerHTML = stats.map(function (s) {
     return "<div class='tr-stat'><div class='n'>" + fmt(s[0]) + "</div><div class='l'>" + s[1] + "</div></div>";
-  }).join("");
-
-  var fams = [];
-  (root.children || []).forEach(function (r) { (r.children || []).forEach(function (f) {
-    if (f.kind === "family" && !f.locked) fams.push(f); }); });
-  document.getElementById("tr-legend").innerHTML = fams.map(function (f) {
-    return "<span class='tr-lg' style='--rc:" + (FAM_COLOR[f.key] || "var(--accent)") + "'><i></i>" + esc(f.name) + "</span>";
   }).join("");
 
   // ---- render ----

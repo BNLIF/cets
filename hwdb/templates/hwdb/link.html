@@ -18,9 +18,14 @@
     .ok  { color: #1a7f37; }
     .err { color: #cf222e; }
     .hint { color: #57606a; font-size: 0.9em; }
+    .notice { margin-bottom: 1.5rem; padding: 0.7rem 1rem; border-radius: 6px;
+              background: #fff8e5; border: 1px solid #e6d68a; color: #6b5900; font-size: 0.95em; }
   </style>
 </head>
 <body>
+  {% if reason == "expired" %}
+  <div class="notice">Your Fermilab session expired. Re-link below to continue where you left off.</div>
+  {% endif %}
   <h1>Link your FNAL identity</h1>
   <p>The hardware database is queried with your own Fermilab credentials.
      1. Click the button to open CILogon <strong>in a new tab</strong> and

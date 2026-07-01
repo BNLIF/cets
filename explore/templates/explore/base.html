@@ -68,6 +68,14 @@
       summary.extree-row a.extree-name:hover { text-decoration: underline; }
       .extree-kids { padding-left: 13px; }
       .ex-count { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--faint); white-space: nowrap; padding-left: 6px; }
+
+      /* shared footer (all explorer pages) */
+      .eh-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+        gap: 6px 14px; padding: 18px 30px; font-size: 12px; color: var(--faint);
+        border-top: 1px solid var(--rule); }
+      .eh-foot a { color: var(--accent-ink); text-decoration: none; }
+      .eh-foot a:hover { text-decoration: underline; }
+      .eh-foot .sep { color: var(--rule-hard); }
     </style>
 </head>
 <body>
@@ -124,6 +132,12 @@
             </div>
         </div>
     </main>
+
+    <footer class="eh-foot">
+        <span>HWDB Explorer · read-only mirror of the DUNE Hardware Database</span>
+        <span class="sep">·</span>
+        <a href="https://github.com/BNLIF/cets/issues/new" target="_blank" rel="noopener">Report an issue &#x2197;</a>
+    </footer>
 
     <script>
     // Sidebar collapse toggle — works on every explorer page (persisted).

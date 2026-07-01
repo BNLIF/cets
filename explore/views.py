@@ -306,7 +306,7 @@ def explore_sync_view(request):
         bearer = mint_for(request)
     except FnalLinkRequired:
         link = reverse("hwdb:link")
-        return redirect(f"{link}?{urlencode({'next': reverse('explore:home')})}")
+        return redirect(f"{link}?{urlencode({'next': reverse('explore:home'), 'reason': 'expired'})}")
     except FnalUnavailable:
         return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
 
@@ -337,7 +337,7 @@ def explore_node_sync_view(request, part_type_id):
     except FnalLinkRequired:
         link = reverse("hwdb:link")
         nxt = f"{reverse('explore:home')}?node={part_type_id}"
-        return redirect(f"{link}?{urlencode({'next': nxt})}")
+        return redirect(f"{link}?{urlencode({'next': nxt, 'reason': 'expired'})}")
     except FnalUnavailable:
         return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
 
@@ -371,7 +371,7 @@ def explore_shipment_sync_view(request, part_type_id):
     except FnalLinkRequired:
         link = reverse("hwdb:link")
         nxt = f"{reverse('explore:home')}?node={part_type_id}"
-        return redirect(f"{link}?{urlencode({'next': nxt})}")
+        return redirect(f"{link}?{urlencode({'next': nxt, 'reason': 'expired'})}")
     except FnalUnavailable:
         return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
 
@@ -469,7 +469,7 @@ def explore_part_view(request, part_id):
         bearer = mint_for(request)
     except FnalLinkRequired:
         link = reverse("hwdb:link")
-        return redirect(f"{link}?{urlencode({'next': request.get_full_path()})}")
+        return redirect(f"{link}?{urlencode({'next': request.get_full_path(), 'reason': 'expired'})}")
     except FnalUnavailable:
         return render(request, "explore/part_detail.html",
                       {"part_id": part_id, "unavailable": True,
