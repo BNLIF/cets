@@ -182,7 +182,7 @@ class AssemblyTreeTest(TestCase):
 
 
 class AssemblyViewTest(TestCase):
-    """The lazy-expand endpoint /explore/assembly/<pid>/."""
+    """The lazy-expand endpoint /hw/assembly/<pid>/."""
 
     def setUp(self):
         self.user = get_user_model().objects.create_user("a", "a@a.io", "pw")
@@ -195,16 +195,16 @@ class AssemblyViewTest(TestCase):
         api.get_component.return_value = {"data": {"status": "Available"}}
         with mock.patch("explore.views.mint_for", return_value="bearer"), \
              mock.patch("explore.views.FnalDbApiClient", return_value=api):
-            resp = self.client.get("/explore/assembly/B1/")
+            resp = self.client.get("/hw/assembly/B1/")
         self.assertEqual(resp.status_code, 200)
         child = json.loads(resp.content)["children"][0]
         self.assertEqual(child["part_id"], "C1")
-        self.assertEqual(child["url"], "/explore/part/C1/")
+        self.assertEqual(child["url"], "/hw/part/C1/")
         self.assertEqual(child["status"], "Available")
 
     def test_fnal_link_required_returns_409(self):
         with mock.patch("explore.views.mint_for", side_effect=FnalLinkRequired()):
-            resp = self.client.get("/explore/assembly/B1/")
+            resp = self.client.get("/hw/assembly/B1/")
         self.assertEqual(resp.status_code, 409)
 
 
@@ -212,7 +212,7 @@ class PartViewTest(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user("p", "p@p.io", "pw")
         self.client.force_login(self.user)
-        self.url = "/explore/part/D05700600099-00007/"  # not a curated shipping type
+        self.url = "/hw/part/D05700600099-00007/"  # not a curated shipping type
 
     def _api(self):
         api = mock.MagicMock()
@@ -258,7 +258,7 @@ class PartViewTest(TestCase):
         self.assertNotIn("In Transit", body)    # no shipping framing for a normal part
 
     def test_shipment_url_redirects_to_part(self):
-        resp = self.client.get("/explore/shipment/D05700600099-00007/")
+        resp = self.client.get("/hw/shipment/D05700600099-00007/")
         self.assertEqual(resp.status_code, 301)
         self.assertEqual(resp["Location"], self.url)
 
@@ -269,7 +269,7 @@ class TestDataDownloadTest(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user("td", "t@d.io", "pw")
         self.client.force_login(self.user)
-        self.url = "/explore/test-data/D08100100003-00226/42/"
+        self.url = "/hw/test-data/D08100100003-00226/42/"
 
     def _api(self):
         api = mock.MagicMock()
@@ -327,7 +327,7 @@ class LeafPartsTableTest(TestCase):
         html = self.client.get(self.url).content.decode()
         self.assertIn("Components (55)", html)
         # 55 rows → 50 on page 1 (newest first), 5 on page 2.
-        self.assertIn(f"/explore/part/{self.leaf.part_type_id}-00054/", html)  # row → part page
+        self.assertIn(f"/hw/part/{self.leaf.part_type_id}-00054/", html)  # row → part page
         self.assertIn('target="_blank"', html)                                 # opens new tab
         self.assertIn("SN-00054", html)                                        # serial column
         self.assertIn("<th>Serial number</th>", html)
@@ -337,12 +337,12 @@ class LeafPartsTableTest(TestCase):
         self.assertIn("Page 1 of 2", html)
         self.assertIn("Last »", html)                                          # first/last links
         self.assertIn("?page=2", html)                                         # Last → page 2
-        self.assertNotIn(f"/explore/part/{self.leaf.part_type_id}-00000/", html)
+        self.assertNotIn(f"/hw/part/{self.leaf.part_type_id}-00000/", html)
 
     def test_second_page_has_first_and_prev_links(self):
         html = self.client.get(self.url + "?page=2").content.decode()
         self.assertIn("Page 2 of 2", html)
-        self.assertIn(f"/explore/part/{self.leaf.part_type_id}-00000/", html)  # tail row
+        self.assertIn(f"/hw/part/{self.leaf.part_type_id}-00000/", html)  # tail row
         self.assertIn("« First", html)
         self.assertIn('href="?page=1"', html)                                  # First → page 1
 
@@ -369,25 +369,25 @@ class SearchTest(TestCase):
             created=timezone.now(), serial_number="2502-18564")
 
     def test_page_renders(self):
-        resp = self.client.get("/explore/search/")
+        resp = self.client.get("/hw/search/")
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Advanced search")  # the future-seam note
 
     def test_api_finds_component_type_by_name_with_leaf_path(self):
-        d = self.client.get("/explore/search/api/", {"q": "ColdADC"}).json()
+        d = self.client.get("/hw/search/api/", {"q": "ColdADC"}).json()
         match = next(t for t in d["types"] if t["part_type_id"] == "D05700600099")
         self.assertTrue(match["path"])  # reachable leaf page
 
     def test_api_finds_mirrored_part_and_flags_direct_pid(self):
-        d = self.client.get("/explore/search/api/", {"q": "D05700600099-00001"}).json()
+        d = self.client.get("/hw/search/api/", {"q": "D05700600099-00001"}).json()
         self.assertEqual(d["direct_part"], "D05700600099-00001")
         self.assertTrue(any(p["part_id"] == "D05700600099-00001" for p in d["parts"]))
 
     def test_api_finds_part_by_serial_number(self):
-        d = self.client.get("/explore/search/api/", {"q": "2502-18564"}).json()
+        d = self.client.get("/hw/search/api/", {"q": "2502-18564"}).json()
         match = next(p for p in d["parts"] if p["part_id"] == "D05700600099-00001")
         self.assertEqual(match["serial_number"], "2502-18564")
 
     def test_short_query_returns_empty(self):
-        d = self.client.get("/explore/search/api/", {"q": "a"}).json()
+        d = self.client.get("/hw/search/api/", {"q": "a"}).json()
         self.assertEqual(d, {"types": [], "parts": [], "direct_part": None})

@@ -30,42 +30,9 @@
   .pill.synced { color: var(--good); border-color: color-mix(in oklch, var(--good) 30%, var(--rule)); }
   .pill.unsynced { color: var(--accent-ink); border-color: color-mix(in oklch, var(--accent) 30%, var(--rule)); }
 
-  /* sidebar + main layout — flush full-height sidebar, not a card.
-   * (.eh-main override lives here too so a cached explore.css can't re-inset it.) */
-  .eh-main { padding: 0; }
-  .ex-layout { display: flex; align-items: stretch; }
-  .ex-side { flex: 0 0 262px; min-width: 0; align-self: stretch;
-    position: sticky; top: 0; max-height: 100vh; overflow: auto;
-    border-right: 1px solid var(--rule); background: var(--page); padding: 14px 8px; }
-  .ex-layout.collapsed .ex-side { display: none; }
-  .ex-main { flex: 1; min-width: 0; padding: 26px 30px 56px; max-width: 1220px; }
-  .ex-side-label { font-size: 11px; font-weight: 600; letter-spacing: .06em;
-    text-transform: uppercase; color: var(--faint); padding: 2px 8px 10px; }
-  /* folder tree: native <details> chevrons, nested indentation */
-  .extree-folder { margin: 0; }
-  .extree-row, .extree-leaf {
-    display: flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: var(--r-sm);
-    font-size: 13px; color: var(--body); text-decoration: none; cursor: pointer; }
-  summary.extree-row { list-style: none; }
-  summary.extree-row::-webkit-details-marker { display: none; }
-  summary.extree-row::before { content: "▸"; flex: 0 0 11px; text-align: center;
-    color: var(--faint); font-size: 16px; }
-  details.extree-folder[open] > summary.extree-row::before { content: "▾"; }
-  .extree-leaf::before, .extree-flat::before { content: ""; flex: 0 0 11px; }
-  .extree-leaf::before { content: "·"; text-align: center; color: var(--rule-hard); font-size: 16px; }
-  a.extree-row:hover, a.extree-leaf:hover, summary.extree-row:hover { background: var(--surface); }
-  .extree-row.is-cur, .extree-leaf.is-cur { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
-  .extree-row.dim { color: var(--faint); cursor: default; }
-  .extree-row.dim:hover { background: none; }
-  /* no components → muted; synced count → green (state at a glance) */
-  .extree-leaf.is-empty, summary.extree-row.is-empty, a.extree-row.is-empty { color: var(--faint); }
-  .extree-leaf.is-empty .extree-name, .extree-row.is-empty .extree-name { opacity: .65; }
-  .ex-count.is-synced { color: var(--good); }
-  .extree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-  summary.extree-row a.extree-name { text-decoration: none; color: inherit; }
-  summary.extree-row a.extree-name:hover { text-decoration: underline; }
-  .extree-kids { padding-left: 13px; }
-  .ex-count { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--faint); white-space: nowrap; padding-left: 6px; }
+  /* content padding for the drill-in folder/leaf pages (sidebar + layout now
+   * live in base.html and wrap every page). */
+  .ex-pad { padding: 26px 30px 56px; max-width: 1220px; }
 
   /* leaf detail: each plot + the meta is a card (matches the prototype) */
   .chart-card { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg); padding: 16px 18px; margin-top: 16px; }
@@ -113,12 +80,7 @@
     max-height: 240px; overflow: auto; display: none; }
 </style>
 
-<div class="ex-layout" id="ex-layout">
-  <aside class="ex-side" id="ex-side" aria-label="Hierarchy tree">
-    <div class="ex-side-label">Curated hierarchy</div>
-    {% for node in sidebar %}{% include "explore/_tree_node.html" with node=node %}{% endfor %}
-  </aside>
-  <div class="ex-main">
+<div class="ex-pad">
 
 <nav class="crumbs" aria-label="Breadcrumb">
     {% for crumb in view.crumbs %}
@@ -230,7 +192,7 @@
                         title="Fetch newly-added components only (cheap)">Sync new</button>
                 <button class="btn btn-sm btn-ghost node-sync-btn" type="button" data-mode="components"
                         data-sync-url="{% url 'explore:node_sync' part_type_id=leaf.part_type_id %}"
-                        title="Refresh ‘updated’ for all components — no test re-fetch (medium)">Refresh updated</button>
+                        title="Refresh ‘updated’ for all components — no test re-fetch (medium)">Shallow re-sync</button>
                 <button class="btn btn-sm btn-ghost node-sync-btn" type="button" data-mode="full"
                         data-sync-url="{% url 'explore:node_sync' part_type_id=leaf.part_type_id %}"
                         title="Re-fetch everything incl. all tests (slow)">Full re-sync</button>
@@ -360,8 +322,7 @@
     {% endif %}
 {% endif %}
 
-  </div>{# .ex-main #}
-</div>{# .ex-layout #}
+</div>{# .ex-pad #}
 
 {% csrf_token %}
 {% if charts %}{{ charts|json_script:"node-chart-config" }}{% endif %}
@@ -370,15 +331,6 @@
 (function () {
     var csrf = document.querySelector("input[name=csrfmiddlewaretoken]").value;
 
-    // Sidebar collapse (persisted).
-    var layout = document.getElementById("ex-layout");
-    if (localStorage.getItem("exSideCollapsed") === "1") layout.classList.add("collapsed");
-    var st = document.getElementById("side-toggle");
-    if (st) st.addEventListener("click", function () {
-        var hidden = layout.classList.toggle("collapsed");
-        localStorage.setItem("exSideCollapsed", hidden ? "1" : "0");
-        window.dispatchEvent(new Event("resize"));  // let charts refit the new width
-    });
     async function stream(url, logEl, startMsg, extra) {
         logEl.style.display = "block"; logEl.textContent = startMsg;
         var fd = new FormData(); fd.append("csrfmiddlewaretoken", csrf);

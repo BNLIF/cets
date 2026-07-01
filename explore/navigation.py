@@ -1,7 +1,7 @@
 """Drill-in navigation: resolve a URL trail to a node, build child cards and
 deep-link URLs (ADR-0012, issue #40).
 
-A node's URL is ``/explore/<region>/<family>/[<system_id>/]<subsystem_id>/<part_type_id>``
+A node's URL is ``/hw/<region>/<family>/[<system_id>/]<subsystem_id>/<part_type_id>``
 — a family that owns one system (FD CE) omits the ``<system_id>`` segment
 (``family_is_flat``). Region/Family come from ``curation.yaml``; System /
 Subsystem / Component Type come from the ``HierarchyNode`` mirror. Resolution is
@@ -372,6 +372,95 @@ def sidebar_tree(ctx: dict) -> list[dict]:
             ctx.get("region_key") == rk, dim=not rbr, children=fams,
             empty=rbr and rempty, synced=rsynced))
     return tree
+
+
+def _tree_subs(region_key, family_key, sid, flat):
+    """Subsystem nodes (+ their component-type leaves) for one system. Returns
+    ``(nodes, n_with_components, n_synced)`` — the leaf tallies roll up so each
+    node can carry the sidebar's ``empty``/``synced`` state. Leaves carry a
+    ``url`` to their explorer page."""
+    out, sys_w, sys_s = [], 0, 0
+    for sub in (H.objects.filter(level=H.LEVEL_SUBSYSTEM, system_id=sid)
+                .order_by("subsystem_id")):
+        types, w, s = [], 0, 0
+        for leaf in (H.objects.filter(level=H.LEVEL_TYPE, system_id=sid,
+                                      subsystem_id=sub.subsystem_id).order_by("name")):
+            n = leaf.n_components or 0
+            has, syn = n > 0, (leaf.n_components or 0) > 0 and _leaf_synced(leaf)
+            w += 1 if has else 0
+            s += 1 if syn else 0
+            types.append({
+                "kind": "type", "name": leaf.name, "ptid": leaf.part_type_id, "n": n,
+                "empty": not has, "synced": syn,
+                "url": node_path(region_key, family_key,
+                                 system_id=None if flat else sid,
+                                 subsystem_id=sub.subsystem_id, part_type_id=leaf.part_type_id),
+            })
+        empty, synced = _state(w, s)
+        out.append({"kind": "sub", "name": sub.subsystem_name or sub.name,
+                    "id": sub.subsystem_id, "n": sum(t["n"] for t in types),
+                    "empty": empty, "synced": synced, "children": types})
+        sys_w += w
+        sys_s += s
+    return out, sys_w, sys_s
+
+
+def curated_tree() -> dict:
+    """The whole curated Region → Family → System → Subsystem → type tree as
+    nested dicts for the hierarchy homepage (#tree view).
+
+    Mirrors ``curation.yaml``: single-system families are flattened (no system
+    tier), non-browsable regions/families are ``locked`` placeholders. Every
+    leaf carries ``url`` (its explorer page); ``n`` is components in HWDB; each
+    node carries ``empty`` (no component-bearing leaves) and ``synced`` (all of
+    them synced) — the same grey/green convention as the sidebar.
+    """
+    regions_out = []
+    for r in curation.regions():
+        browsable = curation.region_is_browsable(r)
+        rnode = {"kind": "region", "name": r["name"], "key": r["key"],
+                 "locked": not browsable, "note": r.get("note", ""), "children": []}
+        rw = rs = 0
+        if browsable:
+            for f in r.get("families", []) or []:
+                fkey = f["key"]
+                if not curation.family_is_browsable(f):
+                    rnode["children"].append({
+                        "kind": "family", "name": f["name"], "key": fkey,
+                        "sub": f.get("sub", ""), "locked": True,
+                        "note": f.get("note", ""), "children": [], "n": 0,
+                        "empty": True, "synced": False})
+                    continue
+                flat = curation.family_is_flat(f)
+                sysids = f.get("systems") or []
+                fam = {"kind": "family", "name": f["name"], "key": fkey,
+                       "sub": f.get("sub", ""), "children": []}
+                fw = fs = 0
+                if flat:
+                    fam["children"], fw, fs = _tree_subs(r["key"], fkey, sysids[0], flat=True)
+                else:
+                    for sid in sysids:
+                        node = H.objects.filter(level=H.LEVEL_SYSTEM, system_id=sid).first()
+                        if not node:
+                            continue
+                        subs, sw, ss = _tree_subs(r["key"], fkey, sid, flat=False)
+                        s_empty, s_synced = _state(sw, ss)
+                        fam["children"].append({
+                            "kind": "system", "name": node.system_name, "id": sid,
+                            "n": sum(s["n"] for s in subs), "empty": s_empty,
+                            "synced": s_synced, "children": subs})
+                        fw += sw
+                        fs += ss
+                fam["n"] = sum(c["n"] for c in fam["children"])
+                fam["empty"], fam["synced"] = _state(fw, fs)
+                rnode["children"].append(fam)
+                rw += fw
+                rs += fs
+        rnode["n"] = sum(c.get("n", 0) for c in rnode["children"])
+        rnode["empty"], rnode["synced"] = _state(rw, rs)
+        regions_out.append(rnode)
+    return {"kind": "root", "name": "DUNE", "sub": "Project D",
+            "children": regions_out, "n": sum(r["n"] for r in regions_out)}
 
 
 def leaf_path_for(part_type_id: str) -> str | None:

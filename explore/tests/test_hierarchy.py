@@ -11,6 +11,7 @@ from unittest import mock
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from explore import curation, hierarchy, navigation
 from explore.models import HierarchyNode as H
@@ -175,12 +176,56 @@ class NavigationTest(TestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertIn(reverse("explore:login"), resp["Location"])
 
-    def test_root_shows_region_cards(self):
-        html = self._html(reverse("explore:home"))
+    def test_browse_root_shows_region_cards(self):
+        html = self._html(reverse("explore:browse"))   # drill-in navigator (home is now the tree)
         self.assertIn("Far Detector", html)
         self.assertIn("Near Detector", html)   # declared region…
         self.assertIn("not curated", html)      # …dimmed, not browsable
         self.assertIn("Refresh hierarchy", html)
+
+    def test_home_is_hierarchy_tree_with_leaf_links(self):
+        html = self._html(reverse("explore:home"))
+        self.assertIn("DUNE Hardware Hierarchy", html)   # the tree page, not the card root
+        self.assertIn("tr-data", html)                   # embedded tree json
+        self.assertIn("Far Detector", html)
+        self.assertIn("not curated", html)               # ND/Other placeholders present
+        leaf_url = navigation.node_path("FD", "FD-CE", subsystem_id=1,
+                                        part_type_id="D08100100003")
+        self.assertIn(leaf_url, html)                     # leaf row links to its page
+
+    def test_curated_tree_flattens_and_locks(self):
+        tree = navigation.curated_tree()
+        self.assertEqual(tree["kind"], "root")
+        regions = {r["key"]: r for r in tree["children"]}
+        self.assertFalse(regions["FD"]["locked"])
+        self.assertTrue(regions["ND"]["locked"])         # declared, not browsable
+        fams = {f["key"]: f for f in regions["FD"]["children"]}
+        # FD CE owns one system → children are subsystems directly (flattened)
+        self.assertTrue(all(c["kind"] == "sub" for c in fams["FD-CE"]["children"]))
+        # FD-VD is multi-system → children are systems
+        self.assertTrue(any(c["kind"] == "system" for c in fams["FD-VD"]["children"]))
+        leaf = fams["FD-CE"]["children"][0]["children"][0]
+        self.assertEqual(leaf["kind"], "type")
+        self.assertTrue(leaf["url"].endswith("/D08100100003/"))
+
+    def test_curated_tree_empty_and_synced_flags(self):
+        # setUp's AMC (57/2) has components but is unsynced. Add a fully-synced
+        # subsystem and an all-empty one, both under FD-VD TDE (system 57).
+        _chain("D05700200090", tname="SYNCEDLEAF", ssid=9, ssname="Synced sub",
+               n_components=5, tests_synced_at=timezone.now())
+        _chain("D05700200091", tname="EMPTYLEAF", ssid=10, ssname="Empty sub",
+               n_components=0)
+        tree = navigation.curated_tree()
+        fd = next(r for r in tree["children"] if r["key"] == "FD")
+        sys57 = next(s for s in next(f for f in fd["children"] if f["key"] == "FD-VD")["children"]
+                     if s.get("id") == 57)
+        subs = {s["name"]: s for s in sys57["children"]}
+        self.assertTrue(subs["Synced sub"]["synced"])       # its one leaf is synced → green
+        self.assertFalse(subs["Synced sub"]["empty"])
+        self.assertTrue(subs["Empty sub"]["empty"])          # 0 components → grey
+        self.assertFalse(subs["Empty sub"]["synced"])
+        self.assertFalse(sys57["synced"])   # mix of synced + unsynced leaves
+        self.assertFalse(sys57["empty"])    # but it does have components
 
     def test_region_shows_family_cards(self):
         html = self._html(navigation.node_path("FD"))

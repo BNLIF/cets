@@ -12,10 +12,12 @@ router.register(r"api/femb", views.FEMBViewSet, basename="femb")
 
 
 def _legacy_redirect(name):
-    """Redirect /fe/<rest> → /larasic/<rest> (etc.) honoring FORCE_SCRIPT_NAME."""
+    """Redirect /fe/<rest> → /larasic/<rest> (etc.) honoring FORCE_SCRIPT_NAME
+    and preserving any query string (e.g. /explore/?node=X → /hw/?node=X)."""
     def view(request, rest=""):
         base = reverse(name)  # includes FORCE_SCRIPT_NAME prefix and trailing slash
-        return HttpResponsePermanentRedirect(f"{base}{rest}")
+        qs = request.META.get("QUERY_STRING", "")
+        return HttpResponsePermanentRedirect(f"{base}{rest}" + (f"?{qs}" if qs else ""))
     return view
 
 urlpatterns = [
@@ -25,7 +27,9 @@ urlpatterns = [
     path("reference/", views.reference, name="reference"),
     path("search/typeahead/", views.search_typeahead, name="search_typeahead"),
     path("hwdb/", include("hwdb.urls")),
-    path("explore/", include("explore.urls")),
+    path("hw/", include("explore.urls")),
+    # Old /explore/<rest> links → /hw/<rest> (path-preserving, honors script name).
+    re_path(r"^explore/(?P<rest>.*)$", _legacy_redirect("explore:home")),
     path("larasic/", views.larasic, name="larasic"),
     # Per-tray drill from the LArASIC grouping page. Listed before the serial
     # detail pattern so "tray" is matched as a literal segment.

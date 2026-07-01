@@ -272,14 +272,14 @@ class ShipmentPanelViewTest(TestCase):
                                     location_name="FNAL", location_id=1, n_contents=1)
         html = self.client.get(navigation.leaf_path_for(leaf.part_type_id)).content.decode()
         self.assertIn('class="ship-row"', html)
-        self.assertIn("/explore/part/B1/", html)  # row click → part detail page
+        self.assertIn("/hw/part/B1/", html)  # row click → part detail page
 
     def test_box_pid_links_to_part_page(self):
         leaf = _ship_leaf()
         ShipmentItem.objects.create(part_type_id=leaf.part_type_id, part_id="B1",
                                     location_name="FNAL", location_id=1, n_contents=1)
         html = self.client.get(navigation.leaf_path_for(leaf.part_type_id)).content.decode()
-        self.assertIn("/explore/part/B1/", html)              # box PID → local part page
+        self.assertIn("/hw/part/B1/", html)              # box PID → local part page
         self.assertNotIn("/edit/component/B1", html)          # not the FNAL deep link
         self.assertIn("event.stopPropagation()", html)        # link doesn't trigger the row
 
@@ -402,7 +402,7 @@ class ShipmentDetailPageTest(TestCase):
         self.part_id = SHIP_PTID + "-00002"
         ShipmentItem.objects.create(part_type_id=SHIP_PTID, part_id=self.part_id,
                                     location_name="In Transit", location_id=0, n_contents=1)
-        self.url = "/explore/part/" + self.part_id + "/"
+        self.url = "/hw/part/" + self.part_id + "/"
 
     def _api(self):
         api = mock.MagicMock()
@@ -448,7 +448,7 @@ class ShipmentImageViewTest(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user("img", "i@i.io", "pw")
         self.client.force_login(self.user)
-        self.url = "/explore/shipment-image/img-7/"
+        self.url = "/hw/shipment-image/img-7/"
 
     def _api(self):
         api = mock.MagicMock()

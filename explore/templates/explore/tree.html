@@ -1,0 +1,263 @@
+{% extends 'explore/base.html' %}
+{% block title %}DUNE Hardware Hierarchy · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .tr-page { max-width: 980px; margin: 0 auto; padding: 34px 30px 64px; }
+  .tr-page h1 { font-size: clamp(24px, 3vw, 34px); line-height: 1.06; letter-spacing: -.02em;
+    margin: 0 0 4px; font-weight: 680; color: var(--ink); }
+  .tr-stats { display: flex; flex-wrap: wrap; gap: 12px 28px; margin: 22px 0 2px; }
+  .tr-stat .n { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums;
+    letter-spacing: -.01em; color: var(--ink); }
+  .tr-stat .l { font-size: 12px; color: var(--faint); margin-top: 5px; }
+  .tr-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 22px;
+    margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--rule); }
+  .tr-legend { display: flex; flex-wrap: wrap; gap: 6px 15px; }
+  .tr-lg { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--dim); }
+  .tr-lg i { width: 10px; height: 10px; border-radius: 3px; background: var(--rc); }
+  .tr-controls { display: flex; gap: 7px; margin-left: auto; }
+  .tr-btn { font: inherit; font-size: 12.5px; color: var(--dim); background: var(--surface);
+    border: 1px solid var(--rule); border-radius: 8px; padding: 7px 12px; cursor: pointer;
+    transition: border-color .12s, color .12s, background .12s; }
+  .tr-btn:hover { border-color: var(--accent); color: var(--accent-ink); }
+  .tr-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .tr-btn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  #tr-tree { margin-top: 20px; font-size: 13.5px; }
+  .tr-kids { margin-left: 15px; }
+  .tr-kids > .tr-branch { position: relative; padding-left: 17px; }
+  .tr-kids > .tr-branch::before { content: ""; position: absolute; left: 0; top: 0; height: 100%;
+    border-left: 1.5px solid var(--tr-guide, var(--rule)); }
+  .tr-kids > .tr-branch:last-child::before { height: 18px; }
+  .tr-kids > .tr-branch::after { content: ""; position: absolute; left: 0; top: 18px; width: 12px;
+    border-top: 1.5px solid var(--tr-guide, var(--rule)); }
+  .tr-branch.collapsed > .tr-kids { display: none; }
+
+  .tr-row { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 3px 10px 3px 6px;
+    border-radius: 8px; color: inherit; text-decoration: none; }
+  .tr-row.expandable, a.tr-row { cursor: pointer; }
+  .tr-row.expandable:hover, a.tr-row:hover { background: color-mix(in oklab, var(--rc, var(--accent)) 8%, var(--surface)); }
+  a.tr-row:hover .tr-nm { color: var(--accent-ink); }
+  .tr-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .tr-caret { flex: none; width: 15px; height: 15px; display: grid; place-items: center;
+    font-size: 9px; color: var(--faint); transition: transform .15s ease; }
+  .tr-branch:not(.collapsed) > .tr-row .tr-caret { transform: rotate(90deg); }
+  .tr-dot { flex: none; width: 15px; text-align: center;
+    color: color-mix(in oklab, var(--rc, var(--faint)) 55%, var(--faint)); }
+
+  .tr-nm { font-weight: 600; letter-spacing: -.005em; white-space: nowrap; }
+  .tr-sub { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; }
+  .tr-grow { flex: 1 1 auto; min-width: 8px; }
+  .tr-meta { flex: none; display: flex; align-items: center; gap: 8px; }
+  .tr-kc { font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .tr-comp { font-family: var(--font-mono); font-size: 11.5px; font-weight: 600;
+    font-variant-numeric: tabular-nums; color: var(--dim); background: var(--surface);
+    border: 1px solid var(--rule); border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
+  .tr-comp.zero { color: var(--faint); background: transparent; }
+  .tr-comp.is-synced { color: var(--good); border-color: color-mix(in oklab, var(--good) 30%, var(--rule)); }
+  .tr-ptid { font-family: var(--font-mono); font-size: 11px; font-weight: 500; color: var(--faint); white-space: nowrap; }
+  /* 0-component nodes greyed, like the sidebar */
+  .tr-row.tr-empty .tr-nm { color: var(--faint); font-weight: 500; }
+
+  .tr-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .tr-refreshed { font-size: 12.5px; color: var(--faint); margin-top: 5px; }
+  .tr-refreshed .mono { font-family: var(--font-mono); }
+  .tr-log { margin: 14px 0 0; background: #1c1812; color: #e7dfce; border-radius: 8px;
+    padding: 12px; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap;
+    max-height: 240px; overflow: auto; display: none; }
+  .tr-warn { margin: 12px 0 0; padding: 10px 12px; border-radius: 8px; font-size: 13px;
+    color: #8a6d10; background: color-mix(in oklab, #b8860b 9%, var(--surface));
+    border: 1px solid color-mix(in oklab, #b8860b 30%, var(--rule)); }
+
+  .tr-row--root { min-height: 44px; padding: 6px 14px 6px 10px; border-radius: 10px; margin-bottom: 4px;
+    background: color-mix(in oklab, var(--accent) 6%, var(--surface));
+    border: 1px solid color-mix(in oklab, var(--accent) 22%, var(--rule)); }
+  .tr-row--root .tr-nm { font-size: 16px; color: color-mix(in oklab, var(--accent) 30%, var(--ink)); }
+  .tr-row--root .tr-sub { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .12em;
+    text-transform: uppercase; }
+  .tr-row--region .tr-nm { font-size: 14.5px; }
+  .tr-row--family { border-left: 3px solid var(--rc); background: color-mix(in oklab, var(--rc) 5%, transparent); }
+  .tr-row--family .tr-nm { color: color-mix(in oklab, var(--rc) 55%, var(--ink)); }
+  .tr-row--type .tr-nm { font-weight: 500; }
+  .tr-swatch { flex: none; width: 9px; height: 9px; border-radius: 3px; background: var(--faint); }
+  .tr-locked { opacity: .6; }
+  .tr-locked .tr-nm { font-weight: 500; }
+  .tr-note { font-size: 11.5px; color: var(--faint); font-style: italic; white-space: nowrap; }
+
+  .tr-foot { color: var(--faint); font-size: 12.5px; line-height: 1.6; margin-top: 20px;
+    padding-top: 16px; border-top: 1px solid var(--rule); }
+  .tr-foot code { font-family: var(--font-mono); font-size: 11.5px; color: var(--dim); }
+  @media (prefers-reduced-motion: reduce) { .tr-caret { transition: none; } }
+</style>
+
+<div class="tr-page">
+  <div class="tr-head">
+    <div>
+      <h1>DUNE Hardware Hierarchy</h1>
+      <div class="tr-refreshed">{% if sync_state.finished_at %}refreshed {{ sync_state.finished_at|timesince }} ago{% else %}never refreshed{% endif %} · <span class="mono">prod</span></div>
+    </div>
+    <button id="tr-refresh" class="btn btn-primary" type="button" title="Walk the curated systems into the local mirror">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+      Refresh hierarchy
+    </button>
+  </div>
+  {% if sync_state.last_error %}<div class="tr-warn">Last refresh error: {{ sync_state.last_error }}</div>{% endif %}
+  <pre id="tr-sync-log" class="tr-log"></pre>
+
+  <div class="tr-stats" id="tr-stats"></div>
+  <div class="tr-bar">
+    <div class="tr-legend" id="tr-legend"></div>
+    <div class="tr-controls">
+      <button class="tr-btn" id="tr-fam" type="button">Families</button>
+      <button class="tr-btn on" id="tr-sys" type="button">Systems</button>
+      <button class="tr-btn" id="tr-all" type="button">Expand all</button>
+      <button class="tr-btn" id="tr-min" type="button">Collapse</button>
+    </div>
+  </div>
+
+  <div id="tr-tree"></div>
+
+  <p class="tr-foot">The explorer's <code>curation.yaml</code> structure, live from the mirror.
+    Counts are components registered in HWDB; a leaf opens its component-type page. Dimmed regions
+    and <em>not curated</em> families exist in HWDB but aren't browsable here yet.</p>
+</div>
+
+{% csrf_token %}
+{{ tree|json_script:"tr-data" }}
+<script>
+// Refresh hierarchy — stream the curated walk into the mirror, then reload.
+(function () {
+  var rb = document.getElementById("tr-refresh");
+  var csrf = document.querySelector("input[name=csrfmiddlewaretoken]");
+  if (!rb || !csrf) return;
+  rb.addEventListener("click", async function () {
+    rb.disabled = true;
+    var log = document.getElementById("tr-sync-log");
+    log.style.display = "block"; log.textContent = "Refreshing hierarchy…\n";
+    var fd = new FormData(); fd.append("csrfmiddlewaretoken", csrf.value);
+    try {
+      var resp = await fetch("{% url 'explore:sync' %}", { method: "POST", body: fd });
+      if (resp.redirected) { window.location = resp.url; return; }
+      var reader = resp.body.getReader(), dec = new TextDecoder();
+      while (true) { var r = await reader.read(); if (r.done) break;
+        log.textContent += dec.decode(r.value, { stream: true }); log.scrollTop = log.scrollHeight; }
+      window.location.reload();
+    } catch (e) { log.textContent += "\nnetwork error: " + e + "\n"; rb.disabled = false; }
+  });
+})();
+</script>
+<script>
+(function () {
+  var FAM_COLOR = { "FD-VD": "#1f9e8b", "FD-CE": "#3f7cc4", "FD-HD": "#7a6bd0",
+                    "FD-shared": "#c0873a", "FS": "#5f7085" };
+  var GUIDE = function (rc) { return "color-mix(in oklab, " + rc + " 34%, var(--rule))"; };
+  var root = JSON.parse(document.getElementById("tr-data").textContent);
+  var fmt = function (n) { return (n || 0).toLocaleString("en-US"); };
+  var esc = function (s) { var d = document.createElement("div"); d.textContent = s == null ? "" : s; return d.innerHTML; };
+
+  // ---- stats ----
+  function tally(n, k) { var c = n.kind === k ? 1 : 0; (n.children || []).forEach(function (x) { c += tally(x, k); }); return c; }
+  function tallyLocked(n, k) { var c = (n.kind === k && n.locked) ? 1 : 0; (n.children || []).forEach(function (x) { c += tallyLocked(x, k); }); return c; }
+  var flatFams = 0;
+  (root.children || []).forEach(function (r) { (r.children || []).forEach(function (f) {
+    if (f.kind === "family" && !f.locked && (f.children || []).some(function (c) { return c.kind === "sub"; })) flatFams++;
+  }); });
+  var stats = [
+    [tally(root, "family") - tallyLocked(root, "family"), "families"],
+    [tally(root, "system") + flatFams, "systems"],
+    [tally(root, "sub"), "subsystems"],
+    [tally(root, "type"), "component types"],
+    [root.n, "components in HWDB"],
+  ];
+  document.getElementById("tr-stats").innerHTML = stats.map(function (s) {
+    return "<div class='tr-stat'><div class='n'>" + fmt(s[0]) + "</div><div class='l'>" + s[1] + "</div></div>";
+  }).join("");
+
+  var fams = [];
+  (root.children || []).forEach(function (r) { (r.children || []).forEach(function (f) {
+    if (f.kind === "family" && !f.locked) fams.push(f); }); });
+  document.getElementById("tr-legend").innerHTML = fams.map(function (f) {
+    return "<span class='tr-lg' style='--rc:" + (FAM_COLOR[f.key] || "var(--accent)") + "'><i></i>" + esc(f.name) + "</span>";
+  }).join("");
+
+  // ---- render ----
+  var CHILD_LABEL = { region: "families", family: "systems", system: "subsystems", sub: "types" };
+  function childCount(n) {
+    var kids = n.children || [];
+    if (n.kind === "family" && kids.some(function (c) { return c.kind === "sub"; })) return kids.length + " subsystems";
+    return kids.length + " " + (CHILD_LABEL[n.kind] || "items");
+  }
+  function rowInner(n, expandable) {
+    var lead = expandable ? "<span class='tr-caret'>▶</span>"
+      : "<span class='tr-dot'>" + (n.kind === "type" ? "•" : "·") + "</span>";
+    var name = "<span class='tr-nm'>" + esc(n.name) + "</span>";
+    if (n.kind === "region" && n.locked) name = "<span class='tr-swatch'></span>" + name;
+    var sub = "";
+    if (n.kind === "root") sub = "<span class='tr-sub'>" + esc(n.sub) + "</span>";
+    else if (n.kind === "family" && n.sub) sub = "<span class='tr-sub'>· " + esc(n.sub) + "</span>";
+    var compCls = "tr-comp" + (n.n ? "" : " zero") + (n.synced ? " is-synced" : "");
+    var meta;
+    if (n.locked) meta = "<span class='tr-note'>" + esc(n.note || "not curated") + "</span>";
+    else if (n.kind === "type") meta = "<span class='tr-meta'><span class='" + compCls + "'>" +
+      fmt(n.n) + "</span>" + (n.ptid ? "<span class='tr-ptid'>" + esc(n.ptid) + "</span>" : "") + "</span>";
+    else meta = "<span class='tr-meta'>" + (expandable ? "<span class='tr-kc'>" + childCount(n) + "</span>" : "") +
+      "<span class='" + compCls + "'>" + fmt(n.n) + "</span></span>";
+    return lead + name + sub + "<span class='tr-grow'></span>" + meta;
+  }
+  function build(n, familyColor) {
+    var branch = document.createElement("div");
+    branch.className = "tr-branch";
+    branch.dataset.kind = n.kind;
+    var rc = n.kind === "family" ? (FAM_COLOR[n.key] || null) : familyColor;
+    if (rc) { branch.style.setProperty("--rc", rc); branch.style.setProperty("--tr-guide", GUIDE(rc)); }
+
+    var expandable = (n.children || []).length > 0;
+    var row;
+    if (!expandable && n.url) {  // leaf → link to its component-type page
+      row = document.createElement("a"); row.href = n.url;
+    } else {
+      row = document.createElement("div");
+      if (expandable) { row.setAttribute("role", "button"); row.setAttribute("tabindex", "0"); }
+    }
+    row.className = "tr-row tr-row--" + n.kind + (expandable ? " expandable" : "") +
+      (n.locked ? " tr-locked" : "") + (n.empty && !n.locked ? " tr-empty" : "");
+    row.innerHTML = rowInner(n, expandable);
+    branch.appendChild(row);
+
+    if (expandable) {
+      var kids = document.createElement("div"); kids.className = "tr-kids";
+      n.children.forEach(function (c) { kids.appendChild(build(c, rc)); });
+      branch.appendChild(kids);
+      if (n.kind === "system" || n.kind === "sub") branch.classList.add("collapsed");
+    }
+    return branch;
+  }
+  var tree = document.getElementById("tr-tree");
+  tree.appendChild(build(root, null));
+
+  // ---- interaction (expand toggles; leaf links navigate) ----
+  function toggle(row) { var b = row.closest(".tr-branch"); if (b.querySelector(":scope > .tr-kids")) b.classList.toggle("collapsed"); }
+  tree.addEventListener("click", function (e) { var r = e.target.closest(".tr-row.expandable"); if (r) toggle(r); });
+  tree.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    var r = e.target.closest(".tr-row.expandable"); if (r) { e.preventDefault(); toggle(r); }
+  });
+
+  // ---- controls ----
+  var ids = ["tr-fam", "tr-sys", "tr-all", "tr-min"];
+  function setActive(id) { ids.forEach(function (b) { document.getElementById(b).classList.toggle("on", b === id); }); }
+  function collapseKinds(kinds) {
+    tree.querySelectorAll(".tr-branch").forEach(function (b) {
+      if (!b.querySelector(":scope > .tr-kids")) return;
+      b.classList.toggle("collapsed", kinds.indexOf(b.dataset.kind) !== -1);
+    });
+  }
+  document.getElementById("tr-fam").addEventListener("click", function () { setActive("tr-fam"); collapseKinds(["family", "system", "sub"]); });
+  document.getElementById("tr-sys").addEventListener("click", function () { setActive("tr-sys"); collapseKinds(["system", "sub"]); });
+  document.getElementById("tr-all").addEventListener("click", function () { setActive("tr-all"); collapseKinds([]); });
+  document.getElementById("tr-min").addEventListener("click", function () { setActive("tr-min"); collapseKinds(["region", "family", "system", "sub"]); });
+})();
+</script>
+{% endblock %}

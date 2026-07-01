@@ -34,18 +34,52 @@
       .eh-find-empty, .eh-find-all { padding: 9px 10px; color: var(--faint); font-size: 12px; }
       .eh-find-all { display: block; text-decoration: none; color: var(--accent-ink); border-top: 1px solid var(--rule); }
       .eh-find-all:hover { background: var(--surface); }
+
+      /* sidebar + content layout (shared across all explorer pages) */
+      .eh-main { padding: 0; }
+      .ex-layout { display: flex; align-items: stretch; }
+      .ex-side { flex: 0 0 262px; min-width: 0; align-self: stretch;
+        position: sticky; top: 0; max-height: 100vh; overflow: auto;
+        border-right: 1px solid var(--rule); background: var(--page); padding: 14px 8px; }
+      .ex-layout.collapsed .ex-side { display: none; }
+      .ex-content { flex: 1; min-width: 0; }
+      .ex-side-label { font-size: 11px; font-weight: 600; letter-spacing: .06em;
+        text-transform: uppercase; color: var(--faint); padding: 2px 8px 10px; }
+      .extree-folder { margin: 0; }
+      .extree-row, .extree-leaf {
+        display: flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: var(--r-sm);
+        font-size: 13px; color: var(--body); text-decoration: none; cursor: pointer; }
+      summary.extree-row { list-style: none; }
+      summary.extree-row::-webkit-details-marker { display: none; }
+      summary.extree-row::before { content: "▸"; flex: 0 0 11px; text-align: center;
+        color: var(--faint); font-size: 16px; }
+      details.extree-folder[open] > summary.extree-row::before { content: "▾"; }
+      .extree-leaf::before, .extree-flat::before { content: ""; flex: 0 0 11px; }
+      .extree-leaf::before { content: "·"; text-align: center; color: var(--rule-hard); font-size: 16px; }
+      a.extree-row:hover, a.extree-leaf:hover, summary.extree-row:hover { background: var(--surface); }
+      .extree-row.is-cur, .extree-leaf.is-cur { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+      .extree-row.dim { color: var(--faint); cursor: default; }
+      .extree-row.dim:hover { background: none; }
+      .extree-leaf.is-empty, summary.extree-row.is-empty, a.extree-row.is-empty { color: var(--faint); }
+      .extree-leaf.is-empty .extree-name, .extree-row.is-empty .extree-name { opacity: .65; }
+      .ex-count.is-synced { color: var(--good); }
+      .extree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+      summary.extree-row a.extree-name { text-decoration: none; color: inherit; }
+      summary.extree-row a.extree-name:hover { text-decoration: underline; }
+      .extree-kids { padding-left: 13px; }
+      .ex-count { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--faint); white-space: nowrap; padding-left: 6px; }
     </style>
 </head>
 <body>
     <header class="eh-header">
         <button id="side-toggle" class="iconbtn" type="button"
                 title="Hide / show the tree" aria-label="Toggle sidebar">☰</button>
-        <a class="eh-brand" href="{% url 'explore:home' %}">
-            <img class="eh-brand-mark" src="{% static 'explore/img/explorer-mark.png' %}" alt="">
-            HWDB Explorer
+        <a class="eh-brand" href="{% url 'explore:home' %}" title="HWDB Explorer">
+            <img class="eh-brand-mark" src="{% static 'explore/img/explorer-mark.png' %}" alt="HWDB Explorer">
         </a>
         <nav class="eh-nav">
-            <a class="eh-nav-item{% if active_nav != 'shipments' and active_nav != 'search' %} active{% endif %}" href="{% url 'explore:home' %}">Hardware</a>
+            <a class="eh-nav-item{% if active_nav == 'hierarchy' %} active{% endif %}" href="{% url 'explore:home' %}">Hierarchy</a>
+            <a class="eh-nav-item{% if active_nav != 'hierarchy' and active_nav != 'shipments' and active_nav != 'search' %} active{% endif %}" href="{% url 'explore:browse' %}">Browse</a>
             <a class="eh-nav-item{% if active_nav == 'shipments' %} active{% endif %}" href="{% url 'explore:shipments' %}">Shipments</a>
             <a class="eh-nav-item{% if active_nav == 'search' %} active{% endif %}" href="{% url 'explore:search' %}">Search</a>
         </nav>
@@ -78,9 +112,33 @@
     </header>
 
     <main class="eh-main">
-        {% block content %}{% endblock %}
+        <div class="ex-layout" id="ex-layout">
+            {% if sidebar %}
+            <aside class="ex-side" id="ex-side" aria-label="Hierarchy tree">
+                <div class="ex-side-label">Curated hierarchy</div>
+                {% for node in sidebar %}{% include "explore/_tree_node.html" with node=node %}{% endfor %}
+            </aside>
+            {% endif %}
+            <div class="ex-content">
+                {% block content %}{% endblock %}
+            </div>
+        </div>
     </main>
 
+    <script>
+    // Sidebar collapse toggle — works on every explorer page (persisted).
+    (function () {
+      var layout = document.getElementById("ex-layout");
+      if (!layout) return;
+      if (localStorage.getItem("exSideCollapsed") === "1") layout.classList.add("collapsed");
+      var st = document.getElementById("side-toggle");
+      if (st) st.addEventListener("click", function () {
+        var hidden = layout.classList.toggle("collapsed");
+        localStorage.setItem("exSideCollapsed", hidden ? "1" : "0");
+        window.dispatchEvent(new Event("resize"));  // let charts refit
+      });
+    })();
+    </script>
     <script>
     (function () {
       var box = document.getElementById("eh-find");
@@ -97,7 +155,7 @@
       function render(d, q) {
         var html = "";
         if (d.direct_part) {
-          html += "<a class='eh-find-row' href='/explore/part/" + encodeURIComponent(d.direct_part) + "/'>" +
+          html += "<a class='eh-find-row' href='/hw/part/" + encodeURIComponent(d.direct_part) + "/'>" +
             "<span class='eh-find-chip'>part</span><span class='eh-find-name mono'>" + esc(d.direct_part) + "</span></a>";
         }
         if (d.types && d.types.length) {

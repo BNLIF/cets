@@ -127,6 +127,26 @@ def login_poll_view(request):
 
 @login_not_required
 @fnal_login_required
+def explore_tree_view(request):
+    """The hierarchy homepage (#tree): the whole curated Region → Family →
+    System → Subsystem → type tree in one expandable view, built from
+    ``curation.yaml`` + the ``HierarchyNode`` mirror. Leaf rows link to their
+    explorer page. Mirror-only (no live HWDB); session-login gated."""
+    legacy = request.GET.get("node")  # old /explore/?node=<ptid> deep links
+    if legacy:
+        dest = navigation.leaf_path_for(legacy)
+        if dest:
+            return redirect(dest)
+    return render(request, "explore/tree.html", {
+        "active_nav": "hierarchy",
+        "tree": navigation.curated_tree(),
+        "sidebar": navigation.sidebar_tree({}),
+        "sync_state": HierarchySyncState.get(),
+    })
+
+
+@login_not_required
+@fnal_login_required
 def explore_view(request, trail=None):
     """Drill-in navigator over the curated DUNE hardware tree (ADR-0012, #40).
 
@@ -264,6 +284,7 @@ def shipments_view(request):
     page_obj = Paginator(boxes, 50).get_page(request.GET.get("page"))
     return render(request, "explore/shipments.html", {
         "active_nav": "shipments",
+        "sidebar": navigation.sidebar_tree({}),
         "sections": sections,
         "page_obj": page_obj,
         "summary": agg,
@@ -451,7 +472,8 @@ def explore_part_view(request, part_id):
         return redirect(f"{link}?{urlencode({'next': request.get_full_path()})}")
     except FnalUnavailable:
         return render(request, "explore/part_detail.html",
-                      {"part_id": part_id, "unavailable": True})
+                      {"part_id": part_id, "unavailable": True,
+                       "sidebar": navigation.sidebar_tree({})})
 
     ptid = part_id.rsplit("-", 1)[0]
     is_shipping = curation.is_shipping_type(ptid)
@@ -462,7 +484,8 @@ def explore_part_view(request, part_id):
         logger.exception("explore_part_view(%s) crashed", part_id)
         return render(request, "explore/part_detail.html",
                       {"part_id": part_id, "unavailable": True,
-                       "error_detail": f"{type(e).__name__}: {e}" if settings.DEBUG else None})
+                       "error_detail": f"{type(e).__name__}: {e}" if settings.DEBUG else None,
+                       "sidebar": navigation.sidebar_tree({})})
 
     # Catch-all attachments minus the ones already shown in a spec section.
     shown = {a["image_id"] for sec in detail["sections"] for a in sec["attachments"]}
@@ -470,10 +493,14 @@ def explore_part_view(request, part_id):
 
     leaf = HierarchyNode.objects.filter(
         level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
+    # Open + highlight this part's component type in the sidebar tree.
+    side_ctx = ({"kind": "leaf", "part_type_id": ptid, "system_id": leaf.system_id,
+                 "subsystem_id": leaf.subsystem_id} if leaf else {})
     box = ShipmentItem.objects.filter(part_id=part_id).first() if is_shipping else None
     return render(request, "explore/part_detail.html", {
         # A box belongs to the Shipments tab; everything else to Hardware.
         "active_nav": "shipments" if is_shipping else "hardware",
+        "sidebar": navigation.sidebar_tree(side_ctx),
         "part_id": part_id,
         "detail": detail,
         "is_shipping": is_shipping,
@@ -521,7 +548,8 @@ def explore_search_view(request):
     type's leaf page or a part's detail page by name / id. Mirror-only, so no
     FNAL needed; live cross-field 'advanced' search is a later addition."""
     return render(request, "explore/search.html",
-                  {"active_nav": "search", "q": request.GET.get("q", "")})
+                  {"active_nav": "search", "q": request.GET.get("q", ""),
+                   "sidebar": navigation.sidebar_tree({})})
 
 
 @login_not_required

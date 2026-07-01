@@ -6,7 +6,9 @@ from . import views
 app_name = "explore"
 
 urlpatterns = [
-    path("", views.explore_view, name="home"),
+    path("", views.explore_tree_view, name="home"),
+    path("tree/", views.explore_tree_view, name="tree"),
+    path("browse/", views.explore_view, name="browse"),
     path("shipments/", views.shipments_view, name="shipments"),
     path("search/", views.explore_search_view, name="search"),
     path("search/api/", views.explore_search_api_view, name="search_api"),
