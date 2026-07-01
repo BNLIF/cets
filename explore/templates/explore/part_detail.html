@@ -155,7 +155,7 @@
 
       <div class="sd-card">
         <h2>Assembly ({{ detail.manifest|length }})</h2>
-        <table class="sd-table asm-table" data-assembly-base="/hw/assembly/">
+        <table class="sd-table asm-table" data-assembly-base="{% url 'explore:assembly' part_id='__PID__' %}">
           <thead><tr><th>Part</th><th>Type</th><th>Position</th><th>Status</th></tr></thead>
           <tbody>
           {% for m in detail.manifest %}
@@ -287,7 +287,7 @@
       return;
     }
     caret.classList.add("is-busy");                  // expand (always fresh fetch)
-    fetch(base + encodeURIComponent(pid) + "/", { headers: { "X-Requested-With": "fetch" } })
+    fetch(base.replace("__PID__", encodeURIComponent(pid)), { headers: { "X-Requested-With": "fetch" } })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         caret.classList.remove("is-busy");

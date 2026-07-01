@@ -169,7 +169,7 @@
       function render(d, q) {
         var html = "";
         if (d.direct_part) {
-          html += "<a class='eh-find-row' href='/hw/part/" + encodeURIComponent(d.direct_part) + "/'>" +
+          html += "<a class='eh-find-row' href='" + esc(d.direct_part_url) + "'>" +
             "<span class='eh-find-chip'>part</span><span class='eh-find-name mono'>" + esc(d.direct_part) + "</span></a>";
         }
         if (d.types && d.types.length) {

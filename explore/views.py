@@ -587,4 +587,7 @@ def explore_search_api_view(request):
                                   .values_list("part_id", "part_type_id", "serial_number")[:25])
     ]
     direct = q if _PID_RE.match(q) else None
-    return JsonResponse({"types": types, "parts": parts, "direct_part": direct})
+    return JsonResponse({
+        "types": types, "parts": parts, "direct_part": direct,
+        "direct_part_url": reverse("explore:part", args=[direct]) if direct else None,
+    })
