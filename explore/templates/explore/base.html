@@ -93,6 +93,31 @@
     </style>
 </head>
 <body>
+    <script>
+    // Shared folder-expansion state for the sidebar + Overview trees. Keyed by
+    // a node's explorer URL (identical in both trees, instance-prefixed), kept
+    // in sessionStorage so it persists across pages in this tab. set() fires
+    // "extree:set" so both trees on one page stay in lockstep; it no-ops on an
+    // unchanged value, which also breaks any event↔toggle echo.
+    // Defined before the content block — the Overview tree reads it at build.
+    window.exTree = (function () {
+      var KEY = "exTreeOpen", state = {};
+      try { state = JSON.parse(sessionStorage.getItem(KEY)) || {}; } catch (e) {}
+      return {
+        isOpen: function (k) {
+          return Object.prototype.hasOwnProperty.call(state, k) ? !!state[k] : undefined;
+        },
+        set: function (k, open) {
+          if (!k) return;
+          open = !!open;
+          if (state[k] === open) return;
+          state[k] = open;
+          try { sessionStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+          document.dispatchEvent(new CustomEvent("extree:set", { detail: { key: k, open: open } }));
+        }
+      };
+    })();
+    </script>
     <header class="eh-header">
         <button id="side-toggle" class="iconbtn" type="button"
                 title="Hide / show the tree" aria-label="Toggle sidebar">☰</button>
@@ -167,6 +192,27 @@
         <a href="https://github.com/BNLIF/cets/issues/new" target="_blank" rel="noopener">Report an issue &#x2197;</a>
     </footer>
 
+    <script>
+    // Sidebar tree folders: restore the shared expansion state, record
+    // toggles, and follow changes made in the Overview tree.
+    (function () {
+      var folders = document.querySelectorAll(".ex-side details.extree-folder[data-key]");
+      if (!folders.length) return;
+      folders.forEach(function (d) {
+        var st = window.exTree.isOpen(d.dataset.key);
+        // A saved state wins — except a folder on the path to the current page
+        // stays open, so the tree always shows where you are.
+        if (st === true) d.open = true;
+        else if (st === false && !d.querySelector(".is-cur")) d.open = false;
+        d.addEventListener("toggle", function () { window.exTree.set(d.dataset.key, d.open); });
+      });
+      document.addEventListener("extree:set", function (e) {
+        folders.forEach(function (d) {
+          if (d.dataset.key === e.detail.key && d.open !== e.detail.open) d.open = e.detail.open;
+        });
+      });
+    })();
+    </script>
     <script>
     // Sidebar collapse toggle — works on every explorer page (persisted).
     (function () {

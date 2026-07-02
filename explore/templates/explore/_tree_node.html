@@ -4,7 +4,7 @@
   <span class="extree-name">{{ node.label }}</span>{% if node.count %}<span class="ex-count{% if node.synced %} is-synced{% endif %}">{{ node.count }}</span>{% endif %}
 </a>
 {% elif node.children %}
-<details class="extree-folder"{% if node.open %} open{% endif %}>
+<details class="extree-folder"{% if node.open %} open{% endif %}{% if node.url %} data-key="{{ node.url }}"{% endif %}>
   <summary class="extree-row{% if node.current %} is-cur{% endif %}{% if node.empty %} is-empty{% endif %}">
     {% if node.url %}<a class="extree-name" href="{{ node.url }}" title="{{ node.title }}">{{ node.label }}</a>{% else %}<span class="extree-name">{{ node.label }}</span>{% endif %}
     {% if node.count %}<span class="ex-count{% if node.synced %} is-synced{% endif %}">{{ node.count }}</span>{% endif %}

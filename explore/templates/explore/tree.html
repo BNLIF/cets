@@ -249,6 +249,13 @@
       n.children.forEach(function (c) { kids.appendChild(build(c, rc)); });
       branch.appendChild(kids);
       if (n.kind === "system" || n.kind === "sub") branch.classList.add("collapsed");
+      // Shared expansion state with the sidebar (keyed by node URL): a saved
+      // state overrides the kind-based default above.
+      if (n.url) {
+        branch.dataset.key = n.url;
+        var st = window.exTree.isOpen(n.url);
+        if (st !== undefined) branch.classList.toggle("collapsed", !st);
+      }
     }
     return branch;
   }
@@ -256,11 +263,21 @@
   tree.appendChild(build(root, null));
 
   // ---- interaction (expand toggles; leaf links navigate) ----
-  function toggle(row) { var b = row.closest(".tr-branch"); if (b.querySelector(":scope > .tr-kids")) b.classList.toggle("collapsed"); }
+  function toggle(row) {
+    var b = row.closest(".tr-branch"); if (!b.querySelector(":scope > .tr-kids")) return;
+    b.classList.toggle("collapsed");
+    window.exTree.set(b.dataset.key, !b.classList.contains("collapsed"));
+  }
   tree.addEventListener("click", function (e) { var r = e.target.closest(".tr-row.expandable"); if (r) toggle(r); });
   tree.addEventListener("keydown", function (e) {
     if (e.key !== "Enter" && e.key !== " ") return;
     var r = e.target.closest(".tr-row.expandable"); if (r) { e.preventDefault(); toggle(r); }
+  });
+  // Follow expand/collapse made in the sidebar (same page, same key space).
+  document.addEventListener("extree:set", function (e) {
+    tree.querySelectorAll(".tr-branch[data-key]").forEach(function (b) {
+      if (b.dataset.key === e.detail.key) b.classList.toggle("collapsed", !e.detail.open);
+    });
   });
 
   // ---- controls ----
@@ -269,7 +286,9 @@
   function collapseKinds(kinds) {
     tree.querySelectorAll(".tr-branch").forEach(function (b) {
       if (!b.querySelector(":scope > .tr-kids")) return;
-      b.classList.toggle("collapsed", kinds.indexOf(b.dataset.kind) !== -1);
+      var closed = kinds.indexOf(b.dataset.kind) !== -1;
+      b.classList.toggle("collapsed", closed);
+      window.exTree.set(b.dataset.key, !closed);  // presets persist + sync too
     });
   }
   document.getElementById("tr-fam").addEventListener("click", function () { setActive("tr-fam"); collapseKinds(["family", "system", "sub"]); });

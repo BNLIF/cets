@@ -449,7 +449,10 @@ def _tree_subs(instance, region_key, family_key, sid, flat):
         out.append({"kind": "sub", "name": sub.subsystem_name or sub.name,
                     "id": sub.subsystem_id, "sys": sid,
                     "n": sum(t["n"] for t in types),
-                    "empty": empty, "synced": synced, "children": types})
+                    "empty": empty, "synced": synced, "children": types,
+                    "url": node_path(instance, region_key, family_key,
+                                     system_id=None if flat else sid,
+                                     subsystem_id=sub.subsystem_id)})
         sys_w += w
         sys_s += s
     return out, sys_w, sys_s
@@ -470,6 +473,10 @@ def curated_tree(instance: str) -> dict:
         browsable = curation.region_is_browsable(r)
         rnode = {"kind": "region", "name": r["name"], "key": r["key"],
                  "locked": not browsable, "note": r.get("note", ""), "children": []}
+        if browsable:
+            # Folder urls double as the shared expansion key with the sidebar
+            # (both trees address a node by its explorer page URL).
+            rnode["url"] = node_path(instance, r["key"])
         rw = rs = 0
         if browsable:
             for f in r.get("families", []) or []:
@@ -484,7 +491,8 @@ def curated_tree(instance: str) -> dict:
                 flat = curation.family_is_flat(f)
                 sysids = f.get("systems") or []
                 fam = {"kind": "family", "name": f["name"], "key": fkey,
-                       "sub": f.get("sub", ""), "children": []}
+                       "sub": f.get("sub", ""), "children": [],
+                       "url": node_path(instance, r["key"], fkey)}
                 fw = fs = 0
                 if flat:
                     fam["children"], fw, fs = _tree_subs(instance, r["key"], fkey,
@@ -500,16 +508,16 @@ def curated_tree(instance: str) -> dict:
                         fam["children"].append({
                             "kind": "system", "name": node.system_name, "id": sid,
                             "n": sum(s["n"] for s in subs), "empty": s_empty,
-                            "synced": s_synced, "children": subs})
+                            "synced": s_synced, "children": subs,
+                            "url": node_path(instance, r["key"], fkey, system_id=sid)})
                         fw += sw
                         fs += ss
                 fam["n"] = sum(c["n"] for c in fam["children"])
                 fam["empty"], fam["synced"] = _state(fw, fs)
                 if r.get("overflow") and not fam["children"]:
-                    # Unwalked overflow system: childless nodes only render as
-                    # links when they carry a url — point it at its own page,
-                    # which walks the system on first visit (#49).
-                    fam["url"] = node_path(instance, r["key"], fkey)
+                    # Unwalked overflow system (#49): childless nodes render as
+                    # links via their url (set above); its page walks the
+                    # system on first visit.
                     fam["unwalked"] = True
                 rnode["children"].append(fam)
                 rw += fw

@@ -233,6 +233,28 @@ class NavigationTest(TestCase):
         self.assertEqual(leaf["kind"], "type")
         self.assertTrue(leaf["url"].endswith("/D08100100003/"))
 
+    def test_curated_tree_folder_urls_match_sidebar_paths(self):
+        # Folder urls double as the shared expansion key with the sidebar —
+        # they must be exactly the node_path the sidebar uses.
+        tree = navigation.curated_tree("prod")
+        fd = next(r for r in tree["children"] if r["key"] == "FD")
+        self.assertEqual(fd["url"], navigation.node_path("prod", "FD"))
+        fams = {f["key"]: f for f in fd["children"]}
+        self.assertEqual(fams["FD-VD"]["url"], navigation.node_path("prod", "FD", "FD-VD"))
+        sys57 = next(s for s in fams["FD-VD"]["children"] if s.get("id") == 57)
+        self.assertEqual(sys57["url"],
+                         navigation.node_path("prod", "FD", "FD-VD", system_id=57))
+        sub = sys57["children"][0]
+        self.assertEqual(sub["url"], navigation.node_path(
+            "prod", "FD", "FD-VD", system_id=57, subsystem_id=sub["id"]))
+        # Flat family: subsystem url skips the system tier, like the sidebar.
+        flat_sub = fams["FD-CE"]["children"][0]
+        self.assertEqual(flat_sub["url"], navigation.node_path(
+            "prod", "FD", "FD-CE", subsystem_id=flat_sub["id"]))
+        # Locked regions aren't browsable — no url, no expansion key.
+        nd = next(r for r in tree["children"] if r["key"] == "ND")
+        self.assertNotIn("url", nd)
+
     def test_curated_tree_empty_and_synced_flags(self):
         # setUp's AMC (57/2) has components but is unsynced. Add a fully-synced
         # subsystem and an all-empty one, both under FD-VD TDE (system 57).
@@ -372,6 +394,11 @@ class SidebarTest(TestCase):
         self.assertIn("side-toggle", html)
         self.assertIn("FD-VD TDE (57)", html)          # HWDB id in the label (#50)
         self.assertIn("Digital electronics (57.2)", html)
+        # Folders carry the shared expansion key (their explorer URL) so the
+        # sidebar and Overview trees sync and persist across pages.
+        self.assertIn(
+            'data-key="%s"' % navigation.node_path("prod", "FD", "FD-VD", system_id=57),
+            html)
 
 
 class ExploreSyncViewTest(TestCase):
