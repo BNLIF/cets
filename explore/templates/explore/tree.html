@@ -194,6 +194,7 @@
   var CHILD_LABEL = { region: "families", family: "systems", system: "subsystems", sub: "types" };
   function childCount(n) {
     var kids = n.children || [];
+    if (n.unwalked) return "not loaded · click to load";
     if (n.kind === "family" && kids.some(function (c) { return c.kind === "sub"; })) return kids.length + " subsystems";
     return kids.length + " " + (CHILD_LABEL[n.kind] || "items");
   }

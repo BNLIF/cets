@@ -394,3 +394,125 @@ class ExploreSyncViewTest(TestCase):
             body = b"".join(resp.streaming_content).decode()
         self.assertEqual(resp.status_code, 200)
         self.assertIn("done", body)
+
+
+class OverflowSyncTest(TestCase):
+    """Overflow discovery during the full refresh (#49) — uses the real dev
+    curation block (curated = {5}, overflow on)."""
+
+    def _run(self, api):
+        with mock.patch("explore.hierarchy.FnalDbApiClient", return_value=api):
+            return list(hierarchy.sync_hierarchy(api, "dev"))
+
+    def _api(self, include_900=True):
+        systems = [{"id": 5, "name": "FD1-HD HVS"}]
+        if include_900:
+            systems.append({"id": 900, "name": "ProtoDUNE-II complete detector"})
+        return _fake_api(
+            systems=systems,
+            subsystems={5: [{"subsystem_id": 998, "subsystem_name": "HWDBUnitTest"}]},
+            part_types={(5, 998): [{"part_type_id": "D00599800007",
+                                    "full_name": "D.FD1-HD HVS.HWDBUnitTest.Test Type 007"}]},
+            counts={"D00599800007": 147},
+        )
+
+    def test_records_uncurated_systems_without_walking(self):
+        api = self._api()
+        lines = self._run(api)
+        row = H.objects.get(instance="dev", level=H.LEVEL_SYSTEM, system_id=900)
+        self.assertIsNone(row.structure_synced_at)
+        self.assertFalse(H.objects.filter(instance="dev", system_id=900)
+                         .exclude(level=H.LEVEL_SYSTEM).exists())
+        called = {c.args for c in api.get_subsystems.call_args_list}
+        self.assertEqual(called, {("D", "005")})   # 051 listed, never walked
+        self.assertTrue(any("overflow" in l for l in lines))
+
+    def test_prune_spares_lazily_walked_overflow_subtree(self):
+        self._run(self._api())
+        sys900 = H.objects.get(instance="dev", level=H.LEVEL_SYSTEM, system_id=900)
+        sub = H.objects.create(
+            instance="dev", level=H.LEVEL_SUBSYSTEM, parent=sys900, system_id=900,
+            subsystem_id=2, system_name=sys900.system_name, subsystem_name="CRP", name="CRP")
+        H.objects.create(
+            instance="dev", level=H.LEVEL_TYPE, parent=sub, system_id=900,
+            subsystem_id=2, system_name=sys900.system_name, subsystem_name="CRP",
+            name="Adapter Board", part_type_id="D90000200001")
+        self._run(self._api())   # a later global refresh
+        self.assertTrue(H.objects.filter(instance="dev",
+                                         part_type_id="D90000200001").exists())
+
+    def test_vanished_overflow_system_pruned(self):
+        self._run(self._api())
+        self._run(self._api(include_900=False))
+        self.assertFalse(H.objects.filter(instance="dev", system_id=900).exists())
+
+    def test_prod_records_no_overflow(self):
+        # prod has no overflow knob: uncurated systems stay invisible.
+        api = _fake_api(systems=[{"id": 57, "name": "FD-VD TDE"},
+                                 {"id": 99, "name": "ND: TMS"}],
+                        subsystems={57: []}, part_types={}, counts={})
+        with mock.patch("explore.hierarchy.FnalDbApiClient", return_value=api):
+            list(hierarchy.sync_hierarchy(api, "prod"))
+        self.assertFalse(H.objects.filter(instance="prod", system_id=99).exists())
+
+
+class SyncSystemTest(TestCase):
+    """The one-system lazy walk behind the overflow section (#49)."""
+
+    def setUp(self):
+        self.sys51 = H.objects.create(
+            instance="dev", level=H.LEVEL_SYSTEM, system_id=51,
+            system_name="FD2-VD Complete Detector", name="FD2-VD Complete Detector")
+
+    def _api(self):
+        return _fake_api(
+            systems=[],
+            subsystems={51: [{"subsystem_id": 2, "subsystem_name": "CRP"}]},
+            part_types={(51, 2): [{"part_type_id": "D05100200001",
+                                   "full_name": "D.FD2-VD.CRP.Adapter Board"}]},
+            counts={"D05100200001": 3},
+        )
+
+    def _run(self, api):
+        with mock.patch("explore.hierarchy.FnalDbApiClient", return_value=api):
+            return list(hierarchy.sync_system(api, "dev", 51))
+
+    def test_walks_one_system_and_marks_it(self):
+        # A stale leaf under 51 is pruned; other systems are untouched.
+        stale = H.objects.create(
+            instance="dev", level=H.LEVEL_TYPE, system_id=51, subsystem_id=9,
+            system_name="FD2-VD Complete Detector", subsystem_name="Old",
+            name="GHOST", part_type_id="D05100900099")
+        other = H.objects.create(
+            instance="dev", level=H.LEVEL_SYSTEM, system_id=52,
+            system_name="Other", name="Other")
+        self._run(self._api())
+        leaf = H.objects.get(instance="dev", level=H.LEVEL_TYPE,
+                             part_type_id="D05100200001")
+        self.assertEqual(leaf.n_components, 3)
+        self.assertEqual(leaf.name, "Adapter Board")
+        self.assertFalse(H.objects.filter(pk=stale.pk).exists())
+        self.assertTrue(H.objects.filter(pk=other.pk).exists())
+        self.sys51.refresh_from_db()
+        self.assertIsNotNone(self.sys51.structure_synced_at)
+        self.assertEqual(self.sys51.tests_sync_error, "")
+
+    def test_failure_records_error_and_raises(self):
+        api = self._api()
+        api.get_subsystems.side_effect = RuntimeError("HWDB 503")
+        with mock.patch("explore.hierarchy.time.sleep"), \
+             mock.patch("explore.hierarchy.FnalDbApiClient", return_value=api):
+            with self.assertRaises(Exception):
+                list(hierarchy.sync_system(api, "dev", 51))
+        self.sys51.refresh_from_db()
+        self.assertIsNone(self.sys51.structure_synced_at)
+        self.assertNotEqual(self.sys51.tests_sync_error, "")
+
+    def test_unknown_system_is_a_noop(self):
+        lines = self._run_unknown()
+        self.assertIn("unknown system", lines[0])
+
+    def _run_unknown(self):
+        api = self._api()
+        with mock.patch("explore.hierarchy.FnalDbApiClient", return_value=api):
+            return list(hierarchy.sync_system(api, "dev", 999))

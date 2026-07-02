@@ -16,6 +16,7 @@ urlpatterns = [
     path("login/poll/", views.login_poll_view, name="login_poll"),
     path("sync/", views.explore_sync_view, name="sync"),
     path("sync-tests/<str:part_type_id>/", views.explore_node_sync_view, name="node_sync"),
+    path("sync-system/<int:system_id>/", views.explore_system_sync_view, name="system_sync"),
     path("sync-shipments/<str:part_type_id>/", views.explore_shipment_sync_view, name="shipment_sync"),
     path("shipment-image/<str:image_id>/", views.explore_shipment_image_view, name="shipment_image"),
     path("test-data/<str:part_id>/<str:test_type_id>/", views.explore_test_data_view, name="test_data"),

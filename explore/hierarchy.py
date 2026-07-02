@@ -89,6 +89,55 @@ def _count_components(api, part_type_id: str) -> int:
     return len(body.get("data") or [])
 
 
+def _upsert_system_tree(instance, project, sys_node, subs, cts_for, counts, seen):
+    """Write one system's Subsystem + Component-Type rows into the mirror —
+    shared by the full refresh and the per-system overflow walk (#49). Adds
+    written pks to ``seen``; returns ``(n_leaves, progress_lines)``. A ptid
+    missing from ``counts`` (failed count) keeps its previous value."""
+    sid, sname = sys_node.system_id, sys_node.system_name
+    leaves, lines = 0, []
+    for ss in subs:
+        ssid = ss.get("subsystem_id")
+        ssname = ss.get("subsystem_name") or ""
+        sub_node, _ = HierarchyNode.objects.update_or_create(
+            instance=instance,
+            level=HierarchyNode.LEVEL_SUBSYSTEM, system_id=sid,
+            subsystem_id=ssid, part_type_id="",
+            defaults={
+                "parent": sys_node, "project": project,
+                "system_name": sname, "subsystem_name": ssname, "name": ssname,
+            },
+        )
+        seen.add(sub_node.pk)
+
+        cts = cts_for.get(ssid, [])
+        for ct in cts:
+            ptid = ct.get("part_type_id")
+            if not ptid:
+                continue
+            full = ct.get("full_name") or ""
+            leaf = full.split(".")[-1].strip() if full else ptid
+            # defaults exclude the test-sync fields so they survive re-sync.
+            defaults = {
+                "parent": sub_node, "project": project,
+                "system_id": sid, "system_name": sname,
+                "subsystem_id": ssid, "subsystem_name": ssname,
+                "name": leaf, "full_name": full,
+            }
+            if ptid in counts:  # a failed count keeps the previous value
+                defaults["n_components"] = counts[ptid]
+            type_node, _ = HierarchyNode.objects.update_or_create(
+                instance=instance,
+                level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid,
+                defaults=defaults,
+            )
+            seen.add(type_node.pk)
+            leaves += 1
+        if cts:
+            lines.append(f"    {ssname}: {len(cts)} component types\n")
+    return leaves, lines
+
+
 def sync_hierarchy(api, instance: str = "prod", project: str = "D") -> Iterator[str]:
     """Walk one instance's curated systems into the ``HierarchyNode`` mirror.
     The caller's ``api`` client must point at the same instance (#47).
@@ -132,6 +181,29 @@ def sync_hierarchy(api, instance: str = "prod", project: str = "D") -> Iterator[
         ]
         systems.sort(key=lambda s: s.get("id") or 0)
         yield f"hierarchy: {len(systems)} curated systems to walk\n"
+
+        # Overflow (#49): record every live-but-uncurated system as a bare
+        # System row — names only, no walk; each is walked lazily on first
+        # visit. Their previously-walked subtrees are spared from the prune.
+        overflow_ids: set[int] = set()
+        if curation.has_overflow(instance):
+            extras = sorted(
+                (s for s in (sys_body.get("data") or [])
+                 if s.get("id") is not None and s.get("id") not in curated),
+                key=lambda s: s.get("id") or 0)
+            for s in extras:
+                node, _ = HierarchyNode.objects.update_or_create(
+                    instance=instance,
+                    level=HierarchyNode.LEVEL_SYSTEM, system_id=s["id"],
+                    subsystem_id=None, part_type_id="",
+                    defaults={"project": project,
+                              "system_name": s.get("name") or "",
+                              "name": s.get("name") or ""},
+                )
+                seen.add(node.pk)
+                overflow_ids.add(s["id"])
+            if overflow_ids:
+                yield f"  overflow: {len(overflow_ids)} uncurated systems recorded (each walks on first visit)\n"
 
         # --- Parallel read phases (no ORM here) ---
         # Phase 1: subsystems per system.
@@ -181,48 +253,22 @@ def sync_hierarchy(api, instance: str = "prod", project: str = "D") -> Iterator[
             )
             seen.add(sys_node.pk)
 
-            for ss in subs_by_sys.get(sid, []):
-                ssid = ss.get("subsystem_id")
-                ssname = ss.get("subsystem_name") or ""
-                sub_node, _ = HierarchyNode.objects.update_or_create(
-                    instance=instance,
-                    level=HierarchyNode.LEVEL_SUBSYSTEM, system_id=sid,
-                    subsystem_id=ssid, part_type_id="",
-                    defaults={
-                        "parent": sys_node, "project": project,
-                        "system_name": sname, "subsystem_name": ssname, "name": ssname,
-                    },
-                )
-                seen.add(sub_node.pk)
-
-                cts = cts_by_sub.get((sid, ssid), [])
-                for ct in cts:
-                    ptid = ct.get("part_type_id")
-                    if not ptid:
-                        continue
-                    full = ct.get("full_name") or ""
-                    leaf = full.split(".")[-1].strip() if full else ptid
-                    # defaults exclude the test-sync fields so they survive re-sync.
-                    defaults = {
-                        "parent": sub_node, "project": project,
-                        "system_id": sid, "system_name": sname,
-                        "subsystem_id": ssid, "subsystem_name": ssname,
-                        "name": leaf, "full_name": full,
-                    }
-                    if ptid in counts:  # a failed count keeps the previous value
-                        defaults["n_components"] = counts[ptid]
-                    type_node, _ = HierarchyNode.objects.update_or_create(
-                        instance=instance,
-                        level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid,
-                        defaults=defaults,
-                    )
-                    seen.add(type_node.pk)
-                    leaves += 1
-                if cts:
-                    yield f"    {ssname}: {len(cts)} component types\n"
+            subs = subs_by_sys.get(sid, [])
+            cts_for = {ss.get("subsystem_id"): cts_by_sub.get((sid, ss.get("subsystem_id")), [])
+                       for ss in subs}
+            n, lines = _upsert_system_tree(instance, project, sys_node,
+                                           subs, cts_for, counts, seen)
+            leaves += n
+            for line in lines:
+                yield line
             systems_done += 1
 
+        # Prune within this instance: stale curated-subtree rows and vanished
+        # systems go; the lazily-walked subtrees of live overflow systems stay
+        # (their system rows are in ``seen``; deeper rows are matched by id).
         stale = HierarchyNode.for_instance(instance).exclude(pk__in=seen)
+        if overflow_ids:
+            stale = stale.exclude(system_id__in=overflow_ids)
         n_stale = stale.count()
         stale.delete()
 
@@ -239,4 +285,83 @@ def sync_hierarchy(api, instance: str = "prod", project: str = "D") -> Iterator[
         state.last_error = str(e)
         state.finished_at = timezone.now()
         state.save()
+        raise
+
+
+def sync_system(api, instance: str, system_id: int, project: str = "D") -> Iterator[str]:
+    """Lazily walk ONE system's structure (subsystems → types → counts) into
+    the mirror — the overflow section's first-visit sync (#49).
+
+    The same walk as ``sync_hierarchy`` scoped to a single system: leaf
+    test-sync state survives, pruning stays within this system, counts are
+    failure-tolerant. On failure the error is recorded on the system row
+    (``tests_sync_error``) so the page won't auto-retry a failing walk; on
+    success ``structure_synced_at`` marks the system walked (a walked-but-
+    empty system isn't mistaken for a never-walked one). Yields progress
+    lines; the caller's ``api`` must point at the same instance.
+    """
+    try:
+        sys_node = HierarchyNode.for_instance(instance).get(
+            level=HierarchyNode.LEVEL_SYSTEM, system_id=system_id)
+    except HierarchyNode.DoesNotExist:
+        yield f"walk system: unknown system {system_id}\n"
+        return
+
+    sys_node.tests_sync_error = ""
+    sys_node.save(update_fields=["tests_sync_error"])
+
+    # Per-thread clients, same rule as sync_hierarchy.
+    base_url = api.base_url
+    auth = api.session.headers.get("Authorization", "")
+    bearer = auth[len("Bearer "):] if isinstance(auth, str) and auth.startswith("Bearer ") else ""
+    tls = _thread_local_cls()
+
+    def _client():
+        c = getattr(tls, "client", None)
+        if c is None:
+            c = tls.client = FnalDbApiClient(base_url, bearer)
+        return c
+
+    seen = {sys_node.pk}
+    try:
+        subs = api.get_subsystems(project, f"{system_id:03d}").get("data") or []
+        subs.sort(key=lambda x: x.get("subsystem_id") or 0)
+        yield f"walk system {system_id}: {len(subs)} subsystem(s)\n"
+
+        def _fetch_cts(ss):
+            return (_client().get_part_types_for_subsystem(
+                project, f"{system_id:03d}", ss.get("subsystem_id")).get("data") or [])
+        cts_for = {ss.get("subsystem_id"): cts for ss, cts in _pool_map(_fetch_cts, subs)}
+        all_ptids = [ct["part_type_id"] for cts in cts_for.values()
+                     for ct in cts if ct.get("part_type_id")]
+        yield f"  {len(all_ptids)} component types across {len(subs)} subsystems\n"
+
+        count_pairs, count_errors = _pool_map(
+            lambda p: _count_components(_client(), p), all_ptids, collect_errors=True)
+        counts = {p: n for p, n in count_pairs}
+        for p, e in count_errors:
+            logger.warning("walk system %s: component count failed for %s: %s",
+                           system_id, p, e)
+            yield f"  WARNING: count failed for {p} (leaf kept, previous count retained)\n"
+
+        n_leaves, lines = _upsert_system_tree(instance, project, sys_node,
+                                              subs, cts_for, counts, seen)
+        for line in lines:
+            yield line
+
+        stale = (HierarchyNode.for_instance(instance)
+                 .filter(system_id=system_id).exclude(pk__in=seen))
+        n_stale = stale.count()
+        stale.delete()
+
+        sys_node.structure_synced_at = timezone.now()
+        sys_node.save(update_fields=["structure_synced_at"])
+        yield (
+            f"done: {n_leaves} component types across {len(subs)} subsystem(s)"
+            f"{f' ({n_stale} stale removed)' if n_stale else ''}\n"
+        )
+    except Exception as e:
+        logger.exception("sync_system(%s, %s) crashed", instance, system_id)
+        sys_node.tests_sync_error = str(e)
+        sys_node.save(update_fields=["tests_sync_error"])
         raise

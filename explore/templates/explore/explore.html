@@ -301,7 +301,25 @@
     {% endif %}
 {% else %}
     {# ---- Folder: grid of child nodes ---- #}
-    {% if view.cards %}
+    {% if view.overflow_system and not view.overflow_system.structure_synced_at %}
+    {# Uncurated system, never walked (#49): auto-walk once; a recorded walk
+       error renders statically with a manual retry (never auto-loop). #}
+    <pre id="system-sync-log"></pre>
+    {% if view.overflow_system.tests_sync_error %}
+    <div class="banner banner-warn" style="margin: 10px 0;">Last walk error: {{ view.overflow_system.tests_sync_error }}</div>
+    <div class="explore-empty">
+        <p>This system hasn’t been loaded from HWDB.</p>
+        <p><button id="system-walk-btn" class="btn btn-primary" type="button"
+                   data-sync-url="{% url 'explore:system_sync' system_id=view.overflow_system.system_id %}">Retry loading this system</button></p>
+    </div>
+    {% else %}
+    <div class="explore-empty" id="system-unwalked"
+         data-sync-url="{% url 'explore:system_sync' system_id=view.overflow_system.system_id %}">
+        <p>This system isn’t curated — loading its structure from HWDB now…</p>
+        <p class="cell-muted">(needs your FNAL link)</p>
+    </div>
+    {% endif %}
+    {% elif view.cards %}
     <div class="node-grid">
         {% for c in view.cards %}
         {% if c.url %}<a class="node-card{% if c.is_leaf %} is-leaf{% endif %}" href="{{ c.url }}">{% else %}<div class="node-card is-dim">{% endif %}
@@ -371,6 +389,23 @@
         var nk = "nodeAutoSynced:" + location.pathname;
         if (!sessionStorage.getItem(nk)) { sessionStorage.setItem(nk, "1"); nodeSync(unsynced.dataset.syncUrl, "incremental"); }
     }
+
+    // Overflow one-system walk (#49) — same streaming pattern; auto-fires
+    // once per tab+path, manual retry button after a recorded error.
+    var sysLog = document.getElementById("system-sync-log");
+    async function systemWalk(url) {
+        var ok = await stream(url, sysLog, "Walking system from HWDB…\n");
+        if (ok) { window.location.reload(); }
+    }
+    var unwalked = document.getElementById("system-unwalked");
+    if (unwalked) {
+        var wk = "systemAutoWalked:" + location.pathname;
+        if (!sessionStorage.getItem(wk)) { sessionStorage.setItem(wk, "1"); systemWalk(unwalked.dataset.syncUrl); }
+    }
+    var swBtn = document.getElementById("system-walk-btn");
+    if (swBtn) swBtn.addEventListener("click", function () {
+        swBtn.disabled = true; systemWalk(swBtn.dataset.syncUrl);
+    });
 
     // Shipments (latest-location) sync — same streaming pattern as node sync.
     var shipLog = document.getElementById("shipment-sync-log");

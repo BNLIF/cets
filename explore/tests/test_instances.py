@@ -35,9 +35,15 @@ def _node(instance, ptid, sid, sname, ssid, ssname, tname, **leaf):
 
 class CurationInstanceTest(TestCase):
     def test_per_instance_blocks(self):
-        self.assertIn(57, curation.curated_system_ids("prod"))
-        self.assertNotIn(57, curation.curated_system_ids("dev"))
-        self.assertEqual(curation.curated_system_ids("dev"), {5})
+        # Both instances curate prod-style FD families, but membership follows
+        # each instance's own audit: dev's FD-HD has system 2 (no 9), prod's
+        # has 9 (no 2). System 5 (HWDBUnitTest sandbox home) is dev FD-HD.
+        prod, dev = curation.curated_system_ids("prod"), curation.curated_system_ids("dev")
+        self.assertIn(9, prod)
+        self.assertNotIn(9, dev)
+        self.assertIn(2, dev)
+        self.assertNotIn(2, prod)
+        self.assertIn(5, dev)
 
     def test_shipping_types_per_instance(self):
         self.assertIn("D08120200001", curation.shipping_types("prod"))
@@ -50,7 +56,7 @@ class CurationInstanceTest(TestCase):
 class InstanceUrlTest(TestCase):
     def test_node_path_carries_the_instance_prefix(self):
         prod = navigation.node_path("prod", "FD", "FD-CE")
-        dev = navigation.node_path("dev", "DEV", "DEV-ship")
+        dev = navigation.node_path("dev", "FD", "FD-HD")
         self.assertTrue(prod.startswith("/hw/") and "/hw/dev/" not in prod)
         self.assertTrue(dev.startswith("/hw/dev/"))
 
@@ -97,7 +103,7 @@ class InstanceViewTest(TestCase):
 
     def test_dev_leaf_drill_in(self):
         url = navigation.leaf_path_for("dev", DEV_PTID)
-        self.assertTrue(url.startswith("/hw/dev/DEV/DEV-ship/"))
+        self.assertTrue(url.startswith("/hw/dev/FD/FD-HD/5/"))
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
         self.assertIn("Test shipping box", resp.content.decode())
@@ -108,10 +114,12 @@ class InstanceViewTest(TestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertTrue(resp["Location"].startswith("/hw/dev/login/"))
 
-    def test_prod_tree_404s_on_dev_only_paths(self):
-        # dev's region key isn't curated on prod, and vice versa.
-        self.assertEqual(self.client.get("/hw/DEV/").status_code, 404)
-        self.assertEqual(self.client.get("/hw/dev/FD/").status_code, 404)
+    def test_cross_instance_paths_404(self):
+        # Region keys are shared prod-style, but family membership is
+        # per-instance: system 2 is dev-FD-HD-only, 9 is prod-FD-HD-only.
+        self.assertEqual(self.client.get("/hw/FD/FD-HD/2/").status_code, 404)
+        self.assertEqual(self.client.get("/hw/dev/FD/FD-HD/9/").status_code, 404)
+        self.assertEqual(self.client.get("/hw/NOPE/").status_code, 404)
 
     def test_search_api_is_instance_scoped(self):
         prod = self.client.get("/hw/search/api/", {"q": "shipping box"}).json()
@@ -170,3 +178,68 @@ class DevShipmentsTest(TestCase):
         self.assertEqual(ShipmentItem.for_instance("prod").count(), 0)
         self.leaf.refresh_from_db()
         self.assertIsNotNone(self.leaf.shipments_synced_at)
+
+
+class OverflowViewTest(TestCase):
+    """The synthetic "Uncurated" region on the dev tree (#49)."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("uncur", "u@u.io", "pw")
+        self.client.force_login(self.user)
+        _node("dev", DEV_PTID, 5, "FD1-HD HVS", 998, "HWDBUnitTest",
+              "Test Type 007", n_components=147)
+        self.sys900 = H.objects.create(
+            instance="dev", level=H.LEVEL_SYSTEM, system_id=900,
+            system_name="ProtoDUNE-II complete detector", name="ProtoDUNE-II complete detector")
+
+    def test_uncurated_section_on_dev_only(self):
+        self.assertIn("Uncurated", self.client.get("/hw/dev/").content.decode())
+        self.assertIn("Uncurated", self.client.get("/hw/dev/browse/").content.decode())
+        self.assertNotIn("Uncurated", self.client.get("/hw/browse/").content.decode())
+        self.assertEqual(self.client.get("/hw/UNC/").status_code, 404)
+
+    def test_home_tree_links_unwalked_systems(self):
+        # The Overview tree only renders childless nodes as links when they
+        # carry a url — without one, unwalked overflow systems were dead rows.
+        html = self.client.get("/hw/dev/").content.decode()
+        self.assertIn("/hw/dev/UNC/900/", html)
+        self.assertIn('"unwalked": true', html)
+
+    def test_overflow_region_lists_systems(self):
+        html = self.client.get("/hw/dev/UNC/").content.decode()
+        self.assertIn("ProtoDUNE-II complete detector", html)
+        # The synthetic region holds only uncurated systems — no duplication of
+        # the curated system 5 (the page's sidebar still shows the full tree).
+        region = navigation.overflow_region("dev")
+        self.assertEqual([f["systems"] for f in region["families"]], [[900]])
+
+    def test_unwalked_system_autofires_walk(self):
+        html = self.client.get("/hw/dev/UNC/900/").content.decode()
+        self.assertIn('id="system-unwalked"', html)
+        self.assertIn("/hw/dev/sync-system/900/", html)
+
+    def test_errored_walk_shows_retry_not_autofire(self):
+        self.sys900.tests_sync_error = "boom"
+        self.sys900.save()
+        html = self.client.get("/hw/dev/UNC/900/").content.decode()
+        self.assertNotIn('id="system-unwalked"', html)
+        self.assertIn("system-walk-btn", html)
+        self.assertIn("Last walk error", html)
+
+    def test_walked_system_drills_in_like_curated(self):
+        self.sys900.structure_synced_at = timezone.now()
+        self.sys900.save()
+        sub = H.objects.create(
+            instance="dev", level=H.LEVEL_SUBSYSTEM, parent=self.sys900, system_id=900,
+            subsystem_id=2, system_name=self.sys900.system_name,
+            subsystem_name="CRP", name="CRP")
+        H.objects.create(
+            instance="dev", level=H.LEVEL_TYPE, parent=sub, system_id=900,
+            subsystem_id=2, system_name=self.sys900.system_name, subsystem_name="CRP",
+            name="Adapter Board", part_type_id="D90000200001", n_components=3)
+        html = self.client.get("/hw/dev/UNC/900/").content.decode()
+        self.assertNotIn('id="system-unwalked"', html)
+        self.assertIn("CRP", html)
+        path = navigation.leaf_path_for("dev", "D90000200001")
+        self.assertTrue(path.startswith("/hw/dev/UNC/900/"))
+        self.assertEqual(self.client.get(path).status_code, 200)

@@ -22,6 +22,39 @@ from .models import HierarchyNode as H
 
 HOME_LABEL = "All systems"
 
+OVERFLOW_KEY = "UNC"
+
+
+def overflow_region(instance: str) -> dict | None:
+    """The synthetic "Uncurated" region for an overflow-enabled instance (#49):
+    one flattened single-system family per mirrored-but-uncurated system,
+    built from the mirror at render time (no yaml). Same dict shape as a
+    curation region, so the card/crumb/tree machinery treats it like any
+    other region. None when the instance has no overflow (prod) or nothing
+    uncurated is mirrored yet."""
+    if not curation.has_overflow(instance):
+        return None
+    curated = curation.curated_system_ids(instance)
+    systems = (H.for_instance(instance).filter(level=H.LEVEL_SYSTEM)
+               .exclude(system_id__in=curated).order_by("system_id"))
+    families = [{"name": s.system_name, "key": str(s.system_id),
+                 "sub": f"system {s.system_id}", "systems": [s.system_id]}
+                for s in systems]
+    if not families:
+        return None
+    return {"name": "Uncurated", "key": OVERFLOW_KEY, "overflow": True,
+            "note": "not in curation.yaml · each system loads on first visit",
+            "families": families}
+
+
+def all_regions(instance: str) -> list[dict]:
+    """Curated regions plus the synthetic overflow region (when present)."""
+    out = list(curation.regions(instance))
+    extra = overflow_region(instance)
+    if extra:
+        out.append(extra)
+    return out
+
 
 def node_path(instance, region_key=None, family_key=None, system_id=None,
               subsystem_id=None, part_type_id=None) -> str:
@@ -49,7 +82,7 @@ def _rollup(instance, **filters) -> tuple[int, int]:
 
 def _region_cards(instance):
     cards = []
-    for r in curation.regions(instance):
+    for r in all_regions(instance):
         browsable = curation.region_is_browsable(r)
         cards.append({
             "level": "Region", "name": r["name"], "sub": "", "ident": "",
@@ -159,7 +192,7 @@ def resolve(instance: str, trail: str | None) -> dict:
         return {"kind": "root", "name": HOME_LABEL, "sub": "Curated DUNE hardware",
                 "crumbs": crumbs, "cards": _region_cards(instance), "ctx": _ctx("root")}
 
-    region = curation.find_region(instance, segs[0])
+    region = next((r for r in all_regions(instance) if r.get("key") == segs[0]), None)
     if not region or not curation.region_is_browsable(region):
         raise Http404("unknown region")
     rk = region["key"]
@@ -201,13 +234,17 @@ def resolve(instance: str, trail: str | None) -> dict:
     sysid = system.system_id
 
     if not rest:
-        return {"kind": "family" if flat else "system",
-                "name": family["name"] if flat else system.system_name,
-                "sub": family.get("sub", "") if flat else "",
-                "crumbs": crumbs,
-                "cards": _subsystem_cards(instance, region, family, system, flat),
-                "ctx": _ctx("family" if flat else "system", region_key=rk,
-                            family_key=fk, flat=flat, system_id=sysid)}
+        out = {"kind": "family" if flat else "system",
+               "name": family["name"] if flat else system.system_name,
+               "sub": family.get("sub", "") if flat else "",
+               "crumbs": crumbs,
+               "cards": _subsystem_cards(instance, region, family, system, flat),
+               "ctx": _ctx("family" if flat else "system", region_key=rk,
+                           family_key=fk, flat=flat, system_id=sysid)}
+        if region.get("overflow"):
+            # Uncurated system page: the template auto-walks it on first visit.
+            out["overflow_system"] = system
+        return out
 
     ssid = _int(rest[0])
     subsystem = H.for_instance(instance).filter(level=H.LEVEL_SUBSYSTEM, system_id=sysid,
@@ -327,7 +364,7 @@ def sidebar_tree(instance: str, ctx: dict) -> list[dict]:
         return out
 
     tree = []
-    for region in curation.regions(instance):
+    for region in all_regions(instance):
         rbr = curation.region_is_browsable(region)
         rk = region["key"]
         fams, rcount = [], 0
@@ -422,7 +459,7 @@ def curated_tree(instance: str) -> dict:
     them synced) — the same grey/green convention as the sidebar.
     """
     regions_out = []
-    for r in curation.regions(instance):
+    for r in all_regions(instance):
         browsable = curation.region_is_browsable(r)
         rnode = {"kind": "region", "name": r["name"], "key": r["key"],
                  "locked": not browsable, "note": r.get("note", ""), "children": []}
@@ -461,6 +498,12 @@ def curated_tree(instance: str) -> dict:
                         fs += ss
                 fam["n"] = sum(c["n"] for c in fam["children"])
                 fam["empty"], fam["synced"] = _state(fw, fs)
+                if r.get("overflow") and not fam["children"]:
+                    # Unwalked overflow system: childless nodes only render as
+                    # links when they carry a url — point it at its own page,
+                    # which walks the system on first visit (#49).
+                    fam["url"] = node_path(instance, r["key"], fkey)
+                    fam["unwalked"] = True
                 rnode["children"].append(fam)
                 rw += fw
                 rs += fs
@@ -479,7 +522,7 @@ def leaf_path_for(instance: str, part_type_id: str) -> str | None:
         level=H.LEVEL_TYPE, part_type_id=part_type_id).first()
     if not leaf:
         return None
-    for region in curation.regions(instance):
+    for region in all_regions(instance):
         if not curation.region_is_browsable(region):
             continue
         for family in region.get("families", []) or []:

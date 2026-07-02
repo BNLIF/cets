@@ -61,21 +61,54 @@ instances:
       - D05700600006   # FD-VD TDE › Shipping › "FEB container" (audit #46)
 
   dev:
-    # Audited via `list_systems --instance dev` 2026-07-02: dev mirrors prod's
-    # system list (47 systems). System 5 (FD1-HD HVS) hosts the sandbox
-    # subsystems 997 "QAQCTest" and 998 "HWDBUnitTest" — Hajime's test entries,
-    # incl. D00599800007 "Test Type 007" (his ship/receive demos) and the
-    # upstream-broken D00599800023 "TestType023-Boxes" (dev API 500s on it).
-    # Grow this block as other dev areas become interesting; the rest lands
-    # via the uncurated-overflow section (#49).
+    # Audited via `list_systems --instance dev` 2026-07-02 (47 systems): dev
+    # mirrors prod's taxonomy with FD1-HD/FD2-VD naming. Curated like prod —
+    # FD first, ND/Other declared placeholders. System 5 (FD1-HD HVS) hosts
+    # the sandbox subsystems 997 "QAQCTest" and 998 "HWDBUnitTest" — Hajime's
+    # test entries, incl. D00599800007 "Test Type 007" (his ship/receive
+    # demos) and the upstream-broken D00599800023 "TestType023-Boxes" (the
+    # dev API 500s on it).
+
+    # Uncurated systems render in an automatic "Uncurated" section (#49):
+    # the hierarchy refresh records every non-curated system (names only, no
+    # walk), and each is walked lazily on first visit. Dev-only affordance —
+    # prod keeps its deliberate dimmed placeholders.
+    overflow: true
+
     regions:
-      - name: Development
-        key: DEV
+      - name: Far Detector
+        key: FD
         families:
-          - name: FD1-HD HVS
-            key: DEV-ship          # key kept stable — deep links already exist
-            sub: incl. HWDBUnitTest sandbox (Hajime's test entries)
-            systems: [5]
+          - name: FD-VD
+            key: FD-VD
+            sub: Vertical Drift (FD2-VD)
+            systems: [51, 52, 53, 54, 55, 56, 57, 58, 59, 80]   # 60 (deprecated HVS) → Uncurated
+          - name: FD CE
+            key: FD-CE
+            sub: Cold Electronics            # single system → flattened in the tree
+            systems: [81]
+          - name: FD-HD
+            key: FD-HD
+            sub: Horizontal Drift (FD1-HD) · system 5 holds the HWDBUnitTest sandbox
+            systems: [1, 2, 3, 4, 5, 6, 8]
+          - name: FD Common
+            key: FD-shared
+            sub: DAQ · Slow Control · Cryostat · Integration · Installation
+            systems: [82, 83, 85, 86, 600]
+          - name: FS
+            key: FS
+            sub: Far Site · Safety · BSI · Cryogenics · Networking
+            systems: [200, 201, 300, 400]
+
+      - name: Near Detector
+        key: ND
+        curated: false
+        note: "9 systems in HWDB · not curated · reachable via Uncurated"
+
+      - name: Other
+        key: OT
+        curated: false
+        note: "Near Site · Computing · Prototypes · not curated · reachable via Uncurated"
 
     # Hajime's ship/receive demos live on "Test Type 007" (#48): boxes like
     # D00599800007-00133 carry pre-shipping checklists + labels. The literal

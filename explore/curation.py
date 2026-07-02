@@ -72,6 +72,13 @@ def is_shipping_type(instance: str, part_type_id: str) -> bool:
     return part_type_id in shipping_types(instance)
 
 
+def has_overflow(instance: str) -> bool:
+    """Whether uncurated systems on this instance render in an automatic
+    "Uncurated" section (#49) instead of being invisible. Dev sets it; prod
+    keeps its deliberate dimmed placeholders."""
+    return bool(_block(instance).get("overflow"))
+
+
 def curated_system_ids(instance: str) -> set[int]:
     """All system ids the explorer browses/syncs on an instance — the union
     across browsable families in browsable regions."""

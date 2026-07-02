@@ -24,7 +24,7 @@ from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
 from . import curation, navigation
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, sync_test_events
-from .hierarchy import sync_hierarchy
+from .hierarchy import sync_hierarchy, sync_system
 from .instances import instance_of, namespace_of
 from .models import (
     HierarchyNode, HierarchySyncState, HwdbComponentEvent, ShipmentItem,
@@ -326,6 +326,35 @@ def explore_sync_view(request):
         except Exception as e:
             logger.exception("explore_sync_view crashed")
             yield f"hierarchy sync: CRASH · {e}\n"
+
+    return StreamingHttpResponse(_iter(), content_type="text/plain; charset=utf-8")
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_system_sync_view(request, system_id):
+    """Stream a one-system structure walk (the overflow section's lazy sync,
+    #49). FNAL-gated; reads the URL's instance. Fired automatically on first
+    visit to an unwalked uncurated system, and by the retry button after a
+    failed walk."""
+    inst = instance_of(request)
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': _rev(request, 'explore:home'), 'reason': 'expired'})}")
+    except FnalUnavailable:
+        return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
+
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+
+    def _iter():
+        try:
+            yield from sync_system(api, inst, system_id)
+        except Exception as e:
+            logger.exception("explore_system_sync_view(%s) crashed", system_id)
+            yield f"walk system: CRASH · {e}\n"
 
     return StreamingHttpResponse(_iter(), content_type="text/plain; charset=utf-8")
 

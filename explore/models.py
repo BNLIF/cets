@@ -72,6 +72,13 @@ class HierarchyNode(InstanceScoped):
     # auto-sync and loop).
     shipments_synced_at = models.DateTimeField(null=True, blank=True)
 
+    # System rows of an overflow (uncurated) section only (#49): set when the
+    # system's structure (subsystems + types + counts) has been lazily walked,
+    # so "walked but genuinely empty" isn't mistaken for "never walked". On
+    # these rows ``tests_sync_error`` holds the walk error, keeping the failed
+    # walk from auto-retrying on render (the #47 loop lesson).
+    structure_synced_at = models.DateTimeField(null=True, blank=True)
+
     synced_at = models.DateTimeField(auto_now=True)
 
     class Meta:
