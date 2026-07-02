@@ -112,103 +112,7 @@
 <pre id="sync-log"></pre>
 
 {% if view.kind == 'leaf' %}
-  {% if is_shipping %}
-    {# ---- Shipping-box leaf: Shipments panel (ADR-0013) ---- #}
-    <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;">
-        <div class="page-subtitle">{{ leaf.system_name }} <span class="crumbs-sep">›</span> {{ leaf.subsystem_name }}</div>
-        <div style="text-align: right; white-space: nowrap;">
-            <button class="btn btn-sm btn-primary" id="shipment-sync-btn" type="button"
-                    data-sync-url="{% url 'explore:shipment_sync' part_type_id=leaf.part_type_id %}"
-                    title="Re-read each box’s latest location from HWDB">Sync shipments</button>
-            <div class="cell-muted" style="font-size: 12px; margin-top: 6px;">
-                {% if shipment_synced_at %}synced {{ shipment_synced_at|timesince }} ago{% else %}never synced{% endif %}
-            </div>
-        </div>
-    </div>
-    <pre id="shipment-sync-log"></pre>
-    {% if not shipment_synced_at %}
-    <div class="explore-empty" id="shipment-unsynced" data-sync-url="{% url 'explore:shipment_sync' part_type_id=leaf.part_type_id %}">
-        <p>Shipments not synced yet.</p>
-        <p class="cell-muted">Syncing from HWDB now… (needs your FNAL link)</p>
-    </div>
-    {% elif shipments %}
-    <div class="ship-cards">
-        <div class="ship-card"><div class="ship-card-n">{{ shipment_summary.total }}</div><div class="ship-card-l">Boxes with contents</div></div>
-        <div class="ship-card is-transit"><div class="ship-card-n">{{ shipment_summary.in_transit }}</div><div class="ship-card-l">In transit</div></div>
-        <div class="ship-card is-delivered"><div class="ship-card-n">{{ shipment_summary.delivered }}</div><div class="ship-card-l">Delivered</div></div>
-    </div>
-    {% for c in charts %}
-    <div class="chart-card" data-chart-panel="{{ c.slug }}">
-        <div class="panel-title" style="font-size: 14px; margin-bottom: 8px;">{{ c.name }}</div>
-        {% if c.empty %}
-        <div class="explore-empty" style="padding: 24px 16px;">No box history yet.</div>
-        {% else %}
-        <div class="chart-range-toggle" role="tablist" style="margin-bottom: 12px;">
-            <button type="button" data-range="month" class="chart-range-btn">Last month · daily</button>
-            <button type="button" data-range="3month" class="chart-range-btn">Last 3 months · daily</button>
-            <button type="button" data-range="all" class="chart-range-btn is-active">All · monthly</button>
-        </div>
-        <div style="display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px;">
-            <div><div style="font-size: 13px; color: var(--faint); margin-bottom: 6px; font-family: var(--font-mono);">Per period</div><div style="position: relative; height: 260px;"><canvas id="bar_{{ c.slug }}"></canvas></div></div>
-            <div><div style="font-size: 13px; color: var(--faint); margin-bottom: 6px; font-family: var(--font-mono);">Cumulative</div><div style="position: relative; height: 260px;"><canvas id="line_{{ c.slug }}"></canvas></div></div>
-        </div>
-        {% endif %}
-        <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">{{ c.caption }}</p>
-    </div>
-    {% endfor %}
-    <details class="chart-card ship-boxes" open>
-        <summary class="ship-boxes-sum">Boxes ({{ shipments|length }}) <span class="cell-muted" style="font-weight:400;">— click to collapse</span></summary>
-        <table class="ship-table">
-            <thead><tr><th>Box PID</th><th>Status</th><th>Latest location</th><th>Contents</th><th>Shipped</th><th>Received</th></tr></thead>
-            <tbody>
-            {% for s in shipments %}
-                <tr class="ship-row" onclick="if(!getSelection().toString())location.href='{% url 'explore:part' part_id=s.part_id %}'" title="Open shipping details for {{ s.part_id }}">
-                    <td class="mono"><a href="{% url 'explore:part' part_id=s.part_id %}" onclick="event.stopPropagation()" title="Open this box’s detail page">{{ s.part_id }}</a></td>
-                    <td><span class="ship-pill {% if s.is_in_transit %}is-transit{% elif s.location_id is not None %}is-delivered{% else %}is-unknown{% endif %}">{{ s.status_label }}</span></td>
-                    <td>{{ s.location_name|default:"—" }}</td>
-                    <td class="mono">{{ s.n_contents }}</td>
-                    <td class="mono">{% if s.shipped_date %}{{ s.shipped_date|date:"Y-m-d" }}{% else %}—{% endif %}</td>
-                    <td class="mono">{% if s.received_date %}{{ s.received_date|date:"Y-m-d" }}{% else %}—{% endif %}</td>
-                </tr>
-            {% endfor %}
-            </tbody>
-        </table>
-        <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">Empty boxes are listed separately below. Latest location + contents count are mirrored; click a box for its full timeline, manifest &amp; shipping checklist (fetched live from HWDB).</p>
-    </details>
-    {% else %}
-    <div class="explore-empty">
-        <p>No boxes with contents here.</p>
-        <p class="cell-muted">All boxes of this type are currently empty (or none are registered). Re-sync after they're packed.</p>
-    </div>
-    {% endif %}
-    {% if empty_boxes_page and empty_boxes_page.paginator.count %}
-    <details class="chart-card ship-boxes"{% if request.GET.page %} open{% endif %}>
-        <summary class="ship-boxes-sum">Empty boxes ({{ empty_boxes_page.paginator.count }}) <span class="cell-muted" style="font-weight:400;">— registered but currently unpacked</span></summary>
-        {% if empty_boxes_page.paginator.num_pages > 1 %}
-        <div style="display:flex; gap:10px; align-items:center; font-size:12px; margin: 8px 0 4px;">
-            {% if empty_boxes_page.has_previous %}<a style="color:var(--accent-ink);text-decoration:none;" href="?page=1">« First</a><a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ empty_boxes_page.previous_page_number }}">‹ Prev</a>{% else %}<span class="cell-muted">« First</span><span class="cell-muted">‹ Prev</span>{% endif %}
-            <span class="cell-muted" style="font-variant-numeric:tabular-nums;">Page {{ empty_boxes_page.number }} of {{ empty_boxes_page.paginator.num_pages }} · {{ empty_boxes_page.paginator.count }} boxes</span>
-            {% if empty_boxes_page.has_next %}<a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ empty_boxes_page.next_page_number }}">Next ›</a><a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ empty_boxes_page.paginator.num_pages }}">Last »</a>{% else %}<span class="cell-muted">Next ›</span><span class="cell-muted">Last »</span>{% endif %}
-        </div>
-        {% endif %}
-        <table class="ship-table">
-            <thead><tr><th>Box PID</th><th>Status</th><th>Latest location</th><th>Arrived</th></tr></thead>
-            <tbody>
-            {% for s in empty_boxes_page %}
-                <tr class="ship-row" onclick="if(!getSelection().toString())location.href='{% url 'explore:part' part_id=s.part_id %}'" title="Open shipping details for {{ s.part_id }}">
-                    <td class="mono"><a href="{% url 'explore:part' part_id=s.part_id %}" onclick="event.stopPropagation()" title="Open this box’s detail page">{{ s.part_id }}</a></td>
-                    <td><span class="ship-pill {% if s.is_in_transit %}is-transit{% elif s.location_id is not None %}is-delivered{% else %}is-unknown{% endif %}">{{ s.status_label }}</span></td>
-                    <td>{{ s.location_name|default:"—" }}</td>
-                    <td class="mono">{% if s.last_arrived %}{{ s.last_arrived|date:"Y-m-d" }}{% else %}—{% endif %}</td>
-                </tr>
-            {% endfor %}
-            </tbody>
-        </table>
-        <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">Boxes with no current contents — not shown in the table above or on the Shipments tab.</p>
-    </details>
-    {% endif %}
-  {% else %}
-    {# ---- Component-type leaf: detail + plots ---- #}
+    {# ---- Component-type leaf: detail + plots. All leaves, incl. shipping types — boxes are regular components; box panes are appended below. ---- #}
     <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;">
         <div class="page-subtitle">{{ leaf.system_name }} <span class="crumbs-sep">›</span> {{ leaf.subsystem_name }}</div>
         <div style="text-align: right; white-space: nowrap;">
@@ -239,7 +143,7 @@
         <dt>System</dt><dd>{{ leaf.system_name }} ({{ leaf.system_id }})</dd>
         <dt>Subsystem</dt><dd>{{ leaf.subsystem_name }} ({{ leaf.subsystem_id }})</dd>
         <dt>{% if is_shipping %}Boxes in HWDB{% else %}Components in HWDB{% endif %}</dt><dd>{{ leaf.n_components }}</dd>
-        {% if not is_shipping %}<dt>Test events</dt><dd>{{ leaf.n_tests }}</dd>{% endif %}
+        <dt>Test events</dt><dd>{{ leaf.n_tests }}</dd>
     </dl>
 
     {% if leaf.tests_synced_at %}
@@ -329,6 +233,91 @@
         <p class="cell-muted">Syncing from HWDB now… (needs your FNAL link)</p>
     </div>
     {% endif %}
+
+  {% if is_shipping %}
+    {# ---- Shipping extras (ADR-0013): the box/logistics view on top of the standard component panels above. ---- #}
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 26px;">
+        <div class="panel-title" style="font-size: 15px;">Shipments</div>
+        <div style="white-space: nowrap;">
+            <span class="cell-muted" style="font-size: 12px; margin-right: 8px;">
+                {% if shipment_synced_at %}synced {{ shipment_synced_at|timesince }} ago{% else %}never synced{% endif %}
+            </span>
+            <button class="btn btn-sm btn-primary" id="shipment-sync-btn" type="button"
+                    data-sync-url="{% url 'explore:shipment_sync' part_type_id=leaf.part_type_id %}"
+                    title="Re-read each box’s latest location from HWDB">Sync shipments</button>
+        </div>
+    </div>
+    <pre id="shipment-sync-log"></pre>
+    {% if not shipment_synced_at %}
+        {% if leaf.tests_synced_at or leaf.tests_sync_error %}
+    <div class="explore-empty" id="shipment-unsynced" data-sync-url="{% url 'explore:shipment_sync' part_type_id=leaf.part_type_id %}">
+        <p>Shipments not synced yet.</p>
+        <p class="cell-muted">Syncing from HWDB now… (needs your FNAL link)</p>
+    </div>
+        {% else %}
+    {# Component sync above is still auto-firing — don't race it; its reload brings the page back through the branch above. #}
+    <div class="explore-empty">
+        <p>Shipments not synced yet.</p>
+        <p class="cell-muted">Waiting for the component sync to finish…</p>
+    </div>
+        {% endif %}
+    {% elif shipments %}
+    <div class="ship-cards">
+        <div class="ship-card"><div class="ship-card-n">{{ shipment_summary.total }}</div><div class="ship-card-l">Boxes with contents</div></div>
+        <div class="ship-card is-transit"><div class="ship-card-n">{{ shipment_summary.in_transit }}</div><div class="ship-card-l">In transit</div></div>
+        <div class="ship-card is-delivered"><div class="ship-card-n">{{ shipment_summary.delivered }}</div><div class="ship-card-l">Delivered</div></div>
+    </div>
+    <details class="chart-card ship-boxes" open>
+        <summary class="ship-boxes-sum">Boxes ({{ shipments|length }}) <span class="cell-muted" style="font-weight:400;">— click to collapse</span></summary>
+        <table class="ship-table">
+            <thead><tr><th>Box PID</th><th>Status</th><th>Latest location</th><th>Contents</th><th>Shipped</th><th>Received</th></tr></thead>
+            <tbody>
+            {% for s in shipments %}
+                <tr class="ship-row" onclick="if(!getSelection().toString())location.href='{% url 'explore:part' part_id=s.part_id %}'" title="Open shipping details for {{ s.part_id }}">
+                    <td class="mono"><a href="{% url 'explore:part' part_id=s.part_id %}" onclick="event.stopPropagation()" title="Open this box’s detail page">{{ s.part_id }}</a></td>
+                    <td><span class="ship-pill {% if s.is_in_transit %}is-transit{% elif s.location_id is not None %}is-delivered{% else %}is-unknown{% endif %}">{{ s.status_label }}</span></td>
+                    <td>{{ s.location_name|default:"—" }}</td>
+                    <td class="mono">{{ s.n_contents }}</td>
+                    <td class="mono">{% if s.shipped_date %}{{ s.shipped_date|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+                    <td class="mono">{% if s.received_date %}{{ s.received_date|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">Empty boxes are listed separately below. Latest location + contents count are mirrored; click a box for its full timeline, manifest &amp; shipping checklist (fetched live from HWDB).</p>
+    </details>
+    {% else %}
+    <div class="explore-empty">
+        <p>No boxes with contents here.</p>
+        <p class="cell-muted">All boxes of this type are currently empty (or none are registered). Re-sync after they're packed.</p>
+    </div>
+    {% endif %}
+    {% if empty_boxes_page and empty_boxes_page.paginator.count %}
+    <details class="chart-card ship-boxes"{% if request.GET.bpage %} open{% endif %}>
+        <summary class="ship-boxes-sum">Empty boxes ({{ empty_boxes_page.paginator.count }}) <span class="cell-muted" style="font-weight:400;">— registered but currently unpacked</span></summary>
+        {% if empty_boxes_page.paginator.num_pages > 1 %}
+        <div style="display:flex; gap:10px; align-items:center; font-size:12px; margin: 8px 0 4px;">
+            {% if empty_boxes_page.has_previous %}<a style="color:var(--accent-ink);text-decoration:none;" href="?bpage=1">« First</a><a style="color:var(--accent-ink);text-decoration:none;" href="?bpage={{ empty_boxes_page.previous_page_number }}">‹ Prev</a>{% else %}<span class="cell-muted">« First</span><span class="cell-muted">‹ Prev</span>{% endif %}
+            <span class="cell-muted" style="font-variant-numeric:tabular-nums;">Page {{ empty_boxes_page.number }} of {{ empty_boxes_page.paginator.num_pages }} · {{ empty_boxes_page.paginator.count }} boxes</span>
+            {% if empty_boxes_page.has_next %}<a style="color:var(--accent-ink);text-decoration:none;" href="?bpage={{ empty_boxes_page.next_page_number }}">Next ›</a><a style="color:var(--accent-ink);text-decoration:none;" href="?bpage={{ empty_boxes_page.paginator.num_pages }}">Last »</a>{% else %}<span class="cell-muted">Next ›</span><span class="cell-muted">Last »</span>{% endif %}
+        </div>
+        {% endif %}
+        <table class="ship-table">
+            <thead><tr><th>Box PID</th><th>Status</th><th>Latest location</th><th>Arrived</th></tr></thead>
+            <tbody>
+            {% for s in empty_boxes_page %}
+                <tr class="ship-row" onclick="if(!getSelection().toString())location.href='{% url 'explore:part' part_id=s.part_id %}'" title="Open shipping details for {{ s.part_id }}">
+                    <td class="mono"><a href="{% url 'explore:part' part_id=s.part_id %}" onclick="event.stopPropagation()" title="Open this box’s detail page">{{ s.part_id }}</a></td>
+                    <td><span class="ship-pill {% if s.is_in_transit %}is-transit{% elif s.location_id is not None %}is-delivered{% else %}is-unknown{% endif %}">{{ s.status_label }}</span></td>
+                    <td>{{ s.location_name|default:"—" }}</td>
+                    <td class="mono">{% if s.last_arrived %}{{ s.last_arrived|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">Boxes with no current contents — not shown in the table above or on the Shipments tab.</p>
+    </details>
+    {% endif %}
   {% endif %}
 
     {% if parts_page %}
@@ -362,8 +351,7 @@
 {% else %}
     {# ---- Folder: grid of child nodes ---- #}
     {% if view.overflow_system and not view.overflow_system.structure_synced_at %}
-    {# Uncurated system, never walked (#49): auto-walk once; a recorded walk
-       error renders statically with a manual retry (never auto-loop). #}
+    {# Uncurated system, never walked (#49): auto-walk once; a recorded walk error renders statically with a manual retry (never auto-loop). #}
     <pre id="system-sync-log"></pre>
     {% if view.overflow_system.tests_sync_error %}
     <div class="banner banner-warn" style="margin: 10px 0;">Last walk error: {{ view.overflow_system.tests_sync_error }}</div>

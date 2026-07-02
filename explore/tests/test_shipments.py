@@ -26,8 +26,9 @@ SHIP_PTID = "D08120200001"  # curated CE Shipping box (FD CE › CE Shipping Box
 def _ship_leaf(ptid=SHIP_PTID, synced=True):
     """Build the FD CE › CE Shipping Box chain + the shipping-box leaf.
 
-    ``synced`` stamps shipments_synced_at (the sync marker) so the panel renders;
-    pass synced=False to test the never-synced (auto-sync) state.
+    ``synced`` stamps BOTH sync markers (boxes are regular components too, so
+    a lived-in leaf has shipments_synced_at and tests_synced_at); pass
+    synced=False to test the never-synced (auto-sync) state.
     """
     sys, _ = H.objects.get_or_create(
         level=H.LEVEL_SYSTEM, system_id=81, subsystem_id=None, part_type_id="",
@@ -41,7 +42,8 @@ def _ship_leaf(ptid=SHIP_PTID, synced=True):
         subsystem_id=202, subsystem_name="CE Shipping Box", name="CE Shipping box",
         part_type_id=ptid, n_components=2,
         full_name="D.FD CE.CE Shipping Box.CE Shipping box",
-        shipments_synced_at=timezone.now() if synced else None)
+        shipments_synced_at=timezone.now() if synced else None,
+        tests_synced_at=timezone.now() if synced else None)
 
 
 def _loc(name, lid, arrived):
@@ -170,14 +172,18 @@ class SyncShipmentsTest(TestCase):
         self.assertIsNone(b3.last_arrived)
         self.assertEqual(b3.n_contents, 1)
 
-    def test_populates_component_events_for_chart(self):
+    def test_does_not_touch_component_events(self):
+        # Boxes are regular components: the node (test) sync owns
+        # HwdbComponentEvent; the shipments sync must not clobber it.
+        HwdbComponentEvent.objects.create(part_type_id=SHIP_PTID, part_id="B1",
+                                          status="Available")
         self._run(
             items=[{"part_id": "B1", "created": "2026-05-01T00:00:00-05:00"}],
             locs_by_pid={"B1": [_loc("FNAL", 1, "2026-05-21T00:00:00-05:00")]},
             subs_by_pid={"B1": [_sub()]},
         )
         ev = HwdbComponentEvent.objects.get(part_type_id=SHIP_PTID, part_id="B1")
-        self.assertIsNotNone(ev.created)  # → boxes-over-time chart
+        self.assertEqual(ev.status, "Available")  # untouched
 
     def test_stores_shipped_received(self):
         self._run(
@@ -228,10 +234,12 @@ class ShipmentPanelViewTest(TestCase):
         self.assertIn("B1", html)
         self.assertIn("In Transit", html)
         self.assertIn("FNAL", html)
-        # Boxes-over-time chart present; test-plot machinery absent.
-        self.assertIn("Boxes over time", html)
-        self.assertNotIn("Test events", html)
-        self.assertNotIn("Tests performed", html)
+        # Boxes are regular components too: the standard component view (sync
+        # buttons + plots) renders ABOVE the shipping panes.
+        self.assertIn("Full re-sync", html)
+        self.assertIn("Components updated", html)
+        self.assertIn("Tests recorded", html)
+        self.assertIn(">Shipments</div>", html)   # the extras section header
 
     def test_empty_boxes_get_their_own_pane(self):
         leaf = _ship_leaf()
@@ -258,13 +266,24 @@ class ShipmentPanelViewTest(TestCase):
         self.assertIn("Page 1 of 2", html)
         self.assertIn("E000", html)
         self.assertNotIn("E050", html)  # on page 2
-        html2 = self.client.get(url, {"page": 2}).content.decode()
+        # ?bpage= pages the empty-box pane (?page= belongs to the components table)
+        html2 = self.client.get(url, {"bpage": 2}).content.decode()
         self.assertIn("E050", html2)
         self.assertNotIn("E000", html2)
 
-    def test_unsynced_shipping_leaf_shows_autosync_block(self):
+    def test_unsynced_shipping_leaf_autosyncs_components_first(self):
+        # Never-synced leaf: the component auto-sync fires; the shipments
+        # auto-sync waits (two concurrent streams would race the reload).
         leaf = _ship_leaf(synced=False)
         html = self.client.get(navigation.leaf_path_for("prod", leaf.part_type_id)).content.decode()
+        self.assertIn('id="node-unsynced"', html)
+        self.assertNotIn('id="shipment-unsynced"', html)
+        self.assertIn("Waiting for the component sync", html)
+        # Once components are synced, the shipments auto-sync takes its turn.
+        leaf.tests_synced_at = timezone.now()
+        leaf.save()
+        html = self.client.get(navigation.leaf_path_for("prod", leaf.part_type_id)).content.decode()
+        self.assertNotIn('id="node-unsynced"', html)
         self.assertIn('id="shipment-unsynced"', html)
 
     def test_synced_but_empty_does_not_loop(self):

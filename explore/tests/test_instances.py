@@ -138,7 +138,8 @@ class DevShipmentsTest(TestCase):
         self.client.force_login(self.user)
         self.leaf = _node("dev", DEV_PTID, 5, "FD1-HD HVS", 998, "HWDBUnitTest",
                           "Test Type 007", n_components=147,
-                          shipments_synced_at=timezone.now())
+                          shipments_synced_at=timezone.now(),
+                          tests_synced_at=timezone.now())
 
     def _box(self, **over):
         row = dict(instance="dev", part_type_id=DEV_PTID,
@@ -152,7 +153,7 @@ class DevShipmentsTest(TestCase):
         html = self.client.get(navigation.leaf_path_for("dev", DEV_PTID)).content.decode()
         self.assertIn("D00599800007-00133", html)
         self.assertIn("BNL", html)
-        self.assertNotIn('id="node-unsynced"', html)  # shipping leaf, not test plots
+        self.assertNotIn('id="node-unsynced"', html)  # both syncs marked done
 
     def test_shipments_tab_is_instance_scoped(self):
         self._box()

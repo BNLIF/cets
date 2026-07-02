@@ -177,13 +177,16 @@ def explore_view(request, trail=None):
     is_shipping = bool(leaf and curation.is_shipping_type(inst, leaf.part_type_id))
     shipments = shipment_synced_at = shipment_summary = empty_boxes_page = None
     if is_shipping:
+        # Shipping extras — boxes are regular components too (charts/breakdown
+        # below render like any other leaf); these panes add the box view.
         ptid = leaf.part_type_id
         rows = list(ShipmentItem.for_instance(inst).filter(part_type_id=ptid, n_contents__gt=0))
         # Empty boxes get their own paginated pane (they're mirrored too, but
         # kept out of the main table, summary cards and the Shipments tab).
+        # Paged by ?bpage= — ?page= belongs to the components table.
         empty_boxes_page = Paginator(
             ShipmentItem.for_instance(inst).filter(part_type_id=ptid, n_contents=0),
-            50).get_page(request.GET.get("page"))
+            50).get_page(request.GET.get("bpage"))
         shipments = rows
         # Sync marker on the leaf — NOT inferred from rows, so a synced type with
         # 0 non-empty boxes reads as synced (no auto-sync loop).
@@ -193,15 +196,7 @@ def explore_view(request, trail=None):
         shipment_summary = {
             "total": len(rows), "in_transit": in_transit, "delivered": delivered,
         }
-        # Boxes-over-time chart (reuses the components-updated machinery; boxes
-        # have no 'updated' so it bins on each box's created date).
-        box_chart = chart_config(
-            slug=f"{ptid}_comp", name="Boxes over time", href="",
-            ranges=component_update_progress(inst, ptid),
-        )
-        box_chart["caption"] = "Non-empty shipping boxes by HWDB created date."
-        charts = [box_chart]
-    elif leaf and leaf.tests_synced_at:
+    if leaf and leaf.tests_synced_at:
         ptid = leaf.part_type_id
         comp_chart = chart_config(
             slug=f"{ptid}_comp", name="Components updated", href="",
@@ -233,7 +228,7 @@ def explore_view(request, trail=None):
     # page. Mirror-backed like the box table, so no live HWDB on render.
     parts_page = None
     breakdowns, qc_flags = [], []
-    if leaf and not is_shipping and leaf.tests_synced_at:
+    if leaf and leaf.tests_synced_at:
         part_rows = (HwdbComponentEvent.for_instance(inst)
                      .filter(part_type_id=leaf.part_type_id)
                      .order_by(F("updated").desc(nulls_last=True),

@@ -23,7 +23,7 @@ from django.utils import timezone
 
 from hwdb.api_client import FnalDbApiClient
 
-from .models import HierarchyNode, HwdbComponentEvent, ShipmentItem
+from .models import HierarchyNode, ShipmentItem
 
 logger = logging.getLogger(__name__)
 
@@ -155,11 +155,9 @@ def fold_entries(entries: list) -> tuple[list, list]:
     return fields, attachments
 
 
-def _list_boxes(api, part_type_id: str) -> list[tuple[str, str | None]]:
-    """Every box as ``(part_id, created)`` across all pages.
-
-    The listing paginates (the #46 run showed 100 of 326) and carries
-    ``created`` (used for the boxes-over-time chart) but not ``updated``."""
+def _list_boxes(api, part_type_id: str) -> list[str]:
+    """Every box's part_id across all pages (the listing paginates — the #46
+    run showed 100 of 326)."""
     out, page = [], 1
     while True:
         body = api._make_request(
@@ -170,7 +168,7 @@ def _list_boxes(api, part_type_id: str) -> list[tuple[str, str | None]]:
         for r in rows:
             pid = r.get("part_id") or r.get("pid")
             if pid:
-                out.append((pid, r.get("created")))
+                out.append(pid)
         pages = (body.get("pagination") or {}).get("pages", 1)
         if page >= pages or not rows:
             return out
@@ -183,16 +181,15 @@ def sync_shipments(api_base_url: str, bearer: str, part_type_id: str,
 
     For each box (in parallel) reads its latest location + current contents.
     Empty boxes (0 contents) are mirrored too (``n_contents=0`` — the leaf
-    page lists them in a separate pane) but excluded from
-    ``HwdbComponentEvent`` (the boxes-over-time chart counts non-empty only).
-    Rewrites ``ShipmentItem`` (latest location, dates, contents count) for
-    the type.
+    page lists them in a separate pane). Rewrites ``ShipmentItem`` (latest
+    location, dates, contents count) for the type. ``HwdbComponentEvent`` is
+    NOT touched — boxes are regular components, so the node (test) sync owns
+    those rows and the standard charts/breakdown render from them.
     """
     bootstrap = FnalDbApiClient(api_base_url, bearer)
 
     yield f"sync shipments: listing boxes for {part_type_id}\n"
     boxes = _list_boxes(bootstrap, part_type_id)
-    created_by_pid = dict(boxes)
     yield f"sync shipments: {len(boxes)} box(es); fetching locations + contents…\n"
 
     tls = _thread_local_cls()
@@ -208,7 +205,7 @@ def sync_shipments(api_base_url: str, bearer: str, part_type_id: str,
     results, done = [], 0
     if boxes:
         with ThreadPoolExecutor(max_workers=_WORKERS, initializer=_init) as pool:
-            futs = {pool.submit(_fetch, pid): pid for pid, _ in boxes}
+            futs = {pool.submit(_fetch, pid): pid for pid in boxes}
             for fut in as_completed(futs):
                 try:
                     results.append(fut.result())
@@ -218,7 +215,7 @@ def sync_shipments(api_base_url: str, bearer: str, part_type_id: str,
                 if done % 50 == 0 or done == len(boxes):
                     yield f"  fetched {done}/{len(boxes)}\n"
 
-    ship_rows, comp_rows = [], []
+    ship_rows = []
     for pid, locs, manifest in results:
         latest = latest_location(locs)
         loc = (latest or {}).get("location") or {}
@@ -230,18 +227,10 @@ def sync_shipments(api_base_url: str, bearer: str, part_type_id: str,
             last_arrived=_parse_dt((latest or {}).get("arrived")),
             shipped_date=shipped, received_date=received,
         ))
-        if manifest:  # empty boxes stay off the boxes-over-time chart
-            comp_rows.append(HwdbComponentEvent(
-                instance=instance, part_type_id=part_type_id, part_id=pid,
-                created=_parse_dt(created_by_pid.get(pid)), updated=None,
-            ))
 
     ShipmentItem.for_instance(instance).filter(part_type_id=part_type_id).delete()
     if ship_rows:
         ShipmentItem.objects.bulk_create(ship_rows, batch_size=1000)
-    HwdbComponentEvent.for_instance(instance).filter(part_type_id=part_type_id).delete()
-    if comp_rows:
-        HwdbComponentEvent.objects.bulk_create(comp_rows, batch_size=1000)
 
     # Mark the leaf synced even when 0 boxes — so the page stops
     # auto-syncing (NULL would read as "never synced" and re-trigger forever).
