@@ -319,6 +319,56 @@ class ComponentUpdateProgressTest(TestCase):
         self.assertEqual(sum(ranges["all"]["series"][0]["counts"]), 1)
 
 
+class ComponentUpdateFiltersTest(TestCase):
+    """Status / QC-flag overlay options for the Components-updated chart (#52)."""
+
+    PTID = "D05700299997"
+
+    def _mk(self, pid, month, status="", **flags):
+        HwdbComponentEvent.objects.create(
+            part_type_id=self.PTID, part_id=pid, status=status,
+            updated=datetime(2025, month, 10, tzinfo=dt_timezone.utc), **flags)
+
+    def test_statuses_most_common_first_plus_the_three_flags(self):
+        from explore.queries import component_update_filters
+        self._mk("P1", 3, status="Passed", qaqc_uploaded=True)
+        self._mk("P2", 4, status="Passed")
+        self._mk("P3", 4, status="Failed")
+        keys = [f["key"] for f in component_update_filters("prod", self.PTID)]
+        self.assertEqual(keys, ["status:Passed", "status:Failed",
+                                "is_installed", "qaqc_uploaded", "certified_qaqc"])
+
+    def test_overlay_series_aligned_with_baseline(self):
+        from explore.queries import component_update_filters
+        self._mk("P1", 3, status="Passed")
+        self._mk("P2", 4, status="Failed")
+        flt = {f["key"]: f for f in component_update_filters("prod", self.PTID)}
+        r = flt["status:Passed"]["ranges"]["all"]
+        (over,) = r["bar_datasets"]             # filtered series only; baseline stripped
+        self.assertEqual(over["label"], "Passed")
+        # Labels span the BASELINE's March–April even though Passed is
+        # March-only — so any overlay concatenates onto the base chart.
+        self.assertEqual(r["labels"], ["2025-03", "2025-04"])
+        self.assertEqual(over["data"], [1, 0])
+        # Overlays get distinct colors so several can stack at once.
+        self.assertNotEqual(
+            flt["status:Passed"]["ranges"]["all"]["line_datasets"][0]["borderColor"],
+            flt["status:Failed"]["ranges"]["all"]["line_datasets"][0]["borderColor"])
+
+    def test_flag_filter_counts_true_rows_only(self):
+        from explore.queries import component_update_filters
+        self._mk("P1", 3, qaqc_uploaded=True)
+        self._mk("P2", 4)                       # NULL flag → not counted
+        flt = {f["key"]: f for f in component_update_filters("prod", self.PTID)}
+        over = flt["qaqc_uploaded"]["ranges"]["all"]["bar_datasets"][0]
+        self.assertEqual(sum(over["data"]), 1)
+        self.assertEqual(flt["qaqc_uploaded"]["group"], "QC flag")
+
+    def test_empty_mirror_returns_no_filters(self):
+        from explore.queries import component_update_filters
+        self.assertEqual(component_update_filters("prod", self.PTID), [])
+
+
 class ExplorePlotViewTest(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user("plotter", "p@p.io", "pw")
@@ -340,6 +390,22 @@ class ExplorePlotViewTest(TestCase):
         self.assertIn(f"bar_{node.part_type_id}_test", html)   # tests-recorded chart
         self.assertIn("Components updated", html)
         self.assertIn("amc_bandwidth_test", html)
+
+    def test_overlay_selector_renders_on_components_chart_only(self):
+        node = _node(tests_synced_at=timezone.now(), n_tests=1)
+        HwdbTestEvent.objects.create(
+            part_type_id=node.part_type_id, part_id="", test_type_name="t",
+            created=datetime(2025, 3, 10, tzinfo=dt_timezone.utc))
+        HwdbComponentEvent.objects.create(
+            part_type_id=node.part_type_id, part_id="P1", status="Passed",
+            updated=datetime(2025, 3, 10, tzinfo=dt_timezone.utc))
+        html = self.client.get(navigation.leaf_path_for("prod", node.part_type_id)).content.decode()
+        self.assertEqual(html.count('<select class="chart-filter-sel"'), 1)  # comp chart, not test chart
+        self.assertIn('value="status:Passed"', html)          # status: dropdown option
+        # QC flags are checkboxes — multi-selectable, overlaid together.
+        self.assertEqual(html.count('class="chart-filter-flag"'), 3)
+        self.assertIn('value="qaqc_uploaded"', html)
+        self.assertIn('"filters"', html)                      # overlay data in the JSON config
 
     def test_qc_flag_tiles_render_with_unsynced_hint(self):
         node = _node(tests_synced_at=timezone.now(), n_tests=0)

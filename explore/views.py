@@ -31,7 +31,7 @@ from .models import (
 )
 from .queries import (
     component_breakdowns, component_qc_flags, component_type_progress,
-    component_update_progress,
+    component_update_filters, component_update_progress,
 )
 from .parts import assembly_children, part_detail
 from .shipments import sync_shipments
@@ -211,6 +211,9 @@ def explore_view(request, trail=None):
             "By HWDB last-updated date (status change / QC upload bumps it), "
             "not the original mint date."
         )
+        # Status / QC-flag overlay menu (#52) — mirror-only, precomputed so the
+        # selector swaps series client-side without a reload.
+        comp_chart["filters"] = component_update_filters(inst, ptid)
         phys = physics_date_field(inst, ptid)
         test_chart = chart_config(
             slug=f"{ptid}_test",

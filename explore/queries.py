@@ -6,11 +6,20 @@ the palettes, ``chart_config``) stays shared in ``core.queries``; only these
 two explore-specific aggregations live here.
 """
 
+from collections import Counter
+
 from django.db.models import Count, Q
 
-from core.queries import COLD_COLOR, TEST_TYPE_PALETTE, _ranges_for_series
+from core.queries import (
+    COLD_COLOR, TEST_TYPE_PALETTE, _ranges_for_series, chart_config,
+)
 
 from .models import HwdbComponentEvent, HwdbTestEvent
+
+# Overlay series colors (#52) — distinct from the cold-blue baseline; cycled
+# across the filter list (statuses first, then the three QC flags).
+OVERLAY_PALETTE = ["#c2410c", "#15803d", "#9333ea", "#dc2626", "#f0b455",
+                   "#0891b2", "#4f46e5"]
 
 # Categorical component facets the breakdown panel charts (mirror-only).
 COMPONENT_FACETS = (("status", "Status"), ("manufacturer", "Manufacturer"),
@@ -75,6 +84,53 @@ def component_breakdowns(instance, part_type_id):
         if any(c[field] for c in counts):       # at least one real value
             out.append({"field": field, "label": label, "total": qs.count(),
                         "rows": rows})
+    return out
+
+
+def component_update_filters(instance, part_type_id):
+    """Overlay options for the Components-updated chart (#52, Hajime's ask).
+
+    One entry per status value present in the mirror for this type (most
+    common first) plus each binary QC flag: ``{key, label, group, ranges}``.
+    Each ``ranges`` holds ONE series — the filtered subset in Chart.js dataset
+    shape — whose labels are computed *together with* the unfiltered baseline
+    so every overlay aligns with the base chart and with each other (the page
+    concatenates any selection of them onto the baseline client-side).
+    Mirror-only; dates bin on ``updated`` with a ``created`` fallback, like
+    the baseline chart.
+    """
+    flag_fields = [f for f, _ in QC_FLAGS]
+    rows = [
+        r for r in HwdbComponentEvent.for_instance(instance)
+        .filter(part_type_id=part_type_id)
+        .values_list("updated", "created", "status", *flag_fields)
+        if (r[0] or r[1]) is not None
+    ]
+    if not rows:
+        return []
+    base_dates = [u or c for u, c, *_ in rows]
+
+    filters = [
+        (f"status:{value}", value, "Status",
+         [r[0] or r[1] for r in rows if r[2] == value])
+        for value, _ in Counter(r[2] for r in rows if r[2]).most_common()
+    ] + [
+        (field, label, "QC flag",
+         [r[0] or r[1] for r in rows if r[3 + i]])
+        for i, (field, label) in enumerate(QC_FLAGS)
+    ]
+    out = []
+    for i, (key, label, group, dates) in enumerate(filters):
+        color = OVERLAY_PALETTE[i % len(OVERLAY_PALETTE)]
+        cfg = chart_config(slug="", name="", href="", ranges=_ranges_for_series([
+            ("All components", COLD_COLOR, base_dates),  # labels only — stripped below
+            (label, color, dates),
+        ]))
+        for r in cfg["ranges"].values():
+            r["bar_datasets"] = r["bar_datasets"][1:]
+            r["line_datasets"] = r["line_datasets"][1:]
+        out.append({"key": key, "label": label, "group": group,
+                    "ranges": cfg["ranges"]})
     return out
 
 

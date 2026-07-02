@@ -249,10 +249,25 @@
             {% if c.empty %}
             <div class="explore-empty" style="padding: 24px 16px;">No {{ c.name|lower }} for this component type yet.</div>
             {% else %}
-            <div class="chart-range-toggle" role="tablist" style="margin-bottom: 12px;">
-                <button type="button" data-range="month" class="chart-range-btn">Last month · daily</button>
-                <button type="button" data-range="3month" class="chart-range-btn">Last 3 months · daily</button>
-                <button type="button" data-range="all" class="chart-range-btn is-active">All · monthly</button>
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;">
+                <div class="chart-range-toggle" role="tablist">
+                    <button type="button" data-range="month" class="chart-range-btn">Last month · daily</button>
+                    <button type="button" data-range="3month" class="chart-range-btn">Last 3 months · daily</button>
+                    <button type="button" data-range="all" class="chart-range-btn is-active">All · monthly</button>
+                </div>
+                {% if c.filters %}
+                <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--faint);">
+                    <label style="display: flex; align-items: center; gap: 6px;">Overlay
+                        <select class="chart-filter-sel" style="font: inherit; color: var(--ink); padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff); max-width: 240px;">
+                            <option value="">— status: none —</option>
+                            {% for f in c.filters %}{% if f.group == "Status" %}<option value="{{ f.key }}">{{ f.label }}</option>{% endif %}{% endfor %}
+                        </select>
+                    </label>
+                    {% for f in c.filters %}{% if f.group == "QC flag" %}
+                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;"><input type="checkbox" class="chart-filter-flag" value="{{ f.key }}">{{ f.label }}</label>
+                    {% endif %}{% endfor %}
+                </div>
+                {% endif %}
             </div>
             <div style="display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px;">
                 <div><div style="font-size: 13px; color: var(--faint); margin-bottom: 6px; font-family: var(--font-mono);">Per period</div><div style="position: relative; height: 260px;"><canvas id="bar_{{ c.slug }}"></canvas></div></div>
@@ -479,15 +494,42 @@
             var barChart = new Chart(document.getElementById('bar_' + c.slug), { type: 'bar', data: { labels: initial.labels, datasets: initial.bar_datasets }, options: commonOpts });
             var lineChart = new Chart(document.getElementById('line_' + c.slug), { type: 'line', data: { labels: initial.labels, datasets: initial.line_datasets }, options: commonOpts });
             var panel = document.querySelector('[data-chart-panel="' + c.slug + '"]'); if (!panel) return;
+            var sel = panel.querySelector('.chart-filter-sel');
+            var flagBoxes = panel.querySelectorAll('.chart-filter-flag');
+            // Selected overlays (#52): one status (dropdown) + any of the QC
+            // flags (checkboxes). Every overlay's labels are precomputed to
+            // align with the baseline, so composing is pure concatenation.
+            function overlayKeys() {
+                var keys = [];
+                if (sel && sel.value) keys.push(sel.value);
+                flagBoxes.forEach(function (b) { if (b.checked) keys.push(b.value); });
+                return keys;
+            }
+            function apply(rangeKey) {
+                var r = c.ranges[rangeKey]; if (!r) return;
+                var bar = r.bar_datasets.slice(), line = r.line_datasets.slice();
+                overlayKeys().forEach(function (k) {
+                    var f = (c.filters || []).find(function (x) { return x.key === k; });
+                    if (!f || !f.ranges[rangeKey]) return;
+                    bar = bar.concat(f.ranges[rangeKey].bar_datasets);
+                    line = line.concat(f.ranges[rangeKey].line_datasets);
+                });
+                barChart.data.labels = r.labels; barChart.data.datasets = bar; barChart.update();
+                lineChart.data.labels = r.labels; lineChart.data.datasets = line; lineChart.update();
+            }
+            function currentRange() {
+                var cur = panel.querySelector('.chart-range-btn.is-active');
+                return cur ? cur.dataset.range : 'all';
+            }
             panel.querySelectorAll('.chart-range-btn').forEach(function (b) {
                 b.addEventListener('click', function () {
-                    var r = c.ranges[b.dataset.range]; if (!r) return;
                     panel.querySelectorAll('.chart-range-btn').forEach(function (x) { x.classList.remove('is-active'); });
                     b.classList.add('is-active');
-                    barChart.data.labels = r.labels; barChart.data.datasets = r.bar_datasets; barChart.update();
-                    lineChart.data.labels = r.labels; lineChart.data.datasets = r.line_datasets; lineChart.update();
+                    apply(b.dataset.range);
                 });
             });
+            if (sel) sel.addEventListener('change', function () { apply(currentRange()); });
+            flagBoxes.forEach(function (b) { b.addEventListener('change', function () { apply(currentRange()); }); });
         });
     }
 
