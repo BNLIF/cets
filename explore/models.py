@@ -1,8 +1,24 @@
 from django.db import models
 
 
-class HierarchyNode(models.Model):
-    """One node of the DUNE hardware structure, mirrored from production HWDB.
+class InstanceScoped(models.Model):
+    """Mirror rows are per HWDB instance (#47): prod and dev share tables,
+    disambiguated by this column — part-type ids are NOT guaranteed disjoint
+    across instances, so every mirror read must scope through
+    ``for_instance()`` rather than raw ``objects``."""
+
+    instance = models.CharField(max_length=8, default="prod", db_index=True)
+
+    class Meta:
+        abstract = True
+
+    @classmethod
+    def for_instance(cls, instance: str):
+        return cls.objects.filter(instance=instance)
+
+
+class HierarchyNode(InstanceScoped):
+    """One node of the DUNE hardware structure, mirrored from one HWDB instance.
 
     The structure-first skeleton that powers the /explore/ tree (ADR-0012,
     generalizing the leaf-only ``ComponentTypeNode`` of ADR-0010). One row per
@@ -66,7 +82,7 @@ class HierarchyNode(models.Model):
         return f"HierarchyNode({self.level}, {self.name})"
 
 
-class HwdbTestEvent(models.Model):
+class HwdbTestEvent(InstanceScoped):
     """One test record for one component, mirrored from production HWDB.
 
     The raw events behind the /explore/ "tests recorded per month" plots
@@ -94,7 +110,7 @@ class HwdbTestEvent(models.Model):
         return f"HwdbTestEvent({self.part_type_id}, {self.test_type_name}, {self.created:%Y-%m-%d})"
 
 
-class HwdbComponentEvent(models.Model):
+class HwdbComponentEvent(InstanceScoped):
     """One component registration for one component type, mirrored from HWDB.
 
     The raw events behind the /explore/ "components updated per month"
@@ -125,7 +141,7 @@ class HwdbComponentEvent(models.Model):
         return f"HwdbComponentEvent({self.part_type_id}, {self.updated:%Y-%m-%d})"
 
 
-class ShipmentItem(models.Model):
+class ShipmentItem(InstanceScoped):
     """One shipping box (an item of a curated shipping-type leaf), mirrored from
     HWDB production (ADR-0013).
 
@@ -174,12 +190,15 @@ class ShipmentItem(models.Model):
 
 
 class HierarchySyncState(models.Model):
-    """Singleton recording the last hierarchy (skeleton) sync run.
+    """One row per HWDB instance recording that instance's last hierarchy
+    (skeleton) sync run.
 
     Surfaces "hierarchy refreshed · 3h ago" and the node/system counts on
-    /explore/. Mirrors the ``hwdb.LarasicSyncState`` singleton pattern.
+    /explore/. Was a singleton (the ``hwdb.LarasicSyncState`` pattern) until
+    the dev instance arrived (#47).
     """
 
+    instance = models.CharField(max_length=8, default="prod", unique=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     systems_count = models.PositiveIntegerField(default=0)
@@ -187,6 +206,6 @@ class HierarchySyncState(models.Model):
     last_error = models.TextField(blank=True, default="")
 
     @classmethod
-    def get(cls):
-        obj, _ = cls.objects.get_or_create(pk=1)
+    def get(cls, instance: str):
+        obj, _ = cls.objects.get_or_create(instance=instance)
         return obj

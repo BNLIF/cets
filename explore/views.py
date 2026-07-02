@@ -20,12 +20,12 @@ from hwdb.api_client import FnalDbApiClient
 from hwdb.fnal import flow
 from hwdb.fnal import session as fnal_session
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
-from hwdb.instance import active_instance
 
 from . import curation, navigation
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, sync_test_events
 from .hierarchy import sync_hierarchy
+from .instances import instance_of, namespace_of
 from .models import (
     HierarchyNode, HierarchySyncState, HwdbComponentEvent, ShipmentItem,
 )
@@ -52,6 +52,12 @@ def _safe_next(request, default):
     return default
 
 
+def _rev(request, viewname, args=None):
+    """``reverse()`` pinned to this request's instance namespace, so a dev-page
+    view reverses explore URLs back onto /hw/dev/ (#47)."""
+    return reverse(viewname, args=args, current_app=namespace_of(instance_of(request)))
+
+
 @login_not_required
 def login_view(request):
     """Sign in with FNAL — the explore site's only login (ADR-0011).
@@ -60,7 +66,7 @@ def login_view(request):
     (in ``login_poll_view``) provisions + logs in a Django user keyed on the
     credkey. An already-authenticated visitor skips straight to ``next``.
     """
-    next_url = _safe_next(request, reverse("explore:home"))
+    next_url = _safe_next(request, _rev(request, "explore:home"))
     if request.user.is_authenticated:
         return redirect(next_url)
     try:
@@ -79,7 +85,7 @@ def login_view(request):
         {
             "auth_url": start.auth_url,
             "user_code": start.user_code,
-            "poll_url": reverse("explore:login_poll"),
+            "poll_url": _rev(request, "explore:login_poll"),
         },
     )
 
@@ -120,7 +126,7 @@ def login_poll_view(request):
     fnal_session.store_link(request, login_result)
     if state.get("login_user"):
         provision_and_login(request, login_result)
-    next_url = state.get("next") or reverse("explore:home")
+    next_url = state.get("next") or _rev(request, "explore:home")
     fnal_session.clear_flow(request)
     return JsonResponse({"status": "ok", "next": next_url})
 
@@ -132,16 +138,17 @@ def explore_tree_view(request):
     System → Subsystem → type tree in one expandable view, built from
     ``curation.yaml`` + the ``HierarchyNode`` mirror. Leaf rows link to their
     explorer page. Mirror-only (no live HWDB); session-login gated."""
+    inst = instance_of(request)
     legacy = request.GET.get("node")  # old /explore/?node=<ptid> deep links
     if legacy:
-        dest = navigation.leaf_path_for(legacy)
+        dest = navigation.leaf_path_for(inst, legacy)
         if dest:
             return redirect(dest)
     return render(request, "explore/tree.html", {
         "active_nav": "hierarchy",
-        "tree": navigation.curated_tree(),
-        "sidebar": navigation.sidebar_tree({}),
-        "sync_state": HierarchySyncState.get(),
+        "tree": navigation.curated_tree(inst),
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "sync_state": HierarchySyncState.get(inst),
     })
 
 
@@ -155,22 +162,23 @@ def explore_view(request, trail=None):
     the local mirror (no live HWDB on render). The legacy ``?node=<ptid>`` link
     permanently redirects to the node's path URL.
     """
+    inst = instance_of(request)
     legacy = request.GET.get("node")
     if legacy:
-        dest = navigation.leaf_path_for(legacy)
+        dest = navigation.leaf_path_for(inst, legacy)
         if dest:
             return redirect(dest)
 
-    view = navigation.resolve(trail)  # raises Http404 on an unknown path
+    view = navigation.resolve(inst, trail)  # raises Http404 on an unknown path
 
     charts = []
     leaf = view.get("leaf")
-    is_shipping = bool(leaf and curation.is_shipping_type(leaf.part_type_id))
+    is_shipping = bool(leaf and curation.is_shipping_type(inst, leaf.part_type_id))
     shipments = shipment_synced_at = shipment_summary = None
     if is_shipping:
         ptid = leaf.part_type_id
         # Only non-empty boxes are mirrored; n_contents>0 guard covers stale rows.
-        rows = list(ShipmentItem.objects.filter(part_type_id=ptid, n_contents__gt=0))
+        rows = list(ShipmentItem.for_instance(inst).filter(part_type_id=ptid, n_contents__gt=0))
         shipments = rows
         # Sync marker on the leaf — NOT inferred from rows, so a synced type with
         # 0 non-empty boxes reads as synced (no auto-sync loop).
@@ -184,7 +192,7 @@ def explore_view(request, trail=None):
         # have no 'updated' so it bins on each box's created date).
         box_chart = chart_config(
             slug=f"{ptid}_comp", name="Boxes over time", href="",
-            ranges=component_update_progress(ptid),
+            ranges=component_update_progress(inst, ptid),
         )
         box_chart["caption"] = "Non-empty shipping boxes by HWDB created date."
         charts = [box_chart]
@@ -192,17 +200,17 @@ def explore_view(request, trail=None):
         ptid = leaf.part_type_id
         comp_chart = chart_config(
             slug=f"{ptid}_comp", name="Components updated", href="",
-            ranges=component_update_progress(ptid),
+            ranges=component_update_progress(inst, ptid),
         )
         comp_chart["caption"] = (
             "By HWDB last-updated date (status change / QC upload bumps it), "
             "not the original mint date."
         )
-        phys = physics_date_field(ptid)
+        phys = physics_date_field(inst, ptid)
         test_chart = chart_config(
             slug=f"{ptid}_test",
             name="Tests performed" if phys else "Tests recorded",
-            href="", ranges=component_type_progress(ptid),
+            href="", ranges=component_type_progress(inst, ptid),
         )
         test_chart["caption"] = (
             f"By physics test date (test_data “{phys}”), faceted by test type."
@@ -218,20 +226,20 @@ def explore_view(request, trail=None):
     parts_page = None
     breakdowns = []
     if leaf and not is_shipping and leaf.tests_synced_at:
-        part_rows = (HwdbComponentEvent.objects
+        part_rows = (HwdbComponentEvent.for_instance(inst)
                      .filter(part_type_id=leaf.part_type_id)
                      .order_by(F("updated").desc(nulls_last=True),
                                F("created").desc(nulls_last=True), "part_id"))
         parts_page = Paginator(part_rows, 50).get_page(request.GET.get("page"))
         # Mirror-only categorical breakdowns (status / manufacturer / institution).
-        breakdowns = component_breakdowns(leaf.part_type_id)
+        breakdowns = component_breakdowns(inst, leaf.part_type_id)
 
     return render(
         request,
         "explore/explore.html",
         {
             "view": view,
-            "sidebar": navigation.sidebar_tree(view["ctx"]),
+            "sidebar": navigation.sidebar_tree(inst, view["ctx"]),
             "leaf": leaf,
             "charts": charts,
             "parts_page": parts_page,
@@ -240,10 +248,9 @@ def explore_view(request, trail=None):
             "shipments": shipments,
             "shipment_synced_at": shipment_synced_at,
             "shipment_summary": shipment_summary,
-            # Mirror is prod-sourced, so deep-link the part type to prod's UI.
-            "hwdb_ui_base": settings.HWDB_PROFILES["prod"]["ui"],
-            "sync_state": HierarchySyncState.get(),
-            "active_instance": active_instance(request),
+            # Deep-link the part type to this instance's FNAL web UI.
+            "hwdb_ui_base": settings.HWDB_PROFILES[inst]["ui"],
+            "sync_state": HierarchySyncState.get(inst),
         },
     )
 
@@ -254,15 +261,16 @@ def shipments_view(request):
     """Top-level Shipments dashboard (Hajime's ask): all boxes across the
     curated shipping types in one view, each linking into the box's existing
     leaf node view. Reads the mirror (skip-empties, like the leaf panel)."""
+    inst = instance_of(request)
     sections, boxes = [], []
     agg = {"total": 0, "in_transit": 0, "delivered": 0}
-    for ptid in sorted(curation.shipping_types()):
-        leaf = HierarchyNode.objects.filter(
+    for ptid in sorted(curation.shipping_types(inst)):
+        leaf = HierarchyNode.for_instance(inst).filter(
             level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
         if not leaf:  # curated but not yet refreshed into the mirror
             continue
-        path = navigation.leaf_path_for(ptid)
-        rows = list(ShipmentItem.objects.filter(part_type_id=ptid, n_contents__gt=0))
+        path = navigation.leaf_path_for(inst, ptid)
+        rows = list(ShipmentItem.for_instance(inst).filter(part_type_id=ptid, n_contents__gt=0))
         in_transit = sum(1 for r in rows if r.location_id == 0)
         delivered = sum(1 for r in rows if r.location_id not in (0, None))
         agg["total"] += len(rows)
@@ -284,11 +292,11 @@ def shipments_view(request):
     page_obj = Paginator(boxes, 50).get_page(request.GET.get("page"))
     return render(request, "explore/shipments.html", {
         "active_nav": "shipments",
-        "sidebar": navigation.sidebar_tree({}),
+        "sidebar": navigation.sidebar_tree(inst, {}),
         "sections": sections,
         "page_obj": page_obj,
         "summary": agg,
-        "hwdb_ui_base": settings.HWDB_PROFILES["prod"]["ui"],
+        "hwdb_ui_base": settings.HWDB_PROFILES[inst]["ui"],
     })
 
 
@@ -296,25 +304,25 @@ def shipments_view(request):
 @fnal_login_required
 @require_POST
 def explore_sync_view(request):
-    """Stream a skeleton (hierarchy) refresh into ``ComponentTypeNode``.
+    """Stream a skeleton (hierarchy) refresh into ``HierarchyNode``.
 
     FNAL-gated; unlinked user is redirected to the link page with a ?next back
-    to /explore/. Reads the production tree regardless of the session instance
-    (the hierarchy is the same shape on dev, but prod is canonical).
+    to /explore/. Reads the tree of the URL's instance (#47).
     """
+    inst = instance_of(request)
     try:
         bearer = mint_for(request)
     except FnalLinkRequired:
         link = reverse("hwdb:link")
-        return redirect(f"{link}?{urlencode({'next': reverse('explore:home'), 'reason': 'expired'})}")
+        return redirect(f"{link}?{urlencode({'next': _rev(request, 'explore:home'), 'reason': 'expired'})}")
     except FnalUnavailable:
         return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
 
-    api = FnalDbApiClient(settings.HWDB_PROFILES["prod"]["api"], bearer)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
 
     def _iter():
         try:
-            yield from sync_hierarchy(api)
+            yield from sync_hierarchy(api, inst)
         except Exception as e:
             logger.exception("explore_sync_view crashed")
             yield f"hierarchy sync: CRASH · {e}\n"
@@ -329,26 +337,28 @@ def explore_node_sync_view(request, part_type_id):
     """Stream a test-event sync for one component type (issue #30).
 
     Lazy per-type sync behind the explorer's plot panel. FNAL-gated; reads the
-    production tree (canonical). The browser fires this automatically on first
-    visit to an unsynced leaf, and on the manual sync-mode buttons.
+    URL's instance (#47). The browser fires this automatically on first visit
+    to an unsynced leaf, and on the manual sync-mode buttons.
     """
+    inst = instance_of(request)
     try:
         bearer = mint_for(request)
     except FnalLinkRequired:
         link = reverse("hwdb:link")
-        nxt = f"{reverse('explore:home')}?node={part_type_id}"
+        nxt = f"{_rev(request, 'explore:home')}?node={part_type_id}"
         return redirect(f"{link}?{urlencode({'next': nxt, 'reason': 'expired'})}")
     except FnalUnavailable:
         return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
 
-    base_url = settings.HWDB_PROFILES["prod"]["api"]
+    base_url = settings.HWDB_PROFILES[inst]["api"]
     mode = request.POST.get("mode", "incremental")
     if mode not in ("incremental", "components", "full"):
         mode = "incremental"
 
     def _iter():
         try:
-            yield from sync_test_events(base_url, bearer, part_type_id, mode=mode)
+            yield from sync_test_events(base_url, bearer, part_type_id,
+                                        instance=inst, mode=mode)
         except Exception as e:
             logger.exception("explore_node_sync_view(%s) crashed", part_type_id)
             yield f"test sync: CRASH · {e}\n"
@@ -363,23 +373,24 @@ def explore_shipment_sync_view(request, part_type_id):
     """Stream a shipment (latest-location) sync for one shipping type (#43).
 
     Mirrors the latest location of each box into ``ShipmentItem``. FNAL-gated;
-    reads production (canonical). Fired automatically on first visit to an
+    reads the URL's instance (#47). Fired automatically on first visit to an
     unsynced shipping leaf, and by the manual "Sync shipments" button.
     """
+    inst = instance_of(request)
     try:
         bearer = mint_for(request)
     except FnalLinkRequired:
         link = reverse("hwdb:link")
-        nxt = f"{reverse('explore:home')}?node={part_type_id}"
+        nxt = f"{_rev(request, 'explore:home')}?node={part_type_id}"
         return redirect(f"{link}?{urlencode({'next': nxt, 'reason': 'expired'})}")
     except FnalUnavailable:
         return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
 
-    base_url = settings.HWDB_PROFILES["prod"]["api"]
+    base_url = settings.HWDB_PROFILES[inst]["api"]
 
     def _iter():
         try:
-            yield from sync_shipments(base_url, bearer, part_type_id)
+            yield from sync_shipments(base_url, bearer, part_type_id, inst)
         except Exception as e:
             logger.exception("explore_shipment_sync_view(%s) crashed", part_type_id)
             yield f"shipment sync: CRASH · {e}\n"
@@ -406,7 +417,7 @@ def explore_shipment_image_view(request, image_id):
     except FnalUnavailable:
         return JsonResponse({"error": "unavailable"}, status=502)
 
-    api = FnalDbApiClient(settings.HWDB_PROFILES["prod"]["api"], bearer)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[instance_of(request)]["api"], bearer)
     try:
         upstream = api.get_image_response(image_id)
     except Exception:
@@ -442,7 +453,7 @@ def explore_test_data_view(request, part_id, test_type_id):
     except FnalUnavailable:
         return JsonResponse({"error": "unavailable"}, status=502)
 
-    api = FnalDbApiClient(settings.HWDB_PROFILES["prod"]["api"], bearer)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[instance_of(request)]["api"], bearer)
     try:
         data = api.get_tests(part_id, test_type_id=test_type_id).get("data")
     except Exception:
@@ -465,6 +476,7 @@ def explore_part_view(request, part_id):
     its shipment lifecycle. FNAL-gated; an unlinked user is bounced to link with
     a ?next back here.
     """
+    inst = instance_of(request)
     try:
         bearer = mint_for(request)
     except FnalLinkRequired:
@@ -473,11 +485,11 @@ def explore_part_view(request, part_id):
     except FnalUnavailable:
         return render(request, "explore/part_detail.html",
                       {"part_id": part_id, "unavailable": True,
-                       "sidebar": navigation.sidebar_tree({})})
+                       "sidebar": navigation.sidebar_tree(inst, {})})
 
     ptid = part_id.rsplit("-", 1)[0]
-    is_shipping = curation.is_shipping_type(ptid)
-    api = FnalDbApiClient(settings.HWDB_PROFILES["prod"]["api"], bearer)
+    is_shipping = curation.is_shipping_type(inst, ptid)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
     try:
         detail = part_detail(api, part_id, is_shipping)
     except Exception as e:
@@ -485,30 +497,31 @@ def explore_part_view(request, part_id):
         return render(request, "explore/part_detail.html",
                       {"part_id": part_id, "unavailable": True,
                        "error_detail": f"{type(e).__name__}: {e}" if settings.DEBUG else None,
-                       "sidebar": navigation.sidebar_tree({})})
+                       "sidebar": navigation.sidebar_tree(inst, {})})
 
     # Catch-all attachments minus the ones already shown in a spec section.
     shown = {a["image_id"] for sec in detail["sections"] for a in sec["attachments"]}
     other_attachments = [a for a in detail["attachments"] if a["image_id"] not in shown]
 
-    leaf = HierarchyNode.objects.filter(
+    leaf = HierarchyNode.for_instance(inst).filter(
         level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
     # Open + highlight this part's component type in the sidebar tree.
     side_ctx = ({"kind": "leaf", "part_type_id": ptid, "system_id": leaf.system_id,
                  "subsystem_id": leaf.subsystem_id} if leaf else {})
-    box = ShipmentItem.objects.filter(part_id=part_id).first() if is_shipping else None
+    box = (ShipmentItem.for_instance(inst).filter(part_id=part_id).first()
+           if is_shipping else None)
     return render(request, "explore/part_detail.html", {
         # A box belongs to the Shipments tab; everything else to Hardware.
         "active_nav": "shipments" if is_shipping else "hardware",
-        "sidebar": navigation.sidebar_tree(side_ctx),
+        "sidebar": navigation.sidebar_tree(inst, side_ctx),
         "part_id": part_id,
         "detail": detail,
         "is_shipping": is_shipping,
         "other_attachments": other_attachments,
         "leaf": leaf,
-        "leaf_path": navigation.leaf_path_for(ptid) if leaf else None,
+        "leaf_path": navigation.leaf_path_for(inst, ptid) if leaf else None,
         "box": box,
-        "hwdb_ui_base": settings.HWDB_PROFILES["prod"]["ui"],
+        "hwdb_ui_base": settings.HWDB_PROFILES[inst]["ui"],
     })
 
 
@@ -525,7 +538,7 @@ def explore_assembly_view(request, part_id):
     except FnalUnavailable:
         return JsonResponse({"error": "unavailable"}, status=502)
 
-    api = FnalDbApiClient(settings.HWDB_PROFILES["prod"]["api"], bearer)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[instance_of(request)]["api"], bearer)
     try:
         children = assembly_children(api, part_id)
     except Exception:
@@ -533,7 +546,8 @@ def explore_assembly_view(request, part_id):
         return JsonResponse({"error": "fetch_failed"}, status=502)
 
     for c in children:
-        c["url"] = reverse("explore:part", args=[c["part_id"]]) if c.get("part_id") else None
+        c["url"] = (_rev(request, "explore:part", args=[c["part_id"]])
+                    if c.get("part_id") else None)
     return JsonResponse({"children": children})
 
 
@@ -549,7 +563,7 @@ def explore_search_view(request):
     FNAL needed; live cross-field 'advanced' search is a later addition."""
     return render(request, "explore/search.html",
                   {"active_nav": "search", "q": request.GET.get("q", ""),
-                   "sidebar": navigation.sidebar_tree({})})
+                   "sidebar": navigation.sidebar_tree(instance_of(request), {})})
 
 
 @login_not_required
@@ -562,14 +576,15 @@ def explore_search_api_view(request):
     if len(q) < 2:
         return JsonResponse({"types": [], "parts": [], "direct_part": None})
 
+    inst = instance_of(request)
     types = []
-    type_qs = (HierarchyNode.objects
+    type_qs = (HierarchyNode.for_instance(inst)
                .filter(level=HierarchyNode.LEVEL_TYPE)
                .filter(Q(name__icontains=q) | Q(part_type_id__icontains=q)
                        | Q(full_name__icontains=q))
                .order_by("system_name", "subsystem_name", "name")[:25])
     for n in type_qs:
-        path = navigation.leaf_path_for(n.part_type_id)
+        path = navigation.leaf_path_for(inst, n.part_type_id)
         if path:  # only types whose curated family is browsable are reachable
             types.append({
                 "name": n.name, "part_type_id": n.part_type_id,
@@ -579,8 +594,8 @@ def explore_search_api_view(request):
 
     parts = [
         {"part_id": pid, "part_type_id": ptid, "serial_number": serial,
-         "path": reverse("explore:part", args=[pid])}
-        for pid, ptid, serial in (HwdbComponentEvent.objects
+         "path": _rev(request, "explore:part", args=[pid])}
+        for pid, ptid, serial in (HwdbComponentEvent.for_instance(inst)
                                   .filter(Q(part_id__icontains=q)
                                           | Q(serial_number__icontains=q))
                                   .order_by("part_id")
@@ -589,5 +604,5 @@ def explore_search_api_view(request):
     direct = q if _PID_RE.match(q) else None
     return JsonResponse({
         "types": types, "parts": parts, "direct_part": direct,
-        "direct_part_url": reverse("explore:part", args=[direct]) if direct else None,
+        "direct_part_url": _rev(request, "explore:part", args=[direct]) if direct else None,
     })

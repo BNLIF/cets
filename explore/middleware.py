@@ -58,6 +58,23 @@ def _static_prefix() -> str:
     return url if url.startswith("/") else "/" + url
 
 
+class ExploreInstanceMiddleware:
+    """Pin template ``{% url %}`` reversing to the request's explore instance
+    namespace (#47), so every link rendered on a /hw/dev/ page stays on
+    /hw/dev/ without touching the templates."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        return self.get_response(request)
+
+    def process_view(self, request, view_func, view_args, view_kwargs):
+        rm = request.resolver_match
+        if rm is not None and rm.app_name == "explore":
+            request.current_app = rm.namespace
+
+
 class CetsZoneMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response

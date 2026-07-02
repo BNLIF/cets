@@ -76,7 +76,7 @@ class Command(BaseCommand):
             (body.get("data") or []), key=lambda s: s.get("id") or 0
         )
 
-        curated = curation.curated_system_ids()
+        curated = curation.curated_system_ids(opts["instance"])
         live_ids = {s.get("id") for s in systems}
 
         # Per-system: curated vs in-HWDB-but-not-curated.

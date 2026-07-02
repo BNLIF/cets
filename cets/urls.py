@@ -27,6 +27,10 @@ urlpatterns = [
     path("reference/", views.reference, name="reference"),
     path("search/typeahead/", views.search_typeahead, name="search_typeahead"),
     path("hwdb/", include("hwdb.urls")),
+    # The explorer serves both HWDB instances (#47): dev at /hw/dev/, prod at
+    # /hw/. Same URLconf under two instance namespaces; dev must be listed
+    # first or /hw/'s trailing <path:trail> catch-all would swallow it.
+    path("hw/dev/", include("explore.urls", namespace="explore_dev")),
     path("hw/", include("explore.urls")),
     # Old /explore/<rest> links → /hw/<rest> (path-preserving, honors script name).
     re_path(r"^explore/(?P<rest>.*)$", _legacy_redirect("explore:home")),

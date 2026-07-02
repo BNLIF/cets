@@ -72,7 +72,10 @@ def fnal_login_required(view):
     @wraps(view)
     def wrapper(request, *args, **kwargs):
         if not request.user.is_authenticated:
-            login_url = reverse("explore:login")
+            # current_app (set by ExploreInstanceMiddleware) keeps a /hw/dev/
+            # visitor on the dev-prefixed login page (#47).
+            login_url = reverse("explore:login",
+                                current_app=getattr(request, "current_app", None))
             return redirect(f"{login_url}?{urlencode({'next': request.get_full_path()})}")
         return view(request, *args, **kwargs)
 

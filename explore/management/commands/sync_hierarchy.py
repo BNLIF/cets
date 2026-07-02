@@ -62,7 +62,7 @@ class Command(BaseCommand):
                 )
 
         api = FnalDbApiClient(settings.HWDB_PROFILES[opts["instance"]]["api"], bearer)
-        for line in sync_hierarchy(api):
+        for line in sync_hierarchy(api, opts["instance"]):
             self.stdout.write(line.rstrip())
 
     def _login(self) -> str:

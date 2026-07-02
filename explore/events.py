@@ -32,18 +32,18 @@ logger = logging.getLogger(__name__)
 _DEFAULT_WORKERS = 20
 
 
-def physics_date_field(part_type_id: str) -> str | None:
+def physics_date_field(instance: str, part_type_id: str) -> str | None:
     """The ``test_data`` field holding the real (physics) test date for this
     component type, or ``None`` if we don't know one (→ fall back to the HWDB
     record ``created`` stamp). The deferred refinement of ADR-0010: only the CE
     chip families are mapped today; other consortia stay on ``created`` until
     their datasheet date field is validated.
     """
-    prod = settings.HWDB_PROFILES["prod"]
+    profile = settings.HWDB_PROFILES[instance]
     ce_chip_types = {
-        prod["larasic_part_type"],
-        prod["coldadc_part_type"],
-        prod["coldata_part_type"],
+        profile["larasic_part_type"],
+        profile["coldadc_part_type"],
+        profile["coldata_part_type"],
     }
     return "Test Date" if part_type_id in ce_chip_types else None
 
@@ -155,6 +155,7 @@ def sync_test_events(
     bearer: str,
     part_type_id: str,
     *,
+    instance: str = "prod",
     mode: str = "incremental",
     workers: int = _DEFAULT_WORKERS,
 ) -> Iterator[str]:
@@ -172,7 +173,7 @@ def sync_test_events(
     - ``full``: re-fetch everything — detail + all tests — for all components.
     """
     try:
-        node = HierarchyNode.objects.get(
+        node = HierarchyNode.for_instance(instance).get(
             level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id
         )
     except HierarchyNode.DoesNotExist:
@@ -184,7 +185,7 @@ def sync_test_events(
 
     bootstrap = FnalDbApiClient(api_base_url, bearer)
     try:
-        date_field = physics_date_field(part_type_id)
+        date_field = physics_date_field(instance, part_type_id)
         test_type_ids = (
             _resolve_test_types(bootstrap, part_type_id) if date_field else {}
         )
@@ -198,7 +199,7 @@ def sync_test_events(
         part_ids = list(_list_part_ids(bootstrap, part_type_id))
         listing_set = set(part_ids)
         known = set(
-            HwdbComponentEvent.objects.filter(part_type_id=part_type_id)
+            HwdbComponentEvent.for_instance(instance).filter(part_type_id=part_type_id)
             .values_list("part_id", flat=True)
         )
         new = listing_set - known
@@ -244,17 +245,17 @@ def sync_test_events(
 
         # --- Test events ---
         if mode == "full":
-            HwdbTestEvent.objects.filter(part_type_id=part_type_id).delete()
+            HwdbTestEvent.for_instance(instance).filter(part_type_id=part_type_id).delete()
         else:
             # append for the (new) components we fetched tests for; clear any
             # stale rows for exactly those first so a retry can't double-insert.
             fetched_test_pids = [r["part_id"] for r in results if r["has_tests"]]
-            HwdbTestEvent.objects.filter(
+            HwdbTestEvent.for_instance(instance).filter(
                 part_type_id=part_type_id, part_id__in=fetched_test_pids
             ).delete()
         new_test_rows = [
-            HwdbTestEvent(part_type_id=part_type_id, part_id=r["part_id"],
-                          test_type_name=name, created=dt)
+            HwdbTestEvent(instance=instance, part_type_id=part_type_id,
+                          part_id=r["part_id"], test_type_name=name, created=dt)
             for r in results if r["has_tests"]
             for name, dt in r["tests"]
         ]
@@ -265,10 +266,11 @@ def sync_test_events(
         # full/components fetch detail for ALL → rewrite wholesale; incremental
         # keeps existing rows and appends only the new components.
         if mode in ("full", "components"):
-            HwdbComponentEvent.objects.filter(part_type_id=part_type_id).delete()
+            HwdbComponentEvent.for_instance(instance).filter(part_type_id=part_type_id).delete()
         HwdbComponentEvent.objects.bulk_create(
             [
                 HwdbComponentEvent(
+                    instance=instance,
                     part_type_id=part_type_id, part_id=r["part_id"],
                     created=r["created"], updated=r["updated"],
                     serial_number=r.get("serial_number", ""),
@@ -282,7 +284,7 @@ def sync_test_events(
             batch_size=1000,
         )
 
-        n_tests = HwdbTestEvent.objects.filter(part_type_id=part_type_id).count()
+        n_tests = HwdbTestEvent.for_instance(instance).filter(part_type_id=part_type_id).count()
         node.tests_synced_at = timezone.now()
         node.n_tests = n_tests
         node.n_components = len(part_ids) or node.n_components

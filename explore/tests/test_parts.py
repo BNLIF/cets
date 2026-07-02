@@ -321,7 +321,7 @@ class LeafPartsTableTest(TestCase):
                 part_type_id=self.leaf.part_type_id,
                 part_id=f"{self.leaf.part_type_id}-{i:05d}", created=timezone.now(),
                 serial_number=f"SN-{i:05d}", created_by="Alex Wagner")
-        self.url = navigation.leaf_path_for(self.leaf.part_type_id)
+        self.url = navigation.leaf_path_for("prod", self.leaf.part_type_id)
 
     def test_lists_parts_paginated_50_with_part_links(self):
         html = self.client.get(self.url).content.decode()

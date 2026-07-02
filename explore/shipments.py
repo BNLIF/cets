@@ -177,7 +177,8 @@ def _list_boxes(api, part_type_id: str) -> list[tuple[str, str | None]]:
         page += 1
 
 
-def sync_shipments(api_base_url: str, bearer: str, part_type_id: str) -> Iterator[str]:
+def sync_shipments(api_base_url: str, bearer: str, part_type_id: str,
+                   instance: str = "prod") -> Iterator[str]:
     """Mirror non-empty boxes of one shipping type. Generator yielding progress.
 
     For each box (in parallel) reads its latest location + current contents;
@@ -224,27 +225,27 @@ def sync_shipments(api_base_url: str, bearer: str, part_type_id: str) -> Iterato
         loc = (latest or {}).get("location") or {}
         shipped, received = shipped_received(locs)
         ship_rows.append(ShipmentItem(
-            part_type_id=part_type_id, part_id=pid,
+            instance=instance, part_type_id=part_type_id, part_id=pid,
             location_name=loc.get("name") or "", location_id=loc.get("id"),
             n_contents=len(manifest),
             last_arrived=_parse_dt((latest or {}).get("arrived")),
             shipped_date=shipped, received_date=received,
         ))
         comp_rows.append(HwdbComponentEvent(
-            part_type_id=part_type_id, part_id=pid,
+            instance=instance, part_type_id=part_type_id, part_id=pid,
             created=_parse_dt(created_by_pid.get(pid)), updated=None,
         ))
 
-    ShipmentItem.objects.filter(part_type_id=part_type_id).delete()
+    ShipmentItem.for_instance(instance).filter(part_type_id=part_type_id).delete()
     if ship_rows:
         ShipmentItem.objects.bulk_create(ship_rows, batch_size=1000)
-    HwdbComponentEvent.objects.filter(part_type_id=part_type_id).delete()
+    HwdbComponentEvent.for_instance(instance).filter(part_type_id=part_type_id).delete()
     if comp_rows:
         HwdbComponentEvent.objects.bulk_create(comp_rows, batch_size=1000)
 
     # Mark the leaf synced even when 0 non-empty boxes — so the page stops
     # auto-syncing (NULL would read as "never synced" and re-trigger forever).
-    HierarchyNode.objects.filter(
+    HierarchyNode.for_instance(instance).filter(
         level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id
     ).update(shipments_synced_at=timezone.now())
 

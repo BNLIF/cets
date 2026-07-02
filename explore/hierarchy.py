@@ -44,22 +44,26 @@ def _with_retry(fn, item):
     raise last
 
 
-def _pool_map(fn, items):
+def _pool_map(fn, items, collect_errors=False):
     """Run ``fn(item)`` over ``items`` across the worker pool (with retries);
     return ``[(item, result), …]``. If **any** item still fails after retries,
     raise — so the caller aborts before pruning rather than overwriting good
-    data with a partial walk (the serial walk's all-or-nothing safety). ORM
-    writes stay on the main thread (SQLite-safe), as in ``events``."""
+    data with a partial walk (the serial walk's all-or-nothing safety). With
+    ``collect_errors=True`` return ``(results, [(item, error), …])`` instead of
+    raising — for phases whose per-item result is cosmetic (component counts)
+    and mustn't let one upstream bug fail the whole walk. ORM writes stay on
+    the main thread (SQLite-safe), as in ``events``."""
     out, errors = [], []
-    if not items:
-        return out
-    with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
-        futs = {pool.submit(_with_retry, fn, it): it for it in items}
-        for fut in as_completed(futs):
-            try:
-                out.append((futs[fut], fut.result()))
-            except Exception as e:  # noqa: BLE001
-                errors.append((futs[fut], e))
+    if items:
+        with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
+            futs = {pool.submit(_with_retry, fn, it): it for it in items}
+            for fut in as_completed(futs):
+                try:
+                    out.append((futs[fut], fut.result()))
+                except Exception as e:  # noqa: BLE001
+                    errors.append((futs[fut], e))
+    if collect_errors:
+        return out, errors
     if errors:
         raise RuntimeError(
             f"{len(errors)}/{len(items)} hierarchy fetch(es) failed after retries "
@@ -85,16 +89,18 @@ def _count_components(api, part_type_id: str) -> int:
     return len(body.get("data") or [])
 
 
-def sync_hierarchy(api, project: str = "D") -> Iterator[str]:
-    """Walk the curated systems into the ``HierarchyNode`` structure mirror.
+def sync_hierarchy(api, instance: str = "prod", project: str = "D") -> Iterator[str]:
+    """Walk one instance's curated systems into the ``HierarchyNode`` mirror.
+    The caller's ``api`` client must point at the same instance (#47).
 
     Records a node for every System, Subsystem, and Component Type — including
     empty systems/subsystems (so a system registered upstream with no component
     types is still navigable, ADR-0012). Leaf test-sync state
     (``tests_synced_at``/``n_tests``) is preserved across re-syncs. Prunes nodes
-    that have disappeared after a clean full walk. Yields progress lines.
+    that have disappeared after a clean full walk — within this instance only.
+    Yields progress lines.
     """
-    state = HierarchySyncState.get()
+    state = HierarchySyncState.get(instance)
     state.started_at = timezone.now()
     state.finished_at = None
     state.last_error = ""
@@ -119,7 +125,7 @@ def sync_hierarchy(api, project: str = "D") -> Iterator[str]:
     leaves = 0
     try:
         sys_body = api.get_systems(project)
-        curated = curation.curated_system_ids()
+        curated = curation.curated_system_ids(instance)
         systems = [
             s for s in (sys_body.get("data") or [])
             if s.get("id") in curated
@@ -151,14 +157,24 @@ def sync_hierarchy(api, project: str = "D") -> Iterator[str]:
         yield f"  {len(all_ptids)} component types across {len(sub_tasks)} subsystems\n"
 
         # Phase 3: true component count per leaf (the bulk of the calls).
-        counts = {p: n for p, n in _pool_map(lambda p: _count_components(_client(), p), all_ptids)}
-        yield f"  counted components for {len(all_ptids)} types\n"
+        # Tolerant: a count that still fails after retries (e.g. the dev HWDB's
+        # own response-validation 500s on category "box" rows) keeps the leaf
+        # with its previous count instead of aborting the walk — the leaf's
+        # identity came from phase 2, so prune safety is unaffected.
+        count_pairs, count_errors = _pool_map(
+            lambda p: _count_components(_client(), p), all_ptids, collect_errors=True)
+        counts = {p: n for p, n in count_pairs}
+        yield f"  counted components for {len(counts)}/{len(all_ptids)} types\n"
+        for p, e in count_errors:
+            logger.warning("hierarchy: component count failed for %s: %s", p, e)
+            yield f"  WARNING: count failed for {p} (leaf kept, previous count retained)\n"
 
         # --- Serial write phase (main thread — SQLite-safe) ---
         for s in systems:
             sid = s.get("id")
             sname = s.get("name") or ""
             sys_node, _ = HierarchyNode.objects.update_or_create(
+                instance=instance,
                 level=HierarchyNode.LEVEL_SYSTEM, system_id=sid, subsystem_id=None,
                 part_type_id="",
                 defaults={"project": project, "system_name": sname, "name": sname},
@@ -169,6 +185,7 @@ def sync_hierarchy(api, project: str = "D") -> Iterator[str]:
                 ssid = ss.get("subsystem_id")
                 ssname = ss.get("subsystem_name") or ""
                 sub_node, _ = HierarchyNode.objects.update_or_create(
+                    instance=instance,
                     level=HierarchyNode.LEVEL_SUBSYSTEM, system_id=sid,
                     subsystem_id=ssid, part_type_id="",
                     defaults={
@@ -186,15 +203,18 @@ def sync_hierarchy(api, project: str = "D") -> Iterator[str]:
                     full = ct.get("full_name") or ""
                     leaf = full.split(".")[-1].strip() if full else ptid
                     # defaults exclude the test-sync fields so they survive re-sync.
+                    defaults = {
+                        "parent": sub_node, "project": project,
+                        "system_id": sid, "system_name": sname,
+                        "subsystem_id": ssid, "subsystem_name": ssname,
+                        "name": leaf, "full_name": full,
+                    }
+                    if ptid in counts:  # a failed count keeps the previous value
+                        defaults["n_components"] = counts[ptid]
                     type_node, _ = HierarchyNode.objects.update_or_create(
+                        instance=instance,
                         level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid,
-                        defaults={
-                            "parent": sub_node, "project": project,
-                            "system_id": sid, "system_name": sname,
-                            "subsystem_id": ssid, "subsystem_name": ssname,
-                            "name": leaf, "full_name": full,
-                            "n_components": counts.get(ptid, 0),
-                        },
+                        defaults=defaults,
                     )
                     seen.add(type_node.pk)
                     leaves += 1
@@ -202,7 +222,7 @@ def sync_hierarchy(api, project: str = "D") -> Iterator[str]:
                     yield f"    {ssname}: {len(cts)} component types\n"
             systems_done += 1
 
-        stale = HierarchyNode.objects.exclude(pk__in=seen)
+        stale = HierarchyNode.for_instance(instance).exclude(pk__in=seen)
         n_stale = stale.count()
         stale.delete()
 

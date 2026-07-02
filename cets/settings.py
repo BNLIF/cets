@@ -80,6 +80,8 @@ MIDDLEWARE = [
     # Two-zone guard: keep FNAL-provisioned explore users out of the CETS zone
     # (ADR-0011). After auth/login so it only judges authenticated users.
     "explore.middleware.CetsZoneMiddleware",
+    # Pin {% url %} reversing to the URL's explore instance (/hw/ vs /hw/dev/).
+    "explore.middleware.ExploreInstanceMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django_htmx.middleware.HtmxMiddleware",
@@ -154,6 +156,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "hwdb.context_processors.fnal_link",
+                "explore.context_processors.instance",
             ],
         },
     },

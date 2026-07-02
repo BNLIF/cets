@@ -1,56 +1,81 @@
 # Curated DUNE hardware taxonomy for the explorer (ADR-0012).
 #
-# Source of truth for what is browsable: Region → Family → member HWDB system
-# ids. Only systems listed under a browsable family are walked by the refresh
-# and shown in the tree. Families/regions with `curated: false` are declared
-# placeholders — they render dimmed ("not curated") so the audit→curate loop
-# has somewhere to land, but aren't browsable and pull no data.
+# Source of truth for what is browsable, per HWDB instance (#47): prod backs
+# /hw/, dev backs /hw/dev/. Under each instance: Region → Family → member HWDB
+# system ids. Only systems listed under a browsable family are walked by the
+# refresh and shown in the tree. Families/regions with `curated: false` are
+# declared placeholders — they render dimmed ("not curated") so the
+# audit→curate loop has somewhere to land, but aren't browsable and pull no
+# data. System ids (and part-type ids) are per-instance — never copy them
+# across instance blocks.
 #
-# Run `python manage.py list_systems` to audit this against live HWDB and see
-# what's newly available to curate (issue #39). System ids are the `id` field
-# of `systems/D`.
+# Run `python manage.py list_systems [--instance dev]` to audit a block
+# against live HWDB and see what's newly available to curate (issue #39).
+# System ids are the `id` field of `systems/D`.
 
 # `key` is the stable URL slug for each region/family (used in deep links like
 # /explore/FD/FD-VD/57/2/D05700200001). Keep keys stable across edits.
-regions:
-  - name: Far Detector
-    key: FD
-    families:
-      - name: FD-VD
-        key: FD-VD
-        sub: Vertical Drift
-        systems: [51, 54, 55, 56, 57, 58, 59, 80]
-      - name: FD CE
-        key: FD-CE
-        sub: Cold Electronics            # single system → flattened in the tree
-        systems: [81]
-      - name: FD-HD
-        key: FD-HD
-        sub: Horizontal Drift
-        systems: [1, 3, 4, 5, 8, 9]
-      - name: FD Common
-        key: FD-shared            # key stays stable so deep links don't break
-        sub: DAQ · Slow Control · Cryostat · Integration · Installation
-        systems: [82, 83, 85, 86, 600]
-      - name: FS
-        key: FS
-        sub: Far Site · Safety · BSI · Cryogenics · Networking
-        systems: [200, 201, 300, 400]
+instances:
+  prod:
+    regions:
+      - name: Far Detector
+        key: FD
+        families:
+          - name: FD-VD
+            key: FD-VD
+            sub: Vertical Drift
+            systems: [51, 54, 55, 56, 57, 58, 59, 80]
+          - name: FD CE
+            key: FD-CE
+            sub: Cold Electronics            # single system → flattened in the tree
+            systems: [81]
+          - name: FD-HD
+            key: FD-HD
+            sub: Horizontal Drift
+            systems: [1, 3, 4, 5, 8, 9]
+          - name: FD Common
+            key: FD-shared            # key stays stable so deep links don't break
+            sub: DAQ · Slow Control · Cryostat · Integration · Installation
+            systems: [82, 83, 85, 86, 600]
+          - name: FS
+            key: FS
+            sub: Far Site · Safety · BSI · Cryogenics · Networking
+            systems: [200, 201, 300, 400]
 
-  - name: Near Detector
-    key: ND
-    curated: false
-    note: "9 systems in HWDB · not curated"
+      - name: Near Detector
+        key: ND
+        curated: false
+        note: "9 systems in HWDB · not curated"
 
-  - name: Other
-    key: OT
-    curated: false
-    note: "Facilities · Computing · Prototypes · not curated"
+      - name: Other
+        key: OT
+        curated: false
+        note: "Facilities · Computing · Prototypes · not curated"
 
-# Component-type leaves whose items are physical shipping boxes (ADR-0013).
-# Such a leaf shows a Shipments panel (location tracking) instead of test plots.
-# Discover candidates with `python manage.py list_shippable` (issue #46).
-shipping_types:
-  - D08120200001   # FD CE › CE Shipping Box › "CE Shipping box"
-  - D05700600003   # FD-VD TDE › Shipping › "Electronics box" (audit #46)
-  - D05700600006   # FD-VD TDE › Shipping › "FEB container" (audit #46)
+    # Component-type leaves whose items are physical shipping boxes (ADR-0013).
+    # Such a leaf shows a Shipments panel (location tracking) instead of test plots.
+    # Discover candidates with `python manage.py list_shippable` (issue #46).
+    shipping_types:
+      - D08120200001   # FD CE › CE Shipping Box › "CE Shipping box"
+      - D05700600003   # FD-VD TDE › Shipping › "Electronics box" (audit #46)
+      - D05700600006   # FD-VD TDE › Shipping › "FEB container" (audit #46)
+
+  dev:
+    # Audited via `list_systems --instance dev` 2026-07-02: dev mirrors prod's
+    # system list (47 systems). System 5 (FD1-HD HVS) hosts the sandbox
+    # subsystems 997 "QAQCTest" and 998 "HWDBUnitTest" — Hajime's test entries,
+    # incl. D00599800007 "Test Type 007" (his ship/receive demos) and the
+    # upstream-broken D00599800023 "TestType023-Boxes" (dev API 500s on it).
+    # Grow this block as other dev areas become interesting; the rest lands
+    # via the uncurated-overflow section (#49).
+    regions:
+      - name: Development
+        key: DEV
+        families:
+          - name: FD1-HD HVS
+            key: DEV-ship          # key kept stable — deep links already exist
+            sub: incl. HWDBUnitTest sandbox (Hajime's test entries)
+            systems: [5]
+
+    # Dev shipping-type leaves land with #48.
+    shipping_types: []

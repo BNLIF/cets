@@ -67,11 +67,11 @@ def _fake_client(items, locs_by_pid, subs_by_pid=None):
 
 class CurationTest(TestCase):
     def test_anchor_is_shipping_type(self):
-        self.assertIn(SHIP_PTID, curation.shipping_types())
-        self.assertTrue(curation.is_shipping_type(SHIP_PTID))
+        self.assertIn(SHIP_PTID, curation.shipping_types("prod"))
+        self.assertTrue(curation.is_shipping_type("prod", SHIP_PTID))
 
     def test_other_type_is_not_shipping(self):
-        self.assertFalse(curation.is_shipping_type("D05700200001"))
+        self.assertFalse(curation.is_shipping_type("prod", "D05700200001"))
 
 
 class LatestLocationTest(TestCase):
@@ -218,7 +218,7 @@ class ShipmentPanelViewTest(TestCase):
                                     location_name="In Transit", location_id=0, n_contents=3)
         ShipmentItem.objects.create(part_type_id=leaf.part_type_id, part_id="B2",
                                     location_name="FNAL", location_id=1, n_contents=5)
-        html = self.client.get(navigation.leaf_path_for(leaf.part_type_id)).content.decode()
+        html = self.client.get(navigation.leaf_path_for("prod", leaf.part_type_id)).content.decode()
         self.assertIn("Sync shipments", html)
         self.assertIn("B1", html)
         self.assertIn("In Transit", html)
@@ -234,14 +234,14 @@ class ShipmentPanelViewTest(TestCase):
                                     location_name="FNAL", location_id=1, n_contents=4)
         ShipmentItem.objects.create(part_type_id=leaf.part_type_id, part_id="EMPTY",
                                     location_name="FNAL", location_id=1, n_contents=0)
-        html = self.client.get(navigation.leaf_path_for(leaf.part_type_id)).content.decode()
+        html = self.client.get(navigation.leaf_path_for("prod", leaf.part_type_id)).content.decode()
         self.assertIn("FULL", html)
         self.assertNotIn("EMPTY", html)
         self.assertIn("Boxes (1)", html)  # only the non-empty box counted
 
     def test_unsynced_shipping_leaf_shows_autosync_block(self):
         leaf = _ship_leaf(synced=False)
-        html = self.client.get(navigation.leaf_path_for(leaf.part_type_id)).content.decode()
+        html = self.client.get(navigation.leaf_path_for("prod", leaf.part_type_id)).content.decode()
         self.assertIn('id="shipment-unsynced"', html)
 
     def test_synced_but_empty_does_not_loop(self):
@@ -249,7 +249,7 @@ class ShipmentPanelViewTest(TestCase):
         # auto-sync block (which would reload-loop forever). Regression for the
         # Electronics-box bug.
         leaf = _ship_leaf(synced=True)  # no ShipmentItems created
-        html = self.client.get(navigation.leaf_path_for(leaf.part_type_id)).content.decode()
+        html = self.client.get(navigation.leaf_path_for("prod", leaf.part_type_id)).content.decode()
         self.assertNotIn('id="shipment-unsynced"', html)
         self.assertIn("No boxes with contents here", html)
 
@@ -259,7 +259,7 @@ class ShipmentPanelViewTest(TestCase):
                                     location_name="In Transit", location_id=0, n_contents=7)
         ShipmentItem.objects.create(part_type_id=leaf.part_type_id, part_id="B2",
                                     location_name="CERN", location_id=200, n_contents=2)
-        html = self.client.get(navigation.leaf_path_for(leaf.part_type_id)).content.decode()
+        html = self.client.get(navigation.leaf_path_for("prod", leaf.part_type_id)).content.decode()
         self.assertIn("Boxes with contents", html)
         self.assertIn("ship-pill is-transit", html)
         self.assertIn("ship-pill is-delivered", html)
@@ -270,7 +270,7 @@ class ShipmentPanelViewTest(TestCase):
         leaf = _ship_leaf()
         ShipmentItem.objects.create(part_type_id=leaf.part_type_id, part_id="B1",
                                     location_name="FNAL", location_id=1, n_contents=1)
-        html = self.client.get(navigation.leaf_path_for(leaf.part_type_id)).content.decode()
+        html = self.client.get(navigation.leaf_path_for("prod", leaf.part_type_id)).content.decode()
         self.assertIn('class="ship-row"', html)
         self.assertIn("/hw/part/B1/", html)  # row click → part detail page
 
@@ -278,7 +278,7 @@ class ShipmentPanelViewTest(TestCase):
         leaf = _ship_leaf()
         ShipmentItem.objects.create(part_type_id=leaf.part_type_id, part_id="B1",
                                     location_name="FNAL", location_id=1, n_contents=1)
-        html = self.client.get(navigation.leaf_path_for(leaf.part_type_id)).content.decode()
+        html = self.client.get(navigation.leaf_path_for("prod", leaf.part_type_id)).content.decode()
         self.assertIn("/hw/part/B1/", html)              # box PID → local part page
         self.assertNotIn("/edit/component/B1", html)          # not the FNAL deep link
         self.assertIn("event.stopPropagation()", html)        # link doesn't trigger the row
@@ -427,7 +427,7 @@ class ShipmentDetailPageTest(TestCase):
         self.assertIn("Not recorded yet.", body)           # empty stage placeholder
         self.assertIn("Shipping Sheet", body)              # download chip label
         self.assertIn("label.pdf", body)                   # real filename in ?name=
-        self.assertIn(navigation.leaf_path_for(SHIP_PTID), body)  # breadcrumb back to leaf
+        self.assertIn(navigation.leaf_path_for("prod", SHIP_PTID), body)  # breadcrumb back to leaf
 
     def test_fnal_link_required_redirects(self):
         with mock.patch("explore.views.mint_for", side_effect=FnalLinkRequired()):
@@ -503,7 +503,7 @@ class ShipmentsPageTest(TestCase):
         self.assertIn("B1", html)
         self.assertIn("B2", html)
         # each box links into the existing leaf node view
-        self.assertIn(navigation.leaf_path_for(self.leaf.part_type_id), html)
+        self.assertIn(navigation.leaf_path_for("prod", self.leaf.part_type_id), html)
         self.assertIn("ship-pill is-transit", html)
         self.assertIn("ship-pill is-delivered", html)
 

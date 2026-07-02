@@ -257,6 +257,12 @@
           .bd-chart-wrap { position: relative; height: 200px; }
         </style>
         {% endif %}
+    {% elif leaf.tests_sync_error %}
+    {# Don't auto-retry a failing sync (e.g. an upstream 500) — that loops. #}
+    <div class="explore-empty">
+        <p>Test events not synced yet.</p>
+        <p class="cell-muted">The last sync failed (error above) — retry with the sync buttons.</p>
+    </div>
     {% else %}
     <div class="explore-empty" id="node-unsynced" data-sync-url="{% url 'explore:node_sync' part_type_id=leaf.part_type_id %}">
         <p>Test events not synced yet.</p>
@@ -359,7 +365,12 @@
     }
     syncBtns.forEach(function (b) { b.addEventListener("click", function () { nodeSync(b.dataset.syncUrl, b.dataset.mode); }); });
     var unsynced = document.getElementById("node-unsynced");
-    if (unsynced) { nodeSync(unsynced.dataset.syncUrl, "incremental"); }
+    if (unsynced) {
+        // One-shot per tab+path: even if a sync persists no marker/error
+        // (crash mid-stream), never loop.
+        var nk = "nodeAutoSynced:" + location.pathname;
+        if (!sessionStorage.getItem(nk)) { sessionStorage.setItem(nk, "1"); nodeSync(unsynced.dataset.syncUrl, "incremental"); }
+    }
 
     // Shipments (latest-location) sync — same streaming pattern as node sync.
     var shipLog = document.getElementById("shipment-sync-log");

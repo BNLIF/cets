@@ -35,14 +35,19 @@ class Command(BaseCommand):
             "--system", type=int,
             help="Restrict to one system id (default: all curated systems).",
         )
+        parser.add_argument(
+            "--instance", default="prod",
+            help="HWDB instance whose mirror to audit (default: prod).",
+        )
 
     def handle(self, *args, **opts):
         match = opts["match"].lower()
-        qs = HierarchyNode.objects.filter(level=HierarchyNode.LEVEL_TYPE)
+        instance = opts["instance"]
+        qs = HierarchyNode.for_instance(instance).filter(level=HierarchyNode.LEVEL_TYPE)
         if opts.get("system") is not None:
             qs = qs.filter(system_id=opts["system"])
         else:
-            qs = qs.filter(system_id__in=curation.curated_system_ids())
+            qs = qs.filter(system_id__in=curation.curated_system_ids(instance))
         leaves = [
             n for n in qs.order_by("system_id", "subsystem_id", "name")
             if match in (n.subsystem_name or "").lower()
@@ -64,7 +69,7 @@ class Command(BaseCommand):
 
         candidates = []
         for leaf in leaves:
-            is_curated = curation.is_shipping_type(leaf.part_type_id)
+            is_curated = curation.is_shipping_type(instance, leaf.part_type_id)
             if not is_curated:
                 candidates.append(leaf)
             self.stdout.write(

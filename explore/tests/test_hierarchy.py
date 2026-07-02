@@ -53,7 +53,7 @@ def _fake_api(systems, subsystems, part_types, counts):
 class CurationTest(TestCase):
     def test_curated_systems_from_yaml(self):
         # The real curation.yaml: FD-VD, FD CE, FD-HD, and FD shared curated; ND not.
-        ids = curation.curated_system_ids()
+        ids = curation.curated_system_ids("prod")
         self.assertIn(57, ids)   # FD-VD TDE
         self.assertIn(81, ids)   # FD CE
         self.assertIn(1, ids)    # FD-HD Complete Detector
@@ -72,7 +72,7 @@ class SyncHierarchyTest(TestCase):
     def _run(self, api):
         # Threads build clients via FnalDbApiClient; patch it to reuse the mock.
         with mock.patch("explore.hierarchy.FnalDbApiClient", return_value=api):
-            list(hierarchy.sync_hierarchy(api))
+            list(hierarchy.sync_hierarchy(api, "prod"))
 
     def _api(self):
         return _fake_api(
@@ -125,7 +125,7 @@ class SyncHierarchyTest(TestCase):
 
     def test_updates_sync_state(self):
         self._run(self._api())
-        st = HierarchySyncState.get()
+        st = HierarchySyncState.get("prod")
         self.assertEqual(st.nodes_count, 2)     # component types
         self.assertEqual(st.systems_count, 2)   # 057 + 060
         self.assertIsNotNone(st.finished_at)
@@ -141,9 +141,34 @@ class SyncHierarchyTest(TestCase):
         with mock.patch("explore.hierarchy.time.sleep"), \
              mock.patch("explore.hierarchy.FnalDbApiClient", return_value=api):
             with self.assertRaises(Exception):
-                list(hierarchy.sync_hierarchy(api))
+                list(hierarchy.sync_hierarchy(api, "prod"))
         self.assertTrue(H.objects.filter(part_type_id="D05700200001").exists())  # not pruned
-        self.assertNotEqual(HierarchySyncState.get().last_error, "")
+        self.assertNotEqual(HierarchySyncState.get("prod").last_error, "")
+
+    def test_count_failure_keeps_leaf_and_previous_count(self):
+        # Upstream bug seen on the dev HWDB (#47): a type whose /components
+        # endpoint persistently 500s (its own response-validation rejects
+        # category "box" rows) must NOT abort the walk. The leaf is kept with
+        # its previous count, other counts land, and the sync finishes clean.
+        _chain("D05700200001", tname="AMC", n_components=3956)
+        api = self._api()
+
+        def _mr(method, endpoint, data=None, params=None):
+            ptid = endpoint.split("/")[1]
+            if ptid == "D05700200001":
+                raise RuntimeError("500 response validation error")
+            return {"pagination": {"total": {"D05700200002": 7}.get(ptid, 0)}, "data": []}
+
+        api._make_request.side_effect = _mr
+        with mock.patch("explore.hierarchy.time.sleep"), \
+             mock.patch("explore.hierarchy.FnalDbApiClient", return_value=api):
+            lines = list(hierarchy.sync_hierarchy(api, "prod"))
+        amc = H.objects.get(level=H.LEVEL_TYPE, part_type_id="D05700200001")
+        self.assertEqual(amc.n_components, 3956)   # previous count retained
+        other = H.objects.get(level=H.LEVEL_TYPE, part_type_id="D05700200002")
+        self.assertEqual(other.n_components, 7)    # good counts still land
+        self.assertEqual(HierarchySyncState.get("prod").last_error, "")
+        self.assertTrue(any("count failed for D05700200001" in l for l in lines))
 
     def test_second_run_prunes_disappeared_nodes(self):
         self._run(self._api())
@@ -189,12 +214,12 @@ class NavigationTest(TestCase):
         self.assertIn("tr-data", html)                   # embedded tree json
         self.assertIn("Far Detector", html)
         self.assertIn("not curated", html)               # ND/Other placeholders present
-        leaf_url = navigation.node_path("FD", "FD-CE", subsystem_id=1,
+        leaf_url = navigation.node_path("prod", "FD", "FD-CE", subsystem_id=1,
                                         part_type_id="D08100100003")
         self.assertIn(leaf_url, html)                     # leaf row links to its page
 
     def test_curated_tree_flattens_and_locks(self):
-        tree = navigation.curated_tree()
+        tree = navigation.curated_tree("prod")
         self.assertEqual(tree["kind"], "root")
         regions = {r["key"]: r for r in tree["children"]}
         self.assertFalse(regions["FD"]["locked"])
@@ -215,7 +240,7 @@ class NavigationTest(TestCase):
                n_components=5, tests_synced_at=timezone.now())
         _chain("D05700200091", tname="EMPTYLEAF", ssid=10, ssname="Empty sub",
                n_components=0)
-        tree = navigation.curated_tree()
+        tree = navigation.curated_tree("prod")
         fd = next(r for r in tree["children"] if r["key"] == "FD")
         sys57 = next(s for s in next(f for f in fd["children"] if f["key"] == "FD-VD")["children"]
                      if s.get("id") == 57)
@@ -228,26 +253,26 @@ class NavigationTest(TestCase):
         self.assertFalse(sys57["empty"])    # but it does have components
 
     def test_region_shows_family_cards(self):
-        html = self._html(navigation.node_path("FD"))
+        html = self._html(navigation.node_path("prod", "FD"))
         self.assertIn("FD-VD", html)
         self.assertIn("FD CE", html)
 
     def test_multi_system_family_shows_system_cards(self):
-        html = self._html(navigation.node_path("FD", "FD-VD"))
+        html = self._html(navigation.node_path("prod", "FD", "FD-VD"))
         self.assertIn("FD-VD TDE", html)         # system tier present
 
     def test_single_system_family_flattens_to_subsystems(self):
         # FD CE owns one system → its subsystems render directly under the family.
-        html = self._html(navigation.node_path("FD", "FD-CE"))
+        html = self._html(navigation.node_path("prod", "FD", "FD-CE"))
         self.assertIn("LArASIC", html)            # subsystem card directly under family
         self.assertNotIn(">System<", html)        # no System-tier card
 
     def test_drill_system_subsystem_leaf(self):
-        sub = self._html(navigation.node_path("FD", "FD-VD", system_id=57))
+        sub = self._html(navigation.node_path("prod", "FD", "FD-VD", system_id=57))
         self.assertIn("Digital electronics", sub)
-        leaves = self._html(navigation.node_path("FD", "FD-VD", system_id=57, subsystem_id=2))
+        leaves = self._html(navigation.node_path("prod", "FD", "FD-VD", system_id=57, subsystem_id=2))
         self.assertIn("AMC", leaves)
-        leaf_url = navigation.node_path("FD", "FD-VD", system_id=57, subsystem_id=2,
+        leaf_url = navigation.node_path("prod", "FD", "FD-VD", system_id=57, subsystem_id=2,
                                         part_type_id="D05700200001")
         detail = self._html(leaf_url)
         self.assertIn("Part type ID", detail)        # leaf detail panel
@@ -257,21 +282,21 @@ class NavigationTest(TestCase):
         resp = self.client.get(reverse("explore:home") + "?node=D05700200001")
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp["Location"],
-                         navigation.node_path("FD", "FD-VD", system_id=57,
+                         navigation.node_path("prod", "FD", "FD-VD", system_id=57,
                                                subsystem_id=2, part_type_id="D05700200001"))
 
     def test_unknown_path_404(self):
-        self.assertEqual(self.client.get(navigation.node_path("NOPE")).status_code, 404)
+        self.assertEqual(self.client.get(navigation.node_path("prod", "NOPE")).status_code, 404)
 
     def test_non_curated_region_not_browsable(self):
         # Near Detector is declared but curated: false → its node 404s.
-        self.assertEqual(self.client.get(navigation.node_path("ND")).status_code, 404)
+        self.assertEqual(self.client.get(navigation.node_path("prod", "ND")).status_code, 404)
 
     def test_uncurated_system_not_reachable(self):
         H.objects.create(level=H.LEVEL_SYSTEM, system_id=999,
                          system_name="Phantom System", name="Phantom System")
         # 999 isn't in any curated family → not in the FD-VD systems grid.
-        self.assertNotIn("Phantom System", self._html(navigation.node_path("FD", "FD-VD")))
+        self.assertNotIn("Phantom System", self._html(navigation.node_path("prod", "FD", "FD-VD")))
 
 
 class SidebarTest(TestCase):
@@ -283,7 +308,7 @@ class SidebarTest(TestCase):
                tname="LArASIC P5B Prod", n_components=100)
 
     def _tree(self, trail):
-        return navigation.sidebar_tree(navigation.resolve(trail)["ctx"])
+        return navigation.sidebar_tree("prod", navigation.resolve("prod", trail)["ctx"])
 
     def _find(self, nodes, label):
         for n in nodes:
@@ -340,7 +365,7 @@ class SidebarTest(TestCase):
     def test_sidebar_rendered_with_chevrons(self):
         u = get_user_model().objects.create_user("sb", "s@s.io", "pw")
         self.client.force_login(u)
-        html = self.client.get(navigation.node_path("FD", "FD-VD", system_id=57)).content.decode()
+        html = self.client.get(navigation.node_path("prod", "FD", "FD-VD", system_id=57)).content.decode()
         self.assertIn('id="ex-side"', html)
         self.assertIn("extree-folder", html)   # collapsible folders
         self.assertIn("<details", html)

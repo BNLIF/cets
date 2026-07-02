@@ -17,7 +17,7 @@ COMPONENT_FACETS = (("status", "Status"), ("manufacturer", "Manufacturer"),
                     ("institution", "Institution"))
 
 
-def component_type_progress(part_type_id):
+def component_type_progress(instance, part_type_id):
     """Tests-recorded-per-month for one component type from ``HwdbTestEvent``.
 
     One series per ``test_type_name`` (dynamic — read from the data, no
@@ -25,7 +25,7 @@ def component_type_progress(part_type_id):
     Returns the month/3month/all ranges; no 1-year projection (the "recorded"
     timeline is often bulk-loaded, so a steady-rate projection would mislead).
     """
-    rows = HwdbTestEvent.objects.filter(part_type_id=part_type_id).values_list(
+    rows = HwdbTestEvent.for_instance(instance).filter(part_type_id=part_type_id).values_list(
         "test_type_name", "created"
     )
     dates_by_type = {}
@@ -38,7 +38,7 @@ def component_type_progress(part_type_id):
     return _ranges_for_series(series)
 
 
-def component_update_progress(part_type_id):
+def component_update_progress(instance, part_type_id):
     """Components-updated-per-month for one component type from
     ``HwdbComponentEvent``. A single series binned by each component's HWDB
     ``updated`` (last-modified) date — the activity view (status changes, QC
@@ -47,7 +47,7 @@ def component_update_progress(part_type_id):
     """
     dates = [
         u or c for u, c in
-        HwdbComponentEvent.objects.filter(part_type_id=part_type_id)
+        HwdbComponentEvent.for_instance(instance).filter(part_type_id=part_type_id)
         .values_list("updated", "created")
         if (u or c) is not None
     ]
@@ -55,14 +55,14 @@ def component_update_progress(part_type_id):
     return _ranges_for_series(series)
 
 
-def component_breakdowns(part_type_id):
+def component_breakdowns(instance, part_type_id):
     """Count of components per category value for each facet (status,
     manufacturer, institution), straight from ``HwdbComponentEvent`` — the
     mirror-only bar charts. Blank values fold into an "(unset)" bucket so a
     not-yet-resynced type still reads honestly. Returns one entry per facet that
     has any non-blank value; facets that are entirely blank are skipped."""
     out = []
-    qs = HwdbComponentEvent.objects.filter(part_type_id=part_type_id)
+    qs = HwdbComponentEvent.for_instance(instance).filter(part_type_id=part_type_id)
     for field, label in COMPONENT_FACETS:
         counts = (qs.values(field).annotate(n=Count("id")).order_by("-n"))
         rows = [{"value": c[field] or "(unset)", "n": c["n"]} for c in counts]

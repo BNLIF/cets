@@ -165,7 +165,7 @@ class ComponentTypeProgressTest(TestCase):
                 part_type_id=ptid, part_id="", test_type_name=name,
                 created=datetime(2025, 3, day, tzinfo=dt_timezone.utc),
             )
-        ranges = component_type_progress(ptid)
+        ranges = component_type_progress("prod", ptid)
         self.assertEqual(set(ranges), {"month", "3month", "all"})  # no 1year projection
         names = [s["name"] for s in ranges["all"]["series"]]
         self.assertEqual(names, ["a", "b"])  # sorted
@@ -183,7 +183,7 @@ class ComponentBreakdownTest(TestCase):
         mk("P1", status="Passed", manu="BNL")
         mk("P2", status="Passed", manu="BNL")
         mk("P3", status="Failed")               # no manufacturer → (unset)
-        bd = {b["field"]: b for b in component_breakdowns(ptid)}
+        bd = {b["field"]: b for b in component_breakdowns("prod", ptid)}
         self.assertEqual(set(bd), {"status", "manufacturer"})   # institution all-blank → skipped
         self.assertEqual(bd["status"]["total"], 3)
         self.assertEqual({r["value"]: r["n"] for r in bd["status"]["rows"]},
@@ -231,8 +231,8 @@ class PhysicsDatePathTest(TestCase):
         self.assertEqual(e.test_type_name, "CryoT QC Test")
 
     def test_non_ce_type_has_no_physics_field(self):
-        self.assertIsNone(events.physics_date_field("D05700200001"))   # TDE AMC
-        self.assertEqual(events.physics_date_field(self.ptid), "Test Date")
+        self.assertIsNone(events.physics_date_field("prod", "D05700200001"))   # TDE AMC
+        self.assertEqual(events.physics_date_field("prod", self.ptid), "Test Date")
 
 
 class ComponentUpdateProgressTest(TestCase):
@@ -244,7 +244,7 @@ class ComponentUpdateProgressTest(TestCase):
                 created=datetime(2025, 1, 1, tzinfo=dt_timezone.utc),
                 updated=datetime(2025, 3, day, tzinfo=dt_timezone.utc),
             )
-        ranges = component_update_progress(ptid)
+        ranges = component_update_progress("prod", ptid)
         series = ranges["all"]["series"]
         self.assertEqual(len(series), 1)
         self.assertEqual(series[0]["name"], "Components updated")
@@ -259,7 +259,7 @@ class ComponentUpdateProgressTest(TestCase):
             part_type_id=ptid, part_id="P1",
             created=datetime(2025, 5, 9, tzinfo=dt_timezone.utc), updated=None,
         )
-        ranges = component_update_progress(ptid)
+        ranges = component_update_progress("prod", ptid)
         self.assertEqual(sum(ranges["all"]["series"][0]["counts"]), 1)
 
 
@@ -278,7 +278,7 @@ class ExplorePlotViewTest(TestCase):
             part_type_id=node.part_type_id, part_id="P1",
             created=datetime(2025, 1, 5, tzinfo=dt_timezone.utc),
         )
-        html = self.client.get(navigation.leaf_path_for(node.part_type_id)).content.decode()
+        html = self.client.get(navigation.leaf_path_for("prod", node.part_type_id)).content.decode()
         self.assertIn("node-chart-config", html)
         self.assertIn(f"bar_{node.part_type_id}_comp", html)   # components-updated chart
         self.assertIn(f"bar_{node.part_type_id}_test", html)   # tests-recorded chart
@@ -287,12 +287,22 @@ class ExplorePlotViewTest(TestCase):
 
     def test_unsynced_node_shows_autosync_block(self):
         node = _node()  # tests_synced_at is NULL
-        html = self.client.get(navigation.leaf_path_for(node.part_type_id)).content.decode()
+        html = self.client.get(navigation.leaf_path_for("prod", node.part_type_id)).content.decode()
         self.assertIn('id="node-unsynced"', html)
+
+    def test_errored_unsynced_node_does_not_autosync(self):
+        # A leaf whose last sync failed must NOT auto-fire another sync on
+        # render — that reload-loops forever on a persistent upstream error
+        # (seen with dev HWDB's broken D00599800023 endpoint, #47).
+        node = _node(tests_sync_error="500 response validation error")
+        html = self.client.get(navigation.leaf_path_for("prod", node.part_type_id)).content.decode()
+        self.assertNotIn('id="node-unsynced"', html)
+        self.assertIn("Last test sync error", html)
+        self.assertIn("retry with the sync buttons", html)
 
     def test_synced_but_empty_node(self):
         node = _node(tests_synced_at=timezone.now(), n_tests=0)
-        html = self.client.get(navigation.leaf_path_for(node.part_type_id)).content.decode()
+        html = self.client.get(navigation.leaf_path_for("prod", node.part_type_id)).content.decode()
         self.assertIn("No tests recorded", html)
 
 
