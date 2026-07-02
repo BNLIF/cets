@@ -269,13 +269,29 @@ def shipments_view(request):
     curated shipping types in one view, each linking into the box's existing
     leaf node view. Reads the mirror (skip-empties, like the leaf panel)."""
     inst = instance_of(request)
-    sections, boxes = [], []
+    boxes, n_types = [], 0
     agg = {"total": 0, "in_transit": 0, "delivered": 0}
-    for ptid in sorted(curation.shipping_types(inst)):
+    # Explicit ids + every mirrored type under a curated shipping subsystem
+    # (the "86.990" selectors).
+    ptids = set(curation.shipping_types(inst))
+    for sid, ssid in curation.shipping_subsystems(inst):
+        ptids.update(HierarchyNode.for_instance(inst).filter(
+            level=HierarchyNode.LEVEL_TYPE, system_id=sid, subsystem_id=ssid,
+        ).values_list("part_type_id", flat=True))
+    # Tracked types grouped by subsystem — the page renders one collapsible
+    # card per group with a compact per-type table (boxes-first, 0-box rows
+    # dimmed). sync_targets feeds the "Sync all types" button.
+    groups, sync_targets = {}, []
+    for ptid in sorted(ptids):
         leaf = HierarchyNode.for_instance(inst).filter(
             level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
         if not leaf:  # curated but not yet refreshed into the mirror
             continue
+        n_types += 1
+        sync_targets.append({
+            "ptid": ptid, "name": leaf.name,
+            "url": _rev(request, "explore:shipment_sync", args=[ptid]),
+        })
         path = navigation.leaf_path_for(inst, ptid)
         rows = list(ShipmentItem.for_instance(inst).filter(part_type_id=ptid, n_contents__gt=0))
         in_transit = sum(1 for r in rows if r.location_id == 0)
@@ -283,13 +299,25 @@ def shipments_view(request):
         agg["total"] += len(rows)
         agg["in_transit"] += in_transit
         agg["delivered"] += delivered
-        sections.append({
+        sec = {
             "leaf": leaf, "path": path, "n": len(rows),
             "in_transit": in_transit, "delivered": delivered,
             "synced_at": leaf.shipments_synced_at,
+        }
+        g = groups.setdefault((leaf.system_id, leaf.subsystem_id), {
+            "sid": leaf.system_id, "ssid": leaf.subsystem_id,
+            "system_name": leaf.system_name, "subsystem_name": leaf.subsystem_name,
+            "active": [], "idle": [], "n": 0, "in_transit": 0, "delivered": 0,
+            "n_unsynced": 0,
         })
+        g["active" if rows else "idle"].append(sec)
+        g["n"] += len(rows)
+        g["in_transit"] += in_transit
+        g["delivered"] += delivered
+        g["n_unsynced"] += 0 if leaf.shipments_synced_at else 1
         for r in rows:
             boxes.append({"box": r, "type_name": leaf.name, "path": path})
+    groups = [groups[k] for k in sorted(groups)]
 
     # In-transit first, then most-recently-arrived first.
     boxes.sort(key=lambda x: (
@@ -300,7 +328,9 @@ def shipments_view(request):
     return render(request, "explore/shipments.html", {
         "active_nav": "shipments",
         "sidebar": navigation.sidebar_tree(inst, {}),
-        "sections": sections,
+        "groups": groups,
+        "n_types": n_types,
+        "sync_targets": sync_targets,
         "page_obj": page_obj,
         "summary": agg,
         "hwdb_ui_base": settings.HWDB_PROFILES[inst]["ui"],
@@ -423,10 +453,13 @@ def explore_shipment_sync_view(request, part_type_id):
         return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
 
     base_url = settings.HWDB_PROFILES[inst]["api"]
+    mode = request.POST.get("mode", "full")
+    if mode not in ("full", "incremental"):
+        mode = "full"
 
     def _iter():
         try:
-            yield from sync_shipments(base_url, bearer, part_type_id, inst)
+            yield from sync_shipments(base_url, bearer, part_type_id, inst, mode=mode)
         except Exception as e:
             logger.exception("explore_shipment_sync_view(%s) crashed", part_type_id)
             yield f"shipment sync: CRASH · {e}\n"

@@ -13,11 +13,14 @@ ids are per-instance and must never leak across.
 from __future__ import annotations
 
 import functools
+import re
 from pathlib import Path
 
 import yaml
 
 CURATION_PATH = Path(__file__).parent / "curation.yaml"
+
+_SUBSYS_SELECTOR = re.compile(r"^\d+\.\d+$")  # "86.990" = system 86, subsystem 990
 
 
 @functools.lru_cache(maxsize=1)
@@ -63,13 +66,52 @@ def family_is_flat(fam: dict) -> bool:
     return len(fam.get("systems") or []) == 1
 
 
+def _split_shipping(instance: str) -> tuple[set[str], set[tuple[int, int]]]:
+    """Parse ``shipping_types`` entries into (explicit part-type ids,
+    whole-subsystem selectors). A selector is a quoted ``"system.subsystem"``
+    string like ``"86.990"`` — every component type under that subsystem is a
+    shipping box. Unquoted, YAML reads 86.990 as the float 86.99 (dropping the
+    trailing zero), so numeric entries are rejected loudly."""
+    ptids, subs = set(), set()
+    for entry in _block(instance).get("shipping_types") or []:
+        if isinstance(entry, (int, float)):
+            raise ValueError(
+                f"shipping_types entry {entry!r} ({instance}): quote subsystem "
+                f'selectors (e.g. "86.990") — unquoted YAML floats lose digits.'
+            )
+        if _SUBSYS_SELECTOR.match(entry):
+            sid, ssid = entry.split(".")
+            subs.add((int(sid), int(ssid)))
+        else:
+            ptids.add(entry)
+    return ptids, subs
+
+
 def shipping_types(instance: str) -> set[str]:
-    """Component-type ids whose items are shipping boxes (ADR-0013)."""
-    return set(_block(instance).get("shipping_types") or [])
+    """Explicitly-listed component-type ids whose items are shipping boxes
+    (ADR-0013). Whole-subsystem selectors are separate — see
+    ``shipping_subsystems``."""
+    return _split_shipping(instance)[0]
+
+
+def shipping_subsystems(instance: str) -> set[tuple[int, int]]:
+    """(system_id, subsystem_id) pairs whose every component type is a
+    shipping box — the ``"86.990"``-style curation shorthand."""
+    return _split_shipping(instance)[1]
+
+
+def _ptid_coord(part_type_id: str) -> tuple[int, int] | None:
+    """(system, subsystem) decoded from a part-type id — HWDB encodes them as
+    D·SSS·PPP·NNNNN (e.g. D08699000012 → (86, 990)). None if it doesn't parse."""
+    m = re.match(r"^[A-Z](\d{3})(\d{3})\d+$", part_type_id or "")
+    return (int(m.group(1)), int(m.group(2))) if m else None
 
 
 def is_shipping_type(instance: str, part_type_id: str) -> bool:
-    return part_type_id in shipping_types(instance)
+    if part_type_id in shipping_types(instance):
+        return True
+    subs = shipping_subsystems(instance)
+    return bool(subs) and _ptid_coord(part_type_id) in subs
 
 
 def has_overflow(instance: str) -> bool:

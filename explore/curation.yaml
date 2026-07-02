@@ -72,12 +72,18 @@ instances:
             systems: [900, 901]
 
     # Component-type leaves whose items are physical shipping boxes (ADR-0013).
-    # Such a leaf shows a Shipments panel (location tracking) instead of test plots.
+    # Such a leaf gets the Shipments panes on top of the regular component view.
+    # Entries are part-type ids, or a quoted "system.subsystem" selector (e.g.
+    # "86.990") marking every type under that subsystem as shipping boxes.
     # Discover candidates with `python manage.py list_shippable` (issue #46).
+    # 2026-07-02 audit: every 'shipping'-named subsystem holds only
+    # box/container types, so all five are whole-subsystem selectors.
     shipping_types:
-      - D08120200001   # FD CE › CE Shipping Box › "CE Shipping box"
-      - D05700600003   # FD-VD TDE › Shipping › "Electronics box" (audit #46)
-      - D05700600006   # FD-VD TDE › Shipping › "FEB container" (audit #46)
+      - "55.51"        # FD-VD Top CRP › Shipping (Box, Container)
+      - "56.51"        # FD-VD Bottom CRP › Shipping (Box)
+      - "57.6"         # FD-VD TDE › Shipping (Electronics box, FEB container, crates, …)
+      - "81.202"       # FD CE › CE Shipping Box
+      - "86.990"       # FD Installation › Shipping Box/Container (Ash River tooling)
 
   dev:
     # Audited via `list_systems --instance dev` 2026-07-02 (47 systems): dev
@@ -152,5 +158,14 @@ instances:
     # D00599800007-00133 carry pre-shipping checklists + labels. The literal
     # box type D00599800023 ("TestType023-Boxes") stays out until the dev API
     # can serialize it (500s on its own category "box" rows — see #47).
+    # A quoted "system.subsystem" entry marks the WHOLE subsystem as shipping
+    # boxes (every component type under it, present and future). Quote it —
+    # unquoted YAML reads 86.990 as the float 86.99. 2026-07-02 audit: same
+    # five all-boxes subsystems as prod, with dev's own CRP subsystem ids.
     shipping_types:
       - D00599800007   # HWDBUnitTest › "Test Type 007" (ship/receive workflow)
+      - "55.50"        # FD2-VD Top CRP › Shipping box (Shipping box, Container)
+      - "56.50"        # FD2-VD Bottom CRP › Shipping box
+      - "57.6"         # FD2-VD TDE › Shipping Containers (Electronics Box, FEB, …)
+      - "81.202"       # FD1-HD/FD2-VD Elec. › CE Shipping Box
+      - "86.990"       # FD2-VD FD Installation › Shipping Box/Container (all types)

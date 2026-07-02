@@ -46,11 +46,34 @@ class CurationInstanceTest(TestCase):
         self.assertIn(5, dev)
 
     def test_shipping_types_per_instance(self):
-        self.assertIn("D08120200001", curation.shipping_types("prod"))
-        self.assertNotIn("D08120200001", curation.shipping_types("dev"))
+        # CE Shipping Box is curated on both instances (selector "81.202");
         # Hajime's ship/receive type is a dev shipping box (#48) — dev only.
+        self.assertTrue(curation.is_shipping_type("prod", "D08120200001"))
+        self.assertTrue(curation.is_shipping_type("dev", "D08120200001"))
         self.assertIn(DEV_PTID, curation.shipping_types("dev"))
         self.assertNotIn(DEV_PTID, curation.shipping_types("prod"))
+        self.assertFalse(curation.is_shipping_type("prod", DEV_PTID))
+
+    def test_shipping_subsystem_selector(self):
+        # "86.990": every type under FD Installation › Shipping Box/Container
+        # is a shipping box, present and future.
+        self.assertIn((86, 990), curation.shipping_subsystems("dev"))
+        self.assertNotIn("86.990", curation.shipping_types("dev"))  # not a ptid
+        self.assertTrue(curation.is_shipping_type("dev", "D08699000012"))
+        self.assertTrue(curation.is_shipping_type("dev", "D08699099999"))  # future type
+        self.assertFalse(curation.is_shipping_type("dev", "D08699100001"))  # 86.991
+        # CRP shipping subsystem ids are per-instance: prod 55.51, dev 55.50.
+        self.assertTrue(curation.is_shipping_type("prod", "D05505100001"))
+        self.assertFalse(curation.is_shipping_type("dev", "D05505100001"))
+        self.assertTrue(curation.is_shipping_type("dev", "D05505000001"))
+        self.assertFalse(curation.is_shipping_type("prod", "D05505000001"))
+
+    def test_unquoted_selector_rejected(self):
+        # YAML would read an unquoted 86.990 as the float 86.99 — fail loudly.
+        with mock.patch("explore.curation._block",
+                        return_value={"shipping_types": [86.990]}):
+            with self.assertRaises(ValueError):
+                curation.shipping_types("dev")
 
 
 class InstanceUrlTest(TestCase):
@@ -161,6 +184,20 @@ class DevShipmentsTest(TestCase):
         prod_html = self.client.get("/hw/shipments/").content.decode()
         self.assertIn("D00599800007-00133", dev_html)
         self.assertNotIn("D00599800007-00133", prod_html)
+
+    def test_selector_types_appear_on_shipments_tab(self):
+        # A type under the "86.990" subsystem selector needs no explicit
+        # shipping_types entry to show on the Shipments tab.
+        _node("dev", "D08699000012", 86, "FD2-VD FD Installation", 990,
+              "Shipping Box/Container", "Ash River Scaffolding", n_components=10,
+              shipments_synced_at=timezone.now())
+        ShipmentItem.objects.create(
+            instance="dev", part_type_id="D08699000012",
+            part_id="D08699000012-00001", location_name="Ash River",
+            location_id=190, n_contents=2)
+        html = self.client.get("/hw/dev/shipments/").content.decode()
+        self.assertIn("Ash River Scaffolding", html)
+        self.assertIn("D08699000012-00001", html)
 
     def test_sync_writes_dev_scoped_rows(self):
         client = mock.MagicMock()

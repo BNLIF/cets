@@ -69,7 +69,7 @@ def _fake_client(items, locs_by_pid, subs_by_pid=None):
 
 class CurationTest(TestCase):
     def test_anchor_is_shipping_type(self):
-        self.assertIn(SHIP_PTID, curation.shipping_types("prod"))
+        # Curated via the "81.202" whole-subsystem selector.
         self.assertTrue(curation.is_shipping_type("prod", SHIP_PTID))
 
     def test_other_type_is_not_shipping(self):
@@ -208,6 +208,28 @@ class SyncShipmentsTest(TestCase):
             list(shipments.sync_shipments("http://api", "b", SHIP_PTID))
         # Both pages' boxes mirrored — not just the first page.
         self.assertEqual(ShipmentItem.objects.filter(part_type_id=SHIP_PTID).count(), 2)
+
+    def test_incremental_fetches_new_boxes_only(self):
+        # Known box keeps its mirrored location untouched, vanished box is
+        # pruned, and only the new box costs API calls.
+        ShipmentItem.objects.create(part_type_id=SHIP_PTID, part_id="B1",
+                                    location_name="OLD", location_id=5, n_contents=1)
+        ShipmentItem.objects.create(part_type_id=SHIP_PTID, part_id="GONE",
+                                    location_name="X", location_id=6, n_contents=1)
+        client = _fake_client(
+            items=[{"part_id": "B1"}, {"part_id": "B2"}],
+            locs_by_pid={"B1": [_loc("NEW", 7, "2026-06-01T00:00:00-05:00")],
+                         "B2": [_loc("FNAL", 1, "2026-06-01T00:00:00-05:00")]},
+            subs_by_pid={"B2": [_sub()]})
+        with mock.patch("explore.shipments.FnalDbApiClient", return_value=client):
+            out = "".join(shipments.sync_shipments("http://api", "b", SHIP_PTID,
+                                                   mode="incremental"))
+        self.assertEqual(ShipmentItem.objects.get(part_id="B1").location_name, "OLD")
+        self.assertEqual(ShipmentItem.objects.get(part_id="B2").location_name, "FNAL")
+        self.assertFalse(ShipmentItem.objects.filter(part_id="GONE").exists())
+        fetched = {c.args[0] for c in client.get_locations.call_args_list}
+        self.assertEqual(fetched, {"B2"})   # the known box is never re-fetched
+        self.assertIn("1 known kept", out)
 
     def test_wholesale_rewrite_no_duplicates(self):
         items = [{"part_id": "B1"}]
@@ -559,6 +581,49 @@ class ShipmentsPageTest(TestCase):
                                     location_name="FNAL", location_id=1, n_contents=0)
         html = self.client.get(reverse("explore:shipments")).content.decode()
         self.assertNotIn("EMPTYBOX", html)
+
+    def test_types_grouped_by_subsystem_with_ids_and_idle_rows(self):
+        # A second type in the same subsystem with no boxes gets a dimmed row
+        # in the group's compact table, not a card of its own.
+        H.objects.create(
+            level=H.LEVEL_TYPE, parent=self.leaf.parent, system_id=81,
+            system_name="FD CE", subsystem_id=202, subsystem_name="CE Shipping Box",
+            name="Spare box", part_type_id="D08120200002", n_components=0)
+        html = self.client.get(reverse("explore:shipments")).content.decode()
+        self.assertEqual(html.count('<details class="tsg"'), 1)  # one subsystem group
+        self.assertIn("(81.202)", html)                    # system.subsystem id in the header
+        self.assertIn("2 boxes", html)                     # group header: B1 + B2
+        self.assertIn("D08120200001", html)                # type ids in the rows
+        self.assertIn("D08120200002", html)
+        self.assertIn('class="tsg-row-idle"', html)        # 0-box row dimmed
+        self.assertIn("never — open to sync", html)
+
+    def test_sync_all_button_with_targets(self):
+        html = self.client.get(reverse("explore:shipments")).content.decode()
+        self.assertIn('id="shipall-btn"', html)            # Sync new (incremental)
+        self.assertIn('data-mode="incremental"', html)
+        self.assertIn('id="shipall-full-btn"', html)       # Re-sync all (full)
+        self.assertIn('id="tsg-toggle"', html)             # expand/collapse all
+        self.assertIn('id="shipall-data"', html)
+        # the target list carries each type's streaming sync endpoint
+        self.assertIn(f'"/hw/sync-shipments/{self.leaf.part_type_id}/"', html)
+
+    def test_sync_view_forwards_mode(self):
+        with mock.patch("explore.views.sync_shipments") as m, \
+             mock.patch("explore.views.mint_for", return_value="b"):
+            m.return_value = iter(["ok\n"])
+            resp = self.client.post(f"/hw/sync-shipments/{self.leaf.part_type_id}/",
+                                    {"mode": "incremental"})
+            list(resp.streaming_content)
+        self.assertEqual(m.call_args.kwargs["mode"], "incremental")
+        # bogus / absent mode falls back to full
+        with mock.patch("explore.views.sync_shipments") as m, \
+             mock.patch("explore.views.mint_for", return_value="b"):
+            m.return_value = iter(["ok\n"])
+            resp = self.client.post(f"/hw/sync-shipments/{self.leaf.part_type_id}/",
+                                    {"mode": "bogus"})
+            list(resp.streaming_content)
+        self.assertEqual(m.call_args.kwargs["mode"], "full")
 
     def test_paginated_50_per_page(self):
         # setUp already made 2 non-empty boxes; add 53 → 55 total across 2 pages.

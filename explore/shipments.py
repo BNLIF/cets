@@ -176,21 +176,33 @@ def _list_boxes(api, part_type_id: str) -> list[str]:
 
 
 def sync_shipments(api_base_url: str, bearer: str, part_type_id: str,
-                   instance: str = "prod") -> Iterator[str]:
-    """Mirror every box of one shipping type. Generator yielding progress.
+                   instance: str = "prod", mode: str = "full") -> Iterator[str]:
+    """Mirror boxes of one shipping type. Generator yielding progress.
 
     For each box (in parallel) reads its latest location + current contents.
     Empty boxes (0 contents) are mirrored too (``n_contents=0`` — the leaf
-    page lists them in a separate pane). Rewrites ``ShipmentItem`` (latest
-    location, dates, contents count) for the type. ``HwdbComponentEvent`` is
-    NOT touched — boxes are regular components, so the node (test) sync owns
+    page lists them in a separate pane). ``HwdbComponentEvent`` is NOT
+    touched — boxes are regular components, so the node (test) sync owns
     those rows and the standard charts/breakdown render from them.
+
+    Two modes (cost-tiered like the events sync):
+    - ``full`` (default): re-fetch every box and rewrite the type wholesale —
+      picks up location changes on known boxes.
+    - ``incremental``: fetch only boxes not yet mirrored (1 listing + N-new
+      fetches); known rows keep their mirrored location, vanished boxes are
+      pruned. The cheap "Sync new" sweep.
     """
     bootstrap = FnalDbApiClient(api_base_url, bearer)
 
-    yield f"sync shipments: listing boxes for {part_type_id}\n"
+    yield f"sync shipments ({mode}): listing boxes for {part_type_id}\n"
     boxes = _list_boxes(bootstrap, part_type_id)
-    yield f"sync shipments: {len(boxes)} box(es); fetching locations + contents…\n"
+    known = set(ShipmentItem.for_instance(instance)
+                .filter(part_type_id=part_type_id).values_list("part_id", flat=True))
+    fetch = [p for p in boxes if p not in known] if mode == "incremental" else boxes
+    yield (
+        f"sync shipments ({mode}): {len(boxes)} box(es) in HWDB · "
+        f"fetching {len(fetch)} (locations + contents)…\n"
+    )
 
     tls = _thread_local_cls()
 
@@ -203,17 +215,17 @@ def sync_shipments(api_base_url: str, bearer: str, part_type_id: str,
         return pid, locs, manifest
 
     results, done = [], 0
-    if boxes:
+    if fetch:
         with ThreadPoolExecutor(max_workers=_WORKERS, initializer=_init) as pool:
-            futs = {pool.submit(_fetch, pid): pid for pid in boxes}
+            futs = {pool.submit(_fetch, pid): pid for pid in fetch}
             for fut in as_completed(futs):
                 try:
                     results.append(fut.result())
                 except Exception as e:
                     logger.warning("sync shipments: %s failed: %s", futs[fut], e)
                 done += 1
-                if done % 50 == 0 or done == len(boxes):
-                    yield f"  fetched {done}/{len(boxes)}\n"
+                if done % 50 == 0 or done == len(fetch):
+                    yield f"  fetched {done}/{len(fetch)}\n"
 
     ship_rows = []
     for pid, locs, manifest in results:
@@ -228,7 +240,16 @@ def sync_shipments(api_base_url: str, bearer: str, part_type_id: str,
             shipped_date=shipped, received_date=received,
         ))
 
-    ShipmentItem.for_instance(instance).filter(part_type_id=part_type_id).delete()
+    if mode == "incremental":
+        # Keep known rows; drop boxes that vanished from HWDB, and any stale
+        # duplicates of the ones just fetched (retry safety).
+        (ShipmentItem.for_instance(instance).filter(part_type_id=part_type_id)
+         .exclude(part_id__in=boxes).delete())
+        (ShipmentItem.for_instance(instance).filter(
+            part_type_id=part_type_id, part_id__in=[r.part_id for r in ship_rows])
+         .delete())
+    else:
+        ShipmentItem.for_instance(instance).filter(part_type_id=part_type_id).delete()
     if ship_rows:
         ShipmentItem.objects.bulk_create(ship_rows, batch_size=1000)
 
@@ -238,9 +259,11 @@ def sync_shipments(api_base_url: str, bearer: str, part_type_id: str,
         level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id
     ).update(shipments_synced_at=timezone.now())
 
-    full = [r for r in ship_rows if r.n_contents]
-    in_transit = sum(1 for r in full if r.location_id == 0)
+    mirrored = ShipmentItem.for_instance(instance).filter(part_type_id=part_type_id)
+    n_full = mirrored.filter(n_contents__gt=0).count()
+    in_transit = mirrored.filter(n_contents__gt=0, location_id=0).count()
+    kept = f" · {len(boxes) - len(fetch)} known kept" if mode == "incremental" else ""
     yield (
-        f"done: {len(ship_rows)} box(es) mirrored ({len(full)} with contents, "
-        f"{len(ship_rows) - len(full)} empty) · {in_transit} in transit\n"
+        f"done ({mode}): {len(ship_rows)} box(es) fetched{kept} · "
+        f"{mirrored.count()} mirrored ({n_full} with contents) · {in_transit} in transit\n"
     )

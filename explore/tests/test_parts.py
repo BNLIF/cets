@@ -221,7 +221,7 @@ class PartViewTest(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user("p", "p@p.io", "pw")
         self.client.force_login(self.user)
-        self.url = "/hw/part/D05700600099-00007/"  # not a curated shipping type
+        self.url = "/hw/part/D05700200099-00007/"  # not a curated shipping type
 
     def _api(self):
         api = mock.MagicMock()
@@ -267,7 +267,7 @@ class PartViewTest(TestCase):
         self.assertNotIn("In Transit", body)    # no shipping framing for a normal part
 
     def test_shipment_url_redirects_to_part(self):
-        resp = self.client.get("/hw/shipment/D05700600099-00007/")
+        resp = self.client.get("/hw/shipment/D05700200099-00007/")
         self.assertEqual(resp.status_code, 301)
         self.assertEqual(resp["Location"], self.url)
 
@@ -302,7 +302,7 @@ class TestDataDownloadTest(TestCase):
         self.assertEqual(resp.status_code, 409)
 
 
-def _comp_leaf(ptid="D05700600099"):
+def _comp_leaf(ptid="D05700200099"):
     """A synced non-shipping leaf under FD CE (so leaf_path_for resolves)."""
     sys, _ = H.objects.get_or_create(
         level=H.LEVEL_SYSTEM, system_id=81, subsystem_id=None, part_type_id="",
@@ -372,9 +372,9 @@ class SearchTest(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user("sx", "s@x.io", "pw")
         self.client.force_login(self.user)
-        self.leaf = _comp_leaf()  # ColdADC, D05700600099, under browsable FD CE
+        self.leaf = _comp_leaf()  # ColdADC, D05700200099, under browsable FD CE
         HwdbComponentEvent.objects.create(
-            part_type_id="D05700600099", part_id="D05700600099-00001",
+            part_type_id="D05700200099", part_id="D05700200099-00001",
             created=timezone.now(), serial_number="2502-18564")
 
     def test_page_renders(self):
@@ -384,17 +384,17 @@ class SearchTest(TestCase):
 
     def test_api_finds_component_type_by_name_with_leaf_path(self):
         d = self.client.get("/hw/search/api/", {"q": "ColdADC"}).json()
-        match = next(t for t in d["types"] if t["part_type_id"] == "D05700600099")
+        match = next(t for t in d["types"] if t["part_type_id"] == "D05700200099")
         self.assertTrue(match["path"])  # reachable leaf page
 
     def test_api_finds_mirrored_part_and_flags_direct_pid(self):
-        d = self.client.get("/hw/search/api/", {"q": "D05700600099-00001"}).json()
-        self.assertEqual(d["direct_part"], "D05700600099-00001")
-        self.assertTrue(any(p["part_id"] == "D05700600099-00001" for p in d["parts"]))
+        d = self.client.get("/hw/search/api/", {"q": "D05700200099-00001"}).json()
+        self.assertEqual(d["direct_part"], "D05700200099-00001")
+        self.assertTrue(any(p["part_id"] == "D05700200099-00001" for p in d["parts"]))
 
     def test_api_finds_part_by_serial_number(self):
         d = self.client.get("/hw/search/api/", {"q": "2502-18564"}).json()
-        match = next(p for p in d["parts"] if p["part_id"] == "D05700600099-00001")
+        match = next(p for p in d["parts"] if p["part_id"] == "D05700200099-00001")
         self.assertEqual(match["serial_number"], "2502-18564")
 
     def test_short_query_returns_empty(self):

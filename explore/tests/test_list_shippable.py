@@ -27,7 +27,8 @@ def _leaf(ptid, system_id, subsystem_name, name, n=0):
 def _run(*extra):
     out = StringIO()
     with mock.patch("explore.curation.curated_system_ids", return_value={57, 81}), \
-         mock.patch("explore.curation.shipping_types", return_value={"D08120200001"}):
+         mock.patch("explore.curation.shipping_types", return_value={"D08120200001"}), \
+         mock.patch("explore.curation.shipping_subsystems", return_value=set()):
         call_command("list_shippable", *extra, stdout=out)
     return out.getvalue()
 
