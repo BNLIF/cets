@@ -174,11 +174,15 @@ def explore_view(request, trail=None):
     charts = []
     leaf = view.get("leaf")
     is_shipping = bool(leaf and curation.is_shipping_type(inst, leaf.part_type_id))
-    shipments = shipment_synced_at = shipment_summary = None
+    shipments = shipment_synced_at = shipment_summary = empty_boxes_page = None
     if is_shipping:
         ptid = leaf.part_type_id
-        # Only non-empty boxes are mirrored; n_contents>0 guard covers stale rows.
         rows = list(ShipmentItem.for_instance(inst).filter(part_type_id=ptid, n_contents__gt=0))
+        # Empty boxes get their own paginated pane (they're mirrored too, but
+        # kept out of the main table, summary cards and the Shipments tab).
+        empty_boxes_page = Paginator(
+            ShipmentItem.for_instance(inst).filter(part_type_id=ptid, n_contents=0),
+            50).get_page(request.GET.get("page"))
         shipments = rows
         # Sync marker on the leaf — NOT inferred from rows, so a synced type with
         # 0 non-empty boxes reads as synced (no auto-sync loop).
@@ -248,6 +252,7 @@ def explore_view(request, trail=None):
             "shipments": shipments,
             "shipment_synced_at": shipment_synced_at,
             "shipment_summary": shipment_summary,
+            "empty_boxes_page": empty_boxes_page,
             # Deep-link the part type to this instance's FNAL web UI.
             "hwdb_ui_base": settings.HWDB_PROFILES[inst]["ui"],
             "sync_state": HierarchySyncState.get(inst),

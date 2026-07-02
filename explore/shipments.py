@@ -179,12 +179,13 @@ def _list_boxes(api, part_type_id: str) -> list[tuple[str, str | None]]:
 
 def sync_shipments(api_base_url: str, bearer: str, part_type_id: str,
                    instance: str = "prod") -> Iterator[str]:
-    """Mirror non-empty boxes of one shipping type. Generator yielding progress.
+    """Mirror every box of one shipping type. Generator yielding progress.
 
-    For each box (in parallel) reads its latest location + current contents;
-    **empty boxes (0 contents) are skipped** — not mirrored, not counted.
-    Rewrites ``ShipmentItem`` (latest location, dates, contents count) and
-    ``HwdbComponentEvent`` (box created date → the boxes-over-time chart) for
+    For each box (in parallel) reads its latest location + current contents.
+    Empty boxes (0 contents) are mirrored too (``n_contents=0`` — the leaf
+    page lists them in a separate pane) but excluded from
+    ``HwdbComponentEvent`` (the boxes-over-time chart counts non-empty only).
+    Rewrites ``ShipmentItem`` (latest location, dates, contents count) for
     the type.
     """
     bootstrap = FnalDbApiClient(api_base_url, bearer)
@@ -219,8 +220,6 @@ def sync_shipments(api_base_url: str, bearer: str, part_type_id: str,
 
     ship_rows, comp_rows = [], []
     for pid, locs, manifest in results:
-        if not manifest:  # empty box → skip everywhere
-            continue
         latest = latest_location(locs)
         loc = (latest or {}).get("location") or {}
         shipped, received = shipped_received(locs)
@@ -231,10 +230,11 @@ def sync_shipments(api_base_url: str, bearer: str, part_type_id: str,
             last_arrived=_parse_dt((latest or {}).get("arrived")),
             shipped_date=shipped, received_date=received,
         ))
-        comp_rows.append(HwdbComponentEvent(
-            instance=instance, part_type_id=part_type_id, part_id=pid,
-            created=_parse_dt(created_by_pid.get(pid)), updated=None,
-        ))
+        if manifest:  # empty boxes stay off the boxes-over-time chart
+            comp_rows.append(HwdbComponentEvent(
+                instance=instance, part_type_id=part_type_id, part_id=pid,
+                created=_parse_dt(created_by_pid.get(pid)), updated=None,
+            ))
 
     ShipmentItem.for_instance(instance).filter(part_type_id=part_type_id).delete()
     if ship_rows:
@@ -243,14 +243,15 @@ def sync_shipments(api_base_url: str, bearer: str, part_type_id: str,
     if comp_rows:
         HwdbComponentEvent.objects.bulk_create(comp_rows, batch_size=1000)
 
-    # Mark the leaf synced even when 0 non-empty boxes — so the page stops
+    # Mark the leaf synced even when 0 boxes — so the page stops
     # auto-syncing (NULL would read as "never synced" and re-trigger forever).
     HierarchyNode.for_instance(instance).filter(
         level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id
     ).update(shipments_synced_at=timezone.now())
 
-    in_transit = sum(1 for r in ship_rows if r.location_id == 0)
+    full = [r for r in ship_rows if r.n_contents]
+    in_transit = sum(1 for r in full if r.location_id == 0)
     yield (
-        f"done: {len(ship_rows)} non-empty box(es) mirrored · {in_transit} in transit · "
-        f"{len(boxes) - len(ship_rows)} empty skipped\n"
+        f"done: {len(ship_rows)} box(es) mirrored ({len(full)} with contents, "
+        f"{len(ship_rows) - len(full)} empty) · {in_transit} in transit\n"
     )

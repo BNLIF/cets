@@ -130,15 +130,19 @@ class SyncShipmentsTest(TestCase):
         self.assertEqual(b2.location_name, "FNAL")
         self.assertFalse(b2.is_in_transit)
 
-    def test_skips_empty_boxes(self):
+    def test_mirrors_empty_boxes_with_zero_contents(self):
         self._run(
             items=[{"part_id": "B1"}, {"part_id": "B2"}],
             locs_by_pid={"B1": [_loc("FNAL", 1, "2026-05-21T00:00:00-05:00")],
                          "B2": [_loc("FNAL", 1, "2026-05-21T00:00:00-05:00")]},
-            subs_by_pid={"B1": [_sub()]},  # B2 has no contents → skipped
+            subs_by_pid={"B1": [_sub()]},  # B2 has no contents → mirrored as empty
         )
-        self.assertTrue(ShipmentItem.objects.filter(part_id="B1").exists())
-        self.assertFalse(ShipmentItem.objects.filter(part_id="B2").exists())
+        self.assertEqual(ShipmentItem.objects.get(part_id="B1").n_contents, 1)
+        b2 = ShipmentItem.objects.get(part_id="B2")
+        self.assertEqual(b2.n_contents, 0)
+        self.assertEqual(b2.location_name, "FNAL")  # location still mirrored
+        # Empty boxes stay off the boxes-over-time chart.
+        self.assertFalse(HwdbComponentEvent.objects.filter(part_id="B2").exists())
 
     def test_counts_contents(self):
         self._run(
@@ -154,7 +158,8 @@ class SyncShipmentsTest(TestCase):
         self._run(items=[{"part_id": "B1"}], locs_by_pid={}, subs_by_pid={})  # all empty
         leaf = H.objects.get(level=H.LEVEL_TYPE, part_type_id=SHIP_PTID)
         self.assertIsNotNone(leaf.shipments_synced_at)  # marked → page won't loop
-        self.assertEqual(ShipmentItem.objects.filter(part_type_id=SHIP_PTID).count(), 0)
+        self.assertEqual(ShipmentItem.objects.get(part_type_id=SHIP_PTID,
+                                                  part_id="B1").n_contents, 0)
 
     def test_box_with_no_locations_but_has_contents(self):
         self._run(items=[{"part_id": "B3"}], locs_by_pid={},
@@ -228,16 +233,34 @@ class ShipmentPanelViewTest(TestCase):
         self.assertNotIn("Test events", html)
         self.assertNotIn("Tests performed", html)
 
-    def test_skips_empty_boxes_in_view(self):
+    def test_empty_boxes_get_their_own_pane(self):
         leaf = _ship_leaf()
         ShipmentItem.objects.create(part_type_id=leaf.part_type_id, part_id="FULL",
                                     location_name="FNAL", location_id=1, n_contents=4)
-        ShipmentItem.objects.create(part_type_id=leaf.part_type_id, part_id="EMPTY",
-                                    location_name="FNAL", location_id=1, n_contents=0)
+        ShipmentItem.objects.create(part_type_id=leaf.part_type_id, part_id="EMPTYBOX",
+                                    location_name="CERN", location_id=200, n_contents=0)
         html = self.client.get(navigation.leaf_path_for("prod", leaf.part_type_id)).content.decode()
         self.assertIn("FULL", html)
-        self.assertNotIn("EMPTY", html)
-        self.assertIn("Boxes (1)", html)  # only the non-empty box counted
+        self.assertIn("Boxes (1)", html)        # main table: non-empty only
+        self.assertIn("Empty boxes (1)", html)  # separate pane
+        self.assertIn("EMPTYBOX", html)
+        # Summary cards count boxes with contents only.
+        self.assertIn("Boxes with contents", html)
+
+    def test_empty_boxes_pane_paginates(self):
+        leaf = _ship_leaf()
+        for i in range(51):
+            ShipmentItem.objects.create(part_type_id=leaf.part_type_id,
+                                        part_id=f"E{i:03d}", n_contents=0)
+        url = navigation.leaf_path_for("prod", leaf.part_type_id)
+        html = self.client.get(url).content.decode()
+        self.assertIn("Empty boxes (51)", html)
+        self.assertIn("Page 1 of 2", html)
+        self.assertIn("E000", html)
+        self.assertNotIn("E050", html)  # on page 2
+        html2 = self.client.get(url, {"page": 2}).content.decode()
+        self.assertIn("E050", html2)
+        self.assertNotIn("E000", html2)
 
     def test_unsynced_shipping_leaf_shows_autosync_block(self):
         leaf = _ship_leaf(synced=False)
