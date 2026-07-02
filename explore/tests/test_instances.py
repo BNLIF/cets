@@ -189,9 +189,11 @@ class OverflowViewTest(TestCase):
         self.client.force_login(self.user)
         _node("dev", DEV_PTID, 5, "FD1-HD HVS", 998, "HWDBUnitTest",
               "Test Type 007", n_components=147)
-        self.sys900 = H.objects.create(
-            instance="dev", level=H.LEVEL_SYSTEM, system_id=900,
-            system_name="ProtoDUNE-II complete detector", name="ProtoDUNE-II complete detector")
+        # System 21 ("DAQ") is a dev-only stray — uncurated since ND/Others
+        # were curated (2026-07-02).
+        self.sys21 = H.objects.create(
+            instance="dev", level=H.LEVEL_SYSTEM, system_id=21,
+            system_name="DAQ", name="DAQ")
 
     def test_uncurated_section_on_dev_only(self):
         self.assertIn("Uncurated", self.client.get("/hw/dev/").content.decode())
@@ -203,44 +205,44 @@ class OverflowViewTest(TestCase):
         # The Overview tree only renders childless nodes as links when they
         # carry a url — without one, unwalked overflow systems were dead rows.
         html = self.client.get("/hw/dev/").content.decode()
-        self.assertIn("/hw/dev/UNC/900/", html)
+        self.assertIn("/hw/dev/UNC/21/", html)
         self.assertIn('"unwalked": true', html)
 
     def test_overflow_region_lists_systems(self):
         html = self.client.get("/hw/dev/UNC/").content.decode()
-        self.assertIn("ProtoDUNE-II complete detector", html)
+        self.assertIn("DAQ", html)
         # The synthetic region holds only uncurated systems — no duplication of
         # the curated system 5 (the page's sidebar still shows the full tree).
         region = navigation.overflow_region("dev")
-        self.assertEqual([f["systems"] for f in region["families"]], [[900]])
+        self.assertEqual([f["systems"] for f in region["families"]], [[21]])
 
     def test_unwalked_system_autofires_walk(self):
-        html = self.client.get("/hw/dev/UNC/900/").content.decode()
+        html = self.client.get("/hw/dev/UNC/21/").content.decode()
         self.assertIn('id="system-unwalked"', html)
-        self.assertIn("/hw/dev/sync-system/900/", html)
+        self.assertIn("/hw/dev/sync-system/21/", html)
 
     def test_errored_walk_shows_retry_not_autofire(self):
-        self.sys900.tests_sync_error = "boom"
-        self.sys900.save()
-        html = self.client.get("/hw/dev/UNC/900/").content.decode()
+        self.sys21.tests_sync_error = "boom"
+        self.sys21.save()
+        html = self.client.get("/hw/dev/UNC/21/").content.decode()
         self.assertNotIn('id="system-unwalked"', html)
         self.assertIn("system-walk-btn", html)
         self.assertIn("Last walk error", html)
 
     def test_walked_system_drills_in_like_curated(self):
-        self.sys900.structure_synced_at = timezone.now()
-        self.sys900.save()
+        self.sys21.structure_synced_at = timezone.now()
+        self.sys21.save()
         sub = H.objects.create(
-            instance="dev", level=H.LEVEL_SUBSYSTEM, parent=self.sys900, system_id=900,
-            subsystem_id=2, system_name=self.sys900.system_name,
-            subsystem_name="CRP", name="CRP")
+            instance="dev", level=H.LEVEL_SUBSYSTEM, parent=self.sys21, system_id=21,
+            subsystem_id=2, system_name=self.sys21.system_name,
+            subsystem_name="Servers", name="Servers")
         H.objects.create(
-            instance="dev", level=H.LEVEL_TYPE, parent=sub, system_id=900,
-            subsystem_id=2, system_name=self.sys900.system_name, subsystem_name="CRP",
-            name="Adapter Board", part_type_id="D90000200001", n_components=3)
-        html = self.client.get("/hw/dev/UNC/900/").content.decode()
+            instance="dev", level=H.LEVEL_TYPE, parent=sub, system_id=21,
+            subsystem_id=2, system_name=self.sys21.system_name, subsystem_name="Servers",
+            name="Event Builder", part_type_id="D02100200001", n_components=3)
+        html = self.client.get("/hw/dev/UNC/21/").content.decode()
         self.assertNotIn('id="system-unwalked"', html)
-        self.assertIn("CRP", html)
-        path = navigation.leaf_path_for("dev", "D90000200001")
-        self.assertTrue(path.startswith("/hw/dev/UNC/900/"))
+        self.assertIn("Servers", html)
+        path = navigation.leaf_path_for("dev", "D02100200001")
+        self.assertTrue(path.startswith("/hw/dev/UNC/21/"))
         self.assertEqual(self.client.get(path).status_code, 200)

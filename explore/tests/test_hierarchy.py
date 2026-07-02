@@ -52,13 +52,16 @@ def _fake_api(systems, subsystems, part_types, counts):
 
 class CurationTest(TestCase):
     def test_curated_systems_from_yaml(self):
-        # The real curation.yaml: FD-VD, FD CE, FD-HD, and FD shared curated; ND not.
+        # The real curation.yaml: FD, ND and Others all curated (2026-07-02).
         ids = curation.curated_system_ids("prod")
         self.assertIn(57, ids)   # FD-VD TDE
         self.assertIn(81, ids)   # FD CE
         self.assertIn(1, ids)    # FD-HD Complete Detector
         self.assertIn(82, ids)   # FD shared (FD DAQ)
-        self.assertNotIn(100, ids)  # ND — still not curated
+        self.assertIn(100, ids)  # ND: Near detector complex
+        self.assertIn(500, ids)  # Others › Computing
+        self.assertIn(900, ids)  # Others › Prototypes (ProtoDUNE-II)
+        self.assertNotIn(999, ids)  # not a DUNE system
 
 
 class SyncHierarchyTest(TestCase):
@@ -204,8 +207,8 @@ class NavigationTest(TestCase):
     def test_browse_root_shows_region_cards(self):
         html = self._html(reverse("explore:browse"))   # drill-in navigator (home is now the tree)
         self.assertIn("Far Detector", html)
-        self.assertIn("Near Detector", html)   # declared region…
-        self.assertIn("not curated", html)      # …dimmed, not browsable
+        self.assertIn("Near Detector", html)   # curated 2026-07-02
+        self.assertIn("Others", html)
         self.assertIn("Refresh hierarchy", html)
 
     def test_home_is_hierarchy_tree_with_leaf_links(self):
@@ -213,7 +216,7 @@ class NavigationTest(TestCase):
         self.assertIn("DUNE Hardware Overview", html)   # the tree page, not the card root
         self.assertIn("tr-data", html)                   # embedded tree json
         self.assertIn("Far Detector", html)
-        self.assertIn("not curated", html)               # ND/Other placeholders present
+        self.assertIn("Others", html)                    # curated 2026-07-02
         leaf_url = navigation.node_path("prod", "FD", "FD-CE", subsystem_id=1,
                                         part_type_id="D08100100003")
         self.assertIn(leaf_url, html)                     # leaf row links to its page
@@ -223,7 +226,9 @@ class NavigationTest(TestCase):
         self.assertEqual(tree["kind"], "root")
         regions = {r["key"]: r for r in tree["children"]}
         self.assertFalse(regions["FD"]["locked"])
-        self.assertTrue(regions["ND"]["locked"])         # declared, not browsable
+        self.assertFalse(regions["ND"]["locked"])        # curated 2026-07-02
+        self.assertFalse(regions["OT"]["locked"])
+        self.assertEqual(regions["OT"]["name"], "Others")
         fams = {f["key"]: f for f in regions["FD"]["children"]}
         # FD CE owns one system → children are subsystems directly (flattened)
         self.assertTrue(all(c["kind"] == "sub" for c in fams["FD-CE"]["children"]))
@@ -251,9 +256,8 @@ class NavigationTest(TestCase):
         flat_sub = fams["FD-CE"]["children"][0]
         self.assertEqual(flat_sub["url"], navigation.node_path(
             "prod", "FD", "FD-CE", subsystem_id=flat_sub["id"]))
-        # Locked regions aren't browsable — no url, no expansion key.
         nd = next(r for r in tree["children"] if r["key"] == "ND")
-        self.assertNotIn("url", nd)
+        self.assertEqual(nd["url"], navigation.node_path("prod", "ND"))
 
     def test_curated_tree_empty_and_synced_flags(self):
         # setUp's AMC (57/2) has components but is unsynced. Add a fully-synced
@@ -310,9 +314,19 @@ class NavigationTest(TestCase):
     def test_unknown_path_404(self):
         self.assertEqual(self.client.get(navigation.node_path("prod", "NOPE")).status_code, 404)
 
+    def test_nd_and_others_regions_browsable(self):
+        # ND and Others curated 2026-07-02 — their nodes render family cards.
+        html = self._html(navigation.node_path("prod", "ND"))
+        self.assertIn("ND Detectors", html)
+        self.assertIn("NS", html)
+        self.assertIn("Prototypes", self._html(navigation.node_path("prod", "OT")))
+
     def test_non_curated_region_not_browsable(self):
-        # Near Detector is declared but curated: false → its node 404s.
-        self.assertEqual(self.client.get(navigation.node_path("prod", "ND")).status_code, 404)
+        # A declared-but-uncurated region (none in prod today) stays a dimmed
+        # placeholder: no url, 404 on direct access.
+        locked = [{"name": "Mock Region", "key": "MOCK", "curated": False, "note": "n"}]
+        with mock.patch("explore.curation.regions", return_value=locked):
+            self.assertEqual(self.client.get("/hw/MOCK/").status_code, 404)
 
     def test_uncurated_system_not_reachable(self):
         H.objects.create(level=H.LEVEL_SYSTEM, system_id=999,
@@ -344,10 +358,13 @@ class SidebarTest(TestCase):
     def test_full_tree_built_with_all_regions_and_families(self):
         tree = self._tree("")  # root
         regions = [n["label"] for n in tree]
-        self.assertEqual(regions, ["Far Detector", "Near Detector", "Other"])
+        self.assertEqual(regions, ["Far Detector", "Near Detector", "Others"])
         fd = self._find(tree, "Far Detector")
         fams = [f["label"] for f in fd["children"]]
         self.assertEqual(fams, ["FD-VD", "FD CE", "FD-HD", "FD Common", "FS"])
+        nd = self._find(tree, "Near Detector")
+        self.assertEqual([f["label"] for f in nd["children"]],
+                         ["ND Detectors", "ND Common", "NS"])
 
     def test_path_open_and_current_highlighted(self):
         tree = self._tree("FD/FD-VD/57/2/D05700200001")  # a leaf
@@ -380,9 +397,13 @@ class SidebarTest(TestCase):
         self.assertFalse(digi["empty"]); self.assertFalse(digi["synced"])
 
     def test_non_curated_is_dim_and_unlinked(self):
-        nd = self._find(self._tree(""), "Near Detector")
-        self.assertTrue(nd["dim"])
-        self.assertIsNone(nd["url"])
+        # No live placeholders since ND/Others were curated (2026-07-02) —
+        # keep the dimmed-placeholder rendering covered with a mocked region.
+        locked = [{"name": "Mock Region", "key": "MOCK", "curated": False, "note": "n"}]
+        with mock.patch("explore.curation.regions", return_value=locked):
+            mock_region = self._find(self._tree(""), "Mock Region")
+        self.assertTrue(mock_region["dim"])
+        self.assertIsNone(mock_region["url"])
 
     def test_sidebar_rendered_with_chevrons(self):
         u = get_user_model().objects.create_user("sb", "s@s.io", "pw")
@@ -433,10 +454,12 @@ class OverflowSyncTest(TestCase):
         with mock.patch("explore.hierarchy.FnalDbApiClient", return_value=api):
             return list(hierarchy.sync_hierarchy(api, "dev"))
 
-    def _api(self, include_900=True):
+    def _api(self, include_stray=True):
+        # System 21 ("DAQ") is a dev-only stray — uncurated since the
+        # 2026-07-02 curation of ND/Others.
         systems = [{"id": 5, "name": "FD1-HD HVS"}]
-        if include_900:
-            systems.append({"id": 900, "name": "ProtoDUNE-II complete detector"})
+        if include_stray:
+            systems.append({"id": 21, "name": "DAQ"})
         return _fake_api(
             systems=systems,
             subsystems={5: [{"subsystem_id": 998, "subsystem_name": "HWDBUnitTest"}]},
@@ -448,32 +471,32 @@ class OverflowSyncTest(TestCase):
     def test_records_uncurated_systems_without_walking(self):
         api = self._api()
         lines = self._run(api)
-        row = H.objects.get(instance="dev", level=H.LEVEL_SYSTEM, system_id=900)
+        row = H.objects.get(instance="dev", level=H.LEVEL_SYSTEM, system_id=21)
         self.assertIsNone(row.structure_synced_at)
-        self.assertFalse(H.objects.filter(instance="dev", system_id=900)
+        self.assertFalse(H.objects.filter(instance="dev", system_id=21)
                          .exclude(level=H.LEVEL_SYSTEM).exists())
         called = {c.args for c in api.get_subsystems.call_args_list}
-        self.assertEqual(called, {("D", "005")})   # 051 listed, never walked
+        self.assertEqual(called, {("D", "005")})   # 021 listed, never walked
         self.assertTrue(any("overflow" in l for l in lines))
 
     def test_prune_spares_lazily_walked_overflow_subtree(self):
         self._run(self._api())
-        sys900 = H.objects.get(instance="dev", level=H.LEVEL_SYSTEM, system_id=900)
+        sys21 = H.objects.get(instance="dev", level=H.LEVEL_SYSTEM, system_id=21)
         sub = H.objects.create(
-            instance="dev", level=H.LEVEL_SUBSYSTEM, parent=sys900, system_id=900,
-            subsystem_id=2, system_name=sys900.system_name, subsystem_name="CRP", name="CRP")
+            instance="dev", level=H.LEVEL_SUBSYSTEM, parent=sys21, system_id=21,
+            subsystem_id=2, system_name=sys21.system_name, subsystem_name="Servers", name="Servers")
         H.objects.create(
-            instance="dev", level=H.LEVEL_TYPE, parent=sub, system_id=900,
-            subsystem_id=2, system_name=sys900.system_name, subsystem_name="CRP",
-            name="Adapter Board", part_type_id="D90000200001")
+            instance="dev", level=H.LEVEL_TYPE, parent=sub, system_id=21,
+            subsystem_id=2, system_name=sys21.system_name, subsystem_name="Servers",
+            name="Event Builder", part_type_id="D02100200001")
         self._run(self._api())   # a later global refresh
         self.assertTrue(H.objects.filter(instance="dev",
-                                         part_type_id="D90000200001").exists())
+                                         part_type_id="D02100200001").exists())
 
     def test_vanished_overflow_system_pruned(self):
         self._run(self._api())
-        self._run(self._api(include_900=False))
-        self.assertFalse(H.objects.filter(instance="dev", system_id=900).exists())
+        self._run(self._api(include_stray=False))
+        self.assertFalse(H.objects.filter(instance="dev", system_id=21).exists())
 
     def test_prod_records_no_overflow(self):
         # prod has no overflow knob: uncurated systems stay invisible.

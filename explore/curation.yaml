@@ -42,15 +42,34 @@ instances:
             sub: Far Site · Safety · BSI · Cryogenics · Networking
             systems: [200, 201, 300, 400]
 
+      # ND + Others curated from the 2026-07-02 prod audit (41 systems),
+      # mirroring the FD family style: detectors / common / site services.
       - name: Near Detector
         key: ND
-        curated: false
-        note: "9 systems in HWDB · not curated"
+        families:
+          - name: ND Detectors
+            key: ND-DET
+            sub: LAr ND · TMS · SAND · PRISM
+            systems: [100, 101, 102, 103, 106]
+          - name: ND Common
+            key: ND-shared
+            sub: DAQ · Slow Control · Cryostat · Integration · Installation
+            systems: [104, 105, 107, 108, 621]
+          - name: NS
+            key: NS
+            sub: Near Site · Safety · BSI · Cryogenics · Networking
+            systems: [220, 221, 321, 421]
 
-      - name: Other
-        key: OT
-        curated: false
-        note: "Facilities · Computing · Prototypes · not curated"
+      - name: Others
+        key: OT                       # key stays stable so deep links don't break
+        families:
+          - name: Computing
+            key: COMP                 # single system → flattened in the tree
+            systems: [500]
+          - name: Prototypes
+            key: PROTO
+            sub: ProtoDUNE-II · FD2-VD Module-0
+            systems: [900, 901]
 
     # Component-type leaves whose items are physical shipping boxes (ADR-0013).
     # Such a leaf shows a Shipments panel (location tracking) instead of test plots.
@@ -63,11 +82,12 @@ instances:
   dev:
     # Audited via `list_systems --instance dev` 2026-07-02 (47 systems): dev
     # mirrors prod's taxonomy with FD1-HD/FD2-VD naming. Curated like prod —
-    # FD first, ND/Other declared placeholders. System 5 (FD1-HD HVS) hosts
-    # the sandbox subsystems 997 "QAQCTest" and 998 "HWDBUnitTest" — Hajime's
-    # test entries, incl. D00599800007 "Test Type 007" (his ship/receive
-    # demos) and the upstream-broken D00599800023 "TestType023-Boxes" (the
-    # dev API 500s on it).
+    # FD / ND / Others. System 5 (FD1-HD HVS) hosts the sandbox subsystems
+    # 997 "QAQCTest" and 998 "HWDBUnitTest" — Hajime's test entries, incl.
+    # D00599800007 "Test Type 007" (his ship/receive demos) and the
+    # upstream-broken D00599800023 "TestType023-Boxes" (the dev API 500s on
+    # it). Dev-only strays (21 "DAQ", 60 deprecated HVS, 84 "FD CI") stay
+    # uncurated → the Uncurated overflow section.
 
     # Uncurated systems render in an automatic "Uncurated" section (#49):
     # the hierarchy refresh records every non-curated system (names only, no
@@ -100,15 +120,33 @@ instances:
             sub: Far Site · Safety · BSI · Cryogenics · Networking
             systems: [200, 201, 300, 400]
 
+      # Same ND/NS/Others ids as prod (verified in the 2026-07-02 dev audit).
       - name: Near Detector
         key: ND
-        curated: false
-        note: "9 systems in HWDB · not curated · reachable via Uncurated"
+        families:
+          - name: ND Detectors
+            key: ND-DET
+            sub: LAr ND · TMS · SAND · PRISM
+            systems: [100, 101, 102, 103, 106]
+          - name: ND Common
+            key: ND-shared
+            sub: DAQ · Slow Control · Cryostat · Integration · Installation
+            systems: [104, 105, 107, 108, 621]
+          - name: NS
+            key: NS
+            sub: Near Site · Safety · BSI · Cryogenics · Networking
+            systems: [220, 221, 321, 421]
 
-      - name: Other
-        key: OT
-        curated: false
-        note: "Near Site · Computing · Prototypes · not curated · reachable via Uncurated"
+      - name: Others
+        key: OT                       # key stays stable so deep links don't break
+        families:
+          - name: Computing
+            key: COMP                 # single system → flattened in the tree
+            systems: [500]
+          - name: Prototypes
+            key: PROTO
+            sub: ProtoDUNE-II · FD2-VD Module-0
+            systems: [900, 901]
 
     # Hajime's ship/receive demos live on "Test Type 007" (#48): boxes like
     # D00599800007-00133 carry pre-shipping checklists + labels. The literal
