@@ -6,12 +6,15 @@ curation, mirror scoping, and the dev-page affordances (banner + switch).
 
 from __future__ import annotations
 
+from unittest import mock
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
-from explore import curation, navigation
-from explore.models import HierarchySyncState, HierarchyNode as H
+from explore import curation, navigation, shipments
+from explore.models import HierarchySyncState, HierarchyNode as H, ShipmentItem
 
 DEV_PTID = "D00599800007"  # Hajime's shipping-test type on dev (system 5)
 
@@ -39,6 +42,9 @@ class CurationInstanceTest(TestCase):
     def test_shipping_types_per_instance(self):
         self.assertIn("D08120200001", curation.shipping_types("prod"))
         self.assertNotIn("D08120200001", curation.shipping_types("dev"))
+        # Hajime's ship/receive type is a dev shipping box (#48) — dev only.
+        self.assertIn(DEV_PTID, curation.shipping_types("dev"))
+        self.assertNotIn(DEV_PTID, curation.shipping_types("prod"))
 
 
 class InstanceUrlTest(TestCase):
@@ -113,3 +119,54 @@ class InstanceViewTest(TestCase):
         self.assertEqual(prod["types"], [])
         self.assertEqual(len(dev["types"]), 1)
         self.assertTrue(dev["types"][0]["path"].startswith("/hw/dev/"))
+
+
+class DevShipmentsTest(TestCase):
+    """Dev shipping boxes in the Shipments tab (#48). The engine/view plumbing
+    is instance-aware since #47; these prove the dev shipping type end-to-end."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("shipper", "s@s.io", "pw")
+        self.client.force_login(self.user)
+        self.leaf = _node("dev", DEV_PTID, 5, "FD1-HD HVS", 998, "HWDBUnitTest",
+                          "Test Type 007", n_components=147,
+                          shipments_synced_at=timezone.now())
+
+    def _box(self, **over):
+        row = dict(instance="dev", part_type_id=DEV_PTID,
+                   part_id="D00599800007-00133", location_name="BNL",
+                   location_id=128, n_contents=3, last_arrived=timezone.now())
+        row.update(over)
+        return ShipmentItem.objects.create(**row)
+
+    def test_dev_leaf_renders_shipment_panel(self):
+        self._box()
+        html = self.client.get(navigation.leaf_path_for("dev", DEV_PTID)).content.decode()
+        self.assertIn("D00599800007-00133", html)
+        self.assertIn("BNL", html)
+        self.assertNotIn('id="node-unsynced"', html)  # shipping leaf, not test plots
+
+    def test_shipments_tab_is_instance_scoped(self):
+        self._box()
+        dev_html = self.client.get("/hw/dev/shipments/").content.decode()
+        prod_html = self.client.get("/hw/shipments/").content.decode()
+        self.assertIn("D00599800007-00133", dev_html)
+        self.assertNotIn("D00599800007-00133", prod_html)
+
+    def test_sync_writes_dev_scoped_rows(self):
+        client = mock.MagicMock()
+        client._make_request.side_effect = lambda m, e, data=None, params=None: {
+            "data": [{"part_id": "D00599800007-00075"}], "pagination": {"pages": 1}}
+        client.get_locations.side_effect = lambda pid: {"data": [
+            {"arrived": "2026-06-10T00:00:00-05:00",
+             "location": {"id": 0, "name": "In Transit"}}]}
+        client.get_subcomponents.side_effect = lambda pid: {"data": [
+            {"part_id": "X1", "type_name": "T", "functional_position": "1",
+             "operation": "mount"}]}
+        with mock.patch("explore.shipments.FnalDbApiClient", return_value=client):
+            list(shipments.sync_shipments("http://api", "b", DEV_PTID, "dev"))
+        box = ShipmentItem.objects.get(part_id="D00599800007-00075")
+        self.assertEqual(box.instance, "dev")
+        self.assertEqual(ShipmentItem.for_instance("prod").count(), 0)
+        self.leaf.refresh_from_db()
+        self.assertIsNotNone(self.leaf.shipments_synced_at)
