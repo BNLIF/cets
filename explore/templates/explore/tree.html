@@ -60,6 +60,7 @@
   .tr-comp.zero { color: var(--faint); background: transparent; }
   .tr-comp.is-synced { color: var(--good); border-color: color-mix(in oklab, var(--good) 30%, var(--rule)); }
   .tr-ptid { font-family: var(--font-mono); font-size: 11px; font-weight: 500; color: var(--faint); white-space: nowrap; }
+  .tr-id { font-family: var(--font-mono); font-size: 11px; color: var(--faint); margin-left: 6px; white-space: nowrap; }
   /* 0-component nodes greyed, like the sidebar */
   .tr-row.tr-empty .tr-nm { color: var(--faint); font-weight: 500; }
 
@@ -202,6 +203,13 @@
     var lead = expandable ? "<span class='tr-caret'>▶</span>"
       : "<span class='tr-dot'>" + (n.kind === "type" ? "•" : "·") + "</span>";
     var name = "<span class='tr-nm'>" + esc(n.name) + "</span>";
+    // HWDB ids next to Systems and Subsystems (#50), coordinate-style: a
+    // system shows (57), its subsystems (57.2) — matching the part-type-id
+    // encoding D·057·002·NNNNN.
+    if (n.kind === "system" && n.id != null)
+      name += "<span class='tr-id'>(" + esc(n.id) + ")</span>";
+    else if (n.kind === "sub" && n.id != null)
+      name += "<span class='tr-id'>(" + esc(n.sys != null ? n.sys + "." + n.id : n.id) + ")</span>";
     if (n.kind === "region" && n.locked) name = "<span class='tr-swatch'></span>" + name;
     var sub = "";
     if (n.kind === "root") sub = "<span class='tr-sub'>" + esc(n.sub) + "</span>";
@@ -209,8 +217,9 @@
     var compCls = "tr-comp" + (n.n ? "" : " zero") + (n.synced ? " is-synced" : "");
     var meta;
     if (n.locked) meta = "<span class='tr-note'>" + esc(n.note || "not curated") + "</span>";
-    else if (n.kind === "type") meta = "<span class='tr-meta'><span class='" + compCls + "'>" +
-      fmt(n.n) + "</span>" + (n.ptid ? "<span class='tr-ptid'>" + esc(n.ptid) + "</span>" : "") + "</span>";
+    else if (n.kind === "type") meta = "<span class='tr-meta'>" +
+      (n.ptid ? "<span class='tr-ptid'>" + esc(n.ptid) + "</span>" : "") +
+      "<span class='" + compCls + "'>" + fmt(n.n) + "</span></span>";  // count chip rightmost, like other rows
     else meta = "<span class='tr-meta'>" + (expandable ? "<span class='tr-kc'>" + childCount(n) + "</span>" : "") +
       "<span class='" + compCls + "'>" + fmt(n.n) + "</span></span>";
     return lead + name + sub + "<span class='tr-grow'></span>" + meta;

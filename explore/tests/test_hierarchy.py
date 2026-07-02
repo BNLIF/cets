@@ -370,6 +370,8 @@ class SidebarTest(TestCase):
         self.assertIn("extree-folder", html)   # collapsible folders
         self.assertIn("<details", html)
         self.assertIn("side-toggle", html)
+        self.assertIn("FD-VD TDE (57)", html)          # HWDB id in the label (#50)
+        self.assertIn("Digital electronics (57.2)", html)
 
 
 class ExploreSyncViewTest(TestCase):

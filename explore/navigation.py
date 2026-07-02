@@ -137,7 +137,8 @@ def _subsystem_cards(instance, region, family, system, flat):
         nleaves = H.for_instance(instance).filter(level=H.LEVEL_TYPE, system_id=sid,
                                                   subsystem_id=sub.subsystem_id).count()
         cards.append({
-            "level": "Subsystem", "name": sub.subsystem_name, "sub": "", "ident": "",
+            "level": "Subsystem", "name": sub.subsystem_name, "sub": "",
+            "ident": f"{sid}.{sub.subsystem_id}",
             "url": node_path(instance, region["key"], family["key"],
                              system_id=None if flat else sid,
                              subsystem_id=sub.subsystem_id),
@@ -288,10 +289,12 @@ def _component_totals(instance):
 
 
 def _tnode(label, url, count, current, open_, dim=False, children=None, is_leaf=False,
-           empty=False, synced=False):
+           empty=False, synced=False, title=""):
+    # ``title`` is the hover tooltip; systems/subsystems put their HWDB id
+    # there (#50) — the sidebar is too narrow to show it inline.
     return {"label": label, "url": url, "count": count, "current": current,
             "open": open_, "dim": dim, "children": children or [], "is_leaf": is_leaf,
-            "empty": empty, "synced": synced}
+            "empty": empty, "synced": synced, "title": title or label}
 
 
 def _leaf_synced(leaf) -> bool:
@@ -360,7 +363,8 @@ def sidebar_tree(instance: str, ctx: dict) -> list[dict]:
                                         system_id=None if flat else sid, subsystem_id=ssid),
                               by_sub.get((sid, ssid), 0),
                               ctx.get("kind") == "subsystem" and on, on, children=leaves,
-                              empty=sempty, synced=ssynced))
+                              empty=sempty, synced=ssynced,
+                              title=f"{sub.subsystem_name} ({sid}.{ssid})"))
         return out
 
     tree = []
@@ -388,12 +392,14 @@ def sidebar_tree(instance: str, ctx: dict) -> list[dict]:
                                 continue
                             sysempty, syssynced = _state(*sys_stats.get(sid, (0, 0)))
                             children.append(_tnode(
-                                sn.system_name, node_path(instance, rk, fk, system_id=sid),
+                                sn.system_name,
+                                node_path(instance, rk, fk, system_id=sid),
                                 by_sys.get(sid, 0),
                                 ctx.get("kind") == "system" and ctx.get("system_id") == sid,
                                 ctx.get("system_id") == sid,
                                 children=subs_of(rk, fk, False, sid),
-                                empty=sysempty, synced=syssynced))
+                                empty=sysempty, synced=syssynced,
+                                title=f"{sn.system_name} ({sid})"))
                     fempty, fsynced = _state(*_agg(fam.get("systems") or []))
                 else:
                     fempty, fsynced = False, False
@@ -441,7 +447,8 @@ def _tree_subs(instance, region_key, family_key, sid, flat):
             })
         empty, synced = _state(w, s)
         out.append({"kind": "sub", "name": sub.subsystem_name or sub.name,
-                    "id": sub.subsystem_id, "n": sum(t["n"] for t in types),
+                    "id": sub.subsystem_id, "sys": sid,
+                    "n": sum(t["n"] for t in types),
                     "empty": empty, "synced": synced, "children": types})
         sys_w += w
         sys_s += s
