@@ -471,6 +471,28 @@
         if (!sessionStorage.getItem(k)) { sessionStorage.setItem(k, "1"); shipmentSync(shipUnsynced.dataset.syncUrl); }
     }
 
+    // Save-a-plot: hover button on every chart canvas that downloads it as a
+    // PNG (composited on white — the canvas itself is transparent).
+    var pngPrefix = location.pathname.split("/").filter(Boolean).pop() || "chart";
+    function addSavePng(canvas, name) {
+        if (!canvas) return;
+        var btn = document.createElement("button");
+        btn.type = "button"; btn.className = "chart-save-btn";
+        btn.title = "Save this plot as a PNG"; btn.textContent = "⤓ PNG";
+        btn.addEventListener("click", function () {
+            var out = document.createElement("canvas");
+            out.width = canvas.width; out.height = canvas.height;
+            var ctx = out.getContext("2d");
+            ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, out.width, out.height);
+            ctx.drawImage(canvas, 0, 0);
+            var a = document.createElement("a");
+            a.href = out.toDataURL("image/png");
+            a.download = (pngPrefix + "_" + name).replace(/[^\w.-]+/g, "_") + ".png";
+            a.click();
+        });
+        canvas.parentElement.appendChild(btn);
+    }
+
     var cfgEl = document.getElementById("node-chart-config");
     if (cfgEl && window.Chart) {
         var commonOpts = { responsive: true, maintainAspectRatio: false,
@@ -479,8 +501,11 @@
         JSON.parse(cfgEl.textContent).forEach(function (c) {
             if (c.empty) return;
             var initial = c.ranges['all'];
-            var barChart = new Chart(document.getElementById('bar_' + c.slug), { type: 'bar', data: { labels: initial.labels, datasets: initial.bar_datasets }, options: commonOpts });
-            var lineChart = new Chart(document.getElementById('line_' + c.slug), { type: 'line', data: { labels: initial.labels, datasets: initial.line_datasets }, options: commonOpts });
+            var barCanvas = document.getElementById('bar_' + c.slug), lineCanvas = document.getElementById('line_' + c.slug);
+            var barChart = new Chart(barCanvas, { type: 'bar', data: { labels: initial.labels, datasets: initial.bar_datasets }, options: commonOpts });
+            var lineChart = new Chart(lineCanvas, { type: 'line', data: { labels: initial.labels, datasets: initial.line_datasets }, options: commonOpts });
+            addSavePng(barCanvas, c.slug + '_per-period');
+            addSavePng(lineCanvas, c.slug + '_cumulative');
             var panel = document.querySelector('[data-chart-panel="' + c.slug + '"]'); if (!panel) return;
             var sel = panel.querySelector('.chart-filter-sel');
             var flagBoxes = panel.querySelectorAll('.chart-filter-flag');
@@ -538,6 +563,7 @@
                     scales: { x: { beginAtZero: true, ticks: { precision: 0, font: { size: 11 }, color: '#3a414b' } },
                               y: { ticks: { font: { size: 11 }, color: '#3a414b', autoSkip: false } } } }
             });
+            addSavePng(canvas, "breakdown_" + b.field);
         });
     }
 })();

@@ -211,3 +211,15 @@ a { color: inherit; }
 .chart-range-btn + .chart-range-btn { border-left: 1px solid var(--rule); }
 .chart-range-btn:hover { background: var(--surface); color: var(--body); }
 .chart-range-btn.is-active { background: var(--accent); color: #fff; }
+
+/* Hover "save as PNG" button, injected top-right of every chart canvas wrap */
+.chart-save-btn {
+  position: absolute; top: 0; right: 0; z-index: 2;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  color: var(--faint); background: var(--page);
+  border: 1px solid var(--rule); border-radius: var(--r-md);
+  padding: 4px 7px; cursor: pointer;
+  opacity: 0; transition: opacity 0.15s, color 0.12s;
+}
+*:hover > .chart-save-btn, .chart-save-btn:focus-visible { opacity: 1; }
+.chart-save-btn:hover { color: var(--body); border-color: var(--rule-hard); }
