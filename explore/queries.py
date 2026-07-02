@@ -6,7 +6,7 @@ the palettes, ``chart_config``) stays shared in ``core.queries``; only these
 two explore-specific aggregations live here.
 """
 
-from django.db.models import Count
+from django.db.models import Count, Q
 
 from core.queries import COLD_COLOR, TEST_TYPE_PALETTE, _ranges_for_series
 
@@ -15,6 +15,12 @@ from .models import HwdbComponentEvent, HwdbTestEvent
 # Categorical component facets the breakdown panel charts (mirror-only).
 COMPONENT_FACETS = (("status", "Status"), ("manufacturer", "Manufacturer"),
                     ("institution", "Institution"))
+
+# Binary QC flags on the breakdown panel (#51), mirrored off the component
+# detail record — model field name → display label.
+QC_FLAGS = (("is_installed", "Installed"),
+            ("qaqc_uploaded", "QA/QC Uploaded"),
+            ("certified_qaqc", "Certified QA/QC"))
 
 
 def component_type_progress(instance, part_type_id):
@@ -70,3 +76,28 @@ def component_breakdowns(instance, part_type_id):
             out.append({"field": field, "label": label, "total": qs.count(),
                         "rows": rows})
     return out
+
+
+def component_qc_flags(instance, part_type_id):
+    """Yes/no/unknown counts per binary QC flag from ``HwdbComponentEvent``
+    (mirror-only). ``unknown`` = rows mirrored before #51 (flag still NULL) —
+    a components/full re-sync backfills them. Empty list when the type has no
+    mirrored components at all."""
+    qs = HwdbComponentEvent.for_instance(instance).filter(part_type_id=part_type_id)
+    total = qs.count()
+    if not total:
+        return []
+    agg = qs.aggregate(**{
+        f"yes_{field}": Count("id", filter=Q(**{field: True}))
+        for field, _ in QC_FLAGS
+    }, **{
+        f"no_{field}": Count("id", filter=Q(**{field: False}))
+        for field, _ in QC_FLAGS
+    })
+    return [
+        {"field": field, "label": label,
+         "yes": agg[f"yes_{field}"], "no": agg[f"no_{field}"],
+         "unknown": total - agg[f"yes_{field}"] - agg[f"no_{field}"],
+         "total": total}
+        for field, label in QC_FLAGS
+    ]

@@ -30,7 +30,8 @@ from .models import (
     HierarchyNode, HierarchySyncState, HwdbComponentEvent, ShipmentItem,
 )
 from .queries import (
-    component_breakdowns, component_type_progress, component_update_progress,
+    component_breakdowns, component_qc_flags, component_type_progress,
+    component_update_progress,
 )
 from .parts import assembly_children, part_detail
 from .shipments import sync_shipments
@@ -228,15 +229,17 @@ def explore_view(request, trail=None):
     # the type from the mirror (HwdbComponentEvent), each row opening its part
     # page. Mirror-backed like the box table, so no live HWDB on render.
     parts_page = None
-    breakdowns = []
+    breakdowns, qc_flags = [], []
     if leaf and not is_shipping and leaf.tests_synced_at:
         part_rows = (HwdbComponentEvent.for_instance(inst)
                      .filter(part_type_id=leaf.part_type_id)
                      .order_by(F("updated").desc(nulls_last=True),
                                F("created").desc(nulls_last=True), "part_id"))
         parts_page = Paginator(part_rows, 50).get_page(request.GET.get("page"))
-        # Mirror-only categorical breakdowns (status / manufacturer / institution).
+        # Mirror-only categorical breakdowns (status / manufacturer / institution)
+        # + binary QC flags (#51).
         breakdowns = component_breakdowns(inst, leaf.part_type_id)
+        qc_flags = component_qc_flags(inst, leaf.part_type_id)
 
     return render(
         request,
@@ -248,6 +251,7 @@ def explore_view(request, trail=None):
             "charts": charts,
             "parts_page": parts_page,
             "breakdowns": breakdowns,
+            "qc_flags": qc_flags,
             "is_shipping": is_shipping,
             "shipments": shipments,
             "shipment_synced_at": shipment_synced_at,

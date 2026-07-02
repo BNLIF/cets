@@ -263,10 +263,22 @@
         </div>
         {% endfor %}
 
-        {% if breakdowns %}
+        {% if breakdowns or qc_flags %}
         <div class="chart-card" id="breakdown-card">
             <div class="panel-title" style="font-size: 14px; margin-bottom: 4px;">Component breakdown</div>
             <p class="cell-muted" style="margin: 0 0 14px; font-size: 12px;">Components by category, counted from the local mirror — no live fetch. A large <em>(unset)</em> slice usually means those rows were synced before the field was captured; a <strong>Full re-sync</strong> refreshes them.</p>
+            {% if qc_flags %}
+            <div class="qcf-row">
+                {% for f in qc_flags %}
+                <div class="qcf-item" title="{{ f.yes }} yes · {{ f.no }} no{% if f.unknown %} · {{ f.unknown }} not re-synced{% endif %}">
+                    <div class="qcf-label">{{ f.label }}</div>
+                    <div class="qcf-n">{{ f.yes }}<span class="qcf-total"> / {{ f.total }}</span></div>
+                    <div class="qcf-bar"><div class="qcf-fill" style="width: {% widthratio f.yes f.total 100 %}%"></div></div>
+                    {% if f.unknown %}<div class="cell-muted" style="font-size: 11px; margin-top: 4px;">{{ f.unknown }} not re-synced yet</div>{% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
             <div class="bd-grid">
                 {% for b in breakdowns %}
                 <div class="bd-item">
@@ -281,6 +293,13 @@
           .bd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
           .bd-title { font-size: 13px; color: var(--ink); font-weight: 600; margin-bottom: 8px; }
           .bd-chart-wrap { position: relative; height: 200px; }
+          .qcf-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 18px; }
+          .qcf-item { border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
+          .qcf-label { font-size: 12px; color: var(--faint); margin-bottom: 4px; }
+          .qcf-n { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--ink); }
+          .qcf-total { font-size: 13px; font-weight: 400; color: var(--faint); }
+          .qcf-bar { height: 5px; border-radius: 3px; background: var(--border); margin-top: 6px; overflow: hidden; }
+          .qcf-fill { height: 100%; border-radius: 3px; background: var(--accent-ink); }
         </style>
         {% endif %}
     {% elif leaf.tests_sync_error %}

@@ -112,6 +112,36 @@ class SyncTestEventsTest(TestCase):
         self.assertEqual(row.manufacturer, "BNL")
         self.assertEqual(row.institution, "Yale")      # plain scalar
 
+    def test_mirrors_qc_flags(self):
+        # The binary QC flags are top-level booleans on the detail record (#51),
+        # riding along with the facets — no extra fetch.
+        client = mock.MagicMock()
+
+        def _make_request(method, endpoint, data=None, params=None):
+            if endpoint.startswith("component-types/"):
+                return {"data": [{"part_id": "P1"}], "pagination": {"pages": 1}}
+            return {"data": {"created": "2025-02-01T00:00:00+00:00",
+                             "updated": "2025-03-15T00:00:00+00:00",
+                             "is_installed": False,
+                             "qaqc_uploaded": True,
+                             "certified_qaqc": False}}
+        client._make_request.side_effect = _make_request
+        client.get_tests.side_effect = lambda pid: {"data": []}
+        with mock.patch("explore.events.FnalDbApiClient", return_value=client):
+            list(events.sync_test_events("https://x", "bearer", "D05700200001", mode="full"))
+        row = HwdbComponentEvent.objects.get(part_type_id="D05700200001", part_id="P1")
+        self.assertIs(row.is_installed, False)
+        self.assertIs(row.qaqc_uploaded, True)
+        self.assertIs(row.certified_qaqc, False)
+
+    def test_qc_flags_null_when_absent_from_record(self):
+        # A record without the flag fields stays NULL — distinct from False.
+        self._run(["P1"], {})
+        row = HwdbComponentEvent.objects.get(part_id="P1")
+        self.assertIsNone(row.is_installed)
+        self.assertIsNone(row.qaqc_uploaded)
+        self.assertIsNone(row.certified_qaqc)
+
     def test_component_events_synced_even_with_no_tests(self):
         # 350-components-0-tests case (e.g. CRU Anode): registration plot
         # still has data while the test plot is empty.
@@ -190,6 +220,32 @@ class ComponentBreakdownTest(TestCase):
                          {"Passed": 2, "Failed": 1})
         self.assertEqual({r["value"]: r["n"] for r in bd["manufacturer"]["rows"]},
                          {"BNL": 2, "(unset)": 1})
+
+
+class ComponentQcFlagsTest(TestCase):
+    """Yes/no/unknown counts for the binary QC flags (#51)."""
+
+    def test_counts_yes_no_unknown(self):
+        from explore.queries import component_qc_flags
+        ptid = "D05700299998"
+        HwdbComponentEvent.objects.create(part_type_id=ptid, part_id="P1",
+                                          is_installed=True, qaqc_uploaded=True,
+                                          certified_qaqc=True)
+        HwdbComponentEvent.objects.create(part_type_id=ptid, part_id="P2",
+                                          is_installed=False, qaqc_uploaded=True,
+                                          certified_qaqc=False)
+        HwdbComponentEvent.objects.create(part_type_id=ptid, part_id="P3")  # legacy NULLs
+        flags = {f["field"]: f for f in component_qc_flags("prod", ptid)}
+        self.assertEqual(set(flags), {"is_installed", "qaqc_uploaded", "certified_qaqc"})
+        f = flags["is_installed"]
+        self.assertEqual((f["yes"], f["no"], f["unknown"], f["total"]), (1, 1, 1, 3))
+        self.assertEqual(flags["qaqc_uploaded"]["yes"], 2)
+        self.assertEqual(flags["qaqc_uploaded"]["unknown"], 1)
+        self.assertEqual(flags["is_installed"]["label"], "Installed")
+
+    def test_empty_when_no_components(self):
+        from explore.queries import component_qc_flags
+        self.assertEqual(component_qc_flags("prod", "D00000000000"), [])
 
 
 class PhysicsDatePathTest(TestCase):
@@ -284,6 +340,19 @@ class ExplorePlotViewTest(TestCase):
         self.assertIn(f"bar_{node.part_type_id}_test", html)   # tests-recorded chart
         self.assertIn("Components updated", html)
         self.assertIn("amc_bandwidth_test", html)
+
+    def test_qc_flag_tiles_render_with_unsynced_hint(self):
+        node = _node(tests_synced_at=timezone.now(), n_tests=0)
+        HwdbComponentEvent.objects.create(
+            part_type_id=node.part_type_id, part_id="P1",
+            is_installed=False, qaqc_uploaded=True, certified_qaqc=False)
+        HwdbComponentEvent.objects.create(  # mirrored pre-#51 → NULL flags
+            part_type_id=node.part_type_id, part_id="P2")
+        html = self.client.get(navigation.leaf_path_for("prod", node.part_type_id)).content.decode()
+        self.assertIn("Installed", html)
+        self.assertIn("QA/QC Uploaded", html)
+        self.assertIn("Certified QA/QC", html)
+        self.assertIn("1 not re-synced yet", html)  # the NULL row, honestly labeled
 
     def test_unsynced_node_shows_autosync_block(self):
         node = _node()  # tests_synced_at is NULL

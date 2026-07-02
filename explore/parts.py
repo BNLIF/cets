@@ -125,6 +125,12 @@ def assembly_children(api, parent_pid: str) -> list[dict]:
     return kids
 
 
+def _yesno(v):
+    """Boolean flag → Yes/No; None (field absent) stays None so the fact is
+    skipped rather than shown as a false No."""
+    return None if v is None else ("Yes" if v else "No")
+
+
 def part_facts(comp: dict) -> list[dict]:
     """Ordered (label, value) item facts, skipping blanks. Defensive about the
     nested-ref vs scalar shapes HWDB uses for institution/manufacturer."""
@@ -133,6 +139,10 @@ def part_facts(comp: dict) -> list[dict]:
         ("Serial number", comp.get("serial_number")),
         ("Type", _named(ct) or comp.get("type_name")),
         ("Status", _named(comp.get("status"))),
+        # Binary QC flags off the same record (#51).
+        ("Installed", _yesno(comp.get("is_installed"))),
+        ("QA/QC Uploaded", _yesno(comp.get("qaqc_uploaded"))),
+        ("Certified QA/QC", _yesno(comp.get("certified_qaqc"))),
         ("Institution", _named(comp.get("institution"))),
         ("Manufacturer", _named(comp.get("manufacturer"))),
         ("Country", comp.get("country_code")),

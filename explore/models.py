@@ -140,6 +140,11 @@ class HwdbComponentEvent(InstanceScoped):
     status = models.CharField(max_length=120, blank=True, default="")
     manufacturer = models.CharField(max_length=160, blank=True, default="")
     institution = models.CharField(max_length=160, blank=True, default="")
+    # Binary QC flags off the same detail record (#51). NULL = row mirrored
+    # before these were captured (a components/full re-sync backfills).
+    is_installed = models.BooleanField(null=True, blank=True)
+    qaqc_uploaded = models.BooleanField(null=True, blank=True)
+    certified_qaqc = models.BooleanField(null=True, blank=True)
 
     class Meta:
         indexes = [models.Index(fields=["part_type_id", "updated"])]

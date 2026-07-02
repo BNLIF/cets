@@ -91,6 +91,11 @@ def _list_part_ids(api, part_type_id: str) -> Iterator[str]:
         page += 1
 
 
+def _flag(v) -> bool | None:
+    """A raw boolean flag off the detail record; ``None`` when absent."""
+    return bool(v) if v is not None else None
+
+
 def _ref_name(v) -> str:
     """HWDB nested ``{id, name}`` ref (or plain scalar) → its display name as a
     string; ``""`` when missing. Used for the categorical facets (creator,
@@ -131,6 +136,7 @@ def _fetch_component(api, part_id: str, date_field: str | None,
 
     created = updated = None
     serial = created_by = status = manufacturer = institution = ""
+    installed = uploaded = certified = None
     if need_detail:
         detail = api._make_request("GET", f"components/{part_id}")
         d = detail.get("data") if isinstance(detail.get("data"), dict) else {}
@@ -141,11 +147,18 @@ def _fetch_component(api, part_id: str, date_field: str | None,
         status = _ref_name(d.get("status"))
         manufacturer = _ref_name(d.get("manufacturer"))
         institution = _ref_name(d.get("institution"))
+        # Binary QC flags — top-level booleans on the detail record (#51);
+        # None when the field is absent (kept NULL in the mirror).
+        installed = _flag(d.get("is_installed"))
+        uploaded = _flag(d.get("qaqc_uploaded"))
+        certified = _flag(d.get("certified_qaqc"))
 
     return {
         "part_id": part_id, "created": created, "updated": updated,
         "serial_number": serial, "created_by": created_by, "status": status,
         "manufacturer": manufacturer, "institution": institution,
+        "is_installed": installed, "qaqc_uploaded": uploaded,
+        "certified_qaqc": certified,
         "tests": tests, "has_detail": need_detail, "has_tests": need_tests,
     }
 
@@ -278,6 +291,9 @@ def sync_test_events(
                     status=r.get("status", ""),
                     manufacturer=r.get("manufacturer", ""),
                     institution=r.get("institution", ""),
+                    is_installed=r.get("is_installed"),
+                    qaqc_uploaded=r.get("qaqc_uploaded"),
+                    certified_qaqc=r.get("certified_qaqc"),
                 )
                 for r in results if r["has_detail"]
             ],

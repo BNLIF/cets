@@ -143,6 +143,15 @@ class PartFactsTest(TestCase):
         self.assertEqual(facts["Created by"], "Chao Zhang")  # name only, not the dict
         self.assertNotIn("Manufacturer", facts)
 
+    def test_qc_flags_render_yes_no_and_skip_absent(self):
+        # False is meaningful (→ "No"); only a missing field is skipped.
+        comp = {"serial_number": "SN-9", "is_installed": False,
+                "qaqc_uploaded": True}  # certified_qaqc absent
+        facts = {f["label"]: f["value"] for f in parts.part_facts(comp)}
+        self.assertEqual(facts["Installed"], "No")
+        self.assertEqual(facts["QA/QC Uploaded"], "Yes")
+        self.assertNotIn("Certified QA/QC", facts)
+
 
 class AssemblyTreeTest(TestCase):
     """parts.assembly_children — one level of the assembly tree with QC status
