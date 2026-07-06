@@ -1,0 +1,173 @@
+# Hand-curated mapping: chart node id -> HWDB part type id(s), per instance
+# (#58). NOT generated — extractor re-runs never touch this file. Mostly one
+# type per box; a list only where the chart itself says so (the "7 types" /
+# "22 types" / "2 types" notes) or where chip batches share one box. FD-VD
+# only — FD1-HD variants of shared systems (CE, PDS) are deliberately absent.
+# Grow this as consortia register types; the audit command (#59) reports
+# unmapped chart nodes and candidate matches.
+#
+# Node ids are the stable slugs from fd-vd-v4.yaml (NOT labels — labels
+# duplicate: the two "Adapter board (12)" boxes are different types).
+# Orientation: the BDE/CE subtree (inst-cru, cru-2, *-2 boards) reads the
+# BOTTOM CRPs (system 56); the TDE-side Inst. CRP subtree reads the TOP
+# CRPs (system 55).
+
+instances:
+  prod:
+    # --- CE / bottom-drift electronics (FD CE, system 81; FD-VD variants) ---
+    larasic: [D08100100003]                 # LArASIC P5B Prod
+    cold-adc: [D08100200002]                # ColdADC P2 Prod
+    cold-data: [D08100300003]               # COLDATA E4 Prod
+    femb: [D08101100041]                    # FEMB FD-VD MiniSAS
+    ce-box: [D08101600011]                  # CE Box FD-VD
+    patch-panel: [D08101900001]             # CRU Patch panel
+    bde-signal-cable: [D08102100012]        # Cold signal cable FD-VD SAMTEC long
+    bde-short-signal-cable: [D08102100021]  # Cold signal cable CRU MiniSAS short
+    bde-power-cable: [D08102200012]         # Cold power cable FD-VD long
+    bde-short-power-cable: [D08102200021]   # Cold power cable CRU short
+    wib: [D08104200001]
+    ptc: [D08104300001]
+    bde-flange-wiec: [D08104100002]         # WIEC Assembly FD-VD
+    bde-lv-ps: [D08105100002]               # LVPS Wiener PL506 (FD-VD)
+    bias-shv-warm-cable-3: [D08105400011]   # Warm BV cable FD-VD long (long wall) — best guess
+    bias-shv-warm-cable: [D08105400012]     # Warm BV cable FD-VD short — best guess
+    # --- Bottom CRP (system 56): the BDE-side CRU subtree ---
+    inst-cru: [D05600100001]                # Instrumented CRP › Bottom CRP
+    cru-2: [D05600200001]
+    adapter-board-2: [D05600600001, D05600600002, D05600600003, D05600600004,
+                      D05600600005, D05600600006, D05600600007]
+    composite-frame-2: [D05600800001]
+    bias-filter-board-2: [D05600900001]
+    bias-jumper-cable: [D05600900002]
+    cold-bias-shv-cable-2: [D05600900003]
+    int-frame: [D05602100001, D05602100002]  # Intermediate frame Type 1/2
+    adapter-plate: [D05602200001]
+    support-post: [D05602200002]
+    # --- Top CRP (system 55): the TDE-side Inst. CRP subtree ---
+    inst-crp: [D05500100001]                # Instrumented CRP › Top CRP
+    cru: [D05500200001]
+    cru-anode-panel: [D05500300001, D05500300002]
+    peek-spacer: [D05500400001]
+    pcb-anode-segment: [D05500500001, D05500500002, D05500500003, D05500500004]
+    adapter-board: [D05500600001, D05500600002, D05500600003, D05500600004,
+                    D05500600005, D05500600006, D05500600007]
+    edge-connector-board: [D05500700001, D05500700002, D05500700003, D05500700004,
+                           D05500700005, D05500700006, D05500700007]
+    composite-frame: [D05500800001]
+    bias-filter-board: [D05500900001]
+    bias-cable-bundle-jumper: [D05500900002]
+    cold-bias-shv-cable: [D05500900003, D05500900004]  # short + long
+    tde-signal-cable: [D05501100001]
+    crp-cable-tray: [D05501200001]
+    decoupling-device: [D05502100001, D05502100002, D05502100003]
+    # --- Top CRP level meters (SST side) + superstructure ---
+    lm-assembly: [D05503100001]
+    lm-cable-bundle: [D05503100002]         # cold cable bundle
+    lm-warm-bundle: [D05503100003]          # warm cable bundle
+    lm-electronics: [D05100400001]          # TOP CRP Level Meter Electronic
+    sst: [D05100100001, D05100100002]       # Large / Small superstructure
+    # --- TDE (system 57) ---
+    tde-chimney-24-48: [D05700100001, D05700100002]
+    tde-warm-flange-24-48: [D05700100005]
+    tde-cold-flange-24-48: [D05700100003, D05700100004]
+    amc: [D05700200001]
+    wr-mch: [D05700200002]
+    utca-mch: [D05700200003]
+    utca-pu: [D05700200004]
+    utca-crate: [D05700200005]
+    feb: [D05700300001]
+    wr-switch: [D05700400001]
+    wr-fiber: [D05700400002]
+    calibration-unit: [D05700500003]
+    tde-lv-ps: [D05700500002]
+    lv-filter-fanout: [D05700500001]        # LV distribution box
+    lv-feb-power-sense-cable: [D05700700001]
+    lv-feb-power-cable: [D05700700002]
+    feb-pulsing-cable: [D05700700003]
+    feb-pulsing-controls-cable: [D05700700004]
+    tde-cable: [D05700700005]               # VHDCI signal
+
+  dev:
+    # --- CE / bottom-drift electronics (system 81; FD2 variants + chip batches) ---
+    larasic: [D08100100001, D08100100004]
+    cold-adc: [D08100200001, D08100200002, D08100200003]
+    cold-data: [D08100300001, D08100300003]
+    femb: [D08100400002, D08101100021]      # FD2 MINISAS versions
+    ce-box: [D08100600002]                  # FD2 CE box version 1
+    patch-panel: [D08101900001]             # CRP Patch panel
+    bde-signal-cable: [D08102100012]        # SAMTEC cold signal long FD2
+    bde-short-signal-cable: [D08102100011]  # SAMTEC cold signal short FD2
+    bde-short-power-cable: [D08102200011]   # cold twisted-pair power short FD2
+    wib: [D08104200001]
+    ptc: [D08104300001]
+    bde-flange-wiec: [D08104100001]
+    # --- Instrumented CRPs (systems 52/53) ---
+    inst-crp: [D05200100001]                # 52 Instrumented CRP (top)
+    tde-signal-cable: [D05200200001]
+    crp-cable-tray: [D05200300001]
+    inst-cru: [D05300100001]                # 53 Instrumented CRP (bottom)
+    # --- Top CRP (system 55) ---
+    cru: [D05500200001]                     # "Top Half CRP" = one CRU
+    cru-anode-panel: [D05500300001, D05500300002]
+    peek-spacer: [D05500400001]
+    pcb-anode-segment: [D05500500001, D05500500002, D05500500003, D05500500004,
+                        D05500500005, D05500500006, D05500500007, D05500500008,
+                        D05500500009, D05500500010, D05500500011, D05500500012,
+                        D05500500013, D05500500014, D05500500015, D05500500016,
+                        D05500500017, D05500500018, D05500500019, D05500500020,
+                        D05500500021, D05500500022]
+    adapter-board: [D05500600001, D05500600002, D05500600003, D05500600004,
+                    D05500600005, D05500600006, D05500600007]
+    edge-connector-board: [D05500700001, D05500700002, D05500700003, D05500700004,
+                           D05500700005, D05500700006, D05500700007]
+    composite-frame: [D05500800001]
+    bias-filter-board: [D05500900001]
+    bias-cable-bundle-jumper: [D05501000001]  # Cold filter HV cable jumper (top)
+    decoupling-device: [D05501100001, D05501100002, D05501100003]
+    lm-assembly: [D05502000001]
+    lm-cable-bundle: [D05502000002]         # internal (cold) cable bundle
+    lm-warm-bundle: [D05502000003]          # external (warm) cable bundle
+    lm-electronics: [D05100400001]
+    sst: [D05100100001, D05100100002]
+    support-post: [D05100700001, D05100700002]  # BOTTOM CRP Support Type 1/2
+    # --- Bottom CRP (system 56) ---
+    cru-2: [D05600200001]                   # "Bottom Half CRP" = one CRU
+    cru-anode-panel-2: [D05600300001, D05600300002]
+    peek-spacer-2: [D05600400001]
+    pcb-anode-segment-2: [D05600500001, D05600500002, D05600500003, D05600500004,
+                          D05600500005, D05600500006, D05600500007, D05600500008,
+                          D05600500009, D05600500010, D05600500011, D05600500012,
+                          D05600500013, D05600500014, D05600500015, D05600500016,
+                          D05600500017, D05600500018, D05600500019, D05600500020,
+                          D05600500021, D05600500022]
+    adapter-board-2: [D05600600001, D05600600002, D05600600003, D05600600004,
+                      D05600600005, D05600600006, D05600600007]
+    edge-connector-board-3: [D05600700001, D05600700002, D05600700003, D05600700004,
+                             D05600700005, D05600700006, D05600700007]
+    composite-frame-2: [D05600800001]
+    bias-filter-board-2: [D05600900001]
+    bias-jumper-cable: [D05601000001]       # Cold filter HV cable jumper (bottom)
+    adapter-plate: [D05601100001, D05601100002]  # CRP Support adapter plate (+TCO)
+    # --- TDE (system 57) ---
+    tde-chimney-24-48: [D05700100001, D05700100002]
+    tde-warm-flange-24-48: [D05700100005]
+    tde-cold-flange-24-48: [D05700100003, D05700100004]
+    amc: [D05700200001]
+    wr-mch: [D05700200002]
+    utca-mch: [D05700200003]
+    utca-pu: [D05700200004]
+    utca-crate: [D05700200005]
+    feb: [D05700300001]                     # Analog Front End Board
+    wr-switch: [D05700400001]
+    calibration-unit: [D05700500003]
+    tde-lv-ps: [D05700500002]
+    lv-filter-fanout: [D05700500001]        # Low Voltage Distribution Box
+    # --- PDS (system 58) ---
+    pds-membrane-module: [D05800300001]     # Membrane Arapuca mod
+    pds-cathode-module: [D05800200001]      # Cathode Arapuca module
+    mm-frame-kit: [D05803100001]            # Membrane Arapuca frame
+    cm-frame-kit: [D05802100001]            # Cathode Arapuca frame
+    wls-light-guide-2: [D05803100002]       # Membrane WLS plate
+    wls-light-guide: [D05802100002]         # Cathode WLS plate
+    sipm-flex-board: [D05803100004]         # Membrane SiPM Flex Board
+    sipm-flex-board-2: [D05802100004]       # Cathode SiPM Flex Board

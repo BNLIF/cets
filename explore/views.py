@@ -267,13 +267,54 @@ def explore_view(request, trail=None):
 def explore_hierarchy_view(request):
     """The detector hierarchy chart (#55): the consortium component-type
     chart, rendered server-side as SVG from its spec in ``chart_specs/``.
-    The spec is instance-independent; only the sidebar is per-instance."""
+    The chart model is instance-independent; the node → part-type mapping
+    (#58) and sidebar are per-instance."""
     inst = instance_of(request)
     return render(request, "explore/hierarchy.html", {
         "active_nav": "detector",
         "sidebar": navigation.sidebar_tree(inst, {}),
         "chart": charts.svg_chart("fd-vd-v4"),
+        "type_mapping": charts.type_mapping("fd-vd-v4", inst),
     })
+
+
+_PTID_RX = re.compile(r"^[A-Z]\d{11}$")
+
+
+@login_not_required
+@fnal_login_required
+def explore_type_summary_view(request):
+    """Compact per-type summaries for the chart popup (#58): mirror-only, no
+    live HWDB. ``?ids=`` takes comma-separated part type ids (the mapping may
+    attach several flavors to one chart box); unknown ids come back with
+    ``name: null`` so the popup can say "not in the mirror yet". Counts and
+    status breakdowns only — no per-item listing (types can hold thousands;
+    the Type View link is the place to browse items)."""
+    inst = instance_of(request)
+    ids = [i for i in (request.GET.get("ids") or "").split(",") if i]
+    if not ids or len(ids) > 20 or not all(_PTID_RX.match(i) for i in ids):
+        return JsonResponse({"error": "ids must be 1-20 part type ids"}, status=400)
+    types = []
+    for ptid in ids:
+        leaf = HierarchyNode.for_instance(inst).filter(
+            level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
+        if leaf is None:
+            types.append({"part_type_id": ptid, "name": None})
+            continue
+        events = HwdbComponentEvent.for_instance(inst).filter(part_type_id=ptid)
+        statuses: dict[str, int] = {}
+        for s in events.values_list("status", flat=True):
+            key = s or "(no status)"
+            statuses[key] = statuses.get(key, 0) + 1
+        types.append({
+            "part_type_id": ptid,
+            "name": leaf.name,
+            "subsystem": f"{leaf.system_name} › {leaf.subsystem_name}",
+            "n_components": leaf.n_components,
+            "statuses": statuses,
+            "url": navigation.leaf_path_for(inst, ptid),
+        })
+    return JsonResponse({"types": types})
 
 
 @login_not_required

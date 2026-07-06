@@ -58,6 +58,20 @@ def svg_chart(chart_id: str) -> dict:
     return _build(chart_id, spec, overlay)
 
 
+@functools.lru_cache(maxsize=None)
+def type_mapping(chart_id: str, instance: str) -> dict[str, list[str]]:
+    """Hand-curated node id → part type ids for one chart + instance (#58),
+    from ``<id>.mapping.yaml``. Empty when the file or instance is absent."""
+    path = CHART_DIR / f"{chart_id}.mapping.yaml"
+    if not path.exists():
+        return {}
+    with open(path) as f:
+        data = yaml.safe_load(f) or {}
+    block = (data.get("instances") or {}).get(instance) or {}
+    return {nid: [v] if isinstance(v, str) else list(v)
+            for nid, v in block.items()}
+
+
 def _box_w(label: str) -> float:
     return max(MIN_BOX_W, BOX_PAD + CHAR_W * len(label))
 

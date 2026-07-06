@@ -12,17 +12,44 @@
     color: var(--dim); background: var(--page); border: 1px solid var(--rule);
     border-radius: 999px; }
   .hc-reset:hover { border-color: var(--rule-hard); background: var(--surface); }
-  .hc-canvas { border: 1px solid var(--rule); border-radius: var(--r-lg);
+  .hc-reset[aria-pressed="true"] { color: var(--accent-ink); border-color: var(--accent-ink); }
+  .hc-canvas { position: relative; border: 1px solid var(--rule); border-radius: var(--r-lg);
     background: #fff; overflow: hidden; height: calc(100vh - 200px); min-height: 420px; }
   .hc-canvas svg { display: block; width: 100%; height: 100%;
     cursor: grab; touch-action: none; }
   .hc-canvas svg.hc-panning { cursor: grabbing; }
+  .hc-box { cursor: pointer; }
+  .hc-box:hover rect { filter: brightness(1.12); }
+  .hc-canvas svg.hc-cov .hc-box:not(.hc-mapped) { opacity: .35; }
+
+  /* type-summary popup (#58) */
+  .hc-pop { position: absolute; top: 12px; right: 12px; width: 330px; max-height: calc(100% - 24px);
+    overflow: auto; background: var(--page); border: 1px solid var(--rule-hard);
+    border-radius: var(--r-lg); box-shadow: 0 10px 30px rgba(0,0,0,.16); z-index: 20;
+    padding: 14px 16px; font-size: 13px; }
+  .hc-pop-head { display: flex; align-items: baseline; gap: 8px; }
+  .hc-pop-title { font-weight: 700; color: var(--ink); font-size: 14px; flex: 1; }
+  .hc-pop-x { border: none; background: none; cursor: pointer; font-size: 15px;
+    color: var(--faint); padding: 0 2px; }
+  .hc-pop-x:hover { color: var(--ink); }
+  .hc-pop-empty { color: var(--faint); margin: 8px 0 2px; }
+  .hc-pop-type { border-top: 1px solid var(--rule); margin-top: 10px; padding-top: 10px; }
+  .hc-pop-type:first-of-type { border-top: none; margin-top: 4px; padding-top: 0; }
+  .hc-pop-name { font-weight: 600; color: var(--ink); }
+  .hc-pop-name a { color: var(--accent-ink); text-decoration: none; }
+  .hc-pop-name a:hover { text-decoration: underline; }
+  .hc-pop-meta { color: var(--faint); font-size: 11.5px; margin: 1px 0 4px; }
+  .hc-pop-id { font-family: var(--font-mono); font-size: 11px; color: var(--faint); }
+  .hc-chip { display: inline-block; font-size: 10.5px; padding: 1px 8px; margin: 2px 4px 2px 0;
+    border: 1px solid var(--rule); border-radius: 999px; color: var(--dim); }
 </style>
 
 <div class="hc-page">
   <div class="hc-head">
     <h1>{{ chart.title }}</h1>
     <span class="hc-hint">scroll to zoom · drag to pan</span>
+    <button class="hc-reset" id="hc-coverage" type="button" aria-pressed="false"
+            title="Fade boxes with no HWDB type mapping">HWDB coverage</button>
     <button class="hc-reset" id="hc-reset" type="button" title="Fit chart to width">Reset view</button>
   </div>
   <p class="subtitle">Component-type hierarchy chart · source: {{ chart.source }}</p>
@@ -60,7 +87,7 @@
       {% endfor %}
 
       {% for b in chart.boxes %}
-      <g class="hc-box">
+      <g class="hc-box{% if b.id in type_mapping %} hc-mapped{% endif %}" data-id="{{ b.id }}" data-label="{{ b.label }}">
         <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"
               fill="{{ b.fill }}"
               {% if b.dashed %}stroke="#000" stroke-width="1" stroke-dasharray="3,2"
@@ -76,9 +103,76 @@
       <text class="hc-annotation" x="{{ n.x }}" y="{{ n.y }}">{{ n.text }}</text>
       {% endfor %}
     </svg>
+    <div class="hc-pop" id="hc-pop" hidden></div>
   </div>
 </div>
 
+{{ type_mapping|json_script:"hc-mapping" }}
+<script>
+// Click a box -> type-summary popup (#58). Mapped boxes fetch mirror-only
+// summaries (a box may carry several flavors/types); unmapped boxes get an
+// honest "not registered yet". Click-vs-drag is resolved by pointer travel.
+(function () {
+  var svg = document.getElementById("hc-svg");
+  var pop = document.getElementById("hc-pop");
+  if (!svg || !pop) return;
+  var mapping = JSON.parse(document.getElementById("hc-mapping").textContent);
+  var summaryUrl = "{% url 'explore:type_summary' %}";
+  function esc(s) { var d = document.createElement("div"); d.textContent = (s == null ? "" : s); return d.innerHTML; }
+
+  function head(label) {
+    return "<div class='hc-pop-head'><span class='hc-pop-title'>" + esc(label) +
+           "</span><button class='hc-pop-x' type='button' aria-label='Close'>&#10005;</button></div>";
+  }
+  function show(html) { pop.innerHTML = html; pop.hidden = false; }
+  pop.addEventListener("click", function (e) {
+    if (e.target.classList.contains("hc-pop-x")) pop.hidden = true;
+  });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") pop.hidden = true; });
+
+  function render(label, data) {
+    var html = head(label);
+    data.types.forEach(function (t) {
+      html += "<div class='hc-pop-type'>";
+      if (!t.name) {
+        html += "<div class='hc-pop-id'>" + esc(t.part_type_id) + "</div>" +
+                "<div class='hc-pop-empty'>Not in the mirror yet — refresh the hierarchy.</div>";
+      } else {
+        html += "<div class='hc-pop-name'>" + (t.url ? "<a href='" + esc(t.url) + "'>" + esc(t.name) + " &rarr;</a>" : esc(t.name)) + "</div>" +
+                "<div class='hc-pop-meta'>" + esc(t.subsystem) + " · <span class='hc-pop-id'>" + esc(t.part_type_id) + "</span></div>" +
+                "<div>" + t.n_components + " component" + (t.n_components === 1 ? "" : "s") + "</div>";
+        var chips = Object.keys(t.statuses || {}).map(function (s) {
+          return "<span class='hc-chip'>" + esc(s) + " · " + t.statuses[s] + "</span>";
+        }).join("");
+        if (chips) html += "<div>" + chips + "</div>";
+      }
+      html += "</div>";
+    });
+    show(html);
+  }
+
+  window.hcBoxClick = async function (box) {
+    var label = box.dataset.label, ids = mapping[box.dataset.id];
+    if (!ids || !ids.length) {
+      show(head(label) + "<div class='hc-pop-empty'>Not registered in the HWDB yet.</div>");
+      return;
+    }
+    show(head(label) + "<div class='hc-pop-empty'>Loading…</div>");
+    try {
+      var resp = await fetch(summaryUrl + "?ids=" + ids.join(","), { headers: { "X-Requested-With": "fetch" } });
+      render(label, await resp.json());
+    } catch (e) {
+      show(head(label) + "<div class='hc-pop-empty'>Could not load the summary.</div>");
+    }
+  };
+
+  // HWDB coverage toggle: fade boxes with no type mapping in this instance.
+  var cov = document.getElementById("hc-coverage");
+  cov.addEventListener("click", function () {
+    cov.setAttribute("aria-pressed", svg.classList.toggle("hc-cov") ? "true" : "false");
+  });
+})();
+</script>
 <script>
 // Pan/zoom for the chart SVG (#57): wheel (and trackpad pinch) zooms about
 // the cursor, drag pans, all via the viewBox — no library. Initial view
@@ -117,20 +211,29 @@
   var drag = null;
   svg.addEventListener("pointerdown", function (e) {
     if (e.button !== 0) return;
-    drag = { x: e.clientX, y: e.clientY };
+    // remember the real target: pointer capture retargets later events
+    drag = { x: e.clientX, y: e.clientY, moved: 0, box: e.target.closest(".hc-box") };
     svg.classList.add("hc-panning");
     svg.setPointerCapture(e.pointerId);
   });
   svg.addEventListener("pointermove", function (e) {
     if (!drag) return;
     var scale = vb.w / svg.getBoundingClientRect().width;
+    drag.moved += Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y);
     vb.x -= (e.clientX - drag.x) * scale;
     vb.y -= (e.clientY - drag.y) * scale;
-    drag = { x: e.clientX, y: e.clientY };
+    drag.x = e.clientX; drag.y = e.clientY;
     apply();
   });
   ["pointerup", "pointercancel"].forEach(function (ev) {
-    svg.addEventListener(ev, function () { drag = null; svg.classList.remove("hc-panning"); });
+    svg.addEventListener(ev, function () {
+      if (drag && drag.moved < 5) {  // a click, not a pan (#58)
+        if (drag.box && window.hcBoxClick) window.hcBoxClick(drag.box);
+        else document.getElementById("hc-pop").hidden = true;
+      }
+      drag = null;
+      svg.classList.remove("hc-panning");
+    });
   });
 
   document.getElementById("hc-reset").addEventListener("click", fit);

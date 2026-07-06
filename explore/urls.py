@@ -10,6 +10,7 @@ urlpatterns = [
     path("tree/", views.explore_tree_view, name="tree"),
     path("browse/", views.explore_view, name="browse"),
     path("hierarchy/", views.explore_hierarchy_view, name="hierarchy"),
+    path("hierarchy/summary/", views.explore_type_summary_view, name="type_summary"),
     path("shipments/", views.shipments_view, name="shipments"),
     path("search/", views.explore_search_view, name="search"),
     path("search/api/", views.explore_search_api_view, name="search_api"),
