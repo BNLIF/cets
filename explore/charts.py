@@ -116,6 +116,12 @@ def _build(chart_id: str, spec: dict) -> dict:
         bands.append({**band, "y": y, "h": band_h, "label_y": y + 24})
         y += band_h
 
+    unplaced = [nid for nid, n in nodes.items() if "x" not in n]
+    if unplaced:
+        raise ValueError(
+            f"chart {chart_id}: unreachable nodes (edge cycle?): "
+            f"{', '.join(sorted(unplaced))}")
+
     # Bracket connectors: one arrowed trunk into the parent, plain stubs
     # from each child; cables route through a lane right of both endpoints.
     arrows = []
