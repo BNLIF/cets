@@ -4,26 +4,40 @@
 {% block content %}
 <style>
   .hc-page { padding: 26px 30px 56px; }
+  .hc-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
   .hc-page h1 { font-size: 1.5rem; color: var(--ink); margin: 0 0 4px; letter-spacing: -0.01em; }
-  .hc-page .subtitle { color: var(--dim); margin: 0 0 20px; font-size: 14px; }
+  .hc-page .subtitle { color: var(--dim); margin: 0 0 14px; font-size: 14px; flex: 1; }
+  .hc-hint { font-size: 12px; color: var(--faint); white-space: nowrap; }
+  .hc-reset { font: inherit; font-size: 12px; padding: 3px 12px; cursor: pointer;
+    color: var(--dim); background: var(--page); border: 1px solid var(--rule);
+    border-radius: 999px; }
+  .hc-reset:hover { border-color: var(--rule-hard); background: var(--surface); }
   .hc-canvas { border: 1px solid var(--rule); border-radius: var(--r-lg);
-    background: #fff; overflow: hidden; }
-  .hc-canvas svg { display: block; width: 100%; height: auto; }
+    background: #fff; overflow: hidden; height: calc(100vh - 200px); min-height: 420px; }
+  .hc-canvas svg { display: block; width: 100%; height: 100%;
+    cursor: grab; touch-action: none; }
+  .hc-canvas svg.hc-panning { cursor: grabbing; }
 </style>
 
 <div class="hc-page">
-  <h1>{{ chart.title }}</h1>
+  <div class="hc-head">
+    <h1>{{ chart.title }}</h1>
+    <span class="hc-hint">scroll to zoom · drag to pan</span>
+    <button class="hc-reset" id="hc-reset" type="button" title="Fit chart to width">Reset view</button>
+  </div>
   <p class="subtitle">Component-type hierarchy chart · source: {{ chart.source }}</p>
 
   <div class="hc-canvas">
-    <svg viewBox="0 0 {{ chart.width }} {{ chart.height }}" xmlns="http://www.w3.org/2000/svg"
+    <svg id="hc-svg" viewBox="0 0 {{ chart.width }} {{ chart.height }}"
+         xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"
          role="img" aria-label="{{ chart.title }}">
       {# text styling lives inside the svg so it survives standalone export #}
       <style>
         text { font-family: 'IBM Plex Sans', sans-serif; }
         .hc-box text { font-size: 10px; text-anchor: middle;
           dominant-baseline: central; pointer-events: none; }
-        .hc-band-label { font-size: 20px; font-weight: 600; fill: #000; }
+        .hc-band-label { font-size: 20px; font-weight: 600; fill: #000;
+          dominant-baseline: central; }
         .hc-annotation { font-size: 9px; fill: #000; dominant-baseline: central; }
       </style>
       <defs>
@@ -37,7 +51,7 @@
 
       {% for band in chart.bands %}
       {% if band.fill %}<rect x="0" y="{{ band.y }}" width="{{ chart.width }}" height="{{ band.h }}" fill="{{ band.fill }}"/>{% endif %}
-      {% if band.label %}<text class="hc-band-label" x="30" y="{{ band.label_y }}">{{ band.label }}</text>{% endif %}
+      {% if band.label %}<text class="hc-band-label" x="{{ band.label_x|default:30 }}" y="{{ band.label_y }}">{{ band.label }}</text>{% endif %}
       {% endfor %}
 
       {% for a in chart.arrows %}
@@ -51,7 +65,10 @@
               fill="{{ b.fill }}"
               {% if b.dashed %}stroke="#000" stroke-width="1" stroke-dasharray="3,2"
               {% elif b.stroke %}stroke="{{ b.stroke }}" stroke-width="1.6"{% endif %}/>
-        <text x="{{ b.cx }}" y="{{ b.cy }}" fill="{{ b.text|default:'#ffffff' }}">{{ b.label }}</text>
+        <text x="{{ b.cx }}" y="{{ b.cy }}" fill="{{ b.text|default:'#ffffff' }}"
+              {% if b.font %}font-size="{{ b.font }}"{% endif %}
+              {% if b.squeeze %}textLength="{{ b.squeeze }}" lengthAdjust="spacingAndGlyphs"{% endif %}
+              {% if b.vertical %}transform="rotate(-90 {{ b.cx }} {{ b.cy }})"{% endif %}>{{ b.label }}</text>
       </g>
       {% endfor %}
 
@@ -61,4 +78,63 @@
     </svg>
   </div>
 </div>
+
+<script>
+// Pan/zoom for the chart SVG (#57): wheel (and trackpad pinch) zooms about
+// the cursor, drag pans, all via the viewBox — no library. Initial view
+// fits the chart width and shows its top; Reset restores that.
+(function () {
+  var svg = document.getElementById("hc-svg");
+  if (!svg) return;
+  var W = {{ chart.width }}, H = {{ chart.height }};
+  var MIN_W = 200, MAX_W = W * 1.5;   // zoom-in / zoom-out limits
+  var vb = null;
+
+  function apply() {
+    svg.setAttribute("viewBox", vb.x + " " + vb.y + " " + vb.w + " " + vb.h);
+  }
+  function fit() {
+    var r = svg.getBoundingClientRect();
+    vb = { x: 0, y: 0, w: W, h: W * (r.height / r.width) };  // fit width, top
+    apply();
+  }
+  function svgPoint(e) {
+    return new DOMPoint(e.clientX, e.clientY).matrixTransform(svg.getScreenCTM().inverse());
+  }
+
+  svg.addEventListener("wheel", function (e) {
+    e.preventDefault();
+    var factor = Math.pow(1.0015, e.deltaY * (e.ctrlKey ? 4 : 1));
+    var w = Math.min(MAX_W, Math.max(MIN_W, vb.w * factor));
+    factor = w / vb.w;
+    if (factor === 1) return;
+    var p = svgPoint(e);
+    vb = { x: p.x - (p.x - vb.x) * factor, y: p.y - (p.y - vb.y) * factor,
+           w: vb.w * factor, h: vb.h * factor };
+    apply();
+  }, { passive: false });
+
+  var drag = null;
+  svg.addEventListener("pointerdown", function (e) {
+    if (e.button !== 0) return;
+    drag = { x: e.clientX, y: e.clientY };
+    svg.classList.add("hc-panning");
+    svg.setPointerCapture(e.pointerId);
+  });
+  svg.addEventListener("pointermove", function (e) {
+    if (!drag) return;
+    var scale = vb.w / svg.getBoundingClientRect().width;
+    vb.x -= (e.clientX - drag.x) * scale;
+    vb.y -= (e.clientY - drag.y) * scale;
+    drag = { x: e.clientX, y: e.clientY };
+    apply();
+  });
+  ["pointerup", "pointercancel"].forEach(function (ev) {
+    svg.addEventListener(ev, function () { drag = null; svg.classList.remove("hc-panning"); });
+  });
+
+  document.getElementById("hc-reset").addEventListener("click", fit);
+  fit();
+})();
+</script>
 {% endblock %}

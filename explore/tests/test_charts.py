@@ -29,39 +29,58 @@ class ChartSpecTest(TestCase):
         self.assertTrue(chart["arrows"])
         self.assertTrue(chart["bands"])
 
-    def test_children_stack_indented_below_parent(self):
+    def test_overlay_places_boxes_at_pdf_positions(self):
         chart = charts.svg_chart("fd-vd-v4")
         femb = _by_label(chart, "FEMB (1)")
-        kids = [_by_label(chart, l)
-                for l in ("LArASIC (8)", "Cold ADC (8)", "Cold DATA (2)")]
-        for kid in kids:
-            self.assertEqual(kid["x"], femb["x"] + charts.INDENT)
-            self.assertGreater(kid["y"], femb["y"])
-        # spec order preserved top to bottom, no overlap
-        ys = [k["y"] for k in kids]
-        self.assertEqual(ys, sorted(ys))
-        self.assertGreaterEqual(ys[1] - ys[0], charts.BOX_H)
+        self.assertAlmostEqual(femb["x"], 705.6, places=0)
+        self.assertAlmostEqual(femb["y"], 912.4, places=0)
+        self.assertEqual((chart["width"], chart["height"]), (1920, 1080))
 
-    def test_band_rows_stack_in_spec_order(self):
+    def test_overlay_band_strips_at_pdf_positions(self):
         chart = charts.svg_chart("fd-vd-v4")
-        mez, roof, interior = chart["bands"]
-        self.assertEqual(mez["label"], "Mezzanine racks")
-        self.assertLess(mez["y"], roof["y"])
-        self.assertLess(roof["y"], interior["y"])
-        # the tree lives in the interior row, below the roof strip
-        root = _by_label(chart, "Inst. CRU (20x4x2)")
-        self.assertGreater(root["y"], roof["y"] + roof["h"])
+        mez = next(b for b in chart["bands"] if b["label"] == "Mezzanine racks")
+        self.assertAlmostEqual(mez["y"], 123.8, places=0)
 
-    def test_cable_edge_routes_with_arrowhead(self):
+    def test_cable_edges_route_with_arrowheads(self):
         chart = charts.svg_chart("fd-vd-v4")
         cable = next(a for a in chart["arrows"] if a["color"] == "#ff0000")
         self.assertTrue(cable["marker"])
-        self.assertEqual(len(cable["points"]), 4)
+        self.assertGreaterEqual(len(cable["points"]), 2)
         self.assertIn(("ff0000", "#ff0000"), chart["arrow_colors"])
 
-    def test_note_becomes_annotation(self):
+    def test_long_labels_shrink_to_fit_their_box(self):
         chart = charts.svg_chart("fd-vd-v4")
-        self.assertEqual(chart["annotations"][0]["text"], "7 types")
+        for box in chart["boxes"]:
+            avail = (box["h"] if box["vertical"] else box["w"]) - 6
+            est = charts.CHAR_W * len(box["label"])
+            if est > avail:
+                self.assertLess(box["font"], 10)
+                self.assertAlmostEqual(box["squeeze"], avail, places=1)
+            else:
+                self.assertNotIn("font", box)
+
+    def test_tall_boxes_get_vertical_labels(self):
+        chart = charts.svg_chart("fd-vd-v4")
+        tall = _by_label(chart, "BDE signal cable (6)")
+        self.assertTrue(tall["vertical"])
+        self.assertFalse(_by_label(chart, "FEMB (1)")["vertical"])
+
+    def test_notes_and_loose_texts_become_annotations(self):
+        texts = [a["text"] for a in charts.svg_chart("fd-vd-v4")["annotations"]]
+        self.assertIn("7 types", texts)          # note on Adapter board
+        self.assertIn("to TMS rack", texts)      # loose text from the overlay
+
+    def test_house_layout_stacks_children_indented(self):
+        spec = {"nodes": [{"id": "p", "label": "P", "fill": "#000"},
+                          {"id": "a", "label": "A", "fill": "#000"},
+                          {"id": "b", "label": "B", "fill": "#000"}],
+                "edges": [{"from": "a", "to": "p"}, {"from": "b", "to": "p"}]}
+        chart = charts._build("t", spec)
+        p, a, b = (next(n for n in chart["boxes"] if n["id"] == i) for i in "pab")
+        self.assertEqual(a["x"], p["x"] + charts.INDENT)
+        self.assertEqual(b["x"], p["x"] + charts.INDENT)
+        self.assertGreater(a["y"], p["y"])
+        self.assertGreaterEqual(b["y"] - a["y"], charts.BOX_H)
 
     def test_unknown_edge_ref_raises(self):
         spec = {"nodes": [{"id": "a", "label": "A", "fill": "#000"}],
@@ -89,6 +108,9 @@ class HierarchyViewTest(TestCase):
         self.assertIn("FEMB (1)", html)
         self.assertIn("FD-VD Complete detector (v4)", html)
         self.assertIn("Cryostat roof", html)
+        # pan/zoom affordances (#57)
+        self.assertIn('id="hc-reset"', html)
+        self.assertIn("svg.addEventListener", html)
 
     def test_dev_instance_serves_same_chart(self):
         html = self.client.get("/hw/dev/hierarchy/").content.decode()
