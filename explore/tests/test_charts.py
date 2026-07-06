@@ -21,6 +21,9 @@ def _by_label(chart, label):
 class ChartSpecTest(TestCase):
     def test_fd_vd_v4_is_listed(self):
         self.assertIn("fd-vd-v4", charts.chart_ids())
+        # overlay files are not charts of their own
+        self.assertNotIn("fd-vd-v4.layout", charts.chart_ids())
+        self.assertNotIn("fd-vd-v4.mapping", charts.chart_ids())
 
     def test_svg_chart_shape(self):
         chart = charts.svg_chart("fd-vd-v4")

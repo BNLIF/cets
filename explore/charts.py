@@ -42,7 +42,7 @@ STACK_TOL = 60.0      # child x-offset that still reads as the stacked idiom
 
 def chart_ids() -> list[str]:
     return sorted(p.stem for p in CHART_DIR.glob("*.yaml")
-                  if not p.stem.endswith(".layout"))
+                  if not p.stem.endswith((".layout", ".mapping")))
 
 
 @functools.lru_cache(maxsize=None)
