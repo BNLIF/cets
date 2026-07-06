@@ -32,7 +32,9 @@ ROOT_GAP = 40.0       # gap between root subtrees in a band row
 BAND_PAD = 14.0       # padding above/below a band row's content
 EMPTY_BAND_H = 40.0   # strip height for a band with no nodes (label only)
 MARGIN = 30.0
+LABEL_W = 170.0       # content offset in a labeled band (room for the title)
 CABLE_LANE = 24.0     # how far right of the boxes a cable elbow runs
+LANE_STEP = 7.0       # stagger between cable lanes sharing a corridor
 
 
 def chart_ids() -> list[str]:
@@ -105,7 +107,8 @@ def _build(chart_id: str, spec: dict) -> dict:
         b_roots = [r for r in roots
                    if nodes[r].get("band", default_band) == band.get("id")]
         if b_roots:
-            x, row_h = MARGIN, 0.0
+            x = MARGIN + (LABEL_W if band.get("label") else 0)
+            row_h = 0.0
             for r in b_roots:
                 h, right = place(r, x, y + BAND_PAD)
                 x = right + ROOT_GAP
@@ -136,9 +139,9 @@ def _build(chart_id: str, spec: dict) -> dict:
             cn = nodes[c]
             arrows.append({"color": "#000000", "marker": False,
                            "points": [(cn["x"], cn["cy"]), (tx, cn["cy"])]})
-    for e in cables:
+    for i, e in enumerate(cables):
         s, t = nodes[e["from"]], nodes[e["to"]]
-        lane = max(s["x"] + s["w"], t["x"] + t["w"]) + CABLE_LANE
+        lane = max(s["x"] + s["w"], t["x"] + t["w"]) + CABLE_LANE + (i % 6) * LANE_STEP
         max_x = max(max_x, lane)
         arrows.append({"color": e.get("color", "#ff0000"), "marker": True,
                        "points": [(s["x"] + s["w"], s["cy"]), (lane, s["cy"]),

@@ -1,57 +1,539 @@
-# Hierarchy chart spec (#55) — one YAML per chart, file name = chart id.
-# Rendered at /hw/hierarchy/: explore/charts.py lays the graph out
-# server-side in the consortium chart's idiom (parent box above an indented
-# stack of children; root subtrees left-to-right inside band rows), so the
-# spec is purely SEMANTIC — no coordinates. A new chart version only touches
-# this file where structure actually changed.
+# Hierarchy chart spec (#55/#56) — one YAML per chart, file name = chart id.
+# Rendered at /hw/hierarchy/ by explore/charts.py, which computes the layout
+# (parent box above an indented stack of children; root subtrees in band
+# rows) — the spec is purely SEMANTIC, no coordinates.
 #
-#   chart   title/source
-#   bands   ordered top-to-bottom rows; optional label + fill make the pink
-#           strips (Mezzanine racks, Cryostat roof)
-#   nodes   component-type boxes, in sibling order: id (stable slug), label,
-#           fill; optional band (roots only), stroke (executive-summary
-#           border), dashed (connector-position boxes), text (label color,
-#           default white), note (annotation right of the box, e.g. 7 types)
-#   edges   from -> to: a tree edge (child -> parent, drawn as bracket
-#           connectors) unless kind: cable, which draws an orthogonal arrow
-#           (red unless color says otherwise). Topology only — geometry is
-#           computed at render time.
+# Bootstrapped by `manage.py extract_chart` from the consortium chart PDF
+# (HWDB_FD-VD_hierarchy.pptx.pdf page 2, v4); edges hand-transcribed from the
+# chart image. Maintain by HAND-EDITING this file when the chart changes.
 #
-# The box-label -> part_type_id mapping is NOT stored here: it lives in a
-# separate hand-curated overlay (#58). The extractor (#56) bootstraps node
-# lists from the consortium PDF; after that, updates are small hand edits.
+#   nodes   id (stable slug), label, fill; optional band (roots only),
+#           stroke (executive-summary border), dashed (connector positions),
+#           text (label color), note (annotation right of the box)
+#   edges   from -> to = child -> parent (bracket connectors); kind: cable
+#           draws an orthogonal arrow instead (red unless color says else).
+#           Cables are tree-parented to their equipment side; the far
+#           endpoint (usually a flange) is the cable edge.
+#
+# The box-label -> part_type_id mapping lives in a separate overlay (#58).
 
 chart:
   title: FD-VD Complete detector (v4)
-  source: HWDB_FD-VD_hierarchy.pptx.pdf, page 2 (FEMB/CRU starter subtree)
+  source: HWDB_FD-VD_hierarchy.pptx.pdf, page 2
 
 bands:
-  - {id: mezzanine, label: Mezzanine racks, fill: "#f4cccc"}
-  - {id: roof, label: Cryostat roof, fill: "#f4cccc"}
+  - {id: mezzanine-racks, label: Mezzanine racks, fill: '#f4cccc'}
+  - {id: below-mezzanine-racks}
+  - {id: cryostat-roof, label: Cryostat roof, fill: '#f4cccc'}
   - {id: interior}
 
 nodes:
-  - {id: inst-cru, label: Inst. CRU (20x4x2), fill: "#ff0000", band: interior}
-  - {id: cru, label: CRU, fill: "#6fbe40", stroke: "#ff4a27"}
-  - {id: adapter-board, label: Adapter board (12), fill: "#6fbe40", note: 7 types}
-  - {id: cru-anode-panel, label: CRU anode panel (2), fill: "#6fbe40"}
-  - {id: ce-box, label: CE BOX (12), fill: "#a27310", stroke: "#00ffff"}
-  - {id: samtec, label: SAMTEC, fill: "#ffffff", text: "#000000", dashed: true}
-  - {id: power, label: POWER, fill: "#ffffff", text: "#000000", dashed: true}
-  - {id: femb, label: FEMB (1), fill: "#a27310"}
-  - {id: larasic, label: LArASIC (8), fill: "#a27310"}
-  - {id: cold-adc, label: Cold ADC (8), fill: "#a27310"}
-  - {id: cold-data, label: Cold DATA (2), fill: "#a27310"}
+  - {id: camera-ps-control, label: Camera PS & Control, fill: '#b269e1', band: mezzanine-racks}
+  - {id: cat6-power, label: "CAT6 + POWER \u2026", fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: hv-bias-ps, label: HV bias PS, fill: '#b269e1', band: mezzanine-racks}
+  - {id: shv-4, label: SHV (8), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: shv-6, label: SHV (24), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: bde-lv-ps, label: BDE LV PS (6), fill: '#a27310', band: mezzanine-racks}
+  - {id: ring-termination, label: Ring termination, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: pds-lv-ps, label: PDS LV PS, fill: '#0000ff', band: mezzanine-racks}
+  - {id: switch-dcs, label: Switch/DCS, fill: '#de6a10', band: mezzanine-racks}
+  - {id: tms-mux-card, label: TMS MUX card (10), fill: '#50a7f9'}
+  - {id: tms-rack, label: TMS rack (1), fill: '#50a7f9', band: mezzanine-racks}
+  - {id: tms-crate, label: TMS crate (1), fill: '#50a7f9'}
+  - {id: tde-lv-ps, label: TDE LV PS, fill: '#773f9b', band: mezzanine-racks}
+  - {id: lv-filter-fanout, label: LV Filter & Fanout, fill: '#773f9b'}
+  - {id: switch-daq, label: Switch/DAQ, fill: '#a6aaa9', band: mezzanine-racks}
+  - {id: wr-switch, label: WR switch, fill: '#773f9b', band: mezzanine-racks}
+  - {id: tms-warm-cable-2, label: TMS warm cable, fill: '#50a7f9'}
+  - {id: cathode-hvps, label: Cathode HVPS, fill: '#b269e1', band: below-mezzanine-racks}
+  - {id: hv-cable, label: HV cable, fill: '#b269e1'}
+  - {id: camera-light-warm-cable, label: Camera & light warm cable, fill: '#b269e1'}
+  - {id: box, label: BOX, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: bias-shv-warm-cable, label: bias SHV warm cable (2), fill: '#b269e1'}
+  - {id: bias-shv-warm-cable-3, label: bias SHV warm cable (6), fill: '#b269e1'}
+  - {id: bias-shv-warm-cable-2, label: bias SHV warm cable (3), fill: '#b269e1'}
+  - {id: wib, label: WIB (6), fill: '#a27310'}
+  - {id: ptc, label: PTC (1), fill: '#a27310'}
+  - {id: lm-electronics, label: LM electronics (1/0), fill: '#0a5c17'}
+  - {id: db25-8, label: DB25 (1/0), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: lm-warm-bundle, label: LM warm bundle, fill: '#0a5c17'}
+  - {id: daphne-module, label: DAPHNE module (2), fill: '#0000ff'}
+  - {id: mezzanine-card, label: mezzanine card (4), fill: '#0000ff', note: 3 types}
+  - {id: db15-3, label: DB15 (2), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: fc, label: FC (8), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: pds-warm-cable, label: PDS warm cable, fill: '#0000ff'}
+  - {id: pds-rack, label: PDS rack (40), fill: '#0000ff', band: below-mezzanine-racks}
+  - {id: laser-box, label: laser box (2), fill: '#0000ff'}
+  - {id: fc-2, label: FC (8), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: lcm-module, label: LCM module (1/0), fill: '#0000ff'}
+  - {id: sma-2, label: SMA (12), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: pds-warm-fiber, label: PDS warm fiber, fill: '#0000ff'}
+  - {id: interrogator-eth, label: Interrogator Eth, fill: '#de6a10'}
+  - {id: interrogator, label: Interrogator, fill: '#50a7f9', band: below-mezzanine-racks}
+  - {id: tms-warm-fiber, label: TMS warm fiber (15), fill: '#50a7f9'}
+  - {id: db25-3, label: DB25 (4), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: tms-warm-cable, label: TMS warm cable (4/12), fill: '#50a7f9'}
+  - {id: lv-feb-power-sense-cable, label: LV FEB power sense cable (1/0), fill: '#773f9b'}
+  - {id: lv-feb-power-cable, label: LV FEB power cable (2), fill: '#773f9b'}
+  - {id: feb-calibration-unit-eth, label: FEB calibration unit Eth, fill: '#a6aaa9'}
+  - {id: amc, label: AMC (24/48), fill: '#773f9b'}
+  - {id: calibration-unit, label: Calibration Unit, fill: '#773f9b', band: below-mezzanine-racks}
+  - {id: feb-pulsing-controls-cable, label: FEB pulsing controls cable, fill: '#773f9b'}
+  - {id: feb-pulsing-cable, label: FEB pulsing cable, fill: '#773f9b'}
+  - {id: wr-mch, label: WR MCH (1), fill: '#773f9b'}
+  - {id: utca-crate, label: uTCA crate (2/4), fill: '#773f9b', band: below-mezzanine-racks}
+  - {id: tde-cable, label: TDE cable (24), fill: '#773f9b'}
+  - {id: daq-patch-panel, label: DAQ patch panel, fill: '#a6aaa9', band: below-mezzanine-racks}
+  - {id: wr-fiber, label: WR Fiber, fill: '#773f9b'}
+  - {id: eth-mch-control-cable, label: Eth MCH control cable, fill: '#a6aaa9'}
+  - {id: data-fiber, label: Data Fiber, fill: '#a6aaa9'}
+  - {id: utca-mch, label: uTCA MCH (1), fill: '#773f9b'}
+  - {id: 110v-av-dist-roof, label: 110V AV dist roof, fill: '#ff0000', band: below-mezzanine-racks}
+  - {id: crate-power-cable, label: Crate power cable, fill: '#ff0000'}
+  - {id: utca-pu, label: uTCA PU, fill: '#773f9b'}
+  - {id: tms-fc-flange, label: TMS FC flange (1/0), fill: '#50a7f9', band: cryostat-roof}
+  - {id: db25-10, label: DB25 (4), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: db25-9, label: DB25 (4), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: hv-cathode-chimney, label: HV-cathode chimney, fill: '#b269e1', band: cryostat-roof}
+  - {id: hvft, label: HVFT, fill: '#b269e1'}
+  - {id: fc-support-flange, label: FC support flange, fill: '#b269e1'}
+  - {id: hv-fc-chimney, label: HV-FC chimney (48), fill: '#b269e1', band: cryostat-roof}
+  - {id: db25-6, label: DB25 (1/0), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: fc-bias-flange, label: FC bias flange, fill: '#b269e1'}
+  - {id: db25-7, label: DB25 (1/0), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: shv-3, label: SHV (2), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: shv-7, label: SHV (6/0), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: shv-8, label: SHV (6/0), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: shv-2, label: SHV (2), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: db25-4, label: DB25 (1/0), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: db25-5, label: DB25 (1/0), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: shv-5, label: SHV (3+1), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: bde-flange-wiec, label: BDE flange-WIEC (2), fill: '#a27310'}
+  - {id: shv, label: SHV (3+1), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: samtec, label: SAMTEC (24), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: power, label: POWER (24), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: tpc-pds-chimney, label: TPC-PDS chimney (40), fill: '#a27310', band: cryostat-roof}
+  - {id: pds-flange, label: PDS flange, fill: '#0000ff'}
+  - {id: db15, label: DB15 (8), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: db15-2, label: DB15 (8), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: sma-4-2, label: SMA 4/2, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: sma, label: SMA (4/2), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: manhole, label: Manhole (4), fill: '#ff0000', band: cryostat-roof}
+  - {id: prm-flange, label: PrM flange (1/0), fill: '#50a7f9'}
+  - {id: sst-chimney, label: SST chimney (64), fill: '#ff0000', band: cryostat-roof}
+  - {id: fc-apc, label: FC/APC (6/9), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000', note: 2 types}
+  - {id: fbg-flange, label: FBG flange (2), fill: '#50a7f9'}
+  - {id: fc-fc, label: FC/FC (6/9), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: tms-pns-chimney, label: TMS-PNS chimney (3), fill: '#50a7f9', band: cryostat-roof, note: 2 types}
+  - {id: db25-2, label: DB25 (4), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: ga-flange, label: GA flange (1/3), fill: '#50a7f9'}
+  - {id: db25, label: DB25 (4), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: db9, label: DB9(2), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: tde-warm-flange-24-48, label: TDE warm flange 24/48 (1/2), fill: '#773f9b', note: 2 types}
+  - {id: db9-2, label: DB9, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: sma-3, label: SMA, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: kel80, label: KEL80, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: kel68, label: KEL68, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: vhdci-p, label: VHDCI-P (24), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: tde-chimney-24-48, label: TDE chimney 24/48 (42/63), fill: '#773f9b', band: cryostat-roof, note: 2 types}
+  - {id: feb, label: FEB (24/48), fill: '#773f9b'}
+  - {id: tde-cold-flange-24-48, label: TDE cold flange 24/48, fill: '#773f9b', note: 2 types}
+  - {id: kel68-2, label: KEL68 (48/96), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: lar-pipe-tms, label: LAr pipe TMS (4), fill: '#50a7f9', band: interior}
+  - {id: precision-rtd, label: Precision RTD (4), fill: '#50a7f9'}
+  - {id: prm-tms, label: PrM TMS (4), fill: '#50a7f9', band: interior}
+  - {id: precision-rtd-2, label: Precision RTD (2), fill: '#50a7f9'}
+  - {id: wall-tms, label: Wall TMS (2), fill: '#50a7f9', band: interior}
+  - {id: standard-rtd, label: Standard RTD (12), fill: '#50a7f9'}
+  - {id: lar-pump-tms, label: LAr pump TMS (3), fill: '#50a7f9', band: interior}
+  - {id: precision-rtd-3, label: Precision RTD (2), fill: '#50a7f9'}
+  - {id: rms-support-kit, label: RMS support kit (2), fill: '#0000ff'}
+  - {id: hv-extender, label: HV extender, fill: '#b269e1'}
+  - {id: inst-fc-super-module, label: Inst. FC super module, fill: '#ff0000', band: interior}
+  - {id: 2-m-1-2-rms-fiber, label: 2 m 1-2 RMS fiber, fill: '#0000ff'}
+  - {id: 5-m-1-2-rms-fiber, label: 5 m 1-2 RMS fiber, fill: '#0000ff'}
+  - {id: fc-support-rod, label: FC support rod (2), fill: '#b269e1', note: 4 types}
+  - {id: fc-super-module, label: FC super module, fill: '#b269e1'}
+  - {id: jumper-wire, label: Jumper wire, fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
+  - {id: hv-bus-resistor, label: HV bus resistor, fill: '#b269e1'}
+  - {id: fc-support-structure, label: FC support structure, fill: '#b269e1', note: 12 types}
+  - {id: fc-module, label: FC module (8), fill: '#b269e1'}
+  - {id: fc-profile, label: FC profile, fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
+  - {id: fc-splice-bar, label: FC splice bar, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 8 types; 4 types}
+  - {id: fc-frp-beam, label: FC FRP beam, fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
+  - {id: fc-alignment-strips, label: FC alignment strips, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 4 types; 4 types}
+  - {id: fc-link-plate, label: FC link plate, fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
+  - {id: fc-fastener, label: FC fastener, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 12 types; 3 types}
+  - {id: rdb, label: RDB (6), fill: '#b269e1'}
+  - {id: camera-light-cold-cable, label: Camera-light cold cable, fill: '#b269e1'}
+  - {id: camera-light, label: Camera-light, fill: '#b269e1', band: interior}
+  - {id: lm-assembly-2, label: LM assembly (2), fill: '#b269e1'}
+  - {id: fc-term-cold-cable, label: FC term. cold cable (2), fill: '#b269e1'}
+  - {id: int-frame, label: 'Int. Frame (???)', fill: '#ff0000', band: interior, note: 2 types}
+  - {id: lm-cold-cable, label: LM cold cable, fill: '#b269e1'}
+  - {id: inst-cru, label: Inst. CRU (20x4x2), fill: '#ff0000', band: interior}
+  - {id: support-post, label: Support post (4), fill: '#6fbe40'}
+  - {id: adapter-plate, label: Adapter plate (2), fill: '#6fbe40'}
+  - {id: patch-panel, label: Patch panel (2), fill: '#a27310'}
+  - {id: cru-2, label: CRU, fill: '#6fbe40', stroke: '#ff4a27'}
+  - {id: pcb-anode-segment-2, label: PCB anode segment (6), fill: '#ffffff', stroke: '#6fbe40', text: '#000000', note: 22 types}
+  - {id: bias-jumper-cable, label: Bias jumper cable (1/0), fill: '#ffffff', stroke: '#6fbe40', text: '#000000'}
+  - {id: bias-filter-board-2, label: Bias filter board (1), fill: '#6fbe40'}
+  - {id: edge-connector-board-3, label: Edge connector board (24), fill: '#ffffff', stroke: '#6fbe40', text: '#000000', note: 7 types}
+  - {id: adapter-board-2, label: Adapter board (12), fill: '#6fbe40', note: 7 types}
+  - {id: peek-spacer-2, label: Peek spacer (61), fill: '#ffffff', stroke: '#6fbe40', text: '#000000'}
+  - {id: ground-plane, label: Ground plane (1), fill: '#ffffff', stroke: '#6fbe40', text: '#000000'}
+  - {id: composite-frame-2, label: Composite frame (1), fill: '#6fbe40'}
+  - {id: cru-anode-panel-2, label: CRU anode panel (2), fill: '#6fbe40', note: 2 types}
+  - {id: cold-bias-shv-cable-2, label: Cold bias SHV cable (3), fill: '#6fbe40'}
+  - {id: bde-pds-cable-tray, label: BDE-PDS cable tray, fill: '#a27310', band: interior, stroke: '#ff4a27'}
+  - {id: bde-signal-cable, label: BDE signal cable (6), fill: '#a27310'}
+  - {id: bde-cable-bundle, label: BDE cable bundle (4), fill: '#a27310'}
+  - {id: samtec-4, label: SAMTEC, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: samtec-3, label: SAMTEC, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: bde-short-signal-cable, label: BDE short signal cable (6), fill: '#a27310'}
+  - {id: samtec-2, label: SAMTEC, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: ce-box, label: CE BOX (12), fill: '#a27310', stroke: '#00ffff'}
+  - {id: femb, label: FEMB (1), fill: '#a27310'}
+  - {id: bde-power-cable, label: BDE power cable (6), fill: '#a27310'}
+  - {id: power-4, label: POWER, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: power-3, label: POWER, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: bde-short-power-cable, label: BDE short power cable (6), fill: '#a27310'}
+  - {id: power-2, label: POWER, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: larasic, label: LArASIC (8), fill: '#a27310'}
+  - {id: cold-adc, label: Cold ADC (8), fill: '#a27310', note: 4 types}
+  - {id: cold-data, label: Cold DATA (2), fill: '#a27310'}
+  - {id: 22-m-rms-fiber, label: 22 m RMS fiber, fill: '#0000ff', band: interior}
+  - {id: pds-mm-array, label: PDS MM array (44), fill: '#0000ff', band: interior}
+  - {id: mm-mesh, label: MM mesh (8), fill: '#ffffff', stroke: '#0000ff', text: '#000000'}
+  - {id: mm-support-kit, label: MM support kit, fill: '#ffffff', stroke: '#0000ff', text: '#000000'}
+  - {id: pds-mm-pair, label: PDS MM pair (4), fill: '#0000ff'}
+  - {id: jumper-cable, label: Jumper cable, fill: '#ffffff', stroke: '#0000ff', text: '#000000'}
+  - {id: pds-membrane-module, label: PDS membrane module (2), fill: '#0000ff', stroke: '#00ffff'}
+  - {id: mm-frame-kit, label: MM frame kit, fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
+  - {id: ptp-substrate-2, label: pTP substrate (16), fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
+  - {id: wls-light-guide-2, label: WLS light guide, fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
+  - {id: electronics-box-2, label: Electronics box, fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
+  - {id: sipm-flex-board, label: SiPM flex board (8), fill: '#0000ff', note: 2 types}
+  - {id: sipm-cable, label: SiPM cable (8), fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
+  - {id: mm-cold-motherboard, label: MM Cold Motherboard, fill: '#0000ff', note: 2 types}
+  - {id: fiber-bundle, label: fiber bundle (8), fill: '#0000ff'}
+  - {id: pds-cold-cable, label: PDS cold cable (4), fill: '#0000ff'}
+  - {id: fiber-mega-bundle, label: fiber mega bundle (1), fill: '#0000ff'}
+  - {id: instrumented-cat-super-module, label: Instrumented CAT super-module (3/1), fill: '#ff0000'}
+  - {id: instrumented-cat-module, label: Instrumented CAT module (2), fill: '#ff0000'}
+  - {id: pds-cathode-module, label: PDS cathode module (4), fill: '#0000ff', stroke: '#00ffff'}
+  - {id: cm-frame-kit, label: CM frame kit, fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
+  - {id: ptp-substrate, label: pTP substrate (32), fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
+  - {id: wls-light-guide, label: WLS light guide, fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
+  - {id: electronics-box, label: Electronics box, fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
+  - {id: cm-ce-package, label: CM CE package, fill: '#0000ff'}
+  - {id: sipm-cable-2, label: SiPM cable, fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
+  - {id: dcdc-bias-card, label: DCDC Bias Card, fill: '#0000ff', note: 2 types}
+  - {id: cm-cold-motherboard, label: CM Cold Motherboard, fill: '#0000ff'}
+  - {id: sipm-flex-board-2, label: SiPM flex board (8), fill: '#0000ff', note: 1 type}
+  - {id: sof-driver-daughtercard, label: SoF Driver Daughtercard, fill: '#0000ff'}
+  - {id: prm, label: PrM (1), fill: '#50a7f9'}
+  - {id: sst, label: SST, fill: '#ff0000', note: 2 types}
+  - {id: inst-sst, label: Inst. SST (8x2), fill: '#ff0000', band: interior, note: 2 types}
+  - {id: half-cathode-plane, label: Half Cathode plane (2), fill: '#b269e1', note: 12 types}
+  - {id: cathode-plane, label: Cathode plane, fill: '#b269e1', note: 6 types}
+  - {id: tad, label: TAD (4), fill: '#b269e1'}
+  - {id: dyneema-rope, label: dyneema rope, fill: '#b269e1', note: 3 types}
+  - {id: lad, label: LAD (2), fill: '#b269e1', note: 4 types}
+  - {id: half-frame, label: Half frame, fill: '#b269e1'}
+  - {id: cathode-interconnect, label: cathode interconnect (6), fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
+  - {id: cross-ribs, label: cross ribs (6), fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
+  - {id: resistive-mesh, label: resistive mesh (12), fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
+  - {id: copper-tape-strips, label: copper tape strips (64), fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
+  - {id: metallic-mesh, label: metallic mesh (4), fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
+  - {id: xa-supports, label: XA-supports (12), fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
+  - {id: tms-cold-fiber, label: TMS cold fiber (3), fill: '#50a7f9'}
+  - {id: tadeff, label: TADEFF (2/1/0), fill: '#50a7f9', stroke: '#ff4a27'}
+  - {id: fbg-fiber, label: FBG fiber (3), fill: '#50a7f9', note: 3 types}
+  - {id: ga, label: GA (2/1/0), fill: '#50a7f9', stroke: '#ff4a27'}
+  - {id: ga-rtd, label: GA RTD (18), fill: '#50a7f9', note: 2 types}
+  - {id: t6-cable-bundle, label: T6 cable bundle (3), fill: '#50a7f9'}
+  - {id: lm-assembly, label: LM assembly (4), fill: '#0a5c17', stroke: '#00ffff'}
+  - {id: sma-4, label: SMA (2), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: idc3, label: IDC3 (1), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: lm-cable-bundle, label: LM cable bundle, fill: '#0a5c17'}
+  - {id: inst-crp, label: Inst. CRP (6/2), fill: '#c82506'}
+  - {id: bias-cable-bundle-jumper, label: Bias cable bundle jumper (1), fill: '#0a5c17'}
+  - {id: decoupling-device, label: Decoupling device (4), fill: '#0a5c17', note: 2 types}
+  - {id: cru, label: CRU (2), fill: '#0a5c17', stroke: '#ff4a27'}
+  - {id: peek-spacer, label: Peek spacer (61), fill: '#ffffff', stroke: '#00882b', text: '#000000'}
+  - {id: edge-connector-board, label: Edge connector board (24), fill: '#0a5c17', note: 7 types; 7 types}
+  - {id: adapter-board, label: Adapter board (12), fill: '#0a5c17'}
+  - {id: bias-filter-board, label: Bias filter board (1), fill: '#0a5c17'}
+  - {id: composite-frame, label: Composite frame (1), fill: '#0a5c17'}
+  - {id: cru-anode-panel, label: CRU anode panel (2), fill: '#0a5c17', note: 2 types}
+  - {id: pcb-anode-segment, label: PCB anode segment (6), fill: '#ffffff', stroke: '#00882b', text: '#000000', note: 22 types}
+  - {id: crp-cable-tray, label: CRP Cable Tray, fill: '#0a5c17', band: interior}
+  - {id: tde-signal-cable, label: TDE Signal cable (4), fill: '#0a5c17'}
+  - {id: cold-bias-shv-cable, label: Cold bias SHV cable (3), fill: '#b269e1'}
 
 edges:
-  - {from: cru, to: inst-cru}
-  - {from: adapter-board, to: cru}
-  - {from: cru-anode-panel, to: cru}
-  - {from: ce-box, to: adapter-board}
-  - {from: samtec, to: ce-box}
-  - {from: power, to: ce-box}
+  - {from: camera-light-warm-cable, to: camera-ps-control}
+  - {from: cat6-power, to: camera-ps-control}
+  - {from: bias-shv-warm-cable, to: hv-bias-ps}
+  - {from: bias-shv-warm-cable-3, to: hv-bias-ps}
+  - {from: bias-shv-warm-cable-2, to: hv-bias-ps}
+  - {from: shv-4, to: hv-bias-ps}
+  - {from: shv-6, to: hv-bias-ps}
+  - {from: ring-termination, to: bde-lv-ps}
+  - {from: db25-3, to: tms-mux-card}
+  - {from: tms-warm-cable, to: tms-mux-card}
+  - {from: tms-warm-cable-2, to: tms-rack}
+  - {from: tms-crate, to: tms-rack}
+  - {from: tms-mux-card, to: tms-crate}
+  - {from: lv-filter-fanout, to: tde-lv-ps}
+  - {from: lv-feb-power-sense-cable, to: lv-filter-fanout}
+  - {from: lv-feb-power-cable, to: lv-filter-fanout}
+  - {from: hv-cable, to: cathode-hvps}
+  - {from: lm-warm-bundle, to: lm-electronics}
+  - {from: db25-8, to: lm-electronics}
+  - {from: mezzanine-card, to: daphne-module}
+  - {from: pds-warm-cable, to: mezzanine-card}
+  - {from: db15-3, to: mezzanine-card}
+  - {from: fc, to: mezzanine-card}
+  - {from: lm-electronics, to: pds-rack}
+  - {from: daphne-module, to: pds-rack}
+  - {from: laser-box, to: pds-rack}
+  - {from: lcm-module, to: pds-rack}
+  - {from: pds-warm-fiber, to: laser-box}
+  - {from: fc-2, to: laser-box}
+  - {from: sma-2, to: lcm-module}
+  - {from: tms-warm-fiber, to: interrogator}
+  - {from: interrogator-eth, to: interrogator}
+  - {from: data-fiber, to: amc}
+  - {from: feb-calibration-unit-eth, to: calibration-unit}
+  - {from: feb-pulsing-cable, to: calibration-unit}
+  - {from: feb-pulsing-controls-cable, to: calibration-unit}
+  - {from: wr-fiber, to: wr-mch}
+  - {from: tde-cable, to: utca-crate}
+  - {from: amc, to: utca-crate}
+  - {from: wr-mch, to: utca-crate}
+  - {from: utca-mch, to: utca-crate}
+  - {from: utca-pu, to: utca-crate}
+  - {from: eth-mch-control-cable, to: utca-mch}
+  - {from: crate-power-cable, to: utca-pu}
+  - {from: db25-10, to: tms-fc-flange}
+  - {from: db25-9, to: tms-fc-flange}
+  - {from: hvft, to: hv-cathode-chimney}
+  - {from: hv-extender, to: hvft}
+  - {from: fc-support-flange, to: hv-fc-chimney}
+  - {from: fc-bias-flange, to: hv-fc-chimney}
+  - {from: box, to: fc-bias-flange}
+  - {from: db25-6, to: fc-bias-flange}
+  - {from: db25-7, to: fc-bias-flange}
+  - {from: shv-2, to: fc-bias-flange}
+  - {from: shv-3, to: fc-bias-flange}
+  - {from: shv-7, to: fc-bias-flange}
+  - {from: shv-8, to: fc-bias-flange}
+  - {from: db25-4, to: fc-bias-flange}
+  - {from: db25-5, to: fc-bias-flange}
+  - {from: shv-5, to: bde-flange-wiec}
+  - {from: shv, to: bde-flange-wiec}
+  - {from: samtec, to: bde-flange-wiec}
+  - {from: power, to: bde-flange-wiec}
+  - {from: wib, to: bde-flange-wiec}
+  - {from: ptc, to: bde-flange-wiec}
+  - {from: bde-flange-wiec, to: tpc-pds-chimney}
+  - {from: pds-flange, to: tpc-pds-chimney}
+  - {from: sma-4-2, to: pds-flange}
+  - {from: sma, to: pds-flange}
+  - {from: db15, to: pds-flange}
+  - {from: db15-2, to: pds-flange}
+  - {from: prm-flange, to: manhole}
+  - {from: prm, to: prm-flange}
+  - {from: fc-apc, to: fbg-flange}
+  - {from: fc-fc, to: fbg-flange}
+  - {from: fbg-flange, to: tms-pns-chimney}
+  - {from: ga-flange, to: tms-pns-chimney}
+  - {from: db25-2, to: ga-flange}
+  - {from: db25, to: ga-flange}
+  - {from: db9, to: tde-warm-flange-24-48}
+  - {from: sma-3, to: tde-warm-flange-24-48}
+  - {from: db9-2, to: tde-warm-flange-24-48}
+  - {from: vhdci-p, to: tde-warm-flange-24-48}
+  - {from: kel68, to: tde-warm-flange-24-48}
+  - {from: kel80, to: tde-warm-flange-24-48}
+  - {from: feb, to: tde-warm-flange-24-48}
+  - {from: tde-warm-flange-24-48, to: tde-chimney-24-48}
+  - {from: tde-cold-flange-24-48, to: tde-chimney-24-48}
+  - {from: kel68-2, to: tde-cold-flange-24-48}
+  - {from: precision-rtd, to: lar-pipe-tms}
+  - {from: precision-rtd-2, to: prm-tms}
+  - {from: standard-rtd, to: wall-tms}
+  - {from: precision-rtd-3, to: lar-pump-tms}
+  - {from: 5-m-1-2-rms-fiber, to: rms-support-kit}
+  - {from: 2-m-1-2-rms-fiber, to: rms-support-kit}
+  - {from: rms-support-kit, to: inst-fc-super-module}
+  - {from: fc-super-module, to: inst-fc-super-module}
+  - {from: fc-support-rod, to: inst-fc-super-module}
+  - {from: jumper-wire, to: inst-fc-super-module}
+  - {from: fc-term-cold-cable, to: inst-fc-super-module}
+  - {from: hv-bus-resistor, to: fc-super-module}
+  - {from: fc-support-structure, to: fc-super-module}
+  - {from: fc-module, to: fc-super-module}
+  - {from: lm-assembly-2, to: fc-support-structure}
+  - {from: fc-profile, to: fc-module}
+  - {from: fc-splice-bar, to: fc-module}
+  - {from: fc-frp-beam, to: fc-module}
+  - {from: fc-alignment-strips, to: fc-module}
+  - {from: fc-link-plate, to: fc-module}
+  - {from: fc-fastener, to: fc-module}
+  - {from: rdb, to: fc-module}
+  - {from: camera-light-cold-cable, to: camera-light}
+  - {from: lm-cold-cable, to: lm-assembly-2}
+  - {from: support-post, to: inst-cru}
+  - {from: adapter-plate, to: inst-cru}
+  - {from: patch-panel, to: inst-cru}
+  - {from: cru-2, to: inst-cru}
+  - {from: samtec-4, to: patch-panel}
+  - {from: power-4, to: patch-panel}
+  - {from: samtec-3, to: patch-panel}
+  - {from: power-3, to: patch-panel}
+  - {from: bias-filter-board-2, to: cru-2}
+  - {from: edge-connector-board-3, to: cru-2}
+  - {from: adapter-board-2, to: cru-2}
+  - {from: peek-spacer-2, to: cru-2}
+  - {from: ground-plane, to: cru-2}
+  - {from: composite-frame-2, to: cru-2}
+  - {from: cru-anode-panel-2, to: cru-2}
+  - {from: bias-jumper-cable, to: bias-filter-board-2}
+  - {from: cold-bias-shv-cable-2, to: bias-filter-board-2}
+  - {from: ce-box, to: adapter-board-2}
+  - {from: pcb-anode-segment-2, to: cru-anode-panel-2}
+  - {from: bde-cable-bundle, to: bde-pds-cable-tray}
+  - {from: bde-signal-cable, to: bde-cable-bundle}
+  - {from: bde-power-cable, to: bde-cable-bundle}
+  - {from: samtec-2, to: ce-box}
+  - {from: power-2, to: ce-box}
   - {from: femb, to: ce-box}
+  - {from: bde-short-signal-cable, to: ce-box}
+  - {from: bde-short-power-cable, to: ce-box}
   - {from: larasic, to: femb}
   - {from: cold-adc, to: femb}
   - {from: cold-data, to: femb}
-  - {from: femb, to: inst-cru, kind: cable}
+  - {from: mm-mesh, to: pds-mm-array}
+  - {from: mm-support-kit, to: pds-mm-array}
+  - {from: pds-mm-pair, to: pds-mm-array}
+  - {from: jumper-cable, to: pds-mm-pair}
+  - {from: pds-membrane-module, to: pds-mm-pair}
+  - {from: pds-cold-cable, to: pds-mm-pair}
+  - {from: mm-frame-kit, to: pds-membrane-module}
+  - {from: ptp-substrate-2, to: pds-membrane-module}
+  - {from: wls-light-guide-2, to: pds-membrane-module}
+  - {from: electronics-box-2, to: pds-membrane-module}
+  - {from: sipm-flex-board, to: pds-membrane-module}
+  - {from: sipm-cable, to: pds-membrane-module}
+  - {from: mm-cold-motherboard, to: pds-membrane-module}
+  - {from: fiber-bundle, to: pds-membrane-module}
+  - {from: fiber-mega-bundle, to: fiber-bundle}
+  - {from: instrumented-cat-module, to: instrumented-cat-super-module}
+  - {from: pds-cathode-module, to: instrumented-cat-module}
+  - {from: cathode-plane, to: instrumented-cat-module}
+  - {from: cm-frame-kit, to: pds-cathode-module}
+  - {from: ptp-substrate, to: pds-cathode-module}
+  - {from: wls-light-guide, to: pds-cathode-module}
+  - {from: electronics-box, to: pds-cathode-module}
+  - {from: cm-ce-package, to: pds-cathode-module}
+  - {from: sipm-cable-2, to: cm-ce-package}
+  - {from: dcdc-bias-card, to: cm-ce-package}
+  - {from: cm-cold-motherboard, to: cm-ce-package}
+  - {from: sipm-flex-board-2, to: cm-ce-package}
+  - {from: sof-driver-daughtercard, to: cm-ce-package}
+  - {from: instrumented-cat-super-module, to: sst}
+  - {from: inst-crp, to: sst}
+  - {from: sst, to: inst-sst}
+  - {from: tad, to: inst-sst}
+  - {from: tadeff, to: inst-sst}
+  - {from: ga, to: inst-sst}
+  - {from: lm-assembly, to: inst-sst}
+  - {from: lad, to: half-cathode-plane}
+  - {from: half-frame, to: half-cathode-plane}
+  - {from: cathode-interconnect, to: half-cathode-plane}
+  - {from: cross-ribs, to: half-cathode-plane}
+  - {from: resistive-mesh, to: half-cathode-plane}
+  - {from: copper-tape-strips, to: half-cathode-plane}
+  - {from: metallic-mesh, to: half-cathode-plane}
+  - {from: xa-supports, to: half-cathode-plane}
+  - {from: half-cathode-plane, to: cathode-plane}
+  - {from: dyneema-rope, to: cathode-plane}
+  - {from: tms-cold-fiber, to: tadeff}
+  - {from: fbg-fiber, to: tadeff}
+  - {from: ga-rtd, to: ga}
+  - {from: t6-cable-bundle, to: ga}
+  - {from: sma-4, to: lm-assembly}
+  - {from: idc3, to: lm-assembly}
+  - {from: lm-cable-bundle, to: lm-assembly}
+  - {from: bias-cable-bundle-jumper, to: inst-crp}
+  - {from: decoupling-device, to: inst-crp}
+  - {from: cru, to: inst-crp}
+  - {from: peek-spacer, to: cru}
+  - {from: edge-connector-board, to: cru}
+  - {from: adapter-board, to: cru}
+  - {from: bias-filter-board, to: cru}
+  - {from: composite-frame, to: cru}
+  - {from: cru-anode-panel, to: cru}
+  - {from: cold-bias-shv-cable, to: bias-filter-board}
+  - {from: pcb-anode-segment, to: cru-anode-panel}
+  - {from: tde-signal-cable, to: crp-cable-tray}
+  # cables (far endpoints)
+  - {from: lar-pipe-tms, to: tms-fc-flange, kind: cable}
+  - {from: prm-tms, to: tms-fc-flange, kind: cable}
+  - {from: wall-tms, to: tms-fc-flange, kind: cable}
+  - {from: lar-pump-tms, to: tms-fc-flange, kind: cable}
+  - {from: tms-warm-cable-2, to: tms-fc-flange, kind: cable}
+  - {from: 5-m-1-2-rms-fiber, to: pds-flange, kind: cable}
+  - {from: 2-m-1-2-rms-fiber, to: pds-flange, kind: cable}
+  - {from: jumper-wire, to: hv-extender, kind: cable}
+  - {from: hv-cable, to: hvft, kind: cable}
+  - {from: camera-light-cold-cable, to: fc-bias-flange, kind: cable}
+  - {from: fc-term-cold-cable, to: fc-bias-flange, kind: cable}
+  - {from: camera-light-warm-cable, to: fc-bias-flange, kind: cable}
+  - {from: bias-shv-warm-cable, to: fc-bias-flange, kind: cable}
+  - {from: bias-shv-warm-cable-3, to: fc-bias-flange, kind: cable}
+  - {from: bias-shv-warm-cable-2, to: bde-flange-wiec, kind: cable}
+  - {from: cold-bias-shv-cable-2, to: bde-flange-wiec, kind: cable}
+  - {from: bde-short-signal-cable, to: patch-panel, kind: cable}
+  - {from: bde-short-power-cable, to: patch-panel, kind: cable}
+  - {from: bde-signal-cable, to: patch-panel, kind: cable}
+  - {from: bde-power-cable, to: patch-panel, kind: cable}
+  - {from: lm-warm-bundle, to: bde-flange-wiec, kind: cable}
+  - {from: lm-cold-cable, to: bde-flange-wiec, kind: cable}
+  - {from: pds-cold-cable, to: pds-flange, kind: cable}
+  - {from: fiber-bundle, to: pds-flange, kind: cable}
+  - {from: pds-warm-cable, to: pds-flange, kind: cable}
+  - {from: pds-warm-fiber, to: pds-flange, kind: cable}
+  - {from: inst-sst, to: sst-chimney, kind: cable, color: '#000000'}
+  - {from: dyneema-rope, to: lad, kind: cable}
+  - {from: tms-cold-fiber, to: tms-pns-chimney, kind: cable}
+  - {from: fbg-fiber, to: fbg-flange, kind: cable}
+  - {from: t6-cable-bundle, to: ga-flange, kind: cable}
+  - {from: lm-cable-bundle, to: fc-bias-flange, kind: cable}
+  - {from: tms-warm-fiber, to: fbg-flange, kind: cable}
+  - {from: interrogator-eth, to: switch-dcs, kind: cable}
+  - {from: tde-signal-cable, to: tde-cold-flange-24-48, kind: cable}
+  - {from: crp-cable-tray, to: tde-chimney-24-48, kind: cable}
+  - {from: cold-bias-shv-cable, to: fc-bias-flange, kind: cable}
+  - {from: tms-warm-cable, to: ga-flange, kind: cable}
+  - {from: lv-feb-power-sense-cable, to: tde-warm-flange-24-48, kind: cable}
+  - {from: lv-feb-power-cable, to: tde-warm-flange-24-48, kind: cable}
+  - {from: feb-calibration-unit-eth, to: switch-daq, kind: cable}
+  - {from: feb-pulsing-cable, to: tde-warm-flange-24-48, kind: cable}
+  - {from: feb-pulsing-controls-cable, to: tde-warm-flange-24-48, kind: cable}
+  - {from: tde-cable, to: tde-warm-flange-24-48, kind: cable}
+  - {from: wr-fiber, to: wr-switch, kind: cable}
+  - {from: data-fiber, to: daq-patch-panel, kind: cable}
+  - {from: eth-mch-control-cable, to: daq-patch-panel, kind: cable}
+  - {from: crate-power-cable, to: 110v-av-dist-roof, kind: cable}
+
+# Open questions for the consortium chart owners (#60 demo):
+# - int-frame: "Int. Frame (???)" has no arrows in the PDF; left as a root.
+# - 22-m-rms-fiber: endpoints not identifiable in the PDF; left as a root.
+# - camera-light: no parent arrow visible; left as a root.
+# - fiber-mega-bundle -> fiber-bundle direction guessed from the PDF arrow,
+#   which looks inverted relative to the "child -> parent" convention.
