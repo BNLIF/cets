@@ -126,7 +126,8 @@
         </a>
         <nav class="eh-nav">
             <a class="eh-nav-item{% if active_nav == 'hierarchy' %} active{% endif %}" href="{% url 'explore:home' %}">Overview</a>
-            <a class="eh-nav-item{% if active_nav != 'hierarchy' and active_nav != 'shipments' and active_nav != 'search' %} active{% endif %}" href="{% url 'explore:browse' %}">Browse</a>
+            <a class="eh-nav-item{% if active_nav != 'hierarchy' and active_nav != 'detector' and active_nav != 'shipments' and active_nav != 'search' %} active{% endif %}" href="{% url 'explore:browse' %}">Browse</a>
+            <a class="eh-nav-item{% if active_nav == 'detector' %} active{% endif %}" href="{% url 'explore:hierarchy' %}">Detector</a>
             <a class="eh-nav-item{% if active_nav == 'shipments' %} active{% endif %}" href="{% url 'explore:shipments' %}">Shipments</a>
             <a class="eh-nav-item{% if active_nav == 'search' %} active{% endif %}" href="{% url 'explore:search' %}">Search</a>
         </nav>

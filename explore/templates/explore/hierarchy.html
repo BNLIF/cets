@@ -1,0 +1,64 @@
+{% extends 'explore/base.html' %}
+{% block title %}Detector · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .hc-page { padding: 26px 30px 56px; }
+  .hc-page h1 { font-size: 1.5rem; color: var(--ink); margin: 0 0 4px; letter-spacing: -0.01em; }
+  .hc-page .subtitle { color: var(--dim); margin: 0 0 20px; font-size: 14px; }
+  .hc-canvas { border: 1px solid var(--rule); border-radius: var(--r-lg);
+    background: #fff; overflow: hidden; }
+  .hc-canvas svg { display: block; width: 100%; height: auto; }
+</style>
+
+<div class="hc-page">
+  <h1>{{ chart.title }}</h1>
+  <p class="subtitle">Component-type hierarchy chart · source: {{ chart.source }}</p>
+
+  <div class="hc-canvas">
+    <svg viewBox="0 0 {{ chart.width }} {{ chart.height }}" xmlns="http://www.w3.org/2000/svg"
+         role="img" aria-label="{{ chart.title }}">
+      {# text styling lives inside the svg so it survives standalone export #}
+      <style>
+        text { font-family: 'IBM Plex Sans', sans-serif; }
+        .hc-box text { font-size: 10px; text-anchor: middle;
+          dominant-baseline: central; pointer-events: none; }
+        .hc-band-label { font-size: 20px; font-weight: 600; fill: #000; }
+        .hc-annotation { font-size: 9px; fill: #000; dominant-baseline: central; }
+      </style>
+      <defs>
+        {% for key, color in chart.arrow_colors %}
+        <marker id="hc-ah-{{ key }}" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="{{ color }}"/>
+        </marker>
+        {% endfor %}
+      </defs>
+
+      {% for band in chart.bands %}
+      {% if band.fill %}<rect x="0" y="{{ band.y }}" width="{{ chart.width }}" height="{{ band.h }}" fill="{{ band.fill }}"/>{% endif %}
+      {% if band.label %}<text class="hc-band-label" x="30" y="{{ band.label_y }}">{{ band.label }}</text>{% endif %}
+      {% endfor %}
+
+      {% for a in chart.arrows %}
+      <polyline points="{{ a.path }}" fill="none" stroke="{{ a.color }}" stroke-width="1.2"
+                {% if a.marker %}marker-end="url(#hc-ah-{{ a.color_key }})"{% endif %}/>
+      {% endfor %}
+
+      {% for b in chart.boxes %}
+      <g class="hc-box">
+        <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"
+              fill="{{ b.fill }}"
+              {% if b.dashed %}stroke="#000" stroke-width="1" stroke-dasharray="3,2"
+              {% elif b.stroke %}stroke="{{ b.stroke }}" stroke-width="1.6"{% endif %}/>
+        <text x="{{ b.cx }}" y="{{ b.cy }}" fill="{{ b.text|default:'#ffffff' }}">{{ b.label }}</text>
+      </g>
+      {% endfor %}
+
+      {% for n in chart.annotations %}
+      <text class="hc-annotation" x="{{ n.x }}" y="{{ n.y }}">{{ n.text }}</text>
+      {% endfor %}
+    </svg>
+  </div>
+</div>
+{% endblock %}

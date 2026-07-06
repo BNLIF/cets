@@ -21,7 +21,7 @@ from hwdb.fnal import flow
 from hwdb.fnal import session as fnal_session
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
 
-from . import curation, navigation
+from . import charts, curation, navigation
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, sync_test_events
 from .hierarchy import sync_hierarchy, sync_system
@@ -260,6 +260,20 @@ def explore_view(request, trail=None):
             "sync_state": HierarchySyncState.get(inst),
         },
     )
+
+
+@login_not_required
+@fnal_login_required
+def explore_hierarchy_view(request):
+    """The detector hierarchy chart (#55): the consortium component-type
+    chart, rendered server-side as SVG from its spec in ``chart_specs/``.
+    The spec is instance-independent; only the sidebar is per-instance."""
+    inst = instance_of(request)
+    return render(request, "explore/hierarchy.html", {
+        "active_nav": "detector",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "chart": charts.svg_chart("fd-vd-v4"),
+    })
 
 
 @login_not_required

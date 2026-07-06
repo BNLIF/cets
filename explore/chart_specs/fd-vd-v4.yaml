@@ -1,0 +1,57 @@
+# Hierarchy chart spec (#55) — one YAML per chart, file name = chart id.
+# Rendered at /hw/hierarchy/: explore/charts.py lays the graph out
+# server-side in the consortium chart's idiom (parent box above an indented
+# stack of children; root subtrees left-to-right inside band rows), so the
+# spec is purely SEMANTIC — no coordinates. A new chart version only touches
+# this file where structure actually changed.
+#
+#   chart   title/source
+#   bands   ordered top-to-bottom rows; optional label + fill make the pink
+#           strips (Mezzanine racks, Cryostat roof)
+#   nodes   component-type boxes, in sibling order: id (stable slug), label,
+#           fill; optional band (roots only), stroke (executive-summary
+#           border), dashed (connector-position boxes), text (label color,
+#           default white), note (annotation right of the box, e.g. 7 types)
+#   edges   from -> to: a tree edge (child -> parent, drawn as bracket
+#           connectors) unless kind: cable, which draws an orthogonal arrow
+#           (red unless color says otherwise). Topology only — geometry is
+#           computed at render time.
+#
+# The box-label -> part_type_id mapping is NOT stored here: it lives in a
+# separate hand-curated overlay (#58). The extractor (#56) bootstraps node
+# lists from the consortium PDF; after that, updates are small hand edits.
+
+chart:
+  title: FD-VD Complete detector (v4)
+  source: HWDB_FD-VD_hierarchy.pptx.pdf, page 2 (FEMB/CRU starter subtree)
+
+bands:
+  - {id: mezzanine, label: Mezzanine racks, fill: "#f4cccc"}
+  - {id: roof, label: Cryostat roof, fill: "#f4cccc"}
+  - {id: interior}
+
+nodes:
+  - {id: inst-cru, label: Inst. CRU (20x4x2), fill: "#ff0000", band: interior}
+  - {id: cru, label: CRU, fill: "#6fbe40", stroke: "#ff4a27"}
+  - {id: adapter-board, label: Adapter board (12), fill: "#6fbe40", note: 7 types}
+  - {id: cru-anode-panel, label: CRU anode panel (2), fill: "#6fbe40"}
+  - {id: ce-box, label: CE BOX (12), fill: "#a27310", stroke: "#00ffff"}
+  - {id: samtec, label: SAMTEC, fill: "#ffffff", text: "#000000", dashed: true}
+  - {id: power, label: POWER, fill: "#ffffff", text: "#000000", dashed: true}
+  - {id: femb, label: FEMB (1), fill: "#a27310"}
+  - {id: larasic, label: LArASIC (8), fill: "#a27310"}
+  - {id: cold-adc, label: Cold ADC (8), fill: "#a27310"}
+  - {id: cold-data, label: Cold DATA (2), fill: "#a27310"}
+
+edges:
+  - {from: cru, to: inst-cru}
+  - {from: adapter-board, to: cru}
+  - {from: cru-anode-panel, to: cru}
+  - {from: ce-box, to: adapter-board}
+  - {from: samtec, to: ce-box}
+  - {from: power, to: ce-box}
+  - {from: femb, to: ce-box}
+  - {from: larasic, to: femb}
+  - {from: cold-adc, to: femb}
+  - {from: cold-data, to: femb}
+  - {from: femb, to: inst-cru, kind: cable}
