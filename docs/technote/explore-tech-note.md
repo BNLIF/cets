@@ -52,11 +52,15 @@ explore/
 ├── shipments.py      # sync engine: shipping boxes → ShipmentItem
 ├── parts.py          # generic part-detail + assembly-tree fetch (live)
 ├── queries.py        # chart data off the mirror
+├── charts.py         # hierarchy chart: spec/overlay loader, SVG layout + edge routing
+├── chart_specs/      # per-chart YAML: semantic spec + generated .layout + hand .mapping
 ├── views.py          # all HTTP endpoints (login, browse, sync, part, search…)
 ├── urls.py           # routes, mounted under /hw/
 └── management/commands/
     ├── sync_hierarchy.py   # CLI refresh of the structure mirror
-    └── list_systems.py     # audit: HWDB systems vs curation.yaml (drift detector)
+    ├── list_systems.py     # audit: HWDB systems vs curation.yaml (drift detector)
+    ├── extract_chart.py    # bootstrap a chart spec / regenerate its layout overlay from the PDF
+    └── audit_chart_mapping.py  # audit: chart mapping vs spec + mirror (paste-ready candidates)
 ```
 
 The shared **HWDB gateway** stays in the `hwdb` app and is imported here:
@@ -405,6 +409,7 @@ this order for the full story:
 | 0013 | Shipment tracker on shipping-type leaves (latest-location mirror) |
 | 0014 | Generic part-detail page |
 | 0015 | Assembly tree on the part page |
+| 0016 | Hierarchy chart: semantic spec + generated layout overlay + mapping overlay |
 
 ---
 
