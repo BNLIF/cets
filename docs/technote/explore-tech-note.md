@@ -59,7 +59,7 @@ explore/
 └── management/commands/
     ├── sync_hierarchy.py   # CLI refresh of the structure mirror
     ├── list_systems.py     # audit: HWDB systems vs curation.yaml (drift detector)
-    ├── extract_chart.py    # bootstrap a chart spec / regenerate its layout overlay from the PDF
+    ├── extract_chart.py    # bootstrap a chart spec / regenerate its layout overlay from the PPTX or PDF
     └── audit_chart_mapping.py  # audit: chart mapping vs spec + mirror (paste-ready candidates)
 ```
 

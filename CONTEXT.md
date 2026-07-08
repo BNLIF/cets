@@ -160,8 +160,8 @@ Three YAML files per chart in `explore/chart_specs/`, joined by stable
 - **chart spec** (`fd-vd-v4.yaml`) — hand-curated semantics: nodes, edges
   (child → parent, `kind: cable` for routed arrows), bands.
 - **layout overlay** (`fd-vd-v4.layout.yaml`) — generated geometry
-  (`manage.py extract_chart --layout` from the PDF); regenerated per PDF
-  update, never hand-edited.
+  (`manage.py extract_chart --layout` from the consortium .pptx or PDF);
+  regenerated per chart update, never hand-edited.
 - **mapping overlay** (`fd-vd-v4.mapping.yaml`) — hand-curated node id →
   Component Type ids per instance; audited by `manage.py audit_chart_mapping`.
 

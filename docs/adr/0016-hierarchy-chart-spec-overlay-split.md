@@ -38,9 +38,11 @@ two "Adapter board (12)" boxes are different types):
   routed arrow instead of a bracket), bands. Never overwritten by tooling;
   transcription uncertainties live as comments at the end of the file.
 - **`<id>.layout.yaml` — geometry overlay, generated.**
-  `manage.py extract_chart --layout` (PyMuPDF, dev-only dependency) pulls box
-  positions, band strips and loose annotation texts from the PDF. Regenerated
-  wholesale on each PDF update and reviewed as a diff.
+  `manage.py extract_chart --layout` pulls box positions, band strips and
+  loose annotation texts from the consortium chart — .pptx (stdlib) or PDF
+  (PyMuPDF, dev-only dependency); both emit the same 1920x1080 pt coordinates,
+  so one can cross-check the other. Regenerated wholesale on each chart
+  update and reviewed as a diff.
 - **`<id>.mapping.yaml` — hand-curated.** Node id → Component Type ids, per
   instance (prod/dev), FD-VD only. Grows as consortia register types;
   `manage.py audit_chart_mapping` reports stale/unknown entries and
@@ -55,7 +57,7 @@ pan/zoom; clicking a box opens a popup fed by the mirror-only
 
 ## Consequences
 
-- **A PDF update costs one command + a diff review** (`extract_chart --layout`);
+- **A chart update costs one command + a diff review** (`extract_chart --layout`);
   the spec and mapping only churn on real topology or type changes.
 - Unmapped boxes are first-class: honest "not registered yet" popup, coverage
   toggle, and the audit command's candidate list drive the curation loop.
