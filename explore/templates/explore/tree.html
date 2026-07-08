@@ -134,7 +134,7 @@
   <div id="tr-tree"></div>
 
   <p class="tr-foot">The explorer's <code>curation.yaml</code> structure, live from the mirror.
-    Counts are components registered in HWDB; a leaf opens its component-type page. Dimmed regions
+    Counts are items registered in HWDB; a leaf opens its component-type page. Dimmed regions
     and <em>not curated</em> families exist in HWDB but aren't browsable here yet.</p>
 </div>
 
@@ -185,7 +185,7 @@
     [tally(root, "system") + flatFams, "systems"],
     [tally(root, "sub"), "subsystems"],
     [tally(root, "type"), "component types"],
-    [root.n, "components in HWDB"],
+    [root.n, "items in HWDB"],
   ];
   document.getElementById("tr-stats").innerHTML = stats.map(function (s) {
     return "<div class='tr-stat'><div class='n'>" + fmt(s[0]) + "</div><div class='l'>" + s[1] + "</div></div>";

@@ -300,7 +300,7 @@ class ShipmentPanelViewTest(TestCase):
         html = self.client.get(navigation.leaf_path_for("prod", leaf.part_type_id)).content.decode()
         self.assertIn('id="node-unsynced"', html)
         self.assertNotIn('id="shipment-unsynced"', html)
-        self.assertIn("Waiting for the component sync", html)
+        self.assertIn("Waiting for the item sync", html)
         # Once components are synced, the shipments auto-sync takes its turn.
         leaf.tests_synced_at = timezone.now()
         leaf.save()

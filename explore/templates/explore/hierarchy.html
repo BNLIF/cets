@@ -141,7 +141,7 @@
       } else {
         html += "<div class='hc-pop-name'>" + (t.url ? "<a href='" + esc(t.url) + "'>" + esc(t.name) + " &rarr;</a>" : esc(t.name)) + "</div>" +
                 "<div class='hc-pop-meta'>" + esc(t.subsystem) + " · <span class='hc-pop-id'>" + esc(t.part_type_id) + "</span></div>" +
-                "<div>" + t.n_components + " component" + (t.n_components === 1 ? "" : "s") + "</div>";
+                "<div>" + t.n_components + " item" + (t.n_components === 1 ? "" : "s") + "</div>";
         var chips = Object.keys(t.statuses || {}).map(function (s) {
           return "<span class='hc-chip'>" + esc(s) + " · " + t.statuses[s] + "</span>";
         }).join("");

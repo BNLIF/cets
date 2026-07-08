@@ -199,7 +199,7 @@ def explore_view(request, trail=None):
     if leaf and leaf.tests_synced_at:
         ptid = leaf.part_type_id
         comp_chart = chart_config(
-            slug=f"{ptid}_comp", name="Components updated", href="",
+            slug=f"{ptid}_comp", name="Items updated", href="",
             ranges=component_update_progress(inst, ptid),
         )
         comp_chart["caption"] = (

@@ -183,7 +183,9 @@ The naming is overloaded — pin it down:
 - HWDB's **REST API** uses **"component" for an *instance***:
   `component-types/{type}/components` returns the *parts*, and
   `components/{pid}` is *one* part.
-- HWDB's **web UI** calls that same instance an **"Item"**.
+- HWDB's **web UI** calls that same instance an **"Item"** — and so does the
+  CETS explorer UI ("Items in HWDB", "Items updated", the Items table), to
+  keep "component" from colliding with "Component Type".
 - Colloquial "component" can mean the *kind* — so when someone says
   "component", confirm whether they mean the Component Type or one unit.
 

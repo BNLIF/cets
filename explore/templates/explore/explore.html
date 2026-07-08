@@ -119,10 +119,10 @@
             <div style="display: flex; gap: 6px; justify-content: flex-end;">
                 <button class="btn btn-sm btn-primary node-sync-btn" type="button" data-mode="incremental"
                         data-sync-url="{% url 'explore:node_sync' part_type_id=leaf.part_type_id %}"
-                        title="Fetch newly-added components only (cheap)">Sync new</button>
+                        title="Fetch newly-added items only (cheap)">Sync new</button>
                 <button class="btn btn-sm btn-ghost node-sync-btn" type="button" data-mode="components"
                         data-sync-url="{% url 'explore:node_sync' part_type_id=leaf.part_type_id %}"
-                        title="Refresh ‘updated’ for all components — no test re-fetch (medium)">Shallow re-sync</button>
+                        title="Refresh ‘updated’ for all items — no test re-fetch (medium)">Shallow re-sync</button>
                 <button class="btn btn-sm btn-ghost node-sync-btn" type="button" data-mode="full"
                         data-sync-url="{% url 'explore:node_sync' part_type_id=leaf.part_type_id %}"
                         title="Re-fetch everything incl. all tests (slow)">Full re-sync</button>
@@ -142,7 +142,7 @@
         <dt>Part type ID</dt><dd><a href="{{ hwdb_ui_base }}/view/components?pa={{ leaf.part_type_id }}" target="_blank" rel="noopener" title="Open this component type in the FNAL HWDB">{{ leaf.part_type_id }} <span aria-hidden="true">&#x2197;</span></a></dd>
         <dt>System</dt><dd>{{ leaf.system_name }} ({{ leaf.system_id }})</dd>
         <dt>Subsystem</dt><dd>{{ leaf.subsystem_name }} ({{ leaf.subsystem_id }})</dd>
-        <dt>{% if is_shipping %}Boxes in HWDB{% else %}Components in HWDB{% endif %}</dt><dd>{{ leaf.n_components }}</dd>
+        <dt>{% if is_shipping %}Boxes in HWDB{% else %}Items in HWDB{% endif %}</dt><dd>{{ leaf.n_components }}</dd>
         <dt>Test events</dt><dd>{{ leaf.n_tests }}</dd>
     </dl>
 
@@ -184,8 +184,8 @@
 
         {% if breakdowns or qc_flags %}
         <div class="chart-card" id="breakdown-card">
-            <div class="panel-title" style="font-size: 14px; margin-bottom: 4px;">Component breakdown</div>
-            <p class="cell-muted" style="margin: 0 0 14px; font-size: 12px;">Components by category, counted from the local mirror — no live fetch. A large <em>(unset)</em> slice usually means those rows were synced before the field was captured; a <strong>Full re-sync</strong> refreshes them.</p>
+            <div class="panel-title" style="font-size: 14px; margin-bottom: 4px;">Item breakdown</div>
+            <p class="cell-muted" style="margin: 0 0 14px; font-size: 12px;">Items by category, counted from the local mirror — no live fetch. A large <em>(unset)</em> slice usually means those rows were synced before the field was captured; a <strong>Full re-sync</strong> refreshes them.</p>
             {% if qc_flags %}
             <div class="qcf-row">
                 {% for f in qc_flags %}
@@ -258,7 +258,7 @@
     {# Component sync above is still auto-firing — don't race it; its reload brings the page back through the branch above. #}
     <div class="explore-empty">
         <p>Shipments not synced yet.</p>
-        <p class="cell-muted">Waiting for the component sync to finish…</p>
+        <p class="cell-muted">Waiting for the item sync to finish…</p>
     </div>
         {% endif %}
     {% elif shipments %}
@@ -322,11 +322,11 @@
 
     {% if parts_page %}
     <details class="chart-card ship-boxes" open>
-        <summary class="ship-boxes-sum">Components ({{ parts_page.paginator.count }}) <span class="cell-muted" style="font-weight:400;">— click to collapse</span></summary>
+        <summary class="ship-boxes-sum">Items ({{ parts_page.paginator.count }}) <span class="cell-muted" style="font-weight:400;">— click to collapse</span></summary>
         {% if parts_page.paginator.num_pages > 1 %}
         <div style="display:flex;gap:14px;justify-content:center;align-items:center;margin:4px 0 14px;font-size:13px;">
             {% if parts_page.has_previous %}<a style="color:var(--accent-ink);text-decoration:none;" href="?page=1">« First</a><a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.previous_page_number }}">‹ Prev</a>{% else %}<span class="cell-muted">« First</span><span class="cell-muted">‹ Prev</span>{% endif %}
-            <span class="cell-muted" style="font-variant-numeric:tabular-nums;">Page {{ parts_page.number }} of {{ parts_page.paginator.num_pages }} · {{ parts_page.paginator.count }} components</span>
+            <span class="cell-muted" style="font-variant-numeric:tabular-nums;">Page {{ parts_page.number }} of {{ parts_page.paginator.num_pages }} · {{ parts_page.paginator.count }} items</span>
             {% if parts_page.has_next %}<a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.next_page_number }}">Next ›</a><a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.paginator.num_pages }}">Last »</a>{% else %}<span class="cell-muted">Next ›</span><span class="cell-muted">Last »</span>{% endif %}
         </div>
         {% endif %}
@@ -341,7 +341,7 @@
                     <td class="mono">{% if p.updated %}{{ p.updated|date:"Y-m-d" }}{% else %}—{% endif %}</td>
                 </tr>
             {% empty %}
-                <tr><td colspan="4" class="cell-muted">No components mirrored.</td></tr>
+                <tr><td colspan="4" class="cell-muted">No items mirrored.</td></tr>
             {% endfor %}
             </tbody>
         </table>
@@ -375,14 +375,14 @@
             <div><div class="nc-name">{{ c.name }}</div>{% if c.sub %}<div class="nc-sub">{{ c.sub }}</div>{% endif %}</div>
             <div class="nc-stat">
                 {% if c.is_leaf %}
-                    {% if c.synced %}<span class="pill synced">&#10003; {{ c.n_tests }} tests</span>{% elif c.n_components %}<span class="pill unsynced">not synced</span>{% else %}<span class="pill empty">no components</span>{% endif %}
-                    {% if c.n_components %}<span class="nc-num">{{ c.n_components }} components</span>{% endif %}
+                    {% if c.synced %}<span class="pill synced">&#10003; {{ c.n_tests }} tests</span>{% elif c.n_components %}<span class="pill unsynced">not synced</span>{% else %}<span class="pill empty">no items</span>{% endif %}
+                    {% if c.n_components %}<span class="nc-num">{{ c.n_components }} items</span>{% endif %}
                 {% elif c.locked %}
                     <span class="pill locked">curate to browse</span>
                 {% elif c.empty %}
-                    <span class="pill empty">no components yet</span>
+                    <span class="pill empty">no items yet</span>
                 {% else %}
-                    <span>{{ c.child_count }} {{ c.child_label }}</span>{% if c.n_components %} · <span class="nc-num">{{ c.n_components }} components</span>{% endif %}
+                    <span>{{ c.child_count }} {{ c.child_label }}</span>{% if c.n_components %} · <span class="nc-num">{{ c.n_components }} items</span>{% endif %}
                 {% endif %}
             </div>
             {% if c.note %}<div class="nc-note">{{ c.note }}</div>{% endif %}

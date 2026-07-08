@@ -334,7 +334,7 @@ class LeafPartsTableTest(TestCase):
 
     def test_lists_parts_paginated_50_with_part_links(self):
         html = self.client.get(self.url).content.decode()
-        self.assertIn("Components (55)", html)
+        self.assertIn("Items (55)", html)
         # 55 rows → 50 on page 1 (newest first), 5 on page 2.
         self.assertIn(f"/hw/part/{self.leaf.part_type_id}-00054/", html)  # row → part page
         self.assertIn('target="_blank"', html)                                 # opens new tab
