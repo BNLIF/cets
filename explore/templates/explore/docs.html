@@ -1,0 +1,84 @@
+{% extends 'explore/base.html' %}
+{% block title %}Docs · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .dc-page { padding: 26px 30px 56px; max-width: 820px; }
+  .dc-page h1 { font-size: 1.5rem; color: var(--ink); margin: 0 0 4px; letter-spacing: -0.01em; }
+  .dc-sub { color: var(--dim); font-size: 13.5px; margin: 0 0 18px; }
+  .dc-group { margin-top: 22px; }
+  .dc-group h2 { font-size: 12px; color: var(--faint); text-transform: uppercase;
+    letter-spacing: .04em; margin: 0 0 8px; }
+  .dc-list { border: 1px solid var(--rule); border-radius: var(--r-lg);
+    background: var(--page); overflow: hidden; }
+  .dc-row { display: flex; align-items: baseline; gap: 12px; padding: 12px 15px;
+    text-decoration: none; color: inherit; border-top: 1px solid var(--rule); }
+  .dc-row:first-child { border-top: none; }
+  .dc-row:hover { background: var(--surface); }
+  .dc-name { font-weight: 600; color: var(--ink); white-space: nowrap; }
+  .dc-name .ext { color: var(--faint); font-weight: 400; }
+  .dc-desc { font-size: 12.5px; color: var(--faint); }
+</style>
+
+<div class="dc-page">
+  <h1>Docs</h1>
+  <p class="dc-sub">External DUNE HWDB documentation and references. All links open in a new tab;
+    the FNAL ones need Fermilab SSO.</p>
+
+  <div class="dc-group">
+    <h2>Start here</h2>
+    <div class="dc-list">
+      <a class="dc-row" href="https://dune.github.io/computing-HWDB/index.html" target="_blank" rel="noopener">
+        <span class="dc-name">HWDB Training <span class="ext">&#x2197;</span></span>
+        <span class="dc-desc">The DUNE HWDB lessons — getting started, the web UI, uploading data, and using the REST API.</span>
+      </a>
+      <a class="dc-row" href="{{ hwdb_ui_base }}/apidoc/redoc" target="_blank" rel="noopener">
+        <span class="dc-name">REST API reference <span class="ext">&#x2197;</span></span>
+        <span class="dc-desc">Endpoint-by-endpoint API documentation (Redoc) on the {{ instance }} instance.</span>
+      </a>
+      <a class="dc-row" href="{{ hwdb_ui_base }}/apidoc/swagger" target="_blank" rel="noopener">
+        <span class="dc-name">REST API sandbox <span class="ext">&#x2197;</span></span>
+        <span class="dc-desc">The same API as interactive Swagger UI — try requests from the browser.</span>
+      </a>
+    </div>
+  </div>
+
+  <div class="dc-group">
+    <h2>FNAL HWDB</h2>
+    <div class="dc-list">
+      <a class="dc-row" href="{{ hwdb_ui_prod }}" target="_blank" rel="noopener">
+        <span class="dc-name">HWDB web UI — production <span class="ext">&#x2197;</span></span>
+        <span class="dc-desc">The official FNAL interface this explorer mirrors.</span>
+      </a>
+      <a class="dc-row" href="{{ hwdb_ui_dev }}" target="_blank" rel="noopener">
+        <span class="dc-name">HWDB web UI — development <span class="ext">&#x2197;</span></span>
+        <span class="dc-desc">The dev instance, for trying uploads and new component types.</span>
+      </a>
+    </div>
+  </div>
+
+  <div class="dc-group">
+    <h2>Consortium references</h2>
+    <div class="dc-list">
+      <a class="dc-row" href="https://edms.cern.ch/document/3416341" target="_blank" rel="noopener">
+        <span class="dc-name">FD-VD hierarchy chart <span class="ext">&#x2197;</span></span>
+        <span class="dc-desc">CERN EDMS home of the component-type chart rendered on the Detector page (Google Slides + exports).</span>
+      </a>
+    </div>
+  </div>
+
+  <div class="dc-group">
+    <h2>Others</h2>
+    <div class="dc-list">
+      <a class="dc-row" href="https://github.com/DUNE/computing-HWDB/" target="_blank" rel="noopener">
+        <span class="dc-name">computing-HWDB on GitHub <span class="ext">&#x2197;</span></span>
+        <span class="dc-desc">Source of the training site — issues and contributions welcome.</span>
+      </a>
+      <a class="dc-row" href="https://fermi.servicenowservices.com/wp?id=evg-service-item&amp;sys_id=89848f4bdb8c9b00da5174131f961994" target="_blank" rel="noopener">
+        <span class="dc-name">Report an HWDB issue <span class="ext">&#x2197;</span></span>
+        <span class="dc-desc">Fermilab ServiceNow ticket for HWDB problems and requests.</span>
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}

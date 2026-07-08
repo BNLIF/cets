@@ -692,6 +692,23 @@ def explore_search_view(request):
 
 @login_not_required
 @fnal_login_required
+def explore_docs_view(request):
+    """External DUNE HWDB documentation links (training site, API reference,
+    the HWDB web UIs, consortium references). Static curated content — the
+    link list lives in the template; API-doc links follow the instance."""
+    inst = instance_of(request)
+    return render(request, "explore/docs.html", {
+        "active_nav": "docs",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "instance": inst,
+        "hwdb_ui_base": settings.HWDB_PROFILES[inst]["ui"],
+        "hwdb_ui_prod": settings.HWDB_PROFILES["prod"]["ui"],
+        "hwdb_ui_dev": settings.HWDB_PROFILES["dev"]["ui"],
+    })
+
+
+@login_not_required
+@fnal_login_required
 def explore_search_api_view(request):
     """JSON results for the instant search box — component types + mirrored
     parts matching ``q`` (substring, case-insensitive), plus a direct-open hint
