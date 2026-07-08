@@ -6,9 +6,9 @@
 # Grow this as consortia register types; the audit command (#59) reports
 # unmapped chart nodes and candidate matches.
 #
-# Node ids are the stable slugs from fd-vd-v4.yaml (NOT labels — labels
+# Node ids are the stable slugs from fd-vd-v10.yaml (NOT labels — labels
 # duplicate: the two "Adapter board (12)" boxes are different types).
-# Orientation: the BDE/CE subtree (inst-cru, cru-2, *-2 boards) reads the
+# Orientation: the BDE/CE subtree (inst-crp-2, cru-2, *-2 boards) reads the
 # BOTTOM CRPs (system 56); the TDE-side Inst. CRP subtree reads the TOP
 # CRPs (system 55).
 
@@ -32,16 +32,16 @@ instances:
     bias-shv-warm-cable-3: [D08105400011]   # Warm BV cable FD-VD long (long wall) — best guess
     bias-shv-warm-cable: [D08105400012]     # Warm BV cable FD-VD short — best guess
     # --- Bottom CRP (system 56): the BDE-side CRU subtree ---
-    inst-cru: [D05600100001]                # Instrumented CRP › Bottom CRP
+    inst-crp-2: [D05600100001]                # Instrumented CRP › Bottom CRP
     cru-2: [D05600200001]
     adapter-board-2: [D05600600001, D05600600002, D05600600003, D05600600004,
                       D05600600005, D05600600006, D05600600007]
     composite-frame-2: [D05600800001]
     bias-filter-board-2: [D05600900001]
-    bias-jumper-cable: [D05600900002]
-    cold-bias-shv-cable-2: [D05600900003]
-    int-frame: [D05602100001, D05602100002]  # Intermediate frame Type 1/2
-    adapter-plate: [D05602200001]
+    bias-cable-jumper-2: [D05600900002]
+    cold-shv-cable-2: [D05600900003]
+    inter-frame: [D05602100001, D05602100002]  # Intermediate frame Type 1/2
+    support-adapter-plate: [D05602200001]
     support-post: [D05602200002]
     # --- Top CRP (system 55): the TDE-side Inst. CRP subtree ---
     inst-crp: [D05500100001]                # Instrumented CRP › Top CRP
@@ -51,21 +51,24 @@ instances:
     pcb-anode-segment: [D05500500001, D05500500002, D05500500003, D05500500004]
     adapter-board: [D05500600001, D05500600002, D05500600003, D05500600004,
                     D05500600005, D05500600006, D05500600007]
-    edge-connector-board: [D05500700001, D05500700002, D05500700003, D05500700004,
+    edge-board: [D05500700001, D05500700002, D05500700003, D05500700004,
                            D05500700005, D05500700006, D05500700007]
     composite-frame: [D05500800001]
     bias-filter-board: [D05500900001]
-    bias-cable-bundle-jumper: [D05500900002]
-    cold-bias-shv-cable: [D05500900003, D05500900004]  # short + long
-    tde-signal-cable: [D05501100001]
-    crp-cable-tray: [D05501200001]
+    bias-cable-jumper: [D05500900002]
+    cold-shv-cable: [D05500900003, D05500900004]  # short + long
+    signal-cable: [D05501100001]
+    cable-tray: [D05501200001]
     decoupling-device: [D05502100001, D05502100002, D05502100003]
     # --- Top CRP level meters (SST side) + superstructure ---
     lm-assembly: [D05503100001]
-    lm-cable-bundle: [D05503100002]         # cold cable bundle
-    lm-warm-bundle: [D05503100003]          # warm cable bundle
-    lm-electronics: [D05100400001]          # TOP CRP Level Meter Electronic
+    lm-cold-cable-bundle: [D05503100002]         # cold cable bundle
+    lm-warm-cable-bundle: [D05503100003]         # warm cable bundle
+    active-board: [D05503100004]                 # Level Meter › Active Board
+    passive-board: [D05503100005]                # Level Meter › Passive Board
+    drawer: [D05100400001, D05503100006]  # TOP CRP LM Electronic + Level Meter › Drawer
     sst: [D05100100001, D05100100002]       # Large / Small superstructure
+    suspension-system: [D05100200001]       # TOP CRP Superstructure Suspension System
     # --- TDE (system 57) ---
     tde-chimney-24-48: [D05700100001, D05700100002]
     tde-warm-flange-24-48: [D05700100005]
@@ -103,9 +106,9 @@ instances:
     bde-flange-wiec: [D08104100001]
     # --- Instrumented CRPs (systems 52/53) ---
     inst-crp: [D05200100001]                # 52 Instrumented CRP (top)
-    tde-signal-cable: [D05200200001]
-    crp-cable-tray: [D05200300001]
-    inst-cru: [D05300100001]                # 53 Instrumented CRP (bottom)
+    signal-cable: [D05200200001]
+    cable-tray: [D05200300001]
+    inst-crp-2: [D05300100001]                # 53 Instrumented CRP (bottom)
     # --- Top CRP (system 55) ---
     cru: [D05500200001]                     # "Top Half CRP" = one CRU
     cru-anode-panel: [D05500300001, D05500300002]
@@ -118,22 +121,25 @@ instances:
                         D05500500021, D05500500022]
     adapter-board: [D05500600001, D05500600002, D05500600003, D05500600004,
                     D05500600005, D05500600006, D05500600007]
-    edge-connector-board: [D05500700001, D05500700002, D05500700003, D05500700004,
+    edge-board: [D05500700001, D05500700002, D05500700003, D05500700004,
                            D05500700005, D05500700006, D05500700007]
     composite-frame: [D05500800001]
     bias-filter-board: [D05500900001]
-    bias-cable-bundle-jumper: [D05501000001]  # Cold filter HV cable jumper (top)
+    bias-cable-jumper: [D05501000001]  # Cold filter HV cable jumper (top)
     decoupling-device: [D05501100001, D05501100002, D05501100003]
     lm-assembly: [D05502000001]
-    lm-cable-bundle: [D05502000002]         # internal (cold) cable bundle
-    lm-warm-bundle: [D05502000003]          # external (warm) cable bundle
-    lm-electronics: [D05100400001]
+    lm-cold-cable-bundle: [D05502000002]         # internal (cold) cable bundle
+    lm-warm-cable-bundle: [D05502000003]         # external (warm) cable bundle
+    active-board: [D05502000004]                 # Level Meters › Active Board
+    passive-board: [D05502000005]                # Level Meters › Passive Board
+    drawer: [D05100400001, D05502000006]  # TOP CRP LM Electronic + Level Meters › Drawer
     sst: [D05100100001, D05100100002]
+    suspension-system: [D05100200001]       # TOP CRP Superstructure Suspension System
     support-post: [D05100700001, D05100700002]  # BOTTOM CRP Support Type 1/2
     # --- Bottom CRP (system 56) ---
     cru-2: [D05600200001]                   # "Bottom Half CRP" = one CRU
     cru-anode-panel-2: [D05600300001, D05600300002]
-    peek-spacer-2: [D05600400001]
+    peek-spacer-3: [D05600400001]
     pcb-anode-segment-2: [D05600500001, D05600500002, D05600500003, D05600500004,
                           D05600500005, D05600500006, D05600500007, D05600500008,
                           D05600500009, D05600500010, D05600500011, D05600500012,
@@ -142,12 +148,12 @@ instances:
                           D05600500021, D05600500022]
     adapter-board-2: [D05600600001, D05600600002, D05600600003, D05600600004,
                       D05600600005, D05600600006, D05600600007]
-    edge-connector-board-3: [D05600700001, D05600700002, D05600700003, D05600700004,
+    edge-board-2: [D05600700001, D05600700002, D05600700003, D05600700004,
                              D05600700005, D05600700006, D05600700007]
     composite-frame-2: [D05600800001]
     bias-filter-board-2: [D05600900001]
-    bias-jumper-cable: [D05601000001]       # Cold filter HV cable jumper (bottom)
-    adapter-plate: [D05601100001, D05601100002]  # CRP Support adapter plate (+TCO)
+    bias-cable-jumper-2: [D05601000001]       # Cold filter HV cable jumper (bottom)
+    support-adapter-plate: [D05601100001, D05601100002]  # CRP Support adapter plate (+TCO)
     # --- TDE (system 57) ---
     tde-chimney-24-48: [D05700100001, D05700100002]
     tde-warm-flange-24-48: [D05700100005]

@@ -273,8 +273,8 @@ def explore_hierarchy_view(request):
     return render(request, "explore/hierarchy.html", {
         "active_nav": "detector",
         "sidebar": navigation.sidebar_tree(inst, {}),
-        "chart": charts.svg_chart("fd-vd-v4"),
-        "type_mapping": charts.type_mapping("fd-vd-v4", inst),
+        "chart": charts.svg_chart("fd-vd-v10"),
+        "type_mapping": charts.type_mapping("fd-vd-v10", inst),
     })
 
 

@@ -150,19 +150,19 @@ drill-in navigation. For the full design + implementation walkthrough
 
 The interactive FD-VD detector chart at `/hw/hierarchy/` — a pan/zoomable,
 clickable SVG replica of the consortium-maintained "FD-VD Complete detector
-(v4)" PowerPoint chart. Distinct from the *hierarchy mirror/tree* above: the
+(v10)" PowerPoint chart. Distinct from the *hierarchy mirror/tree* above: the
 mirror is HWDB's System/Subsystem/Type structure; the chart is the physicists'
 box-and-arrow drawing of the physical detector, which HWDB does not encode.
 
 Three YAML files per chart in `explore/chart_specs/`, joined by stable
 **node id** slugs (see [[0016-hierarchy-chart-spec-overlay-split]]):
 
-- **chart spec** (`fd-vd-v4.yaml`) — hand-curated semantics: nodes, edges
+- **chart spec** (`fd-vd-v10.yaml`) — hand-curated semantics: nodes, edges
   (child → parent, `kind: cable` for routed arrows), bands.
-- **layout overlay** (`fd-vd-v4.layout.yaml`) — generated geometry
+- **layout overlay** (`fd-vd-v10.layout.yaml`) — generated geometry
   (`manage.py extract_chart --layout` from the consortium .pptx or PDF);
   regenerated per chart update, never hand-edited.
-- **mapping overlay** (`fd-vd-v4.mapping.yaml`) — hand-curated node id →
+- **mapping overlay** (`fd-vd-v10.mapping.yaml`) — hand-curated node id →
   Component Type ids per instance; audited by `manage.py audit_chart_mapping`.
 
 ### Type vs. instance (and the terms around it)

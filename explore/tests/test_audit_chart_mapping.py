@@ -86,4 +86,4 @@ class AuditChartMappingTest(TestCase):
     def test_real_chart_smoke(self):
         out = StringIO()
         call_command("audit_chart_mapping", stdout=out)  # default = sole chart
-        self.assertIn("Chart 'fd-vd-v4' · instance prod", out.getvalue())
+        self.assertIn("Chart 'fd-vd-v10' · instance prod", out.getvalue())

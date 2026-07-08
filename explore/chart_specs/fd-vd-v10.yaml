@@ -3,9 +3,11 @@
 # (parent box above an indented stack of children; root subtrees in band
 # rows) — the spec is purely SEMANTIC, no coordinates.
 #
-# Bootstrapped by `manage.py extract_chart` from the consortium chart PDF
-# (HWDB_FD-VD_hierarchy.pptx.pdf page 2, v4); edges hand-transcribed from the
-# chart image. Maintain by HAND-EDITING this file when the chart changes.
+# Bootstrapped from the v4 spec (HWDB_FD-VD_hierarchy.pptx.pdf page 2) and
+# hand-updated to the v10 chart (HWDB_FD-VD_hierarchy_v10.pptx slide 2) by
+# diffing extract_chart drafts of both slides and checking every ambiguous
+# change against the slide XML (glued connectors, note row alignment).
+# Maintain by HAND-EDITING this file when the chart changes.
 #
 #   nodes   id (stable slug), label, fill; optional band (roots only),
 #           stroke (executive-summary border), dashed (connector positions),
@@ -18,8 +20,9 @@
 # The box-label -> part_type_id mapping lives in a separate overlay (#58).
 
 chart:
-  title: FD-VD Complete detector (v4)
-  source: HWDB_FD-VD_hierarchy.pptx.pdf, page 2
+  title: FD-VD Complete detector (v10)
+  source: HWDB_FD-VD_hierarchy_v10.pptx, slide 2
+  source_url: https://edms.cern.ch/document/3416341  # EDMS home of the live chart (Google Slides)
 
 bands:
   - {id: mezzanine-racks, label: Mezzanine racks, fill: '#f4cccc'}
@@ -29,7 +32,7 @@ bands:
 
 nodes:
   - {id: camera-ps-control, label: Camera PS & Control, fill: '#b269e1', band: mezzanine-racks}
-  - {id: cat6-power, label: "CAT6 + POWER \u2026", fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: cat6-power, label: "CAT6 + POWER …", fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: hv-bias-ps, label: HV bias PS, fill: '#b269e1', band: mezzanine-racks}
   - {id: shv-4, label: SHV (8), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: shv-6, label: SHV (24), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
@@ -47,16 +50,19 @@ nodes:
   - {id: tms-warm-cable-2, label: TMS warm cable, fill: '#50a7f9'}
   - {id: cathode-hvps, label: Cathode HVPS, fill: '#b269e1', band: below-mezzanine-racks}
   - {id: hv-cable, label: HV cable, fill: '#b269e1'}
-  - {id: camera-light-warm-cable, label: Camera & light warm cable, fill: '#b269e1'}
+  - {id: camera-warm-cable, label: Camera warm cable, fill: '#b269e1'}
+  - {id: light-warm-cable, label: Light warm cable, fill: '#b269e1'}
   - {id: box, label: BOX, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
-  - {id: bias-shv-warm-cable, label: bias SHV warm cable (2), fill: '#b269e1'}
-  - {id: bias-shv-warm-cable-3, label: bias SHV warm cable (6), fill: '#b269e1'}
+  - {id: bias-shv-warm-cable, label: bias SHV warm cable (2), fill: '#b269e1', note: 4 types}
+  - {id: bias-shv-warm-cable-3, label: bias SHV warm cable (6), fill: '#b269e1', note: 4 types}
   - {id: bias-shv-warm-cable-2, label: bias SHV warm cable (3), fill: '#b269e1'}
   - {id: wib, label: WIB (6), fill: '#a27310'}
   - {id: ptc, label: PTC (1), fill: '#a27310'}
-  - {id: lm-electronics, label: LM electronics (1/0), fill: '#0a5c17'}
+  - {id: drawer, label: Drawer (1/0), fill: '#0a5c17'}
+  - {id: active-board, label: Active board, fill: '#0a5c17'}
+  - {id: passive-board, label: Passive board, fill: '#0a5c17'}
   - {id: db25-8, label: DB25 (1/0), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
-  - {id: lm-warm-bundle, label: LM warm bundle, fill: '#0a5c17'}
+  - {id: lm-warm-cable-bundle, label: LM warm cable bundle, fill: '#0a5c17'}
   - {id: daphne-module, label: DAPHNE module (2), fill: '#0000ff'}
   - {id: mezzanine-card, label: mezzanine card (4), fill: '#0000ff', note: 3 types}
   - {id: db15-3, label: DB15 (2), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
@@ -78,11 +84,11 @@ nodes:
   - {id: feb-calibration-unit-eth, label: FEB calibration unit Eth, fill: '#a6aaa9'}
   - {id: amc, label: AMC (24/48), fill: '#773f9b'}
   - {id: calibration-unit, label: Calibration Unit, fill: '#773f9b', band: below-mezzanine-racks}
-  - {id: feb-pulsing-controls-cable, label: FEB pulsing controls cable, fill: '#773f9b'}
-  - {id: feb-pulsing-cable, label: FEB pulsing cable, fill: '#773f9b'}
+  - {id: feb-pulsing-controls-cable, label: FEB pulsing controls cable, fill: '#ffffff', stroke: '#773f9b', text: '#000000'}
+  - {id: feb-pulsing-cable, label: FEB pulsing cable, fill: '#ffffff', stroke: '#773f9b', text: '#000000'}
   - {id: wr-mch, label: WR MCH (1), fill: '#773f9b'}
   - {id: utca-crate, label: uTCA crate (2/4), fill: '#773f9b', band: below-mezzanine-racks}
-  - {id: tde-cable, label: TDE cable (24), fill: '#773f9b'}
+  - {id: tde-cable, label: TDE cable (24), fill: '#ffffff', stroke: '#773f9b', text: '#000000'}
   - {id: daq-patch-panel, label: DAQ patch panel, fill: '#a6aaa9', band: below-mezzanine-racks}
   - {id: wr-fiber, label: WR Fiber, fill: '#773f9b'}
   - {id: eth-mch-control-cable, label: Eth MCH control cable, fill: '#a6aaa9'}
@@ -101,6 +107,7 @@ nodes:
   - {id: db25-6, label: DB25 (1/0), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: fc-bias-flange, label: FC bias flange, fill: '#b269e1'}
   - {id: db25-7, label: DB25 (1/0), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: db25-11, label: DB25 (1/0), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: shv-3, label: SHV (2), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: shv-7, label: SHV (6/0), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: shv-8, label: SHV (6/0), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
@@ -121,6 +128,7 @@ nodes:
   - {id: manhole, label: Manhole (4), fill: '#ff0000', band: cryostat-roof}
   - {id: prm-flange, label: PrM flange (1/0), fill: '#50a7f9'}
   - {id: sst-chimney, label: SST chimney (64), fill: '#ff0000', band: cryostat-roof}
+  - {id: suspension-system, label: Suspension system, fill: '#0a5c17'}
   - {id: fc-apc, label: FC/APC (6/9), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000', note: 2 types}
   - {id: fbg-flange, label: FBG flange (2), fill: '#50a7f9'}
   - {id: fc-fc, label: FC/FC (6/9), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
@@ -155,37 +163,44 @@ nodes:
   - {id: fc-support-rod, label: FC support rod (2), fill: '#b269e1', note: 4 types}
   - {id: fc-super-module, label: FC super module, fill: '#b269e1'}
   - {id: jumper-wire, label: Jumper wire, fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
+  - {id: pds-fiber-frp-channel, label: PDS fiber FRP channel (2), fill: '#b269e1'}
   - {id: hv-bus-resistor, label: HV bus resistor, fill: '#b269e1'}
-  - {id: fc-support-structure, label: FC support structure, fill: '#b269e1', note: 12 types}
+  # fc-support-structure's "12 types" lives in the loose annotation
+  # "12 types (max 6 types in SM)", which the v10 chart places by FC module.
+  - {id: fc-support-structure, label: FC support structure, fill: '#b269e1'}
+  - {id: fc-support-beam, label: FC support beam, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 14 types}
+  - {id: fc-top-yoke, label: FC top yoke, fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
   - {id: fc-module, label: FC module (8), fill: '#b269e1'}
-  - {id: fc-profile, label: FC profile, fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
-  - {id: fc-splice-bar, label: FC splice bar, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 8 types; 4 types}
-  - {id: fc-frp-beam, label: FC FRP beam, fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
-  - {id: fc-alignment-strips, label: FC alignment strips, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 4 types; 4 types}
-  - {id: fc-link-plate, label: FC link plate, fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
-  - {id: fc-fastener, label: FC fastener, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 12 types; 3 types}
-  - {id: rdb, label: RDB (6), fill: '#b269e1'}
-  - {id: camera-light-cold-cable, label: Camera-light cold cable, fill: '#b269e1'}
-  - {id: camera-light, label: Camera-light, fill: '#b269e1', band: interior}
+  - {id: fc-profile, label: FC profile, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 8 types}
+  - {id: fc-splice-bar, label: FC splice bar, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 4 types}
+  - {id: fc-frp-beam, label: FC FRP beam, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 4 types}
+  - {id: fc-alignment-strips, label: FC alignment strips, fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
+  - {id: fc-link-plate, label: FC link plate, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 4 types}
+  - {id: fc-fastener, label: FC fastener, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 12 types}
+  - {id: vdb, label: VDB (6), fill: '#b269e1', note: 3 types}
+  - {id: camera-cold-cable, label: Camera cold cable, fill: '#b269e1', note: 3 types}
+  - {id: light-cold-cable, label: Light cold cable, fill: '#b269e1'}
+  - {id: camera, label: Camera, fill: '#b269e1', band: interior, note: 2 types}
+  - {id: light, label: Light, fill: '#b269e1', band: interior, note: 2 types}
   - {id: lm-assembly-2, label: LM assembly (2), fill: '#b269e1'}
-  - {id: fc-term-cold-cable, label: FC term. cold cable (2), fill: '#b269e1'}
-  - {id: int-frame, label: 'Int. Frame (???)', fill: '#ff0000', band: interior, note: 2 types}
+  - {id: fc-term-cold-cable, label: FC term. cold cable (2), fill: '#b269e1', note: 4 types}
+  - {id: inter-frame, label: Inter. Frame (34/4), fill: '#6fbe40', band: interior, note: 2 types}
   - {id: lm-cold-cable, label: LM cold cable, fill: '#b269e1'}
-  - {id: inst-cru, label: Inst. CRU (20x4x2), fill: '#ff0000', band: interior}
-  - {id: support-post, label: Support post (4), fill: '#6fbe40'}
-  - {id: adapter-plate, label: Adapter plate (2), fill: '#6fbe40'}
+  - {id: inst-crp-2, label: Inst. CRP (2/3), fill: '#6fbe40'}
+  - {id: support-post, label: Support post (8), fill: '#6fbe40'}
+  - {id: support-adapter-plate, label: Support adapter plate (4), fill: '#6fbe40'}
   - {id: patch-panel, label: Patch panel (2), fill: '#a27310'}
-  - {id: cru-2, label: CRU, fill: '#6fbe40', stroke: '#ff4a27'}
-  - {id: pcb-anode-segment-2, label: PCB anode segment (6), fill: '#ffffff', stroke: '#6fbe40', text: '#000000', note: 22 types}
-  - {id: bias-jumper-cable, label: Bias jumper cable (1/0), fill: '#ffffff', stroke: '#6fbe40', text: '#000000'}
-  - {id: bias-filter-board-2, label: Bias filter board (1), fill: '#6fbe40'}
-  - {id: edge-connector-board-3, label: Edge connector board (24), fill: '#ffffff', stroke: '#6fbe40', text: '#000000', note: 7 types}
+  - {id: cru-2, label: CRU (2), fill: '#6fbe40', stroke: '#ff4a27'}
+  - {id: pcb-anode-segment-2, label: PCB anode segment (6), fill: '#ffffff', stroke: '#6fbe40', text: '#000000', note: 4 types}
+  - {id: bias-cable-jumper-2, label: Bias cable jumper, fill: '#6fbe40'}
+  - {id: bias-filter-board-2, label: Bias filter board, fill: '#6fbe40'}
+  - {id: edge-board-2, label: Edge board (24), fill: '#6fbe40', note: 7 types}
   - {id: adapter-board-2, label: Adapter board (12), fill: '#6fbe40', note: 7 types}
-  - {id: peek-spacer-2, label: Peek spacer (61), fill: '#ffffff', stroke: '#6fbe40', text: '#000000'}
-  - {id: ground-plane, label: Ground plane (1), fill: '#ffffff', stroke: '#6fbe40', text: '#000000'}
-  - {id: composite-frame-2, label: Composite frame (1), fill: '#6fbe40'}
+  - {id: peek-spacer-3, label: Peek spacer (61), fill: '#ffffff', stroke: '#6fbe40', text: '#000000'}
+  - {id: ground-plane, label: Ground plane, fill: '#ffffff', stroke: '#6fbe40', text: '#000000'}
+  - {id: composite-frame-2, label: Composite frame, fill: '#6fbe40'}
   - {id: cru-anode-panel-2, label: CRU anode panel (2), fill: '#6fbe40', note: 2 types}
-  - {id: cold-bias-shv-cable-2, label: Cold bias SHV cable (3), fill: '#6fbe40'}
+  - {id: cold-shv-cable-2, label: Cold SHV cable (3), fill: '#a27310'}
   - {id: bde-pds-cable-tray, label: BDE-PDS cable tray, fill: '#a27310', band: interior, stroke: '#ff4a27'}
   - {id: bde-signal-cable, label: BDE signal cable (6), fill: '#a27310'}
   - {id: bde-cable-bundle, label: BDE cable bundle (4), fill: '#a27310'}
@@ -193,8 +208,8 @@ nodes:
   - {id: samtec-3, label: SAMTEC, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: bde-short-signal-cable, label: BDE short signal cable (6), fill: '#a27310'}
   - {id: samtec-2, label: SAMTEC, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
-  - {id: ce-box, label: CE BOX (12), fill: '#a27310', stroke: '#00ffff'}
-  - {id: femb, label: FEMB (1), fill: '#a27310'}
+  - {id: ce-box, label: CE box (12), fill: '#a27310', stroke: '#00ffff'}
+  - {id: femb, label: FEMB, fill: '#a27310'}
   - {id: bde-power-cable, label: BDE power cable (6), fill: '#a27310'}
   - {id: power-4, label: POWER, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: power-3, label: POWER, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
@@ -236,18 +251,18 @@ nodes:
   - {id: prm, label: PrM (1), fill: '#50a7f9'}
   - {id: sst, label: SST, fill: '#ff0000', note: 2 types}
   - {id: inst-sst, label: Inst. SST (8x2), fill: '#ff0000', band: interior, note: 2 types}
-  - {id: half-cathode-plane, label: Half Cathode plane (2), fill: '#b269e1', note: 12 types}
+  - {id: half-cathode-plane, label: Half Cathode plane (2), fill: '#b269e1', note: 8 types}
   - {id: cathode-plane, label: Cathode plane, fill: '#b269e1', note: 6 types}
-  - {id: tad, label: TAD (4), fill: '#b269e1'}
+  - {id: tad, label: TAD (4), fill: '#b269e1', note: 3 types}
   - {id: dyneema-rope, label: dyneema rope, fill: '#b269e1', note: 3 types}
-  - {id: lad, label: LAD (2), fill: '#b269e1', note: 4 types}
+  - {id: lad, label: LAD (2), fill: '#ffffff', stroke: '#9900ff', text: '#000000', note: 3 types}
   - {id: half-frame, label: Half frame, fill: '#b269e1'}
-  - {id: cathode-interconnect, label: cathode interconnect (6), fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
-  - {id: cross-ribs, label: cross ribs (6), fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
-  - {id: resistive-mesh, label: resistive mesh (12), fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
-  - {id: copper-tape-strips, label: copper tape strips (64), fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
-  - {id: metallic-mesh, label: metallic mesh (4), fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
-  - {id: xa-supports, label: XA-supports (12), fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
+  - {id: cathode-interconnect, label: cathode interconnect (6), fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 2 types}
+  - {id: cross-ribs, label: cross ribs (6), fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 2 types}
+  - {id: resistive-mesh, label: resistive mesh (12), fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 8 types}
+  - {id: copper-tape-strips, label: copper tape strips (64), fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 2 types}
+  - {id: metallic-mesh, label: metallic mesh (4), fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 3 types}
+  - {id: xa-supports, label: XA-supports (6), fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 5 types}
   - {id: tms-cold-fiber, label: TMS cold fiber (3), fill: '#50a7f9'}
   - {id: tadeff, label: TADEFF (2/1/0), fill: '#50a7f9', stroke: '#ff4a27'}
   - {id: fbg-fiber, label: FBG fiber (3), fill: '#50a7f9', note: 3 types}
@@ -257,24 +272,25 @@ nodes:
   - {id: lm-assembly, label: LM assembly (4), fill: '#0a5c17', stroke: '#00ffff'}
   - {id: sma-4, label: SMA (2), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: idc3, label: IDC3 (1), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
-  - {id: lm-cable-bundle, label: LM cable bundle, fill: '#0a5c17'}
-  - {id: inst-crp, label: Inst. CRP (6/2), fill: '#c82506'}
-  - {id: bias-cable-bundle-jumper, label: Bias cable bundle jumper (1), fill: '#0a5c17'}
-  - {id: decoupling-device, label: Decoupling device (4), fill: '#0a5c17', note: 2 types}
+  - {id: lm-cold-cable-bundle, label: LM cold cable bundle, fill: '#0a5c17'}
+  - {id: inst-crp, label: Inst. CRP (6/2), fill: '#274e13'}
+  - {id: bias-cable-jumper, label: Bias cable jumper (1), fill: '#0a5c17'}
+  - {id: decoupling-device, label: Decoupling device (4), fill: '#ffffff', stroke: '#0a5c17', text: '#000000', note: 3 types}
   - {id: cru, label: CRU (2), fill: '#0a5c17', stroke: '#ff4a27'}
   - {id: peek-spacer, label: Peek spacer (61), fill: '#ffffff', stroke: '#00882b', text: '#000000'}
-  - {id: edge-connector-board, label: Edge connector board (24), fill: '#0a5c17', note: 7 types; 7 types}
-  - {id: adapter-board, label: Adapter board (12), fill: '#0a5c17'}
-  - {id: bias-filter-board, label: Bias filter board (1), fill: '#0a5c17'}
-  - {id: composite-frame, label: Composite frame (1), fill: '#0a5c17'}
+  - {id: edge-board, label: Edge board (24), fill: '#0a5c17', note: 7 types}
+  - {id: adapter-board, label: Adapter board (12), fill: '#0a5c17', note: 7 types}
+  - {id: bias-filter-board, label: Bias filter board, fill: '#0a5c17'}
+  - {id: composite-frame, label: Composite frame, fill: '#0a5c17'}
   - {id: cru-anode-panel, label: CRU anode panel (2), fill: '#0a5c17', note: 2 types}
-  - {id: pcb-anode-segment, label: PCB anode segment (6), fill: '#ffffff', stroke: '#00882b', text: '#000000', note: 22 types}
-  - {id: crp-cable-tray, label: CRP Cable Tray, fill: '#0a5c17', band: interior}
-  - {id: tde-signal-cable, label: TDE Signal cable (4), fill: '#0a5c17'}
-  - {id: cold-bias-shv-cable, label: Cold bias SHV cable (3), fill: '#b269e1'}
+  - {id: pcb-anode-segment, label: PCB anode segment (6), fill: '#ffffff', stroke: '#00882b', text: '#000000', note: 4 types}
+  - {id: cable-tray, label: Cable Tray, fill: '#0a5c17', band: interior}
+  - {id: signal-cable, label: Signal cable (4), fill: '#0a5c17'}
+  - {id: cold-shv-cable, label: Cold SHV cable (3), fill: '#b269e1', note: 2 types}
 
 edges:
-  - {from: camera-light-warm-cable, to: camera-ps-control}
+  - {from: camera-warm-cable, to: camera-ps-control}
+  - {from: light-warm-cable, to: camera-ps-control}
   - {from: cat6-power, to: camera-ps-control}
   - {from: bias-shv-warm-cable, to: hv-bias-ps}
   - {from: bias-shv-warm-cable-3, to: hv-bias-ps}
@@ -291,13 +307,15 @@ edges:
   - {from: lv-feb-power-sense-cable, to: lv-filter-fanout}
   - {from: lv-feb-power-cable, to: lv-filter-fanout}
   - {from: hv-cable, to: cathode-hvps}
-  - {from: lm-warm-bundle, to: lm-electronics}
-  - {from: db25-8, to: lm-electronics}
+  - {from: active-board, to: drawer}
+  - {from: passive-board, to: drawer}
+  - {from: lm-warm-cable-bundle, to: drawer}
+  - {from: db25-8, to: drawer}
   - {from: mezzanine-card, to: daphne-module}
   - {from: pds-warm-cable, to: mezzanine-card}
   - {from: db15-3, to: mezzanine-card}
   - {from: fc, to: mezzanine-card}
-  - {from: lm-electronics, to: pds-rack}
+  - {from: drawer, to: pds-rack}
   - {from: daphne-module, to: pds-rack}
   - {from: laser-box, to: pds-rack}
   - {from: lcm-module, to: pds-rack}
@@ -327,6 +345,7 @@ edges:
   - {from: box, to: fc-bias-flange}
   - {from: db25-6, to: fc-bias-flange}
   - {from: db25-7, to: fc-bias-flange}
+  - {from: db25-11, to: fc-bias-flange}
   - {from: shv-2, to: fc-bias-flange}
   - {from: shv-3, to: fc-bias-flange}
   - {from: shv-7, to: fc-bias-flange}
@@ -347,6 +366,7 @@ edges:
   - {from: db15-2, to: pds-flange}
   - {from: prm-flange, to: manhole}
   - {from: prm, to: prm-flange}
+  - {from: suspension-system, to: sst-chimney}
   - {from: fc-apc, to: fbg-flange}
   - {from: fc-fc, to: fbg-flange}
   - {from: fbg-flange, to: tms-pns-chimney}
@@ -374,36 +394,41 @@ edges:
   - {from: fc-support-rod, to: inst-fc-super-module}
   - {from: jumper-wire, to: inst-fc-super-module}
   - {from: fc-term-cold-cable, to: inst-fc-super-module}
+  - {from: pds-fiber-frp-channel, to: fc-super-module}
   - {from: hv-bus-resistor, to: fc-super-module}
   - {from: fc-support-structure, to: fc-super-module}
   - {from: fc-module, to: fc-super-module}
   - {from: lm-assembly-2, to: fc-support-structure}
+  - {from: fc-support-beam, to: fc-support-structure}
+  - {from: fc-top-yoke, to: fc-support-structure}
   - {from: fc-profile, to: fc-module}
   - {from: fc-splice-bar, to: fc-module}
   - {from: fc-frp-beam, to: fc-module}
   - {from: fc-alignment-strips, to: fc-module}
   - {from: fc-link-plate, to: fc-module}
   - {from: fc-fastener, to: fc-module}
-  - {from: rdb, to: fc-module}
-  - {from: camera-light-cold-cable, to: camera-light}
+  - {from: vdb, to: fc-module}
+  - {from: camera-cold-cable, to: camera}
+  - {from: light-cold-cable, to: light}
   - {from: lm-cold-cable, to: lm-assembly-2}
-  - {from: support-post, to: inst-cru}
-  - {from: adapter-plate, to: inst-cru}
-  - {from: patch-panel, to: inst-cru}
-  - {from: cru-2, to: inst-cru}
+  - {from: inst-crp-2, to: inter-frame}
+  - {from: support-post, to: inst-crp-2}
+  - {from: support-adapter-plate, to: inst-crp-2}
+  - {from: patch-panel, to: inst-crp-2}
+  - {from: cru-2, to: inst-crp-2}
   - {from: samtec-4, to: patch-panel}
   - {from: power-4, to: patch-panel}
   - {from: samtec-3, to: patch-panel}
   - {from: power-3, to: patch-panel}
   - {from: bias-filter-board-2, to: cru-2}
-  - {from: edge-connector-board-3, to: cru-2}
+  - {from: edge-board-2, to: cru-2}
   - {from: adapter-board-2, to: cru-2}
-  - {from: peek-spacer-2, to: cru-2}
+  - {from: peek-spacer-3, to: cru-2}
   - {from: ground-plane, to: cru-2}
   - {from: composite-frame-2, to: cru-2}
   - {from: cru-anode-panel-2, to: cru-2}
-  - {from: bias-jumper-cable, to: bias-filter-board-2}
-  - {from: cold-bias-shv-cable-2, to: bias-filter-board-2}
+  - {from: bias-cable-jumper-2, to: bias-filter-board-2}
+  - {from: cold-shv-cable-2, to: bias-filter-board-2}
   - {from: ce-box, to: adapter-board-2}
   - {from: pcb-anode-segment-2, to: cru-anode-panel-2}
   - {from: bde-cable-bundle, to: bde-pds-cable-tray}
@@ -468,19 +493,19 @@ edges:
   - {from: t6-cable-bundle, to: ga}
   - {from: sma-4, to: lm-assembly}
   - {from: idc3, to: lm-assembly}
-  - {from: lm-cable-bundle, to: lm-assembly}
-  - {from: bias-cable-bundle-jumper, to: inst-crp}
+  - {from: lm-cold-cable-bundle, to: lm-assembly}
+  - {from: bias-cable-jumper, to: inst-crp}
   - {from: decoupling-device, to: inst-crp}
   - {from: cru, to: inst-crp}
   - {from: peek-spacer, to: cru}
-  - {from: edge-connector-board, to: cru}
+  - {from: edge-board, to: cru}
   - {from: adapter-board, to: cru}
   - {from: bias-filter-board, to: cru}
   - {from: composite-frame, to: cru}
   - {from: cru-anode-panel, to: cru}
-  - {from: cold-bias-shv-cable, to: bias-filter-board}
+  - {from: cold-shv-cable, to: bias-filter-board}
   - {from: pcb-anode-segment, to: cru-anode-panel}
-  - {from: tde-signal-cable, to: crp-cable-tray}
+  - {from: signal-cable, to: cable-tray}
   # cables (far endpoints)
   - {from: lar-pipe-tms, to: tms-fc-flange, kind: cable}
   - {from: prm-tms, to: tms-fc-flange, kind: cable}
@@ -491,34 +516,37 @@ edges:
   - {from: 2-m-1-2-rms-fiber, to: pds-flange, kind: cable}
   - {from: jumper-wire, to: hv-extender, kind: cable}
   - {from: hv-cable, to: hvft, kind: cable}
-  - {from: camera-light-cold-cable, to: fc-bias-flange, kind: cable}
+  - {from: camera-cold-cable, to: fc-bias-flange, kind: cable}
+  - {from: light-cold-cable, to: fc-bias-flange, kind: cable}
   - {from: fc-term-cold-cable, to: fc-bias-flange, kind: cable}
-  - {from: camera-light-warm-cable, to: fc-bias-flange, kind: cable}
+  - {from: camera-warm-cable, to: fc-bias-flange, kind: cable}
+  - {from: light-warm-cable, to: fc-bias-flange, kind: cable}
   - {from: bias-shv-warm-cable, to: fc-bias-flange, kind: cable}
   - {from: bias-shv-warm-cable-3, to: fc-bias-flange, kind: cable}
   - {from: bias-shv-warm-cable-2, to: bde-flange-wiec, kind: cable}
-  - {from: cold-bias-shv-cable-2, to: bde-flange-wiec, kind: cable}
+  - {from: cold-shv-cable-2, to: bde-flange-wiec, kind: cable}
   - {from: bde-short-signal-cable, to: patch-panel, kind: cable}
   - {from: bde-short-power-cable, to: patch-panel, kind: cable}
   - {from: bde-signal-cable, to: patch-panel, kind: cable}
   - {from: bde-power-cable, to: patch-panel, kind: cable}
-  - {from: lm-warm-bundle, to: bde-flange-wiec, kind: cable}
+  - {from: lm-warm-cable-bundle, to: bde-flange-wiec, kind: cable}
   - {from: lm-cold-cable, to: bde-flange-wiec, kind: cable}
   - {from: pds-cold-cable, to: pds-flange, kind: cable}
   - {from: fiber-bundle, to: pds-flange, kind: cable}
   - {from: pds-warm-cable, to: pds-flange, kind: cable}
   - {from: pds-warm-fiber, to: pds-flange, kind: cable}
-  - {from: inst-sst, to: sst-chimney, kind: cable, color: '#000000'}
+  - {from: inst-sst, to: suspension-system, kind: cable, color: '#000000'}
   - {from: dyneema-rope, to: lad, kind: cable}
   - {from: tms-cold-fiber, to: tms-pns-chimney, kind: cable}
   - {from: fbg-fiber, to: fbg-flange, kind: cable}
   - {from: t6-cable-bundle, to: ga-flange, kind: cable}
-  - {from: lm-cable-bundle, to: fc-bias-flange, kind: cable}
+  - {from: lm-cold-cable-bundle, to: fc-bias-flange, kind: cable}
   - {from: tms-warm-fiber, to: fbg-flange, kind: cable}
   - {from: interrogator-eth, to: switch-dcs, kind: cable}
-  - {from: tde-signal-cable, to: tde-cold-flange-24-48, kind: cable}
-  - {from: crp-cable-tray, to: tde-chimney-24-48, kind: cable}
-  - {from: cold-bias-shv-cable, to: fc-bias-flange, kind: cable}
+  - {from: signal-cable, to: tde-cold-flange-24-48, kind: cable}
+  - {from: cable-tray, to: tde-chimney-24-48, kind: cable}
+  - {from: cold-shv-cable, to: fc-bias-flange, kind: cable}
+  - {from: bias-cable-jumper, to: bias-filter-board, kind: cable}
   - {from: tms-warm-cable, to: ga-flange, kind: cable}
   - {from: lv-feb-power-sense-cable, to: tde-warm-flange-24-48, kind: cable}
   - {from: lv-feb-power-cable, to: tde-warm-flange-24-48, kind: cable}
@@ -531,9 +559,16 @@ edges:
   - {from: eth-mch-control-cable, to: daq-patch-panel, kind: cable}
   - {from: crate-power-cable, to: 110v-av-dist-roof, kind: cable}
 
-# Open questions for the consortium chart owners (#60 demo):
-# - int-frame: "Int. Frame (???)" has no arrows in the PDF; left as a root.
-# - 22-m-rms-fiber: endpoints not identifiable in the PDF; left as a root.
-# - camera-light: no parent arrow visible; left as a root.
+# Open questions for the consortium chart owners:
+# - 22-m-rms-fiber: endpoints not identifiable in the chart; left as a root.
+# - camera / light (split from v4's camera-light): no parent arrows visible;
+#   left as roots.
+# - inst-crp-2 -> inter-frame: the box stacking says Inter. Frame is the
+#   parent, but the arrowhead in the pptx points the other way (arrowheads
+#   are inconsistent elsewhere in the chart too, e.g. Drawer's boards).
 # - fiber-mega-bundle -> fiber-bundle direction guessed from the PDF arrow,
 #   which looks inverted relative to the "child -> parent" convention.
+# - "2 types" over camera/light warm cables, "4 types" over bias SHV warm
+#   cable (3), and "3 types" over LM cold cable sit too far from their boxes
+#   for the extractor to attach; they render as loose layout annotations
+#   instead of node notes.

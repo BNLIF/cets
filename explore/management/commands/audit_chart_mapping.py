@@ -18,7 +18,7 @@ Reports, per instance:
   mirror types fuzzy-matched by name, formatted for pasting.
 
     python manage.py audit_chart_mapping
-    python manage.py audit_chart_mapping fd-vd-v4 --instance dev
+    python manage.py audit_chart_mapping fd-vd-v10 --instance dev
 """
 import difflib
 import re
