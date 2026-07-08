@@ -52,7 +52,8 @@
             title="Fade boxes with no HWDB type mapping">HWDB coverage</button>
     <button class="hc-reset" id="hc-reset" type="button" title="Fit chart to width">Reset view</button>
   </div>
-  <p class="subtitle">Component-type hierarchy chart · source: {{ chart.source }}</p>
+  <p class="subtitle">Component-type hierarchy chart{% if chart.source_url %}
+    · source: <a href="{{ chart.source_url }}" target="_blank" rel="noopener">{{ chart.source_url }}</a>{% endif %}</p>
 
   <div class="hc-canvas">
     <svg id="hc-svg" viewBox="0 0 {{ chart.width }} {{ chart.height }}"

@@ -194,6 +194,7 @@ def _build(chart_id: str, spec: dict, overlay: dict | None = None) -> dict:
         "id": chart_id,
         "title": meta.get("title", chart_id),
         "source": meta.get("source", ""),
+        "source_url": meta.get("source_url", ""),
         "width": max_x + (0 if overlay else MARGIN),
         "height": max_y + (0 if overlay else MARGIN),
         "bands": bands,
