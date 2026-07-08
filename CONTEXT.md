@@ -140,7 +140,7 @@ The whole tree is live in production HWDB and walkable via the API
 subsystems (the three chip families); the dashboard expansion is about
 navigating the rest read-only. See [[0007-hwdb-mirror-separation]].
 
-The read-only navigator over this tree is the **DUNE HWDB Explorer** (`/hw/`),
+The navigator over this tree is the **DUNE HWDB Explorer** (`/hw/`),
 its own `explore` app with FNAL login, a disposable local mirror, and curated
 drill-in navigation. For the full design + implementation walkthrough
 (authentication, the mirror tables, curation, sync engines), see
