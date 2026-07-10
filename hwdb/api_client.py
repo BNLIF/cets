@@ -140,6 +140,14 @@ class FnalDbApiClient:
         """
         return self._make_request("GET", f"components/{part_id}/images")
 
+    def get_institutions(self):
+        """All registered institutions: ``{id, name, country: {code, name}}``.
+
+        Options for the location dropdown of the explorer's Update-location
+        form (issue #61) — the same list the official Dashboard offers.
+        """
+        return self._make_request("GET", "institutions")
+
     def get_image_response(self, image_id):
         """Raw attachment bytes by id (``GET img/{id}``) as a streaming
         ``requests.Response`` for the caller to proxy. The bytes are bearer-

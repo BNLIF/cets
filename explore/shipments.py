@@ -155,6 +155,25 @@ def fold_entries(entries: list) -> tuple[list, list]:
     return fields, attachments
 
 
+def refresh_box(api, instance: str, part_type_id: str, part_id: str) -> None:
+    """Re-mirror ONE box's ShipmentItem row from HWDB — the targeted re-sync
+    after the explorer itself writes to that box (issue #61). Same row shape as
+    ``sync_shipments``, without the whole-type walk."""
+    locs = api.get_locations(part_id).get("data") or []
+    manifest = current_manifest(api.get_subcomponents(part_id).get("data"))
+    latest = latest_location(locs)
+    loc = (latest or {}).get("location") or {}
+    shipped, received = shipped_received(locs)
+    ShipmentItem.for_instance(instance).filter(part_id=part_id).delete()
+    ShipmentItem.objects.create(
+        instance=instance, part_type_id=part_type_id, part_id=part_id,
+        location_name=loc.get("name") or "", location_id=loc.get("id"),
+        n_contents=len(manifest),
+        last_arrived=_parse_dt((latest or {}).get("arrived")),
+        shipped_date=shipped, received_date=received,
+    )
+
+
 def _list_boxes(api, part_type_id: str) -> list[str]:
     """Every box's part_id across all pages (the listing paginates — the #46
     run showed 100 of 326)."""

@@ -4,11 +4,15 @@ import re
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
 
+import requests
 from django.conf import settings
+from django.contrib import messages
 from django.contrib.auth.decorators import login_not_required
 from django.core.paginator import Paginator
 from django.db.models import F, Q
-from django.http import HttpResponse, JsonResponse, StreamingHttpResponse
+from django.http import (
+    HttpResponse, HttpResponseForbidden, JsonResponse, StreamingHttpResponse,
+)
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -34,7 +38,7 @@ from .queries import (
     component_update_filters, component_update_progress,
 )
 from .parts import assembly_children, part_detail
-from .shipments import sync_shipments
+from .shipments import refresh_box, sync_shipments
 
 logger = logging.getLogger(__name__)
 FNAL_UNAVAILABLE = "FNAL authentication service is unavailable. Please try again later."
@@ -634,6 +638,9 @@ def explore_part_view(request, part_id):
                  "subsystem_id": leaf.subsystem_id} if leaf else {})
     box = (ShipmentItem.for_instance(inst).filter(part_id=part_id).first()
            if is_shipping else None)
+    # First write feature (issue #61): boxes on a write-enabled instance get
+    # the Update-location form; its dropdown needs the institution list.
+    can_update_location = is_shipping and inst in settings.HWDB_WRITE_INSTANCES
     return render(request, "explore/part_detail.html", {
         # A box belongs to the Shipments tab; everything else to Hardware.
         "active_nav": "shipments" if is_shipping else "hardware",
@@ -646,7 +653,79 @@ def explore_part_view(request, part_id):
         "leaf_path": navigation.leaf_path_for(inst, ptid) if leaf else None,
         "box": box,
         "hwdb_ui_base": settings.HWDB_PROFILES[inst]["ui"],
+        "can_update_location": can_update_location,
+        "institutions": _institution_options(api) if can_update_location else [],
+        "arrived_default": timezone.localtime().strftime("%Y-%m-%dT%H:%M"),
     })
+
+
+def _institution_options(api) -> list[dict]:
+    """Institution choices for the Update-location form, name-sorted.
+    Best-effort: an empty list renders the form disabled rather than
+    breaking the part page."""
+    try:
+        rows = api.get_institutions().get("data") or []
+    except Exception as e:
+        logger.warning("institutions fetch failed: %s", e)
+        return []
+    opts = [{"id": r.get("id"), "name": r.get("name") or "",
+             "country_code": ((r.get("country") or {}).get("code") or "")}
+            for r in rows if isinstance(r, dict) and r.get("id") is not None]
+    return sorted(opts, key=lambda o: o["name"].lower())
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_part_location_view(request, part_id):
+    """Post a location update for a shipping box — the explorer's first HWDB
+    write (issue #61), mirroring the Dashboard's "Update location" workflow.
+
+    Gated to ``HWDB_WRITE_INSTANCES`` (dev-only for now) on top of the usual
+    FNAL gate; the payload matches the Dashboard's exactly. After a successful
+    post, the box's mirrored ShipmentItem row is refreshed in place so the
+    Shipments dashboard agrees without a whole-type sync.
+    """
+    inst = instance_of(request)
+    part_url = _rev(request, "explore:part", args=[part_id])
+    ptid = part_id.rsplit("-", 1)[0]
+    if inst not in settings.HWDB_WRITE_INSTANCES or not curation.is_shipping_type(inst, ptid):
+        return HttpResponseForbidden("Location updates are not enabled here.")
+
+    try:
+        payload = {
+            "location": {"id": int(request.POST.get("location_id") or "")},
+            "arrived": datetime.fromisoformat(
+                (request.POST.get("arrived") or "").strip()).isoformat(),
+            "comments": (request.POST.get("comments") or "").strip(),
+        }
+    except (TypeError, ValueError):
+        messages.error(request, "Pick a location and a valid arrival time.")
+        return redirect(part_url)
+
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': part_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(part_url)
+
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    try:
+        api.post_location(part_id, payload)
+    except requests.RequestException as e:
+        logger.warning("post location for %s failed: %s", part_id, e)
+        messages.error(request, f"HWDB rejected the location update — {e}")
+        return redirect(part_url)
+
+    try:  # targeted mirror refresh; the write itself already succeeded
+        refresh_box(api, inst, ptid, part_id)
+    except Exception as e:
+        logger.warning("refresh_box(%s) failed: %s", part_id, e)
+    messages.success(request, "Location update posted to HWDB.")
+    return redirect(part_url)
 
 
 @login_not_required

@@ -77,6 +77,25 @@
   .asm-row.is-child td { background: color-mix(in oklch, var(--surface) 55%, var(--page)); }
   .sd-banner { border: 1px solid color-mix(in oklch, var(--warn, #b8860b) 40%, var(--rule));
     background: var(--good-bg); border-radius: var(--r-lg); padding: 16px 18px; color: var(--dim); }
+
+  .sd-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
+  .sd-flash.success { color: var(--good); background: var(--good-bg);
+    border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule)); }
+  .sd-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
+    border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+
+  .sd-locform { margin-top: 12px; border-top: 1px solid var(--rule); padding-top: 10px; }
+  .sd-locform summary { font-size: 12.5px; font-weight: 600; color: var(--accent-ink); cursor: pointer; }
+  .sd-locform form { display: flex; flex-direction: column; gap: 9px; margin-top: 10px; }
+  .sd-locform label { font-size: 12px; color: var(--faint); display: flex; flex-direction: column; gap: 3px; }
+  .sd-locform select, .sd-locform input { font: inherit; font-size: 13px; color: var(--ink);
+    background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 6px 8px; }
+  .sd-locform .row { display: flex; gap: 10px; align-items: center; }
+  .sd-locform button { font: inherit; font-size: 13px; font-weight: 600; color: var(--accent-ink);
+    background: var(--accent-soft); border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--rule));
+    border-radius: var(--r-sm); padding: 6px 15px; cursor: pointer; }
+  .sd-locform button:hover { border-color: var(--accent); }
+  .sd-locform .hint { font-size: 11.5px; color: var(--faint); }
 </style>
 
 <div class="sd-page">
@@ -86,6 +105,8 @@
     {% if leaf_path %}<span class="sep">›</span><a href="{{ leaf_path }}">{{ leaf.name }}</a>{% endif %}
     <span class="sep">›</span>{{ part_id }}
   </div>
+
+  {% for m in messages %}<div class="sd-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
 
   {% if unavailable %}
   <div class="sd-head"><h1>{{ part_id }}</h1></div>
@@ -174,9 +195,10 @@
         </table>
       </div>
 
-      {% if detail.has_location %}
+      {% if detail.has_location or can_update_location %}
       <div class="sd-card">
         <h2>Location timeline</h2>
+        {% if detail.has_location %}
         <table class="sd-table">
           <thead><tr><th>Arrived</th><th>Location</th><th>By</th><th>Comments</th></tr></thead>
           <tbody>
@@ -190,6 +212,35 @@
           {% endfor %}
           </tbody>
         </table>
+        {% else %}
+        <div class="sd-empty">No location recorded yet.</div>
+        {% endif %}
+        {% if can_update_location %}
+        <details class="sd-locform">
+          <summary>Update location</summary>
+          {% if institutions %}
+          <form method="post" action="{% url 'explore:part_location' part_id=part_id %}">
+            {% csrf_token %}
+            <label>New location
+              <select name="location_id" required>
+                <option value="">— pick an institution —</option>
+                {% for i in institutions %}<option value="{{ i.id }}">({{ i.id }}) {{ i.name }}{% if i.country_code %} [{{ i.country_code }}]{% endif %}</option>{% endfor %}
+              </select>
+            </label>
+            <div class="row">
+              <label>Arrived <input type="datetime-local" name="arrived" value="{{ arrived_default }}" required></label>
+              <label style="flex:1;">Comments <input type="text" name="comments" maxlength="500" placeholder="optional"></label>
+            </div>
+            <div class="row">
+              <button type="submit">Post to HWDB</button>
+              <span class="hint">Writes this move to the {{ hwdb_instance }} HWDB as a new location event.</span>
+            </div>
+          </form>
+          {% else %}
+          <div class="sd-empty">Couldn’t load the institution list from HWDB — reload to try again.</div>
+          {% endif %}
+        </details>
+        {% endif %}
       </div>
       {% endif %}
     </div>
