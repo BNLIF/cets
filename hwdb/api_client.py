@@ -140,6 +140,15 @@ class FnalDbApiClient:
         """
         return self._make_request("GET", f"components/{part_id}/images")
 
+    def get_component_type(self, part_type_id):
+        """The component-type record itself (``GET component-types/{id}``):
+        name, category, manufacturers, and ``properties.specifications`` —
+        whose last entry's ``datasheet`` is the spec template a create
+        payload must echo (issue #62). Distinct from ``get_component_types``
+        (a legacy misnomer that lists the type's components).
+        """
+        return self._make_request("GET", f"component-types/{part_type_id}")
+
     def get_institutions(self):
         """All registered institutions: ``{id, name, country: {code, name}}``.
 

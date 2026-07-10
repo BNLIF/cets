@@ -78,6 +78,32 @@
   #sync-log, #node-sync-log { margin-top: 14px; background: #1c1812; color: #e7dfce; border-radius: 8px;
     padding: 12px; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap;
     max-height: 240px; overflow: auto; display: none; }
+  /* new-box pane + flash (issue #62) */
+  .ex-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin: 12px 0; }
+  .ex-flash.success { color: var(--good); background: var(--good-bg);
+    border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule)); }
+  .ex-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
+    border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+  details.nb-pane { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg);
+    padding: 12px 16px; margin-top: 14px; }
+  details.nb-pane > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--accent-ink); }
+  .nb-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-top: 12px; }
+  .nb-form label { font-size: 12px; color: var(--faint); display: flex; flex-direction: column; gap: 3px; }
+  .nb-form select, .nb-form input { font: inherit; font-size: 13px; color: var(--ink);
+    background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 6px 8px; }
+  .nb-form button { font: inherit; font-size: 13px; font-weight: 600; color: var(--accent-ink);
+    background: var(--accent-soft); border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--rule));
+    border-radius: var(--r-sm); padding: 6px 15px; cursor: pointer; }
+  .nb-form button:hover { border-color: var(--accent); }
+  .nb-hint { font-size: 11.5px; color: var(--faint); margin-top: 8px; }
+  .nb-existing { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 12px;
+    padding-top: 10px; border-top: 1px solid var(--rule); font-size: 12.5px; color: var(--dim); }
+  .nb-existing select { font: inherit; font-size: 12.5px; color: var(--ink); background: var(--surface);
+    border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 5px 7px; }
+  .nb-existing button { font: inherit; font-size: 12.5px; font-weight: 600; color: var(--dim);
+    background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm);
+    padding: 5px 13px; cursor: pointer; }
+  .nb-existing button:hover { border-color: var(--rule-hard); }
 </style>
 
 <div class="ex-pad">
@@ -248,6 +274,36 @@
         </div>
     </div>
     <pre id="shipment-sync-log"></pre>
+
+    {% for m in messages %}<div class="ex-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+
+    {% if can_create_box %}
+    <details class="nb-pane" id="newbox-pane" data-institutions-url="{% url 'explore:institutions' %}">
+      <summary>New box</summary>
+      <form class="nb-form" method="post" action="{% url 'explore:box_create' part_type_id=leaf.part_type_id %}">
+        {% csrf_token %}
+        <label>Institution
+          <select name="institution_id" required data-role="nb-inst">
+            <option value="">loading institutions…</option>
+          </select>
+        </label>
+        <label>Serial number <input name="serial_number" maxlength="120" placeholder="optional"></label>
+        <label>Comments <input name="comments" maxlength="500" placeholder="optional"></label>
+        <button type="submit">Mint in HWDB</button>
+      </form>
+      <div class="nb-hint">Requests a new {{ leaf.name }} PID from the {{ hwdb_instance }} HWDB; you'll land on the new box's page.</div>
+      {% if empty_pids %}
+      <div class="nb-existing">
+        …or reuse an existing empty box:
+        <select data-role="nb-existing" data-part-base="{% url 'explore:part' part_id='__PID__' %}">
+          <option value="">— pick a box —</option>
+          {% for p in empty_pids %}<option>{{ p }}</option>{% endfor %}
+        </select>
+        <button type="button" data-role="nb-open">Open it</button>
+      </div>
+      {% endif %}
+    </details>
+    {% endif %}
     {% if not shipment_synced_at %}
         {% if leaf.tests_synced_at or leaf.tests_sync_error %}
     <div class="explore-empty" id="shipment-unsynced" data-sync-url="{% url 'explore:shipment_sync' part_type_id=leaf.part_type_id %}">
@@ -566,6 +622,39 @@
             addSavePng(canvas, "breakdown_" + b.field);
         });
     }
+})();
+
+// New-box pane (issue #62): lazy-load institutions on first open; the
+// "reuse existing" picker just navigates to the chosen box's page.
+(function () {
+    var pane = document.getElementById("newbox-pane");
+    if (!pane) return;
+    var loaded = false;
+    pane.addEventListener("toggle", function () {
+        if (!pane.open || loaded) return;
+        loaded = true;
+        var sel = pane.querySelector("[data-role=nb-inst]");
+        fetch(pane.dataset.institutionsUrl)
+            .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+            .then(function (d) {
+                sel.innerHTML = "<option value=''>— pick an institution —</option>";
+                (d.institutions || []).forEach(function (i) {
+                    var o = document.createElement("option");
+                    o.value = i.id;
+                    o.textContent = "(" + i.id + ") " + i.name + (i.country_code ? " [" + i.country_code + "]" : "");
+                    sel.appendChild(o);
+                });
+            })
+            .catch(function () {
+                loaded = false;  // allow retry on next open
+                sel.innerHTML = "<option value=''>couldn’t load institutions — close and reopen to retry</option>";
+            });
+    });
+    var openBtn = pane.querySelector("[data-role=nb-open]");
+    if (openBtn) openBtn.addEventListener("click", function () {
+        var sel = pane.querySelector("[data-role=nb-existing]");
+        if (sel.value) location.href = sel.dataset.partBase.replace("__PID__", encodeURIComponent(sel.value));
+    });
 })();
 </script>
 {% endblock %}

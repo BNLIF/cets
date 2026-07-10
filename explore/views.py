@@ -180,6 +180,11 @@ def explore_view(request, trail=None):
     leaf = view.get("leaf")
     is_shipping = bool(leaf and curation.is_shipping_type(inst, leaf.part_type_id))
     shipments = shipment_synced_at = shipment_summary = empty_boxes_page = None
+    # New-box pane (issue #62) on write-enabled instances. The leaf page stays
+    # mirror-only on render: the form's institution list lazy-loads via the
+    # explore:institutions JSON endpoint when the pane is first opened.
+    can_create_box = is_shipping and inst in settings.HWDB_WRITE_INSTANCES
+    empty_pids = []
     if is_shipping:
         # Shipping extras — boxes are regular components too (charts/breakdown
         # below render like any other leaf); these panes add the box view.
@@ -191,6 +196,12 @@ def explore_view(request, trail=None):
         empty_boxes_page = Paginator(
             ShipmentItem.for_instance(inst).filter(part_type_id=ptid, n_contents=0),
             50).get_page(request.GET.get("bpage"))
+        if can_create_box:
+            # "Use an existing box" picker — newest empty boxes first.
+            empty_pids = list(
+                ShipmentItem.for_instance(inst)
+                .filter(part_type_id=ptid, n_contents=0)
+                .order_by("-part_id").values_list("part_id", flat=True)[:200])
         shipments = rows
         # Sync marker on the leaf — NOT inferred from rows, so a synced type with
         # 0 non-empty boxes reads as synced (no auto-sync loop).
@@ -259,6 +270,8 @@ def explore_view(request, trail=None):
             "shipment_synced_at": shipment_synced_at,
             "shipment_summary": shipment_summary,
             "empty_boxes_page": empty_boxes_page,
+            "can_create_box": can_create_box,
+            "empty_pids": empty_pids,
             # Deep-link the part type to this instance's FNAL web UI.
             "hwdb_ui_base": settings.HWDB_PROFILES[inst]["ui"],
             "sync_state": HierarchySyncState.get(inst),
@@ -726,6 +739,98 @@ def explore_part_location_view(request, part_id):
         logger.warning("refresh_box(%s) failed: %s", part_id, e)
     messages.success(request, "Location update posted to HWDB.")
     return redirect(part_url)
+
+
+@login_not_required
+@fnal_login_required
+def explore_institutions_view(request):
+    """Institution options as JSON — lazy-loaded by the write forms' dropdowns
+    (issue #62), so mirror-only pages stay live-fetch-free on render."""
+    inst = instance_of(request)
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return JsonResponse({"error": "writes disabled"}, status=403)
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        return JsonResponse({"error": "link"}, status=401)
+    except FnalUnavailable:
+        return JsonResponse({"error": "unavailable"}, status=503)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    return JsonResponse({"institutions": _institution_options(api)})
+
+
+def _spec_template(type_record: dict) -> dict:
+    """The type's spec datasheet — the template a create payload must echo
+    (the official flow posts ``ct.properties.specifications[-1].datasheet``)."""
+    specs = (((type_record.get("data") or {}).get("properties") or {})
+             .get("specifications") or [])
+    ds = (specs[-1] or {}).get("datasheet") if specs else None
+    return ds if isinstance(ds, dict) else {}
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_box_create_view(request, part_type_id):
+    """Mint a new shipping box of this type in HWDB — the iPad app's "request
+    a new PID" (issue #62), from the shipping type's page.
+
+    Payload mirrors the official create flow: institution (+ its country
+    code), optional serial/comments, the type's spec datasheet echoed
+    verbatim, and the manufacturer only when the type defines exactly one.
+    On success the box gets a mirror row immediately and the user lands on
+    its part page, ready for packing.
+    """
+    inst = instance_of(request)
+    if inst not in settings.HWDB_WRITE_INSTANCES or not curation.is_shipping_type(inst, part_type_id):
+        return HttpResponseForbidden("Box creation is not enabled here.")
+    back = navigation.leaf_path_for(inst, part_type_id) or _rev(request, "explore:browse")
+
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': back, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(back)
+
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    institution = next((o for o in _institution_options(api)
+                        if str(o["id"]) == (request.POST.get("institution_id") or "")), None)
+    if institution is None:
+        messages.error(request, "Pick an institution for the new box.")
+        return redirect(back)
+
+    try:
+        type_record = api.get_component_type(part_type_id)
+        manufacturers = (type_record.get("data") or {}).get("manufacturers") or []
+        payload = {
+            "component_type": {"part_type_id": part_type_id},
+            "country_code": institution["country_code"],
+            "institution": {"id": institution["id"]},
+            "serial_number": (request.POST.get("serial_number") or "").strip(),
+            "comments": (request.POST.get("comments") or "").strip(),
+            "specifications": _spec_template(type_record),
+        }
+        if len(manufacturers) == 1 and manufacturers[0].get("id") is not None:
+            payload["manufacturer"] = {"id": manufacturers[0]["id"]}
+        body = api.create_component(part_type_id, payload)
+    except requests.RequestException as e:
+        logger.warning("box create for %s failed: %s", part_type_id, e)
+        messages.error(request, f"HWDB rejected the new box — {e}")
+        return redirect(back)
+    part_id = body.get("part_id")
+    if body.get("status") != "OK" or not part_id:
+        messages.error(request, f"HWDB rejected the new box — {body.get('data') or body}")
+        return redirect(back)
+
+    try:  # the box exists now; give it a mirror row so it lists immediately
+        refresh_box(api, inst, part_type_id, part_id)
+    except Exception as e:
+        logger.warning("refresh_box(%s) failed: %s", part_id, e)
+    messages.success(request, f"Box {part_id} minted in the {inst} HWDB.")
+    return redirect(_rev(request, "explore:part", args=[part_id]))
 
 
 @login_not_required
