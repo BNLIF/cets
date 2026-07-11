@@ -1,3 +1,4 @@
+import io
 import json
 import logging
 import re
@@ -25,7 +26,7 @@ from hwdb.fnal import flow
 from hwdb.fnal import session as fnal_session
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
 
-from . import charts, curation, navigation
+from . import charts, curation, execsummary, navigation
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, sync_test_events
 from .hierarchy import sync_hierarchy, sync_system
@@ -1091,55 +1092,306 @@ def explore_box_pack_view(request, part_id):
     return redirect(back if failed else part_url)
 
 
+def _whoami_context(api) -> tuple[str, set, dict]:
+    """(full name, role-id set, role-id→name map) for the calling user —
+    best-effort; empty values just mean role-gated rows stay locked."""
+    full_name, role_ids, role_names = "", set(), {}
+    try:
+        who = api.whoami().get("data") or {}
+        full_name = who.get("full_name") or who.get("username") or ""
+        role_ids = {r["id"] for r in who.get("roles") or []
+                    if isinstance(r, dict) and r.get("id") is not None}
+    except Exception as e:
+        logger.warning("whoami failed: %s", e)
+    try:
+        role_names = {r["id"]: r["name"] for r in (api.get_roles().get("data") or [])
+                      if isinstance(r, dict) and r.get("id") is not None}
+    except Exception as e:
+        logger.warning("roles fetch failed: %s", e)
+    return full_name, role_ids, role_names
+
+
+def _post_es(api, part_id, es_list, todos, comments) -> str | None:
+    """Post the consolidated ES test record; returns an error string or None."""
+    try:
+        body = api.post_test(part_id, execsummary.es_test_payload(es_list, todos, comments))
+    except requests.RequestException as e:
+        return _hwdb_error_detail(e)
+    return None if body.get("status") == "OK" else str(body.get("data") or body)
+
+
+def _patch_item_flags(api, part_id, status_id, certified, uploaded, comment) -> None:
+    """The Dashboard PATCHes the item's status + QA/QC flags with every
+    signature; best-effort (the signature itself already landed)."""
+    try:
+        api.patch_component(part_id, {
+            "part_id": part_id, "status": {"id": status_id},
+            "certified_qaqc": certified, "qaqc_uploaded": uploaded,
+            "comments": comment})
+    except Exception as e:
+        logger.warning("exec summary: item patch for %s failed: %s", part_id, e)
+
+
 @login_not_required
 @fnal_login_required
-@require_POST
 def explore_exec_summary_view(request, part_id):
-    """Post an executive-summary PDF onto a shipping box (issue #53 spike).
+    """The executive-summary page (issue #64) — the Dashboard's signing flow
+    reimplemented: config-driven signees sign in rank order (each signature
+    re-posts the consolidated "ES" test record and patches the item's
+    status/flags), todos ride along, and once everyone has signed the
+    summary PDF is generated (reportlab, DETAIL layout minus plots) and
+    uploaded under the pre-shipping gate's naming convention. Without a
+    config the page runs DEFAULT mode: one whoami signature, status/flag
+    patch, and a minimal PDF. HWDB holds all state.
 
-    The artifact of record is an image attachment on the item named
-    ``ExecutiveSummary_{pid}_{ts}.pdf`` — exactly what the Dashboard's
-    pre-shipping gate matches (case-insensitively) on the box's own image
-    list. The uploaded file is renamed to that convention; signature "ES"
-    test records are #64's scope.
+    POST actions: ``sign`` / ``default_sign`` / ``generate`` / ``reset`` /
+    ``upload`` (a ready-made PDF, the #53 spike path).
     """
     inst = instance_of(request)
     part_url = _rev(request, "explore:part", args=[part_id])
+    page_url = _rev(request, "explore:exec_summary", args=[part_id])
     ptid = part_id.rsplit("-", 1)[0]
     if inst not in settings.HWDB_WRITE_INSTANCES or not curation.is_shipping_type(inst, ptid):
-        return HttpResponseForbidden("Executive-summary upload is not enabled here.")
-
-    pdf = request.FILES.get("pdf")
-    if pdf is None or not pdf.name.lower().endswith(".pdf"):
-        messages.error(request, "Pick a PDF file to upload.")
-        return redirect(part_url)
-    if pdf.size > 25 * 1024 * 1024:
-        messages.error(request, "That PDF is over 25 MB — too large for a summary.")
-        return redirect(part_url)
+        return HttpResponseForbidden("Executive summaries are not enabled here.")
 
     try:
         bearer = mint_for(request)
     except FnalLinkRequired:
         link = reverse("hwdb:link")
-        return redirect(f"{link}?{urlencode({'next': part_url, 'reason': 'expired'})}")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
     except FnalUnavailable:
         messages.error(request, FNAL_UNAVAILABLE)
         return redirect(part_url)
 
-    name = f"ExecutiveSummary_{part_id}_{timezone.now():%Y%m%d-%H%M%S}.pdf"
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    cfg, cfg_msg = execsummary.load_config(api, ptid)
+
+    if request.method == "POST":
+        return _exec_summary_action(request, api, part_id, ptid, cfg,
+                                    page_url)
+
+    # ---- GET: assemble the signing page, all state live from HWDB ----
+    es_list, saved_todos = execsummary.fetch_es_state(api, part_id)
+    full_name, role_ids, role_names = _whoami_context(api)
     try:
-        body = api.post_component_image(part_id, pdf, name,
-                                        comments="Executive Summary")
+        comp = api.get_component(part_id).get("data") or {}
+    except requests.RequestException:
+        comp = {}
+    status_name = (comp.get("status") or {}).get("name") if isinstance(comp.get("status"), dict) else comp.get("status")
+    summaries = []
+    try:
+        summaries = [i for i in (api.get_images(part_id).get("data") or [])
+                     if (i.get("image_name") or "").lower().startswith(
+                         f"executivesummary_{part_id.lower()}_")]
+        summaries.sort(key=lambda i: i.get("created") or "", reverse=True)
+    except Exception as e:
+        logger.warning("exec summary: images list failed: %s", e)
+    return render(request, "explore/exec_summary.html", {
+        "active_nav": "shipments",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "part_id": part_id,
+        "cfg": cfg, "cfg_msg": cfg_msg,
+        "signing": (execsummary.compute_status(cfg, es_list, role_ids, role_names)
+                    if cfg else None),
+        "todos_checked": (saved_todos or {}).get("checked") or [],
+        "full_name": full_name,
+        "status_options": execsummary.STATUS_OPTIONS,
+        "status_current_id": execsummary.STATUS_ID_BY_LABEL.get(status_name),
+        "certified": bool(comp.get("certified_qaqc")),
+        "uploaded": bool(comp.get("qaqc_uploaded")),
+        "summaries": summaries,
+    })
+
+
+def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
+    """Dispatch one executive-summary POST action; always lands back on the
+    page with flash messages."""
+    action = request.POST.get("action") or ("sign" if request.POST.get("sign") else "")
+    inst = instance_of(request)
+
+    def _form_flags():
+        try:
+            sid = int(request.POST.get("status_id") or 0)
+        except ValueError:
+            sid = 0
+        return (sid, bool(request.POST.get("certified")),
+                bool(request.POST.get("uploaded")))
+
+    if action == "upload_config":  # ES config JSON onto the TYPE's images
+        cfg_file = request.FILES.get("config")
+        if cfg_file is None or not cfg_file.name.lower().endswith(".json"):
+            messages.error(request, "Pick a .json config file.")
+            return redirect(page_url)
+        raw = cfg_file.read()
+        try:
+            json.loads(raw)
+        except ValueError as e:
+            messages.error(request, f"That file isn’t valid JSON — {e}")
+            return redirect(page_url)
+        name = f"ES_{ptid}_{timezone.now():{execsummary.FILENAME_TS_FMT}}.json"
+        try:
+            body = api.post_component_type_image(
+                ptid, io.BytesIO(raw), name, comments="Executive Summary config")
+        except requests.RequestException as e:
+            messages.error(request, f"HWDB rejected the config — {_hwdb_error_detail(e)}")
+            return redirect(page_url)
+        if body.get("status") != "OK":
+            messages.error(request, f"HWDB rejected the config — {body.get('data') or body}")
+            return redirect(page_url)
+        messages.success(request, f"Config posted as {name} — it now applies to every "
+                                  f"{ptid} box.")
+        return redirect(page_url)
+
+    if action == "upload":  # ready-made PDF (the #53 spike path)
+        pdf = request.FILES.get("pdf")
+        if pdf is None or not pdf.name.lower().endswith(".pdf"):
+            messages.error(request, "Pick a PDF file to upload.")
+            return redirect(page_url)
+        if pdf.size > 25 * 1024 * 1024:
+            messages.error(request, "That PDF is over 25 MB — too large for a summary.")
+            return redirect(page_url)
+        name = f"ExecutiveSummary_{part_id}_{timezone.now():{execsummary.FILENAME_TS_FMT}}.pdf"
+        err = _upload_summary_pdf(api, part_id, pdf, name)
+        if err:
+            messages.error(request, f"HWDB rejected the summary — {err}")
+        else:
+            messages.success(request, f"Executive summary posted as {name}.")
+        return redirect(page_url)
+
+    if action == "default_sign":  # no-config mode: sign + patch + PDF, one shot
+        full_name, _ids, _names = _whoami_context(api)
+        sid, certified, uploaded = _form_flags()
+        ts = timezone.localtime().strftime(execsummary.TIMESTAMP_FMT)
+        comments = (request.POST.get("comments") or "").strip() or f"signed by {full_name}"
+        _patch_item_flags(api, part_id, sid, certified, uploaded, comments)
+        signinfo = {"signature": full_name, "comments": comments, "timestamp": ts,
+                    "status_label": execsummary.STATUS_LABEL_BY_ID.get(sid, "Unknown"),
+                    "certified_flag": certified, "uploaded_flag": uploaded}
+        manifest = current_manifest(_safe_get_data(api.get_subcomponents, part_id))
+        pdf_bytes = execsummary.build_default_pdf(
+            part_id, signinfo, execsummary.subcomponent_lines(manifest))
+        name = f"ExecutiveSummary_{part_id}_{timezone.now():{execsummary.FILENAME_TS_FMT}}.pdf"
+        err = _upload_summary_pdf(api, part_id, io.BytesIO(pdf_bytes), name)
+        if err:
+            messages.error(request, f"Summary PDF upload failed — {err}")
+        else:
+            messages.success(request, f"Signed and posted {name}.")
+        return redirect(page_url)
+
+    if cfg is None:
+        messages.error(request, "This action needs an ES config on the type.")
+        return redirect(page_url)
+
+    es_list, saved_todos = execsummary.fetch_es_state(api, part_id)
+    full_name, role_ids, role_names = _whoami_context(api)
+    checked = []
+    for v in request.POST.getlist("todo"):
+        try:
+            checked.append(int(v))
+        except ValueError:
+            pass
+    todos = execsummary.todos_payload(cfg, checked)
+
+    if action == "sign":
+        name = request.POST.get("sign") or ""
+        status = execsummary.compute_status(cfg, es_list, role_ids)
+        row = next((r for r in status["rows"] if r["name"] == name), None)
+        if row is None:
+            messages.error(request, f"“{name}” is not a configured signee.")
+            return redirect(page_url)
+        if not row["allowed"]:
+            why = ("their signing turn hasn’t come yet" if row["role_ok"]
+                   else "you don’t hold the required role")
+            messages.error(request, f"“{name}” can’t sign now — {why}.")
+            return redirect(page_url)
+        signature = (request.POST.get(f"sig:{name}") or "").strip()
+        if not signature:
+            messages.error(request, f"Type the signature text for “{name}”.")
+            return redirect(page_url)
+        ts = timezone.localtime().strftime(execsummary.TIMESTAMP_FMT)
+        merged = execsummary.merge_es_entry(
+            es_list, name, signature, row["rank"], ts,
+            request.POST.get(f"com:{name}") or "")
+        err = _post_es(api, part_id, merged, todos, f"ES signature updated: {name}")
+        if err:
+            messages.error(request, f"HWDB rejected the signature — {err}")
+            return redirect(page_url)
+        sid, certified, uploaded = _form_flags()
+        _patch_item_flags(
+            api, part_id, sid, certified, uploaded,
+            f"[ExecSum] signature '{name}' uploaded, also Status, QAQC Certified, "
+            f"and Uploaded flags updated.")
+        messages.success(request, f"Signature for “{name}” posted.")
+        return redirect(page_url)
+
+    if action == "reset":
+        status = execsummary.compute_status(cfg, es_list, role_ids)
+        if not status["reset_allowed"]:
+            messages.error(request, "RESET needs the final approver’s role.")
+            return redirect(page_url)
+        err = _post_es(api, part_id, [], saved_todos,
+                       "ES RESET requested (cleared signatures)")
+        if err:
+            messages.error(request, f"HWDB rejected the reset — {err}")
+        else:
+            messages.success(request, "Signatures cleared.")
+        return redirect(page_url)
+
+    if action == "generate":
+        status = execsummary.compute_status(cfg, es_list, role_ids, role_names)
+        if not status["all_signed"]:
+            messages.error(request, "Every configured signee must sign before generating.")
+            return redirect(page_url)
+        try:
+            comp = api.get_component(part_id).get("data") or {}
+        except requests.RequestException:
+            comp = {}
+        status_name = ((comp.get("status") or {}).get("name")
+                       if isinstance(comp.get("status"), dict) else comp.get("status"))
+        manifest = current_manifest(_safe_get_data(api.get_subcomponents, part_id))
+        leaf = HierarchyNode.for_instance(inst).filter(
+            level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
+        pdf_bytes = execsummary.build_detail_pdf(part_id, {
+            "type_name": leaf.name if leaf else "",
+            "description": cfg["test_description"],
+            "todos": {**cfg["todos"], "checked": ((saved_todos or {}).get("checked") or [])},
+            "signee_rows": status["rows"],
+            "status_label": status_name or "Unknown",
+            "certified_flag": bool(comp.get("certified_qaqc")),
+            "uploaded_flag": bool(comp.get("qaqc_uploaded")),
+            "references": cfg["references"],
+            "subcomponents": execsummary.subcomponent_lines(manifest),
+        })
+        name = f"ExecutiveSummary_{part_id}_{timezone.now():{execsummary.FILENAME_TS_FMT}}.pdf"
+        err = _upload_summary_pdf(api, part_id, io.BytesIO(pdf_bytes), name)
+        if err:
+            messages.error(request, f"Summary PDF upload failed — {err}")
+        else:
+            messages.success(request, f"Summary generated and posted as {name}.")
+        return redirect(page_url)
+
+    messages.error(request, "Unknown action.")
+    return redirect(page_url)
+
+
+def _safe_get_data(fn, *args) -> list:
+    try:
+        return fn(*args).get("data") or []
+    except Exception:
+        return []
+
+
+def _upload_summary_pdf(api, part_id, fileobj, name) -> str | None:
+    """Upload a summary PDF under the gate convention; error string or None."""
+    ts = timezone.localtime().strftime(execsummary.TIMESTAMP_FMT)
+    try:
+        body = api.post_component_image(
+            part_id, fileobj, name,
+            comments=f"Executive Summary PDF uploaded by HWDB Explorer ({ts})")
     except requests.RequestException as e:
         logger.warning("exec summary upload for %s failed: %s", part_id, e)
-        messages.error(request, f"HWDB rejected the summary — {_hwdb_error_detail(e)}")
-        return redirect(part_url)
-    if body.get("status") != "OK":
-        messages.error(request, f"HWDB rejected the summary — {body.get('data') or body}")
-        return redirect(part_url)
-    messages.success(request, f"Executive summary posted as {name}.")
-    return redirect(part_url)
+        return _hwdb_error_detail(e)
+    return None if body.get("status") == "OK" else str(body.get("data") or body)
 
 
 @login_not_required

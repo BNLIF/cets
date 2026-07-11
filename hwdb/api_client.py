@@ -167,6 +167,18 @@ class FnalDbApiClient:
         """
         return self._make_request("GET", f"component-types/{part_type_id}")
 
+    def whoami(self):
+        """The calling user's HWDB record (``GET users/whoami``): full_name
+        and roles — the executive-summary signing gate matches signee roles
+        against these (issue #64).
+        """
+        return self._make_request("GET", "users/whoami")
+
+    def get_roles(self):
+        """All defined HWDB roles ``{id, name}`` — for displaying which role
+        a summary signee requires (issue #64)."""
+        return self._make_request("GET", "roles")
+
     def get_institutions(self):
         """All registered institutions: ``{id, name, country: {code, name}}``.
 
@@ -174,6 +186,13 @@ class FnalDbApiClient:
         form (issue #61) — the same list the official Dashboard offers.
         """
         return self._make_request("GET", "institutions")
+
+    def get_component_type_images(self, part_type_id):
+        """Attachments on the component TYPE (not an item): the executive
+        summary's per-type config lives here as ``ES_{typeid}_*.json``
+        (issue #64), discovered newest-first like the Dashboard does.
+        """
+        return self._make_request("GET", f"component-types/{part_type_id}/images")
 
     def get_image_response(self, image_id):
         """Raw attachment bytes by id (``GET img/{id}``) as a streaming
@@ -230,6 +249,28 @@ class FnalDbApiClient:
             response = self.session.post(url, files=files)
         except requests.exceptions.RequestException:
             logger.exception("post_component_image to %s failed", url)
+            raise
+        if not response.ok:
+            body = (response.text or "")[:600]
+            logger.warning("HWDB POST %s -> %d: %s", url, response.status_code, body)
+            raise requests.exceptions.HTTPError(
+                f"{response.status_code} {response.reason} for {url}: {body}",
+                response=response,
+            )
+        return response.json()
+
+    def post_component_type_image(self, part_type_id, fileobj, filename, comments=""):
+        """Multipart upload of an attachment onto a component TYPE — the
+        executive-summary config (``ES_{typeid}_*.json``) lives there
+        (issue #64). Same multipart shape as ``post_component_image``.
+        """
+        url = f"{self.base_url}/component-types/{part_type_id}/images"
+        files = {"comments": (None, comments),
+                 "image": (filename, fileobj, "application/json")}
+        try:
+            response = self.session.post(url, files=files)
+        except requests.exceptions.RequestException:
+            logger.exception("post_component_type_image to %s failed", url)
             raise
         if not response.ok:
             body = (response.text or "")[:600]

@@ -259,13 +259,10 @@
         {% else %}
         <div class="sd-empty" style="margin-bottom: 10px;">No executive summary on this box yet — the pre-shipping checklist requires one.</div>
         {% endif %}
-        <form method="post" enctype="multipart/form-data" action="{% url 'explore:exec_summary' part_id=part_id %}" class="pk-actions" style="margin: 0;">
-          {% csrf_token %}
-          <input type="file" name="pdf" accept=".pdf,application/pdf" required style="font-size: 12.5px; color: var(--dim);">
-          <button type="submit" class="pk-link" style="border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--rule)); background: var(--accent-soft); cursor: pointer;">Post to HWDB</button>
-        </form>
-        <p class="pk-hint" style="margin: 8px 0 0;">Uploads onto this box’s attachments, renamed to the
-          <span class="mono" style="font-size: 11px;">ExecutiveSummary_{{ part_id }}_&lt;timestamp&gt;.pdf</span> convention the Dashboard’s gate matches.</p>
+        <div class="pk-actions" style="margin: 0;">
+          <a class="pk-link" href="{% url 'explore:exec_summary' part_id=part_id %}">Sign / generate summary…</a>
+          <span class="pk-hint">Config-driven signing flow, matching the Dashboard.</span>
+        </div>
       </div>
       {% endif %}
 

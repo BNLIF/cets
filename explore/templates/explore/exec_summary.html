@@ -1,0 +1,193 @@
+{% extends 'explore/base.html' %}
+{% block title %}Executive summary · {{ part_id }} · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .es-page { padding: 22px 30px 56px; max-width: 900px; }
+  .es-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .es-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .es-crumbs a:hover { text-decoration: underline; }
+  .es-crumbs .sep { color: var(--faint); margin: 0 7px; }
+  .es-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 4px; }
+  .es-page h1 .mono { font-family: var(--font-mono); }
+  .es-sub { color: var(--dim); font-size: 13.5px; margin: 0 0 18px; }
+
+  .es-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
+  .es-flash.success { color: var(--good); background: var(--good-bg);
+    border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule)); }
+  .es-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
+    border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+
+  .es-card { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg);
+    padding: 16px 18px; margin-bottom: 18px; }
+  .es-card h2 { font-size: 12px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em;
+    margin: 0 0 12px; }
+  .es-hint { font-size: 11.5px; color: var(--faint); }
+  .es-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+  .es-row label { font-size: 12px; color: var(--faint); display: flex; flex-direction: column; gap: 3px; }
+  .es-page select, .es-page input[type=text], .es-page textarea { font: inherit; font-size: 13px;
+    color: var(--ink); background: var(--surface); border: 1px solid var(--rule);
+    border-radius: var(--r-sm); padding: 6px 8px; }
+  .es-page input:disabled, .es-page textarea:disabled { opacity: .55; }
+  .es-btn { font: inherit; font-size: 13px; font-weight: 600; color: var(--accent-ink);
+    background: var(--accent-soft); border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--rule));
+    border-radius: var(--r-sm); padding: 6px 15px; cursor: pointer; }
+  .es-btn:hover { border-color: var(--accent); }
+  .es-btn:disabled { opacity: .45; cursor: default; }
+  .es-btn.quiet { color: var(--dim); background: var(--surface); border-color: var(--rule); }
+
+  .es-signee { border-top: 1px solid var(--rule); padding: 12px 0; }
+  .es-signee:first-of-type { border-top: none; }
+  .es-signee .who { font-weight: 600; color: var(--ink); font-size: 13.5px; }
+  .es-signee .meta { font-size: 11.5px; color: var(--faint); margin-left: 8px; }
+  .es-signed { color: var(--good); font-weight: 700; font-size: 12px; }
+  .es-waiting { color: var(--faint); font-size: 12px; }
+  .es-todo { display: block; font-size: 13px; color: var(--ink); margin: 4px 0; }
+  .es-dl { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500;
+    color: var(--good); text-decoration: none; border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule));
+    background: var(--good-bg); border-radius: 999px; padding: 4px 13px; margin: 2px 6px 2px 0; }
+</style>
+
+<div class="es-page">
+  <div class="es-crumbs">
+    <a href="{% url 'explore:shipments' %}">Shipments</a>
+    <span class="sep">›</span><a href="{% url 'explore:part' part_id=part_id %}">{{ part_id }}</a>
+    <span class="sep">›</span>Executive summary
+  </div>
+
+  {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+
+  <h1>Executive summary — <span class="mono">{{ part_id }}</span></h1>
+  <p class="es-sub">{% if cfg %}{{ cfg.consortium_name }} · {{ cfg_msg }}{% else %}{{ cfg_msg }} Running in
+    DEFAULT mode — a single sign-off, no checklist.{% endif %}
+    Signatures live in the box’s “ES” test record in HWDB; this page has no local state.</p>
+
+  {% if summaries %}
+  <div class="es-card">
+    <h2>Summaries on this box</h2>
+    {% for s in summaries %}
+    <a class="es-dl" href="{% url 'explore:shipment_image' image_id=s.image_id %}?name={{ s.image_name|urlencode }}"><span aria-hidden="true">&#x2913;</span> {{ s.image_name }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if cfg %}
+  {% if cfg.test_description %}<div class="es-card"><h2>Test description</h2>
+    <div style="font-size:13px; color:var(--ink);">{{ cfg.test_description }}</div></div>{% endif %}
+
+  <form method="post">
+    {% csrf_token %}
+    {% if cfg.todos.check_list %}
+    <div class="es-card">
+      <h2>{{ cfg.todos.title }}</h2>
+      {% for item in cfg.todos.check_list %}
+      <label class="es-todo"><input type="checkbox" name="todo" value="{{ forloop.counter0 }}"
+        {% if forloop.counter0 in todos_checked %}checked{% endif %}> {{ item }}</label>
+      {% endfor %}
+      <p class="es-hint">Checklist state is saved with each signature.</p>
+    </div>
+    {% endif %}
+
+    <div class="es-card">
+      <h2>Item status &amp; QA/QC flags</h2>
+      <div class="es-row">
+        <label>Component status
+          <select name="status_id">
+            {% for o in status_options %}<option value="{{ o.value }}"{% if o.value == status_current_id %} selected{% endif %}>{{ o.label }}</option>{% endfor %}
+          </select>
+        </label>
+        <label style="flex-direction:row; align-items:center; gap:6px;">
+          <input type="checkbox" name="certified" {% if certified %}checked{% endif %}> Consortium Certified QA/QC</label>
+        <label style="flex-direction:row; align-items:center; gap:6px;">
+          <input type="checkbox" name="uploaded" {% if uploaded %}checked{% endif %}> All QA/QC Uploaded</label>
+      </div>
+      <p class="es-hint">Patched onto the item with every signature, like the Dashboard.</p>
+    </div>
+
+    <div class="es-card">
+      <h2>Sign-off {% if signing.all_signed %}<span class="es-signed">— all signed ✓</span>{% endif %}</h2>
+      {% for r in signing.rows %}
+      <div class="es-signee">
+        <div><span class="who">{{ r.name }}</span>
+          <span class="meta">rank {{ r.rank }}{% if r.role_names %} · requires: {{ r.role_names|join:", " }}{% endif %}</span>
+          {% if r.entry %}<span class="es-signed">signed {{ r.entry.timestamp }}</span>
+          {% elif r.allowed %}<span class="es-waiting">their turn — can sign now</span>
+          {% elif not r.role_ok %}<span class="es-waiting">you don’t hold the required role</span>
+          {% else %}<span class="es-waiting">waiting for earlier signees</span>{% endif %}
+        </div>
+        <div class="es-row" style="margin-top:6px;">
+          <label>Signature
+            <input type="text" name="sig:{{ r.name }}" placeholder="Type signature for {{ r.name }}"
+                   value="{{ r.entry.signature|default:'' }}" {% if not r.allowed %}disabled{% endif %}></label>
+          <label style="flex:1;">Comments
+            <input type="text" name="com:{{ r.name }}" value="{{ r.entry.comments|default:'' }}"
+                   {% if not r.allowed %}disabled{% endif %}></label>
+          <button class="es-btn" name="sign" value="{{ r.name }}" {% if not r.allowed %}disabled{% endif %}>Sign &amp; post</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </form>
+
+  <div class="es-card">
+    <h2>Generate</h2>
+    <div class="es-row">
+      <form method="post">{% csrf_token %}<input type="hidden" name="action" value="generate">
+        <button class="es-btn" {% if not signing.all_signed %}disabled title="Every configured signee must sign first"{% endif %}>Generate PDF &amp; upload to HWDB</button>
+      </form>
+      <form method="post" onsubmit="return confirm('Clear ALL signatures on this box?');">
+        {% csrf_token %}<input type="hidden" name="action" value="reset">
+        <button class="es-btn quiet" {% if not signing.reset_allowed %}disabled title="Needs the final approver’s role"{% endif %}>RESET signatures</button>
+      </form>
+    </div>
+    <p class="es-hint">Generates the DETAIL summary (description, checklist, sign-off table, status
+      fields, references, contents){% if cfg.has_plots %} — config plots are not supported here yet{% endif %},
+      named to the pre-shipping gate’s convention.</p>
+  </div>
+
+  {% else %}
+  <form method="post" class="es-card">
+    {% csrf_token %}<input type="hidden" name="action" value="default_sign">
+    <h2>Default sign-off</h2>
+    <div class="es-row">
+      <label>Signature <input type="text" value="{{ full_name }}" disabled></label>
+      <label style="flex:1;">Comments <input type="text" name="comments" placeholder="signed by {{ full_name }}"></label>
+    </div>
+    <div class="es-row" style="margin-top:10px;">
+      <label>Component status
+        <select name="status_id">
+          {% for o in status_options %}<option value="{{ o.value }}"{% if o.value == status_current_id %} selected{% endif %}>{{ o.label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label style="flex-direction:row; align-items:center; gap:6px;">
+        <input type="checkbox" name="certified" {% if certified %}checked{% endif %}> Certified QA/QC</label>
+      <label style="flex-direction:row; align-items:center; gap:6px;">
+        <input type="checkbox" name="uploaded" {% if uploaded %}checked{% endif %}> All QA/QC Uploaded</label>
+      <button class="es-btn">Sign &amp; post summary PDF</button>
+    </div>
+    <p class="es-hint">Patches the item’s status/flags and posts the minimal DEFAULT summary in one step.</p>
+  </form>
+  {% endif %}
+
+  <form method="post" enctype="multipart/form-data" class="es-card">
+    {% csrf_token %}<input type="hidden" name="action" value="upload_config">
+    <h2>{% if cfg %}Replace{% else %}Upload{% endif %} the type’s ES config</h2>
+    <div class="es-row">
+      <input type="file" name="config" accept=".json,application/json" required style="font-size:12.5px; color:var(--dim);">
+      <button class="es-btn quiet">Post config to HWDB</button>
+    </div>
+    <p class="es-hint">A JSON file (signees, checklist, references) posted onto the component type as
+      <span class="mono" style="font-size:11px;">ES_{{ part_id|slice:":12" }}_&lt;timestamp&gt;.json</span> — newest config wins, for all boxes of the type.</p>
+  </form>
+
+  <form method="post" enctype="multipart/form-data" class="es-card">
+    {% csrf_token %}<input type="hidden" name="action" value="upload">
+    <h2>Or upload a ready-made PDF</h2>
+    <div class="es-row">
+      <input type="file" name="pdf" accept=".pdf,application/pdf" required style="font-size:12.5px; color:var(--dim);">
+      <button class="es-btn quiet">Post to HWDB</button>
+    </div>
+    <p class="es-hint">Renamed to <span class="mono" style="font-size:11px;">ExecutiveSummary_{{ part_id }}_&lt;timestamp&gt;.pdf</span> — the gate convention.</p>
+  </form>
+</div>
+{% endblock %}
