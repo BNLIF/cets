@@ -246,6 +246,27 @@
         <div class="sd-empty">This box type defines no functional positions (connectors) in HWDB, so contents can’t be linked.</div>
         {% endif %}
       </div>
+
+      <div class="sd-card">
+        <h2>Executive summary</h2>
+        {% if exec_summaries %}
+        <div class="sd-atts" style="margin: 0 0 10px;">
+          {% for a in exec_summaries %}
+          <a class="sd-dl" href="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.image_name|urlencode }}" title="{{ a.image_name }}"><span aria-hidden="true">&#x2913;</span> {{ a.image_name }}</a>
+          {% endfor %}
+        </div>
+        <p class="pk-hint" style="margin: 0 0 10px;">A summary is present — this box passes the pre-shipping gate’s summary check.</p>
+        {% else %}
+        <div class="sd-empty" style="margin-bottom: 10px;">No executive summary on this box yet — the pre-shipping checklist requires one.</div>
+        {% endif %}
+        <form method="post" enctype="multipart/form-data" action="{% url 'explore:exec_summary' part_id=part_id %}" class="pk-actions" style="margin: 0;">
+          {% csrf_token %}
+          <input type="file" name="pdf" accept=".pdf,application/pdf" required style="font-size: 12.5px; color: var(--dim);">
+          <button type="submit" class="pk-link" style="border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--rule)); background: var(--accent-soft); cursor: pointer;">Post to HWDB</button>
+        </form>
+        <p class="pk-hint" style="margin: 8px 0 0;">Uploads onto this box’s attachments, renamed to the
+          <span class="mono" style="font-size: 11px;">ExecutiveSummary_{{ part_id }}_&lt;timestamp&gt;.pdf</span> convention the Dashboard’s gate matches.</p>
+      </div>
       {% endif %}
 
       {% if detail.has_location or can_update_location %}

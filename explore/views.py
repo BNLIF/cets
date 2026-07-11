@@ -680,6 +680,12 @@ def explore_part_view(request, part_id):
         # connectors fetch fails (the card just doesn't render).
         "packing": (_packing_context(api, inst, ptid, detail["manifest"])
                     if can_update_location else None),
+        # Executive summaries already on this item (issue #53): attachments
+        # matching the Dashboard's gate convention, newest first.
+        "exec_summaries": [
+            a for a in detail["attachments"]
+            if (a["image_name"] or "").lower().startswith(
+                f"executivesummary_{part_id.lower()}_")],
     })
 
 
@@ -1083,6 +1089,57 @@ def explore_box_pack_view(request, part_id):
     for pid, detail in failed:
         messages.error(request, f"{pid} was not added — {detail}")
     return redirect(back if failed else part_url)
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_exec_summary_view(request, part_id):
+    """Post an executive-summary PDF onto a shipping box (issue #53 spike).
+
+    The artifact of record is an image attachment on the item named
+    ``ExecutiveSummary_{pid}_{ts}.pdf`` — exactly what the Dashboard's
+    pre-shipping gate matches (case-insensitively) on the box's own image
+    list. The uploaded file is renamed to that convention; signature "ES"
+    test records are #64's scope.
+    """
+    inst = instance_of(request)
+    part_url = _rev(request, "explore:part", args=[part_id])
+    ptid = part_id.rsplit("-", 1)[0]
+    if inst not in settings.HWDB_WRITE_INSTANCES or not curation.is_shipping_type(inst, ptid):
+        return HttpResponseForbidden("Executive-summary upload is not enabled here.")
+
+    pdf = request.FILES.get("pdf")
+    if pdf is None or not pdf.name.lower().endswith(".pdf"):
+        messages.error(request, "Pick a PDF file to upload.")
+        return redirect(part_url)
+    if pdf.size > 25 * 1024 * 1024:
+        messages.error(request, "That PDF is over 25 MB — too large for a summary.")
+        return redirect(part_url)
+
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': part_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(part_url)
+
+    name = f"ExecutiveSummary_{part_id}_{timezone.now():%Y%m%d-%H%M%S}.pdf"
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    try:
+        body = api.post_component_image(part_id, pdf, name,
+                                        comments="Executive Summary")
+    except requests.RequestException as e:
+        logger.warning("exec summary upload for %s failed: %s", part_id, e)
+        messages.error(request, f"HWDB rejected the summary — {_hwdb_error_detail(e)}")
+        return redirect(part_url)
+    if body.get("status") != "OK":
+        messages.error(request, f"HWDB rejected the summary — {body.get('data') or body}")
+        return redirect(part_url)
+    messages.success(request, f"Executive summary posted as {name}.")
+    return redirect(part_url)
 
 
 @login_not_required

@@ -216,6 +216,30 @@ class FnalDbApiClient:
     def post_test(self, part_id, payload):
         return self._make_request("POST", f"components/{part_id}/tests", data=payload)
 
+    def post_component_image(self, part_id, fileobj, filename, comments=""):
+        """Multipart upload of an attachment onto an item
+        (``POST components/{pid}/images``). ``filename`` becomes the HWDB
+        ``image_name`` — the executive-summary gate matches on it (issue
+        #53). Mirrors the official ``post_hwitem_image`` shape: data fields
+        as form parts plus the file under ``image``.
+        """
+        url = f"{self.base_url}/components/{part_id}/images"
+        files = {"comments": (None, comments),
+                 "image": (filename, fileobj, "application/pdf")}
+        try:
+            response = self.session.post(url, files=files)
+        except requests.exceptions.RequestException:
+            logger.exception("post_component_image to %s failed", url)
+            raise
+        if not response.ok:
+            body = (response.text or "")[:600]
+            logger.warning("HWDB POST %s -> %d: %s", url, response.status_code, body)
+            raise requests.exceptions.HTTPError(
+                f"{response.status_code} {response.reason} for {url}: {body}",
+                response=response,
+            )
+        return response.json()
+
     def attach_test_image(self, test_id, file_path):
         """Multipart POST. ``file_path`` is a filesystem path; the filename
         becomes the HWDB image_name. Routes through ``self.session`` so the
