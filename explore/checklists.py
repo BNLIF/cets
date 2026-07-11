@@ -38,12 +38,38 @@ PRESHIPPING_SCENES = [
 N_SCENES = len(PRESHIPPING_SCENES)
 
 
+SHIPPING_SCENES = [
+    (1, "Shipping1", "Contents confirm"),
+    (2, "Shipping2", "Shipping documents"),
+    (3, "Shipping3", "Approval email"),
+    (4, "Shipping4", "Final approval"),
+    (5, "Shipping5", "Mark in transit"),
+    (6, "Shipping6", "Wrap up"),
+]
+N_SHIPPING_SCENES = len(SHIPPING_SCENES)
+
+
 def scene_key(scene: int) -> str:
     return PRESHIPPING_SCENES[scene - 1][1]
 
 
 def scene_title(scene: int) -> str:
     return PRESHIPPING_SCENES[scene - 1][2]
+
+
+def shipping_scene_key(scene: int) -> str:
+    return SHIPPING_SCENES[scene - 1][1]
+
+
+def shipping_scene_title(scene: int) -> str:
+    return SHIPPING_SCENES[scene - 1][2]
+
+
+def artifact_filename(part_id: str, stem: str, original: str) -> str:
+    """The Dashboard's shipping-artifact naming:
+    ``{pid}-{stem}-{YYYY-MM-DD-HH-MM}{ext}``."""
+    ext = ("." + original.rsplit(".", 1)[-1]) if "." in original else ""
+    return f"{part_id}-{stem}-{datetime.now():%Y-%m-%d-%H-%M}{ext}"
 
 
 # ---- Per-scene validation (the Dashboard's routes.py rules) ---------------
@@ -111,6 +137,202 @@ def clean_scene(scene: int, is_surf: bool, post) -> tuple[dict, str | None]:
         return {"confirm_patch_hwdb": True}, None
 
     return {}, "Unknown scene."
+
+
+def clean_shipping_scene(scene: int, is_surf: bool, shipping_type: str,
+                         post, merged: dict) -> tuple[dict, str | None]:
+    """Validate one shipping scene (the Dashboard's rules). ``merged`` is the
+    scene's state AFTER this request's uploads/fields were folded in — file
+    requirements check it, since documents may have arrived on an earlier
+    submit."""
+    g = lambda k: (post.get(k) or "").strip().replace("T", " ")
+
+    if scene == 1:
+        if not post.get("confirm_list"):
+            return {}, "Please confirm the component list before continuing."
+        return {"confirm_list": True}, None
+
+    if scene == 2:
+        if is_surf:
+            if not (merged.get("bol_info") or {}).get("image_id"):
+                return {}, "Please select a Bill of Lading image/PDF file before continuing."
+            if shipping_type == "International" and not (merged.get("proforma_info") or {}).get("image_id"):
+                return {}, "Please select a Proforma Invoice image/PDF file for this international shipment."
+        return {}, None
+
+    if scene == 3:
+        d = {"confirm_email_contents": bool(post.get("confirm_email_contents"))}
+        if is_surf and not d["confirm_email_contents"]:
+            return d, "Please confirm that you have sent the email before continuing."
+        return d, None
+
+    if scene == 4:
+        d = {
+            "received_approval": bool(post.get("received_approval")),
+            "approved_by": g("approved_by"),
+            "approved_time": g("approved_time"),
+            "confirm_attached_sheet": bool(post.get("confirm_attached_sheet")),
+            "confirm_insured": bool(post.get("confirm_insured")),
+        }
+        if is_surf:
+            if not d["received_approval"]:
+                return d, "Please wait for and confirm final approval from the FD Logistics team."
+            if not d["approved_by"] or not d["approved_time"]:
+                return d, "Please provide the final approver name and approval time."
+            if not ({**merged, **d}.get("approval_info") or {}).get("image_id"):
+                return d, "Please upload the final approval message image or PDF."
+            if not d["confirm_attached_sheet"] or not d["confirm_insured"]:
+                return d, "Please confirm that the shipping sheet is attached and the cargo is insured."
+        return d, None
+
+    if scene == 5:
+        d = {"shipment_time": g("shipment_time"), "comments": g("comments"),
+             "affirm_shipment": bool(post.get("affirm_shipment"))}
+        if not d["shipment_time"]:
+            return d, "Please provide the shipment date/time before continuing."
+        if not d["affirm_shipment"]:
+            return d, "Please confirm that you have shipped the cargo."
+        return d, None
+
+    if scene == 6:
+        return {}, None
+
+    return {}, "Unsupported scene."
+
+
+def shipping_service_type(spec_data: dict | None) -> str:
+    """The Dashboard's rule: an HTS code in the box's Pre-Shipping Checklist
+    spec means International, else Domestic."""
+    entries = (spec_data or {}).get("Pre-Shipping Checklist")
+    if isinstance(entries, list):
+        for entry in entries:
+            if isinstance(entry, dict) and "HTS code" in entry:
+                return "International" if (entry.get("HTS code") or "") else "Domestic"
+    return "Domestic"
+
+
+def poc_from(preship_state: dict | None, spec_data: dict | None) -> tuple[str, str]:
+    """(POC name, POC email string) — from the Explorer's pre-shipping run
+    when it exists, else off the box's Pre-Shipping Checklist spec (so a
+    Dashboard-run pre-shipping still feeds our shipping checklist)."""
+    p3 = (preship_state or {}).get("PreShipping3") or {}
+    if p3.get("approver_name") or p3.get("approver_email"):
+        return p3.get("approver_name", ""), p3.get("approver_email", "")
+    name = email = ""
+    entries = (spec_data or {}).get("Pre-Shipping Checklist")
+    if isinstance(entries, list):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            if "POC name" in entry:
+                name = entry.get("POC name") or ""
+            if "POC Email" in entry:
+                v = entry.get("POC Email")
+                email = ", ".join(v) if isinstance(v, list) else (v or "")
+    return name, email
+
+
+def shipping_email_html(part_id: str, poc_name: str, poc_email: str,
+                        sender_name: str, sender_email: str) -> str:
+    """The Dashboard's final-approval request email, verbatim."""
+    from_html = f"{sender_name} &lt;{sender_email}&gt;" if sender_email else sender_name
+    return (
+        "<table>"
+        f"<tr><td width='100'>From:</td><td>{from_html}</td></tr>"
+        "<tr><td>To:</td><td>FD Logistics Team &lt;sdshipments@fnal.gov&gt;</td></tr>"
+        f"<tr><td>Subject:</td><td>Request for the final approval for shipment PID = {part_id}</td></tr>"
+        "<tr><td colspan='2'>&nbsp;</td></tr>"
+        "<tr><td colspan='2'>"
+        "Dear FD Logistics team,<br/><br/>"
+        "I would like to request a new shipment.<br/><br/>"
+        "Should there be any issue with this shipment, email to:"
+        f"<ul><li>{poc_name} &lt;{poc_email}&gt;</li></ul>"
+        "Sincerely,<br/><br/>"
+        f"{sender_name}<br/>{sender_email}<br/>"
+        "</td></tr></table>"
+    )
+
+
+def build_shipping_checklist_dict(checklist, info: dict,
+                                  poc_name: str, poc_email: str) -> dict:
+    """The ``Shipping Checklist`` spec dict, Dashboard keys verbatim — base
+    keys always, artifact/approval extras on the SURF route only."""
+    ws = checklist.state
+    s2, s4 = ws.get("Shipping2", {}), ws.get("Shipping4", {})
+    d = {
+        "POC name": poc_name,
+        "POC Email": _emails(poc_email),
+        "System Name (ID)": f"{info.get('system_name')} ({info.get('system_id')})",
+        "Subsystem Name (ID)": f"{info.get('subsystem_name')} ({info.get('subsystem_id')})",
+        "Component Type Name (ID)": f"{info.get('part_type_name')} ({info.get('part_type_id')})",
+        "DUNE PID": checklist.part_id,
+    }
+    if checklist.is_surf:
+        d.update({
+            "Image ID for BoL": (s2.get("bol_info") or {}).get("image_id"),
+            "Image ID for Proforma Invoice": (s2.get("proforma_info") or {}).get("image_id"),
+            "Image ID for the final approval message": (s4.get("approval_info") or {}).get("image_id"),
+            "FD Logistics team final approval (name)": s4.get("approved_by"),
+            "FD Logistics team final approval (date in CST)": s4.get("approved_time"),
+            "DUNE Shipping Sheet has been attached": s4.get("confirm_attached_sheet"),
+            "This shipment has been adequately insured for transit": s4.get("confirm_insured"),
+        })
+    return d
+
+
+def build_shipping_csv(checklist, info: dict, poc_name: str, poc_email: str) -> tuple[str, str]:
+    """(filename, csv text) — the Dashboard's shipping wrap-up CSV, verbatim
+    (including its one-cell SubPID rows)."""
+    ws = checklist.state
+    filename = f"{checklist.part_id}-shipping-{datetime.now():%Y-%m-%d-%H-%M}.csv"
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=",")
+    rows = [
+        ["POC name", poc_name],
+        ["POC Email", poc_email],
+        ["System Name (ID)", f"{info.get('system_name', '')} ({info.get('system_id', '')})"],
+        ["Subsystem Name (ID)", f"{info.get('subsystem_name', '')} ({info.get('subsystem_id', '')})"],
+        ["Component Type Name (ID)", f"{info.get('part_type_name', '')} ({info.get('part_type_id', '')})"],
+        ["DUNE PID", checklist.part_id],
+    ]
+    if checklist.is_surf:
+        s2, s4 = ws.get("Shipping2", {}), ws.get("Shipping4", {})
+        rows.extend([
+            ["Image ID for BoL", (s2.get("bol_info") or {}).get("image_id", "")],
+            ["Image ID for Proforma Invoice", (s2.get("proforma_info") or {}).get("image_id", "")],
+            ["Image ID for the final approval message", (s4.get("approval_info") or {}).get("image_id", "")],
+            ["FD Logistics team final approval (name)", s4.get("approved_by", "")],
+            ["FD Logistics team final approval (date in CT)", s4.get("approved_time", "")],
+            ["DUNE Shipping Sheet has been attached", s4.get("confirm_attached_sheet", False)],
+            ["This shipment has been adequately insured for transit", s4.get("confirm_insured", False)],
+        ])
+    rows.append(["SubPIDs:"])
+    for sc in info.get("subcomponents", {}).values():
+        rows.append([f"{sc.get('Component Type Name', '')} ({sc.get('Functional Position Name', '')}),{sc.get('Sub-component PID', '')}"])
+    w.writerows(rows)
+    return filename, buf.getvalue()
+
+
+def patch_shipping(api, checklist, info: dict, poc_name: str, poc_email: str) -> str | None:
+    """Scene 4's write: fold the Shipping Checklist into the item's latest
+    specs block and PATCH — same envelope as pre-shipping. Error or None."""
+    item = api.get_component(checklist.part_id).get("data") or {}
+    specs_list = item.get("specifications") or [{}]
+    specs = specs_list[-1] if isinstance(specs_list[-1], dict) else {}
+    if not isinstance(specs.get("DATA"), dict):
+        specs["DATA"] = {}
+    specs["DATA"]["Shipping Checklist"] = [
+        {k: v} for k, v in
+        build_shipping_checklist_dict(checklist, info, poc_name, poc_email).items()]
+    manufacturer = item.get("manufacturer")
+    body = api.patch_component(checklist.part_id, {
+        "part_id": checklist.part_id,
+        "comments": item.get("comments"),
+        "manufacturer": {"id": manufacturer["id"]} if manufacturer else None,
+        "serial_number": item.get("serial_number"),
+        "specifications": specs,
+    })
+    return None if body.get("status") == "OK" else str(body.get("data") or body)
 
 
 # ---- Box context (the Dashboard's part_info shape) -------------------------

@@ -40,7 +40,7 @@ from .queries import (
     component_update_filters, component_update_progress,
 )
 from .parts import assembly_children, current_container, part_detail
-from .shipments import current_manifest, refresh_box, sync_shipments
+from .shipments import _spec_data, current_manifest, refresh_box, sync_shipments
 
 logger = logging.getLogger(__name__)
 FNAL_UNAVAILABLE = "FNAL authentication service is unavailable. Please try again later."
@@ -688,9 +688,10 @@ def explore_part_view(request, part_id):
             a for a in detail["attachments"]
             if (a["image_name"] or "").lower().startswith(
                 f"executivesummary_{part_id.lower()}_")],
-        # Ship/receive checklist runs on this box (issue #65).
-        "checklists": (list(BoxChecklist.for_instance(inst).filter(part_id=part_id))
-                       if can_update_location else []),
+        # Ship/receive checklist runs on this box (issue #65), by workflow.
+        "checklists": ({c.workflow: c for c in
+                        BoxChecklist.for_instance(inst).filter(part_id=part_id)}
+                       if can_update_location else {}),
     })
 
 
@@ -1582,6 +1583,185 @@ def explore_preship_view(request, part_id):
                               cl.state.get(checklists.scene_key(i), {}))
                              for i in range(2, checklists.N_SCENES)]
     return render(request, "explore/preship.html", ctx)
+
+
+@login_not_required
+@fnal_login_required
+def explore_shipping_view(request, part_id):
+    """The Shipping checklist (issue #66) — the Dashboard's flow on the
+    #65 engine: contents confirm, document uploads (BoL / Proforma /
+    approval posted straight onto the box with the Dashboard's comment
+    strings), the final-approval email, the ``Shipping Checklist`` spec
+    patch (SURF route), and the In-Transit location post. ``?csv=1``
+    downloads the wrap-up CSV.
+    """
+    inst = instance_of(request)
+    part_url = _rev(request, "explore:part", args=[part_id])
+    page_url = _rev(request, "explore:shipping", args=[part_id])
+    ptid = part_id.rsplit("-", 1)[0]
+    if inst not in settings.HWDB_WRITE_INSTANCES or not curation.is_shipping_type(inst, ptid):
+        return HttpResponseForbidden("Checklists are not enabled here.")
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(part_url)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+
+    cl = BoxChecklist.for_instance(inst).filter(
+        part_id=part_id, workflow="shipping").first()
+    preship = BoxChecklist.for_instance(inst).filter(
+        part_id=part_id, workflow="preshipping").first()
+
+    def _info():
+        leaf = HierarchyNode.for_instance(inst).filter(
+            level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
+        manifest = current_manifest(_safe_get_data(api.get_subcomponents, part_id))
+        return checklists.part_info(leaf, part_id, manifest)
+
+    def _poc():
+        try:
+            spec = _spec_data(api.get_component(part_id))
+        except requests.RequestException:
+            spec = None
+        return checklists.poc_from(preship.state if preship else None, spec)
+
+    if request.method == "POST":
+        action = request.POST.get("action") or "advance"
+        if action == "start":
+            route = request.POST.get("route") or (preship.route if preship else "confirm_surf")
+            if route not in dict(BoxChecklist.ROUTES):
+                route = "confirm_surf"
+            if cl:
+                cl.delete()
+            BoxChecklist.objects.create(
+                instance=inst, part_id=part_id, workflow="shipping",
+                route=route, created_by=request.user.get_username())
+            messages.success(request, "Shipping checklist started.")
+            return redirect(page_url)
+        if cl is None:
+            messages.error(request, "Start the checklist first.")
+            return redirect(page_url)
+        if action == "back":
+            cl.current_scene = max(1, cl.current_scene - 1)
+            cl.save(update_fields=["current_scene", "updated_at"])
+            return redirect(page_url)
+
+        scene = cl.current_scene
+        key = checklists.shipping_scene_key(scene)
+        merged = dict(cl.state.get(key, {}))
+        # Uploaded documents post straight onto the box (the Dashboard holds
+        # them locally until scene 4; we have no local disk, and images are
+        # append-only either way). Image ids land in the scene state.
+        uploads = {2: [("bol_file", "shipping-bol", "shipping_bol", "bol_info"),
+                       ("proforma_file", "shipping-proforma", "shipping_proforma", "proforma_info")],
+                   4: [("approval_file", "shipping-final-approval",
+                        "shipping_final_approval", "approval_info")]}
+        for field, stem, comment, state_key in uploads.get(scene, []):
+            f = request.FILES.get(field)
+            if f is None:
+                continue
+            name = checklists.artifact_filename(part_id, stem, f.name)
+            try:
+                body = api.post_component_image(part_id, f, name, comments=comment)
+            except requests.RequestException as e:
+                messages.error(request, f"{field} upload failed — {_hwdb_error_detail(e)}")
+                return redirect(page_url)
+            if body.get("status") != "OK":
+                messages.error(request, f"{field} upload failed — {body.get('data') or body}")
+                return redirect(page_url)
+            merged[state_key] = {"filename": name, "image_id": body.get("image_id")}
+
+        try:
+            spec = _spec_data(api.get_component(part_id))
+        except requests.RequestException:
+            spec = None
+        ship_type = checklists.shipping_service_type(spec)
+        cleaned, err = checklists.clean_shipping_scene(
+            scene, cl.is_surf, ship_type, request.POST, merged)
+        merged.update(cleaned)
+        cl.state[key] = merged
+        cl.save()  # keep uploads/fields even when validation fails
+        if err:
+            messages.error(request, err)
+            return redirect(page_url)
+
+        if scene == 4 and cl.is_surf:  # the Shipping Checklist patch
+            poc_name, poc_email = _poc()
+            try:
+                perr = checklists.patch_shipping(api, cl, _info(), poc_name, poc_email)
+            except requests.RequestException as e:
+                perr = _hwdb_error_detail(e)
+            if perr:
+                messages.error(request, f"Shipping HWDB update failed — {perr}")
+                return redirect(page_url)
+            messages.success(request, "Shipping Checklist patched into HWDB.")
+        if scene == 5:  # mark In-Transit
+            try:
+                body = api.post_location(part_id, {
+                    "location": {"id": 0},
+                    "arrived": merged.get("shipment_time"),
+                    "comments": merged.get("comments", "")})
+            except requests.RequestException as e:
+                messages.error(request, f"Location update failed — {_hwdb_error_detail(e)}")
+                return redirect(page_url)
+            if body.get("status") != "OK":
+                messages.error(request, f"Location update failed — {body.get('data') or body}")
+                return redirect(page_url)
+            _refresh_box_quietly(api, inst, ptid, part_id)
+            messages.success(request, "Box marked In-Transit in HWDB.")
+
+        if scene == checklists.N_SHIPPING_SCENES:
+            cl.completed_at = timezone.now()
+            cl.save(update_fields=["completed_at", "updated_at"])
+            messages.success(request, "Shipping checklist complete.")
+        else:
+            cl.current_scene = scene + 1
+            cl.save(update_fields=["current_scene", "updated_at"])
+        return redirect(page_url)
+
+    # ---- GET ----
+    if cl and request.GET.get("csv"):
+        poc_name, poc_email = _poc()
+        filename, text = checklists.build_shipping_csv(cl, _info(), poc_name, poc_email)
+        resp = HttpResponse(text, content_type="text/csv")
+        resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return resp
+
+    ctx = {
+        "active_nav": "shipments",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "part_id": part_id,
+        "cl": cl,
+        "preship": preship,
+        "routes": BoxChecklist.ROUTES,
+        "n_scenes": checklists.N_SHIPPING_SCENES,
+    }
+    if cl and not cl.completed_at:
+        scene = cl.current_scene
+        ctx.update({"scene": scene,
+                    "scene_title": checklists.shipping_scene_title(scene),
+                    "saved": cl.state.get(checklists.shipping_scene_key(scene), {})})
+        if scene == 2:
+            try:
+                spec = _spec_data(api.get_component(part_id))
+            except requests.RequestException:
+                spec = None
+            ctx["ship_type"] = checklists.shipping_service_type(spec)
+        if scene == 3:
+            poc_name, poc_email = _poc()
+            try:
+                who = api.whoami().get("data") or {}
+            except Exception:
+                who = {}
+            ctx["email_html"] = checklists.shipping_email_html(
+                part_id, poc_name, poc_email,
+                who.get("full_name") or who.get("username") or "",
+                who.get("email") or "")
+    return render(request, "explore/shipping.html", ctx)
 
 
 @login_not_required

@@ -33,6 +33,7 @@ urlpatterns = [
     path("part/<str:part_id>/exec-summary/", views.explore_exec_summary_view,
          name="exec_summary"),
     path("part/<str:part_id>/preship/", views.explore_preship_view, name="preship"),
+    path("part/<str:part_id>/shipping/", views.explore_shipping_view, name="shipping"),
     path("assembly/<str:part_id>/", views.explore_assembly_view, name="assembly"),
     # The box page is now the generic part page (ADR-0014); keep old links working.
     path("shipment/<str:part_id>/",

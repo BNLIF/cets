@@ -1,0 +1,161 @@
+{% extends 'explore/base.html' %}
+{% block title %}Shipping · {{ part_id }} · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .ps-page { padding: 22px 30px 56px; max-width: 860px; }
+  .ps-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .ps-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .ps-crumbs a:hover { text-decoration: underline; }
+  .ps-crumbs .sep { color: var(--faint); margin: 0 7px; }
+  .ps-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 4px; }
+  .ps-page h1 .mono { font-family: var(--font-mono); }
+  .ps-sub { color: var(--dim); font-size: 13.5px; margin: 0 0 18px; }
+  .ps-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
+  .ps-flash.success { color: var(--good); background: var(--good-bg);
+    border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule)); }
+  .ps-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
+    border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+  .ps-card { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg);
+    padding: 16px 18px; margin-bottom: 18px; }
+  .ps-card h2 { font-size: 12px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em;
+    margin: 0 0 12px; }
+  .ps-hint { font-size: 11.5px; color: var(--faint); }
+  .ps-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .ps-page label { font-size: 12px; color: var(--faint); display: flex; flex-direction: column; gap: 3px; }
+  .ps-page label.inline { flex-direction: row; align-items: center; gap: 7px; font-size: 13px; color: var(--ink); }
+  .ps-page input[type=text], .ps-page input[type=datetime-local] { font: inherit; font-size: 13px;
+    color: var(--ink); background: var(--surface); border: 1px solid var(--rule);
+    border-radius: var(--r-sm); padding: 6px 8px; }
+  .ps-actions { display: flex; gap: 10px; align-items: center; margin-top: 16px; }
+  .ps-btn { font: inherit; font-size: 13px; font-weight: 600; color: var(--accent-ink);
+    background: var(--accent-soft); border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--rule));
+    border-radius: var(--r-sm); padding: 7px 17px; cursor: pointer; }
+  .ps-btn:hover { border-color: var(--accent); }
+  .ps-btn.quiet { color: var(--dim); background: var(--surface); border-color: var(--rule); }
+  .ps-steps { font-size: 12px; color: var(--faint); margin-bottom: 16px; }
+  .ps-steps .cur { color: var(--accent-ink); font-weight: 700; }
+  .ps-email { border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 12px;
+    background: var(--surface); font-size: 13px; overflow-x: auto; }
+  .ps-doc { font-size: 12.5px; color: var(--good); font-weight: 600; }
+</style>
+
+<div class="ps-page">
+  <div class="ps-crumbs">
+    <a href="{% url 'explore:shipments' %}">Shipments</a>
+    <span class="sep">›</span><a href="{% url 'explore:part' part_id=part_id %}">{{ part_id }}</a>
+    <span class="sep">›</span>Shipping checklist
+  </div>
+
+  {% for m in messages %}<div class="ps-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+
+  <h1>Shipping — <span class="mono">{{ part_id }}</span></h1>
+
+  {% if not cl %}
+  <p class="ps-sub">No shipping checklist on this box yet.
+    {% if preship and preship.completed_at %}Pre-shipping is complete — good to go.
+    {% elif preship %}Note: the pre-shipping checklist is still at step {{ preship.current_scene }}.
+    {% else %}Note: no pre-shipping run on this box (fine if it was done in the Dashboard).{% endif %}</p>
+  <form method="post" class="ps-card">
+    {% csrf_token %}<input type="hidden" name="action" value="start">
+    <h2>Select shipping route</h2>
+    {% for value, label in routes %}
+    <label class="inline"><input type="radio" name="route" value="{{ value }}"
+      {% if preship and preship.route == value or not preship and value == 'confirm_surf' %}checked{% endif %}> {{ label }}</label>
+    {% endfor %}
+    <div class="ps-actions"><button class="ps-btn">Start checklist</button></div>
+  </form>
+
+  {% elif cl.completed_at %}
+  <p class="ps-sub">{{ cl.route_label }} · completed {{ cl.completed_at|date:"Y-m-d H:i" }} — the box is
+    In-Transit in HWDB.</p>
+  <div class="ps-card">
+    <h2>Done</h2>
+    <p style="font-size:13.5px; color:var(--ink);">The receiving site runs the <em>Receiving</em> checklist
+      on arrival. Wrap-up CSV: <a href="?csv=1">download</a>.</p>
+    <form method="post" onsubmit="return confirm('Discard this completed run and start over?');">
+      {% csrf_token %}<input type="hidden" name="action" value="start">
+      <input type="hidden" name="route" value="{{ cl.route }}">
+      <div class="ps-actions"><button class="ps-btn quiet">Start a fresh run</button></div>
+    </form>
+  </div>
+
+  {% else %}
+  <p class="ps-sub">{{ cl.route_label }} · started by {{ cl.created_by|default:"—" }} · progress saved
+    automatically.</p>
+  <div class="ps-steps">
+    {% for n in "123456" %}{% if forloop.counter == scene %}<span class="cur">Step {{ forloop.counter }}</span>{% else %}Step {{ forloop.counter }}{% endif %}{% if not forloop.last %} › {% endif %}{% endfor %}
+  </div>
+
+  <form method="post" enctype="multipart/form-data" class="ps-card">
+    {% csrf_token %}
+    <h2>Step {{ scene }} of {{ n_scenes }} — {{ scene_title }}</h2>
+
+    {% if scene == 1 %}
+      <p style="font-size:13px; color:var(--ink);">Confirm the box contents match the packing list one last
+        time (see the <a href="{% url 'explore:part' part_id=part_id %}">box page</a>).</p>
+      <label class="inline" style="margin-top:8px;"><input type="checkbox" name="confirm_list" required>
+        The contents are correct and the box is ready to leave.</label>
+
+    {% elif scene == 2 %}
+      <p style="font-size:13px; color:var(--ink); margin:0 0 10px;">Attach the shipping documents
+        ({{ ship_type }} shipment{% if ship_type == 'International' %} — Proforma Invoice required{% endif %}).
+        They are posted onto the box in HWDB immediately.</p>
+      <div class="ps-grid">
+        <label>Bill of Lading (image/PDF){% if cl.is_surf %} — required{% endif %}
+          <input type="file" name="bol_file" accept=".pdf,image/*">
+          {% if saved.bol_info %}<span class="ps-doc">✓ {{ saved.bol_info.filename }}</span>{% endif %}</label>
+        <label>Proforma Invoice (International)
+          <input type="file" name="proforma_file" accept=".pdf,image/*">
+          {% if saved.proforma_info %}<span class="ps-doc">✓ {{ saved.proforma_info.filename }}</span>{% endif %}</label>
+      </div>
+
+    {% elif scene == 3 %}
+      <p style="font-size:13px; color:var(--ink); margin:0 0 10px;">Send the final-approval request to the
+        FD Logistics team:</p>
+      <div class="ps-email">{{ email_html|safe }}</div>
+      {% if cl.is_surf %}
+      <label class="inline" style="margin-top:12px;"><input type="checkbox" name="confirm_email_contents" required>
+        I have sent this email to sdshipments@fnal.gov.</label>
+      {% endif %}
+
+    {% elif scene == 4 %}
+      <label class="inline"><input type="checkbox" name="received_approval" {% if saved.received_approval %}checked{% endif %}>
+        FD Logistics sent the final approval{% if cl.is_surf %} (required for SURF){% endif %}</label>
+      <div class="ps-grid" style="margin-top:10px;">
+        <label>Approved by <input type="text" name="approved_by" value="{{ saved.approved_by|default:'' }}"></label>
+        <label>Approval time (CT) <input type="text" name="approved_time" value="{{ saved.approved_time|default:'' }}" placeholder="YYYY-MM-DD HH:MM"></label>
+        <label>Approval message (image/PDF)
+          <input type="file" name="approval_file" accept=".pdf,image/*">
+          {% if saved.approval_info %}<span class="ps-doc">✓ {{ saved.approval_info.filename }}</span>{% endif %}</label>
+      </div>
+      <label class="inline" style="margin-top:10px;"><input type="checkbox" name="confirm_attached_sheet" {% if saved.confirm_attached_sheet %}checked{% endif %}>
+        The DUNE Shipping Sheet is attached to the box</label>
+      <label class="inline"><input type="checkbox" name="confirm_insured" {% if saved.confirm_insured %}checked{% endif %}>
+        The shipment is adequately insured for transit</label>
+      <p class="ps-hint" style="margin-top:8px;">Continuing on the SURF route patches the Shipping Checklist
+        into HWDB.</p>
+
+    {% elif scene == 5 %}
+      <div class="ps-grid">
+        <label>Shipment date/time <input type="datetime-local" name="shipment_time" value="{{ saved.shipment_time|default:'' }}"></label>
+        <label>Comments <input type="text" name="comments" value="{{ saved.comments|default:'' }}" placeholder="optional"></label>
+      </div>
+      <label class="inline" style="margin-top:10px;"><input type="checkbox" name="affirm_shipment" required>
+        The cargo has physically shipped.</label>
+      <p class="ps-hint" style="margin-top:8px;">Continuing posts the In-Transit location onto the box.</p>
+
+    {% elif scene == 6 %}
+      <p style="font-size:13px; color:var(--ink);">All writes are done. Keep the wrap-up CSV for your
+        records: <a href="?csv=1">download</a>.</p>
+    {% endif %}
+
+    <div class="ps-actions">
+      {% if scene > 1 %}<button class="ps-btn quiet" name="action" value="back" formnovalidate>‹ Back</button>{% endif %}
+      <button class="ps-btn" name="action" value="advance">{% if scene == n_scenes %}Finish{% else %}Continue ›{% endif %}</button>
+      <span class="ps-hint">{{ cl.route_label }}</span>
+    </div>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

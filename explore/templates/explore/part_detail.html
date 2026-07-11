@@ -269,12 +269,12 @@
         <h2>Workflows</h2>
         <table class="sd-kv">
           <tr><td class="k">Pre-shipping checklist</td>
-            <td>{% for c in checklists %}{% if c.workflow == 'preshipping' %}
-                {% if c.completed_at %}<span style="color:var(--good); font-weight:600;">completed {{ c.completed_at|date:"Y-m-d" }}</span>
-                {% else %}step {{ c.current_scene }} of 8 · {{ c.route_label }}{% endif %}
-              {% endif %}{% empty %}not started{% endfor %}
+            <td>{% with c=checklists.preshipping %}{% if c and c.completed_at %}<span style="color:var(--good); font-weight:600;">completed {{ c.completed_at|date:"Y-m-d" }}</span>{% elif c %}step {{ c.current_scene }} of 8 · {{ c.route_label }}{% else %}not started{% endif %}{% endwith %}
               · <a style="color:var(--accent-ink); text-decoration:none;" href="{% url 'explore:preship' part_id=part_id %}">open ›</a></td></tr>
-          <tr><td class="k">Shipping / Receiving</td><td style="color:var(--faint);">coming next (#66, #67)</td></tr>
+          <tr><td class="k">Shipping checklist</td>
+            <td>{% with c=checklists.shipping %}{% if c and c.completed_at %}<span style="color:var(--good); font-weight:600;">completed {{ c.completed_at|date:"Y-m-d" }}</span>{% elif c %}step {{ c.current_scene }} of 6 · {{ c.route_label }}{% else %}not started{% endif %}{% endwith %}
+              · <a style="color:var(--accent-ink); text-decoration:none;" href="{% url 'explore:shipping' part_id=part_id %}">open ›</a></td></tr>
+          <tr><td class="k">Receiving</td><td style="color:var(--faint);">coming next (#67)</td></tr>
         </table>
       </div>
       {% endif %}
