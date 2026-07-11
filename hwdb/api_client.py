@@ -194,6 +194,18 @@ class FnalDbApiClient:
         """
         return self._make_request("GET", f"component-types/{part_type_id}/images")
 
+    def get_qrcode_response(self, part_id):
+        """The item's HWDB-issued QR code PNG (``GET get-qrcode/{pid}``) as a
+        streaming response — drawn onto the shipping label (issue #65)."""
+        url = f"{self.base_url}/get-qrcode/{part_id}"
+        try:
+            response = self.session.get(url, stream=True)
+            response.raise_for_status()
+            return response
+        except requests.exceptions.RequestException:
+            logger.exception("get_qrcode_response from %s failed", url)
+            raise
+
     def get_image_response(self, image_id):
         """Raw attachment bytes by id (``GET img/{id}``) as a streaming
         ``requests.Response`` for the caller to proxy. The bytes are bearer-

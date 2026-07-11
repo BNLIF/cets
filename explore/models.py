@@ -210,6 +210,48 @@ class ShipmentItem(InstanceScoped):
         return f"ShipmentItem({self.part_id}, {self.location_name})"
 
 
+class BoxChecklist(InstanceScoped):
+    """One ship/receive checklist run on one box (issue #65).
+
+    The Explorer's answer to the Dashboard's local ``dash_shipping_conf.json``
+    — but in the shared DB, so any teammate can resume any box's checklist
+    from any browser. ``state`` holds per-scene form data under the
+    Dashboard's page keys (``PreShipping1``…``PreShipping7``) so the final
+    HWDB patch can be built byte-for-byte compatibly.
+    """
+
+    WORKFLOWS = [("preshipping", "Pre-Shipping"), ("shipping", "Shipping"),
+                 ("receiving", "Receiving")]
+    ROUTES = [("confirm_surf", "Shipping to SURF"),
+              ("confirm_non_surf", "Shipping to non-SURF"),
+              ("confirm_transshipping", "Transshipping to SURF")]
+
+    part_id = models.CharField(max_length=50, db_index=True)
+    workflow = models.CharField(max_length=20, choices=WORKFLOWS)
+    route = models.CharField(max_length=24, choices=ROUTES, default="confirm_surf")
+    current_scene = models.PositiveSmallIntegerField(default=1)
+    state = models.JSONField(default=dict, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.CharField(max_length=150, blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=["instance", "part_id", "workflow"],
+            name="one_checklist_per_box_workflow")]
+
+    @property
+    def is_surf(self) -> bool:
+        return self.route == "confirm_surf"
+
+    @property
+    def route_label(self) -> str:
+        return dict(self.ROUTES).get(self.route, "Shipping to SURF")
+
+    def __str__(self):
+        return f"BoxChecklist({self.part_id}, {self.workflow}, scene {self.current_scene})"
+
+
 class HierarchySyncState(models.Model):
     """One row per HWDB instance recording that instance's last hierarchy
     (skeleton) sync run.

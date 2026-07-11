@@ -26,13 +26,14 @@ from hwdb.fnal import flow
 from hwdb.fnal import session as fnal_session
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
 
-from . import charts, curation, execsummary, navigation
+from . import charts, checklists, curation, execsummary, navigation
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, sync_test_events
 from .hierarchy import sync_hierarchy, sync_system
 from .instances import instance_of, namespace_of
 from .models import (
-    HierarchyNode, HierarchySyncState, HwdbComponentEvent, ShipmentItem,
+    BoxChecklist, HierarchyNode, HierarchySyncState, HwdbComponentEvent,
+    ShipmentItem,
 )
 from .queries import (
     component_breakdowns, component_qc_flags, component_type_progress,
@@ -687,6 +688,9 @@ def explore_part_view(request, part_id):
             a for a in detail["attachments"]
             if (a["image_name"] or "").lower().startswith(
                 f"executivesummary_{part_id.lower()}_")],
+        # Ship/receive checklist runs on this box (issue #65).
+        "checklists": (list(BoxChecklist.for_instance(inst).filter(part_id=part_id))
+                       if can_update_location else []),
     })
 
 
@@ -1392,6 +1396,192 @@ def _upload_summary_pdf(api, part_id, fileobj, name) -> str | None:
         logger.warning("exec summary upload for %s failed: %s", part_id, e)
         return _hwdb_error_detail(e)
     return None if body.get("status") == "OK" else str(body.get("data") or body)
+
+
+def _preship_gate(api, part_id) -> dict:
+    """The Dashboard's pre-shipping gate status: QC flags + status id ∈
+    {120, 140} + a gate-named executive summary on the box's images."""
+    item = {}
+    try:
+        item = api.get_component(part_id).get("data") or {}
+    except requests.RequestException as e:
+        logger.warning("preship gate: item fetch failed: %s", e)
+    status = item.get("status") or {}
+    status_id = status.get("id") if isinstance(status, dict) else None
+    certified = bool(item.get("certified_qaqc"))
+    uploaded = bool(item.get("qaqc_uploaded"))
+    summary, uploader = "", ""
+    try:
+        prefix = f"executivesummary_{part_id.lower()}_"
+        matches = [i for i in (api.get_images(part_id).get("data") or [])
+                   if (i.get("image_name") or "").lower().startswith(prefix)
+                   and (i.get("image_name") or "").lower().endswith(".pdf")]
+        if matches:
+            newest = max(matches, key=lambda i: i.get("created") or "")
+            summary = newest.get("image_name") or ""
+            creator = newest.get("creator") or {}
+            uploader = creator.get("name") if isinstance(creator, dict) else str(creator or "")
+    except Exception as e:
+        logger.warning("preship gate: images fetch failed: %s", e)
+    return {
+        "status_id": status_id,
+        "status_name": (status.get("name") if isinstance(status, dict) else status) or "",
+        "certified": certified, "uploaded": uploaded,
+        "qaqc_ready": certified and uploaded and status_id in {120, 140},
+        "summary_name": summary, "summary_uploader": uploader or "",
+    }
+
+
+@login_not_required
+@fnal_login_required
+def explore_preship_view(request, part_id):
+    """The Pre-Shipping checklist (issue #65) — the Dashboard's workflow,
+    scene for scene, with state in the shared DB (``BoxChecklist``) so any
+    teammate can resume. Scenes 1–7 collect and validate; scene 8 uploads
+    the shipping-label PDF and PATCHes the ``Pre-Shipping Checklist`` +
+    ``SubPIDs`` spec keys byte-for-byte like the Dashboard. ``?csv=1``
+    downloads the logistics CSV.
+    """
+    inst = instance_of(request)
+    part_url = _rev(request, "explore:part", args=[part_id])
+    page_url = _rev(request, "explore:preship", args=[part_id])
+    ptid = part_id.rsplit("-", 1)[0]
+    if inst not in settings.HWDB_WRITE_INSTANCES or not curation.is_shipping_type(inst, ptid):
+        return HttpResponseForbidden("Checklists are not enabled here.")
+
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(part_url)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+
+    cl = BoxChecklist.for_instance(inst).filter(
+        part_id=part_id, workflow="preshipping").first()
+
+    if request.method == "POST":
+        action = request.POST.get("action") or "advance"
+        if action == "start":
+            route = request.POST.get("route") or "confirm_surf"
+            if route not in dict(BoxChecklist.ROUTES):
+                route = "confirm_surf"
+            if cl:
+                cl.delete()
+            BoxChecklist.objects.create(
+                instance=inst, part_id=part_id, workflow="preshipping",
+                route=route, created_by=request.user.get_username())
+            messages.success(request, "Pre-shipping checklist started.")
+            return redirect(page_url)
+        if cl is None:
+            messages.error(request, "Start the checklist first.")
+            return redirect(page_url)
+        if action == "back":
+            cl.current_scene = max(1, cl.current_scene - 1)
+            cl.save(update_fields=["current_scene", "updated_at"])
+            return redirect(page_url)
+
+        scene = cl.current_scene
+        cleaned, err = checklists.clean_scene(scene, cl.is_surf, request.POST)
+        if err:
+            messages.error(request, err)
+            return redirect(page_url)
+        if scene == 1:  # server-side gate re-check, like the Dashboard
+            gate = _preship_gate(api, part_id)
+            if not (gate["qaqc_ready"] and gate["summary_name"]):
+                messages.error(request,
+                               "Gate not passed: the box needs QC flags + passing "
+                               "status and an executive summary.")
+                return redirect(page_url)
+            cleaned.update(gate)
+        cl.state[checklists.scene_key(scene)] = {
+            **cl.state.get(checklists.scene_key(scene), {}), **cleaned}
+
+        if scene == checklists.N_SCENES:  # final writes
+            leaf = HierarchyNode.for_instance(inst).filter(
+                level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
+            manifest = current_manifest(_safe_get_data(api.get_subcomponents, part_id))
+            info = checklists.part_info(leaf, part_id, manifest)
+            qr = None
+            try:
+                qr = api.get_qrcode_response(part_id).content
+            except Exception as e:
+                logger.warning("preship: QR fetch failed: %s", e)
+            label = checklists.build_label_pdf(
+                part_id, info["part_type_name"],
+                "Development HWDB" if inst == "dev" else "Production HWDB", qr)
+            try:
+                image_id, err = checklists.execute_final_patch(api, cl, info, label)
+            except requests.RequestException as e:
+                messages.error(request, f"HWDB rejected the update — {_hwdb_error_detail(e)}")
+                return redirect(page_url)
+            if err:
+                messages.error(request, f"HWDB rejected the update — {err}")
+                return redirect(page_url)
+            cl.state[checklists.scene_key(scene)].update(
+                {"image_id": image_id, "patched": True})
+            cl.completed_at = timezone.now()
+            cl.save()
+            _refresh_box_quietly(api, inst, ptid, part_id)
+            messages.success(request,
+                             "Pre-shipping checklist written to HWDB (shipping sheet "
+                             "uploaded, checklist patched).")
+            return redirect(page_url)
+
+        cl.current_scene = scene + 1
+        cl.save()
+        return redirect(page_url)
+
+    # ---- GET ----
+    if cl and request.GET.get("csv"):
+        leaf = HierarchyNode.for_instance(inst).filter(
+            level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
+        manifest = current_manifest(_safe_get_data(api.get_subcomponents, part_id))
+        filename, text = checklists.build_csv(
+            cl, checklists.part_info(leaf, part_id, manifest))
+        resp = HttpResponse(text, content_type="text/csv")
+        resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return resp
+
+    ctx = {
+        "active_nav": "shipments",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "part_id": part_id,
+        "cl": cl,
+        "routes": BoxChecklist.ROUTES,
+        "n_scenes": checklists.N_SCENES,
+    }
+    if cl and not cl.completed_at:
+        scene = cl.current_scene
+        ctx.update({"scene": scene, "scene_title": checklists.scene_title(scene),
+                    "saved": cl.state.get(checklists.scene_key(scene), {})})
+        if scene == 1:
+            ctx["gate"] = _preship_gate(api, part_id)
+        if scene == 2:
+            # Prefill the QA rep from the summary's uploader, like the Dashboard.
+            ctx["qa_rep_default"] = (ctx.get("saved", {}).get("qa_rep_name")
+                                     or cl.state.get("PreShipping1", {}).get("summary_uploader", ""))
+        if scene == 6:
+            leaf = HierarchyNode.for_instance(inst).filter(
+                level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
+            manifest = current_manifest(_safe_get_data(api.get_subcomponents, part_id))
+            filename, _text = checklists.build_csv(
+                cl, checklists.part_info(leaf, part_id, manifest))
+            try:
+                who = api.whoami().get("data") or {}
+            except Exception:
+                who = {}
+            ctx["csv_filename"] = filename
+            ctx["email_html"] = checklists.email_html(
+                cl, filename, who.get("full_name") or who.get("username") or "",
+                who.get("email") or "")
+        if scene == checklists.N_SCENES:
+            ctx["review"] = [(checklists.scene_title(i),
+                              cl.state.get(checklists.scene_key(i), {}))
+                             for i in range(2, checklists.N_SCENES)]
+    return render(request, "explore/preship.html", ctx)
 
 
 @login_not_required

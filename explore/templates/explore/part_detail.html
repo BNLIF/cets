@@ -264,6 +264,19 @@
           <span class="pk-hint">Config-driven signing flow, matching the Dashboard.</span>
         </div>
       </div>
+
+      <div class="sd-card">
+        <h2>Workflows</h2>
+        <table class="sd-kv">
+          <tr><td class="k">Pre-shipping checklist</td>
+            <td>{% for c in checklists %}{% if c.workflow == 'preshipping' %}
+                {% if c.completed_at %}<span style="color:var(--good); font-weight:600;">completed {{ c.completed_at|date:"Y-m-d" }}</span>
+                {% else %}step {{ c.current_scene }} of 8 · {{ c.route_label }}{% endif %}
+              {% endif %}{% empty %}not started{% endfor %}
+              · <a style="color:var(--accent-ink); text-decoration:none;" href="{% url 'explore:preship' part_id=part_id %}">open ›</a></td></tr>
+          <tr><td class="k">Shipping / Receiving</td><td style="color:var(--faint);">coming next (#66, #67)</td></tr>
+        </table>
+      </div>
       {% endif %}
 
       {% if detail.has_location or can_update_location %}
