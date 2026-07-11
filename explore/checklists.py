@@ -49,6 +49,14 @@ SHIPPING_SCENES = [
 N_SHIPPING_SCENES = len(SHIPPING_SCENES)
 
 
+RECEIVING_SCENES = [
+    (1, "Receiving1", "Contents confirm"),
+    (2, "Receiving2", "Location update"),
+    (3, "Receiving3", "Arrival email"),
+]
+N_RECEIVING_SCENES = len(RECEIVING_SCENES)
+
+
 def scene_key(scene: int) -> str:
     return PRESHIPPING_SCENES[scene - 1][1]
 
@@ -63,6 +71,14 @@ def shipping_scene_key(scene: int) -> str:
 
 def shipping_scene_title(scene: int) -> str:
     return SHIPPING_SCENES[scene - 1][2]
+
+
+def receiving_scene_key(scene: int) -> str:
+    return RECEIVING_SCENES[scene - 1][1]
+
+
+def receiving_scene_title(scene: int) -> str:
+    return RECEIVING_SCENES[scene - 1][2]
 
 
 def artifact_filename(part_id: str, stem: str, original: str) -> str:
@@ -200,6 +216,36 @@ def clean_shipping_scene(scene: int, is_surf: bool, shipping_type: str,
     return {}, "Unsupported scene."
 
 
+def clean_receiving_scene(scene: int, post) -> tuple[dict, str | None]:
+    """Validate one receiving scene (the Dashboard's rules: everything on
+    scene 2 must be present before the writes fire)."""
+    g = lambda k: (post.get(k) or "").strip().replace("T", " ")
+
+    if scene == 1:
+        if not post.get("confirm_list"):
+            return {}, "Please confirm the component list before continuing."
+        return {"confirm_list": True}, None
+
+    if scene == 2:
+        d = {"location_id": g("location_id"), "arrived": g("arrived"),
+             "comments": g("comments"),
+             "affirm_update": bool(post.get("affirm_update"))}
+        if not d["location_id"]:
+            return d, "Please pick the arrival location."
+        if not d["arrived"]:
+            return d, "Please provide the arrival date/time."
+        if not d["affirm_update"]:
+            return d, "Please confirm that you wish to update the location now."
+        return d, None
+
+    if scene == 3:
+        if not post.get("confirm_email_contents"):
+            return {}, "Please confirm that you have sent the email before continuing."
+        return {"confirm_email_contents": True}, None
+
+    return {}, "Unsupported scene."
+
+
 def shipping_service_type(spec_data: dict | None) -> str:
     """The Dashboard's rule: an HTS code in the box's Pre-Shipping Checklist
     spec means International, else Domestic."""
@@ -333,6 +379,65 @@ def patch_shipping(api, checklist, info: dict, poc_name: str, poc_email: str) ->
         "specifications": specs,
     })
     return None if body.get("status") == "OK" else str(body.get("data") or body)
+
+
+def receiving_email_html(part_id: str, poc_name: str, poc_email: str,
+                         sender_name: str, sender_email: str,
+                         location_name: str, arrived: str) -> str:
+    """The Dashboard's arrival notification to the POC, verbatim — its
+    "Reciving" subject typo included (the pid is interpolated, though: the
+    Dashboard drops it via a missing f-prefix, plainly a bug)."""
+    try:
+        formatted = datetime.fromisoformat(arrived).strftime(
+            "<b>%B %d, %Y</b> at <b>%I:%M %p</b> (Central Time)")
+    except ValueError:
+        formatted = arrived
+    from_html = f"{sender_name} &lt;{sender_email}&gt;" if sender_email else sender_name
+    return (
+        "<table>"
+        f"<tr><td width='100'>From:</td><td>{from_html}</td></tr>"
+        f"<tr><td>To:</td><td>{poc_name} &lt;{poc_email}&gt;</td></tr>"
+        f"<tr><td>Subject:</td><td>Final Reciving checklist for shipment {part_id}</td></tr>"
+        "<tr><td colspan='2'>&nbsp;</td></tr>"
+        "<tr><td colspan='2'>"
+        f"Dear {poc_name},<br/><br/>"
+        f"Your shipment, {part_id}, has arrived at <b>{location_name}</b> at "
+        f"{formatted}.<br/><br/>"
+        "Sincerely,<br/><br/>"
+        f"{sender_name}<br/>{sender_email}<br/>"
+        "</td></tr></table>"
+    )
+
+
+def receive_box(api, checklist, manifest: list[dict]) -> str | None:
+    """Scene 2's writes — the Dashboard's ``update_locations_and_detach``:
+    post the arrival location on the box, then on every subcomponent, then
+    PATCH all occupied functional positions to ``None`` (the structural
+    write that "opens the box"). The transshipping route posts the box's
+    location only and keeps the contents linked. Error or None."""
+    r2 = checklist.state.get("Receiving2", {})
+    payload = {
+        "location": {"id": (r2.get("location") or {}).get("institution_id")},
+        "arrived": r2.get("arrived"),
+        "comments": r2.get("comments", ""),
+    }
+    body = api.post_location(checklist.part_id, payload)
+    if body.get("status") != "OK":
+        return f"location post for {checklist.part_id} failed: {body.get('data') or body}"
+    if checklist.route == "confirm_transshipping":
+        return None
+    for m in manifest:
+        body = api.post_location(m["part_id"], payload)
+        if body.get("status") != "OK":
+            return f"location post for {m['part_id']} failed: {body.get('data') or body}"
+    if manifest:
+        body = api.patch_subcomponents(checklist.part_id, {
+            "component": {"part_id": checklist.part_id},
+            "subcomponents": {m["functional_position"]: None for m in manifest},
+        })
+        if body.get("status") != "OK":
+            return f"detach patch failed: {body.get('data') or body}"
+    return None
 
 
 # ---- Box context (the Dashboard's part_info shape) -------------------------

@@ -274,7 +274,9 @@
           <tr><td class="k">Shipping checklist</td>
             <td>{% with c=checklists.shipping %}{% if c and c.completed_at %}<span style="color:var(--good); font-weight:600;">completed {{ c.completed_at|date:"Y-m-d" }}</span>{% elif c %}step {{ c.current_scene }} of 6 · {{ c.route_label }}{% else %}not started{% endif %}{% endwith %}
               · <a style="color:var(--accent-ink); text-decoration:none;" href="{% url 'explore:shipping' part_id=part_id %}">open ›</a></td></tr>
-          <tr><td class="k">Receiving</td><td style="color:var(--faint);">coming next (#67)</td></tr>
+          <tr><td class="k">Receiving checklist</td>
+            <td>{% with c=checklists.receiving %}{% if c and c.completed_at %}<span style="color:var(--good); font-weight:600;">completed {{ c.completed_at|date:"Y-m-d" }}</span>{% elif c %}step {{ c.current_scene }} of 3 · {{ c.route_label }}{% else %}not started{% endif %}{% endwith %}
+              · <a style="color:var(--accent-ink); text-decoration:none;" href="{% url 'explore:receiving' part_id=part_id %}">open ›</a></td></tr>
         </table>
       </div>
       {% endif %}

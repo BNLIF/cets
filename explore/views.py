@@ -1766,6 +1766,150 @@ def explore_shipping_view(request, part_id):
 
 @login_not_required
 @fnal_login_required
+def explore_receiving_view(request, part_id):
+    """The Receiving checklist (issue #67) — the Dashboard's flow on the
+    #65 engine: contents confirm, then the arrival-location update that
+    posts the location on the box AND every subcomponent and detaches all
+    functional positions ("opens the box"; the transshipping route keeps
+    contents linked), then the arrival email to the POC. Independent of the
+    Explorer's own shipping run so a Dashboard-shipped box is receivable.
+    """
+    inst = instance_of(request)
+    part_url = _rev(request, "explore:part", args=[part_id])
+    page_url = _rev(request, "explore:receiving", args=[part_id])
+    ptid = part_id.rsplit("-", 1)[0]
+    if inst not in settings.HWDB_WRITE_INSTANCES or not curation.is_shipping_type(inst, ptid):
+        return HttpResponseForbidden("Checklists are not enabled here.")
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(part_url)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+
+    cl = BoxChecklist.for_instance(inst).filter(
+        part_id=part_id, workflow="receiving").first()
+    preship = BoxChecklist.for_instance(inst).filter(
+        part_id=part_id, workflow="preshipping").first()
+    shipping = BoxChecklist.for_instance(inst).filter(
+        part_id=part_id, workflow="shipping").first()
+
+    def _manifest():
+        return current_manifest(_safe_get_data(api.get_subcomponents, part_id))
+
+    if request.method == "POST":
+        action = request.POST.get("action") or "advance"
+        if action == "start":
+            route = (request.POST.get("route")
+                     or (shipping.route if shipping else "")
+                     or (preship.route if preship else "confirm_surf"))
+            if route not in dict(BoxChecklist.ROUTES):
+                route = "confirm_surf"
+            if cl:
+                cl.delete()
+            BoxChecklist.objects.create(
+                instance=inst, part_id=part_id, workflow="receiving",
+                route=route, created_by=request.user.get_username())
+            messages.success(request, "Receiving checklist started.")
+            return redirect(page_url)
+        if cl is None:
+            messages.error(request, "Start the checklist first.")
+            return redirect(page_url)
+        if action == "back":
+            cl.current_scene = max(1, cl.current_scene - 1)
+            cl.save(update_fields=["current_scene", "updated_at"])
+            return redirect(page_url)
+
+        scene = cl.current_scene
+        key = checklists.receiving_scene_key(scene)
+        cleaned, err = checklists.clean_receiving_scene(scene, request.POST)
+        if scene == 2 and not err:
+            # Dashboard state shape: the location as institution id + name
+            # (the name feeds the scene-3 arrival email).
+            names = {str(o["id"]): o["name"] for o in _institution_options(api)}
+            cleaned = {"location": {"institution_id": int(cleaned["location_id"]),
+                                    "institution_name": names.get(cleaned["location_id"], "")},
+                       "arrived": cleaned["arrived"], "comments": cleaned["comments"],
+                       "affirm_update": True}
+        cl.state[key] = {**cl.state.get(key, {}), **cleaned}
+        cl.save()
+        if err:
+            messages.error(request, err)
+            return redirect(page_url)
+
+        if scene == 2:  # the writes: locations fan-out + detach
+            manifest = _manifest()
+            try:
+                rerr = checklists.receive_box(api, cl, manifest)
+            except requests.RequestException as e:
+                rerr = _hwdb_error_detail(e)
+            if rerr:
+                messages.error(request, f"Receiving HWDB update failed — {rerr}")
+                return redirect(page_url)
+            _refresh_box_quietly(api, inst, ptid, part_id)
+            if cl.route == "confirm_transshipping":
+                messages.success(
+                    request, "Arrival location posted; contents stay linked (transshipping).")
+            else:
+                messages.success(
+                    request, f"Arrival location posted for the box and {len(manifest)} "
+                             "item(s); all contents detached.")
+
+        if scene == checklists.N_RECEIVING_SCENES:
+            cl.completed_at = timezone.now()
+            cl.save(update_fields=["completed_at", "updated_at"])
+            messages.success(request, "Receiving checklist complete.")
+        else:
+            cl.current_scene = scene + 1
+            cl.save(update_fields=["current_scene", "updated_at"])
+        return redirect(page_url)
+
+    # ---- GET ----
+    ctx = {
+        "active_nav": "shipments",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "part_id": part_id,
+        "cl": cl,
+        "shipping": shipping,
+        "routes": BoxChecklist.ROUTES,
+        "n_scenes": checklists.N_RECEIVING_SCENES,
+    }
+    if cl and not cl.completed_at:
+        scene = cl.current_scene
+        ctx.update({"scene": scene,
+                    "scene_title": checklists.receiving_scene_title(scene),
+                    "saved": cl.state.get(checklists.receiving_scene_key(scene), {})})
+        if scene == 1:
+            ctx["n_items"] = len(_manifest())
+        if scene == 2:
+            ctx["institutions"] = _institution_options(api)
+            ctx["arrived_default"] = timezone.localtime().strftime("%Y-%m-%dT%H:%M")
+        if scene == 3:
+            try:
+                spec = _spec_data(api.get_component(part_id))
+            except requests.RequestException:
+                spec = None
+            poc_name, poc_email = checklists.poc_from(
+                preship.state if preship else None, spec)
+            try:
+                who = api.whoami().get("data") or {}
+            except Exception:
+                who = {}
+            r2 = cl.state.get("Receiving2", {})
+            ctx["email_html"] = checklists.receiving_email_html(
+                part_id, poc_name, poc_email,
+                who.get("full_name") or who.get("username") or "",
+                who.get("email") or "",
+                (r2.get("location") or {}).get("institution_name", ""),
+                r2.get("arrived") or "")
+    return render(request, "explore/receiving.html", ctx)
+
+
+@login_not_required
+@fnal_login_required
 def explore_assembly_view(request, part_id):
     """One level of a part's assembly tree as JSON — a node's direct children
     with their live QC flags (ADR-0015). Lazy-load target for deeper expansion

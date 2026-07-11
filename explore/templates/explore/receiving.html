@@ -1,0 +1,145 @@
+{% extends 'explore/base.html' %}
+{% block title %}Receiving · {{ part_id }} · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .ps-page { padding: 22px 30px 56px; max-width: 860px; }
+  .ps-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .ps-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .ps-crumbs a:hover { text-decoration: underline; }
+  .ps-crumbs .sep { color: var(--faint); margin: 0 7px; }
+  .ps-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 4px; }
+  .ps-page h1 .mono { font-family: var(--font-mono); }
+  .ps-sub { color: var(--dim); font-size: 13.5px; margin: 0 0 18px; }
+  .ps-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
+  .ps-flash.success { color: var(--good); background: var(--good-bg);
+    border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule)); }
+  .ps-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
+    border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+  .ps-card { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg);
+    padding: 16px 18px; margin-bottom: 18px; }
+  .ps-card h2 { font-size: 12px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em;
+    margin: 0 0 12px; }
+  .ps-hint { font-size: 11.5px; color: var(--faint); }
+  .ps-warn { font-size: 12.5px; color: var(--bad, #a33); }
+  .ps-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .ps-page label { font-size: 12px; color: var(--faint); display: flex; flex-direction: column; gap: 3px; }
+  .ps-page label.inline { flex-direction: row; align-items: center; gap: 7px; font-size: 13px; color: var(--ink); }
+  .ps-page input[type=text], .ps-page input[type=datetime-local], .ps-page select { font: inherit; font-size: 13px;
+    color: var(--ink); background: var(--surface); border: 1px solid var(--rule);
+    border-radius: var(--r-sm); padding: 6px 8px; }
+  .ps-actions { display: flex; gap: 10px; align-items: center; margin-top: 16px; }
+  .ps-btn { font: inherit; font-size: 13px; font-weight: 600; color: var(--accent-ink);
+    background: var(--accent-soft); border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--rule));
+    border-radius: var(--r-sm); padding: 7px 17px; cursor: pointer; }
+  .ps-btn:hover { border-color: var(--accent); }
+  .ps-btn.quiet { color: var(--dim); background: var(--surface); border-color: var(--rule); }
+  .ps-steps { font-size: 12px; color: var(--faint); margin-bottom: 16px; }
+  .ps-steps .cur { color: var(--accent-ink); font-weight: 700; }
+  .ps-email { border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 12px;
+    background: var(--surface); font-size: 13px; overflow-x: auto; }
+</style>
+
+<div class="ps-page">
+  <div class="ps-crumbs">
+    <a href="{% url 'explore:shipments' %}">Shipments</a>
+    <span class="sep">›</span><a href="{% url 'explore:part' part_id=part_id %}">{{ part_id }}</a>
+    <span class="sep">›</span>Receiving checklist
+  </div>
+
+  {% for m in messages %}<div class="ps-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+
+  <h1>Receiving — <span class="mono">{{ part_id }}</span></h1>
+
+  {% if not cl %}
+  <p class="ps-sub">No receiving checklist on this box yet.
+    {% if shipping and shipping.completed_at %}The shipping checklist is complete — the box should be
+    In-Transit.{% elif shipping %}Note: the shipping checklist is still at step {{ shipping.current_scene }}.
+    {% else %}Note: no shipping run on this box (fine if it was shipped from the Dashboard).{% endif %}</p>
+  <form method="post" class="ps-card">
+    {% csrf_token %}<input type="hidden" name="action" value="start">
+    <h2>Select receiving route</h2>
+    {% for value, label in routes %}
+    <label class="inline"><input type="radio" name="route" value="{{ value }}"
+      {% if shipping and shipping.route == value or not shipping and value == 'confirm_surf' %}checked{% endif %}> {{ label }}</label>
+    {% endfor %}
+    <p class="ps-hint" style="margin:10px 0 0;">Transshipping updates only the box's location and keeps
+      the contents linked; the other routes detach every sub-component on arrival.</p>
+    <div class="ps-actions"><button class="ps-btn">Start checklist</button></div>
+  </form>
+
+  {% elif cl.completed_at %}
+  <p class="ps-sub">{{ cl.route_label }} · completed {{ cl.completed_at|date:"Y-m-d H:i" }} — the shipment
+    has been received.</p>
+  <div class="ps-card">
+    <h2>Done</h2>
+    <p style="font-size:13.5px; color:var(--ink);">The arrival location is in HWDB
+      {% if cl.route == 'confirm_transshipping' %}(contents kept linked for transshipping).
+      {% else %}and the box's contents have been detached.{% endif %}</p>
+    <form method="post" onsubmit="return confirm('Discard this completed run and start over?');">
+      {% csrf_token %}<input type="hidden" name="action" value="start">
+      <input type="hidden" name="route" value="{{ cl.route }}">
+      <div class="ps-actions"><button class="ps-btn quiet">Start a fresh run</button></div>
+    </form>
+  </div>
+
+  {% else %}
+  <p class="ps-sub">{{ cl.route_label }} · started by {{ cl.created_by|default:"—" }} · progress saved
+    automatically.</p>
+  <div class="ps-steps">
+    {% for n in "123" %}{% if forloop.counter == scene %}<span class="cur">Step {{ forloop.counter }}</span>{% else %}Step {{ forloop.counter }}{% endif %}{% if not forloop.last %} › {% endif %}{% endfor %}
+  </div>
+
+  <form method="post" class="ps-card">
+    {% csrf_token %}
+    <h2>Step {{ scene }} of {{ n_scenes }} — {{ scene_title }}</h2>
+
+    {% if scene == 1 %}
+      <p style="font-size:13px; color:var(--ink);">Confirm the received contents against the packing list
+        ({{ n_items }} item{{ n_items|pluralize }} currently linked — see the
+        <a href="{% url 'explore:part' part_id=part_id %}">box page</a>).</p>
+      {% if cl.route != 'confirm_transshipping' %}
+      <p class="ps-warn" style="margin:8px 0 0;">Completing step 2 will unlink ALL sub-components from
+        this box.</p>
+      {% endif %}
+      <label class="inline" style="margin-top:8px;"><input type="checkbox" name="confirm_list" required>
+        The list of components for this shipment is correct.</label>
+
+    {% elif scene == 2 %}
+      <p style="font-size:13px; color:var(--ink); margin:0 0 10px;">Record where the shipment arrived.</p>
+      <div class="ps-grid">
+        <label>Location
+          <select name="location_id" required>
+            <option value="">— select institution —</option>
+            {% for o in institutions %}
+            <option value="{{ o.id }}" {% if saved.location.institution_id == o.id %}selected{% endif %}>{{ o.name }}{% if o.country_code %} ({{ o.country_code }}){% endif %}</option>
+            {% endfor %}
+          </select></label>
+        <label>Date/Time (Central time zone)
+          <input type="datetime-local" name="arrived" value="{{ saved.arrived|default:arrived_default }}"></label>
+        <label>Comments <input type="text" name="comments" value="{{ saved.comments|default:'' }}" placeholder="optional"></label>
+      </div>
+      <label class="inline" style="margin-top:10px;"><input type="checkbox" name="affirm_update" required>
+        Yes, update the location now</label>
+      <p class="ps-hint" style="margin-top:8px;">
+        {% if cl.route == 'confirm_transshipping' %}Continuing posts the arrival location onto the box
+        (transshipping — contents stay linked).{% else %}Continuing posts the arrival location onto the
+        box and every sub-component, then unlinks all contents.{% endif %}</p>
+
+    {% elif scene == 3 %}
+      <p style="font-size:13px; color:var(--ink); margin:0 0 10px;">Please send an email to your POC to let
+        them know the shipment has arrived:</p>
+      <div class="ps-email">{{ email_html|safe }}</div>
+      <label class="inline" style="margin-top:12px;"><input type="checkbox" name="confirm_email_contents" required>
+        I have sent the email.</label>
+    {% endif %}
+
+    <div class="ps-actions">
+      {% if scene > 1 %}<button class="ps-btn quiet" name="action" value="back" formnovalidate>‹ Back</button>{% endif %}
+      <button class="ps-btn" name="action" value="advance">{% if scene == n_scenes %}Finish{% else %}Continue ›{% endif %}</button>
+      <span class="ps-hint">{{ cl.route_label }}</span>
+    </div>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}
