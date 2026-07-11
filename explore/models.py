@@ -145,6 +145,15 @@ class HwdbComponentEvent(InstanceScoped):
     is_installed = models.BooleanField(null=True, blank=True)
     qaqc_uploaded = models.BooleanField(null=True, blank=True)
     certified_qaqc = models.BooleanField(null=True, blank=True)
+    # Containment + availability (issue #63). ``parent_part_id`` is the box or
+    # assembly currently holding this item (detail record field; also kept
+    # fresh by the shipment sync / the explorer's own pack writes via
+    # ``refresh_box``); "" = free or not yet captured. ``enabled`` mirrors
+    # HWDB's approval flag ("not yet available" until enabled); NULL = not
+    # yet captured by an item sync.
+    parent_part_id = models.CharField(max_length=50, blank=True, default="",
+                                      db_index=True)
+    enabled = models.BooleanField(null=True, blank=True)
 
     class Meta:
         indexes = [models.Index(fields=["part_type_id", "updated"])]

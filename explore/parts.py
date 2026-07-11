@@ -194,6 +194,25 @@ def _enrich_test_ids(api, part_id: str, tests: list[dict]) -> None:
             t["has_test_data"] = bool(latest.get("test_data"))
 
 
+def current_container(rows) -> dict | None:
+    """The item's current parent from its ``/container`` rows (the reverse of
+    the manifest, same mount/unmount row shape): the newest entry that isn't
+    an unmount, or None. Defensive — the endpoint is undocumented in the
+    official client, so unexpected shapes just mean "no parent shown"."""
+    if not isinstance(rows, list):
+        return None
+    live = [r for r in rows
+            if isinstance(r, dict) and r.get("operation") != "unmount"
+            and (r.get("container") or {}).get("part_id")]
+    if not live:
+        return None
+    top = max(live, key=lambda r: r.get("created") or "")
+    c = top["container"]
+    return {"part_id": c.get("part_id"),
+            "type_name": _named(c.get("component_type")),
+            "functional_position": top.get("functional_position")}
+
+
 def part_detail(api, part_id: str, is_shipping: bool) -> dict:
     """Live detail bundle for one part. ``sections`` are the spec cards (the
     shipping lifecycle when ``is_shipping``); attachments are enriched with the
@@ -230,6 +249,8 @@ def part_detail(api, part_id: str, is_shipping: bool) -> dict:
     ct = comp.get("component_type") or {}
     return {
         "part_id": part_id,
+        "container": current_container(
+            _safe_data("container", lambda: api.get_container(part_id))),
         "type_name": _named(ct) or comp.get("type_name"),
         "status": _named(comp.get("status")),
         "facts": part_facts(comp),

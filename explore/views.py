@@ -37,8 +37,8 @@ from .queries import (
     component_breakdowns, component_qc_flags, component_type_progress,
     component_update_filters, component_update_progress,
 )
-from .parts import assembly_children, part_detail
-from .shipments import refresh_box, sync_shipments
+from .parts import assembly_children, current_container, part_detail
+from .shipments import current_manifest, refresh_box, sync_shipments
 
 logger = logging.getLogger(__name__)
 FNAL_UNAVAILABLE = "FNAL authentication service is unavailable. Please try again later."
@@ -651,6 +651,11 @@ def explore_part_view(request, part_id):
                  "subsystem_id": leaf.subsystem_id} if leaf else {})
     box = (ShipmentItem.for_instance(inst).filter(part_id=part_id).first()
            if is_shipping else None)
+    # Mirror fallback for containment (issue #63): used only when the live
+    # /container call yields nothing (detail.container is preferred).
+    mirror_parent = (HwdbComponentEvent.for_instance(inst)
+                     .filter(part_id=part_id).exclude(parent_part_id="")
+                     .values_list("parent_part_id", flat=True).first())
     # First write feature (issue #61): boxes on a write-enabled instance get
     # the Update-location form; its dropdown needs the institution list.
     can_update_location = is_shipping and inst in settings.HWDB_WRITE_INSTANCES
@@ -665,10 +670,16 @@ def explore_part_view(request, part_id):
         "leaf": leaf,
         "leaf_path": navigation.leaf_path_for(inst, ptid) if leaf else None,
         "box": box,
+        "mirror_parent": mirror_parent,
         "hwdb_ui_base": settings.HWDB_PROFILES[inst]["ui"],
         "can_update_location": can_update_location,
         "institutions": _institution_options(api) if can_update_location else [],
         "arrived_default": timezone.localtime().strftime("%Y-%m-%dT%H:%M"),
+        # Packing card (issue #63): the box's slot schema + occupants; the
+        # item picker is its own page. None when writes are off or the
+        # connectors fetch fails (the card just doesn't render).
+        "packing": (_packing_context(api, inst, ptid, detail["manifest"])
+                    if can_update_location else None),
     })
 
 
@@ -730,7 +741,7 @@ def explore_part_location_view(request, part_id):
         api.post_location(part_id, payload)
     except requests.RequestException as e:
         logger.warning("post location for %s failed: %s", part_id, e)
-        messages.error(request, f"HWDB rejected the location update — {e}")
+        messages.error(request, f"HWDB rejected the location update — {_hwdb_error_detail(e)}")
         return redirect(part_url)
 
     try:  # targeted mirror refresh; the write itself already succeeded
@@ -757,6 +768,26 @@ def explore_institutions_view(request):
         return JsonResponse({"error": "unavailable"}, status=503)
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
     return JsonResponse({"institutions": _institution_options(api)})
+
+
+def _refresh_box_quietly(api, instance, part_type_id, part_id):
+    """Best-effort mirror-row refresh after a write that already succeeded."""
+    try:
+        refresh_box(api, instance, part_type_id, part_id)
+    except Exception as e:
+        logger.warning("refresh_box(%s) failed: %s", part_id, e)
+
+
+def _hwdb_error_detail(e) -> str:
+    """The useful part of an HWDB write error: the JSON body's ``data``
+    message when the response carries one (e.g. "The component '…' is
+    already in use"), else the exception text."""
+    resp = getattr(e, "response", None)
+    try:
+        detail = (resp.json() or {}).get("data") if resp is not None else None
+    except ValueError:
+        detail = None
+    return str(detail) if detail else str(e)
 
 
 def _spec_template(type_record: dict) -> dict:
@@ -818,7 +849,7 @@ def explore_box_create_view(request, part_type_id):
         body = api.create_component(part_type_id, payload)
     except requests.RequestException as e:
         logger.warning("box create for %s failed: %s", part_type_id, e)
-        messages.error(request, f"HWDB rejected the new box — {e}")
+        messages.error(request, f"HWDB rejected the new box — {_hwdb_error_detail(e)}")
         return redirect(back)
     part_id = body.get("part_id")
     if body.get("status") != "OK" or not part_id:
@@ -831,6 +862,227 @@ def explore_box_create_view(request, part_type_id):
         logger.warning("refresh_box(%s) failed: %s", part_id, e)
     messages.success(request, f"Box {part_id} minted in the {inst} HWDB.")
     return redirect(_rev(request, "explore:part", args=[part_id]))
+
+
+# Candidate PIDs listed per child type on the packing page. Any PID can still
+# be typed/scanned into the add-by-PID box; the cap only bounds the table.
+_PACK_CANDIDATE_CAP = 500
+
+
+def _box_connectors(api, part_type_id) -> dict:
+    """The box type's connectors: {functional position: child part_type_id}.
+    These named slots are HWDB's own model — an item can only be linked into
+    one, and the slot set is fixed by the type's definition."""
+    return ((api.get_component_type(part_type_id).get("data") or {})
+            .get("connectors") or {})
+
+
+def _packing_context(api, instance, part_type_id, manifest) -> dict | None:
+    """The box page's packing card (issue #63): the box's full slot schema —
+    every functional position with the child type it accepts and its current
+    occupant — plus free/total counts. The schema is the type's connectors,
+    so users see exactly what this box can hold. Candidate picking lives on
+    the separate packing page. None if the connectors fetch fails."""
+    try:
+        connectors = _box_connectors(api, part_type_id)
+    except Exception as e:
+        logger.warning("packing: connectors for %s failed: %s", part_type_id, e)
+        return None
+    names = {n.part_type_id: n.name
+             for n in HierarchyNode.for_instance(instance).filter(
+                 level=HierarchyNode.LEVEL_TYPE,
+                 part_type_id__in={v for v in connectors.values() if v})}
+    occupied = {m["functional_position"]: m["part_id"] for m in manifest}
+    positions = [{"position": pos, "child_type_id": ctid,
+                  "child_type_name": names.get(ctid, ctid),
+                  "current": occupied.get(pos)}
+                 for pos, ctid in sorted(connectors.items())]
+    n_free = sum(1 for p in positions if not p["current"])
+    return {"positions": positions, "n_total": len(positions), "n_free": n_free}
+
+
+def _pack_groups(instance, connectors, manifest) -> list[dict]:
+    """The packing page's pickable candidates: one group per child type that
+    still has free slots — mirror rows of that type, with status + QC flags
+    so un-shippable items are visible up front. Rows with a known parent
+    (HWDB rejects those with "already in use") or known-unapproved
+    (``enabled=False``) are hidden; unknowns pass and HWDB stays the arbiter
+    (a refused add reports that item's live HWDB status flags)."""
+    occupied = {m["functional_position"] for m in manifest}
+    in_box = {m["part_id"] for m in manifest if m["part_id"]}
+    free_by_type: dict[str, int] = {}
+    for pos, ctid in connectors.items():
+        if pos not in occupied and ctid:
+            free_by_type[ctid] = free_by_type.get(ctid, 0) + 1
+    groups = []
+    for ctid, n_free in sorted(free_by_type.items()):
+        rows = (HwdbComponentEvent.for_instance(instance)
+                .filter(part_type_id=ctid, parent_part_id="")
+                .exclude(part_id__in=in_box)
+                .exclude(enabled=False)
+                .order_by("part_id"))
+        leaf = HierarchyNode.for_instance(instance).filter(
+            level=HierarchyNode.LEVEL_TYPE, part_type_id=ctid).first()
+        groups.append({
+            "type_id": ctid, "name": leaf.name if leaf else ctid,
+            "n_free": n_free, "total": rows.count(),
+            "candidates": [
+                {"part_id": r.part_id, "status": r.status or "—",
+                 "qc_ok": bool(r.qaqc_uploaded and r.certified_qaqc),
+                 "institution": r.institution or "—"}
+                for r in rows[:_PACK_CANDIDATE_CAP]],
+        })
+    return groups
+
+
+@login_not_required
+@fnal_login_required
+def explore_box_pack_view(request, part_id):
+    """The packing page + endpoint (issue #63) — the iPad app's packing
+    step 2, via ``PATCH components/{pid}/subcomponents``.
+
+    GET renders the item picker: one candidate group per child type with free
+    slots (mirror rows with status + QC flags), plus an add-by-PID box for
+    typed/scanned entries. POST either unlinks one position (``unlink=<pos>``,
+    from the box page) or links the picked ``pid`` values — users pick items,
+    not slots; the server assigns each item to a free slot of its type.
+    Following the official clients, the PATCH always carries the COMPLETE
+    positions dict (current state + this request's changes).
+    """
+    inst = instance_of(request)
+    part_url = _rev(request, "explore:part", args=[part_id])
+    pack_url = _rev(request, "explore:box_pack", args=[part_id])
+    ptid = part_id.rsplit("-", 1)[0]
+    if inst not in settings.HWDB_WRITE_INSTANCES or not curation.is_shipping_type(inst, ptid):
+        return HttpResponseForbidden("Packing is not enabled here.")
+
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': part_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(part_url)
+
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    try:
+        connectors = _box_connectors(api, ptid)
+        manifest = current_manifest(api.get_subcomponents(part_id).get("data"))
+        current = {pos: None for pos in connectors}
+        for m in manifest:
+            if m["functional_position"] in current:
+                current[m["functional_position"]] = m["part_id"]
+    except requests.RequestException as e:
+        logger.warning("packing: state fetch for %s failed: %s", part_id, e)
+        messages.error(request, f"Couldn’t read the box’s current state — {e}")
+        return redirect(part_url)
+
+    if request.method != "POST":
+        return render(request, "explore/pack.html", {
+            "active_nav": "shipments",
+            "sidebar": navigation.sidebar_tree(inst, {}),
+            "part_id": part_id,
+            "n_contents": len(manifest),
+            "groups": _pack_groups(inst, connectors, manifest),
+        })
+
+    unlink = (request.POST.get("unlink") or "").strip()
+    if unlink:
+        removed = current.get(unlink)
+        if unlink not in current or not removed:
+            messages.error(request, f"Position “{unlink}” has nothing to unlink.")
+            return redirect(part_url)
+        payload = {"component": {"part_id": part_id},
+                   "subcomponents": {**current, unlink: None}}
+        try:
+            body = api.patch_subcomponents(part_id, payload)
+        except requests.RequestException as e:
+            logger.warning("packing: unlink patch for %s failed: %s", part_id, e)
+            messages.error(request, f"HWDB rejected the packing change — {_hwdb_error_detail(e)}")
+            return redirect(part_url)
+        if body.get("status") != "OK":
+            messages.error(request, f"HWDB rejected the packing change — {body.get('data') or body}")
+            return redirect(part_url)
+        _refresh_box_quietly(api, inst, ptid, part_id)
+        messages.success(request, f"Unlinked {removed} from “{unlink}”.")
+        return redirect(part_url)
+
+    # Add mode. Checked candidates + the add-by-PID box, deduped, order kept.
+    back = pack_url  # keep the user on the picker when an add fails
+    picked = list(dict.fromkeys(
+        [p.strip() for p in request.POST.getlist("pid") if p.strip()]
+        + re.split(r"[\s,]+", (request.POST.get("manual") or "").strip())))
+    picked = [p for p in picked if p]
+    if not picked:
+        messages.error(request, "Pick at least one item to add.")
+        return redirect(back)
+    # Free slots per child type, in stable position order.
+    free_by_type: dict[str, list] = {}
+    for pos in sorted(current, key=str):
+        if current[pos] is None and connectors.get(pos):
+            free_by_type.setdefault(connectors[pos], []).append(pos)
+    changes = {}
+    for pid in picked:
+        if not re.fullmatch(r"[A-Z]\d{11}-\d{5}", pid):
+            messages.error(request, f"“{pid}” doesn’t look like a PID.")
+            return redirect(back)
+        if pid in current.values():
+            messages.error(request, f"{pid} is already in this box.")
+            return redirect(back)
+        ctid = pid.rsplit("-", 1)[0]
+        free = free_by_type.get(ctid)
+        if free is None:
+            messages.error(request,
+                           f"This box has no positions for {ctid} items ({pid}).")
+            return redirect(back)
+        if not free:
+            messages.error(request,
+                           f"No free positions left for {ctid} items ({pid}).")
+            return redirect(back)
+        changes[free.pop(0)] = pid
+
+    # One PATCH per item: HWDB has no "is it free?" lookup, so an item that's
+    # secretly inside some other assembly only fails at write time — and it
+    # must not sink the rest of the batch. State accumulates across successes.
+    added, failed, state = [], [], dict(current)
+    for pos, pid in changes.items():
+        payload = {"component": {"part_id": part_id},
+                   "subcomponents": {**state, pos: pid}}
+        try:
+            body = api.patch_subcomponents(part_id, payload)
+            ok, detail = body.get("status") == "OK", body.get("data")
+        except requests.RequestException as e:
+            logger.warning("packing: patch %s into %s failed: %s", pid, part_id, e)
+            ok, detail = False, _hwdb_error_detail(e)
+        if ok:
+            state[pos] = pid
+            added.append(pid)
+        else:
+            try:  # tell the user where the refused item actually is
+                parent = current_container(api.get_container(pid).get("data") or [])
+            except Exception:
+                parent = None
+            if parent:
+                detail = f"{detail} (it is inside {parent['part_id']})"
+            else:
+                try:  # …or HWDB's own status flags on why it's unavailable
+                    flags = api.get_component_status(pid).get("data") or {}
+                    shown = ", ".join(
+                        f"{k}={v.get('name') if isinstance(v, dict) else v}"
+                        for k, v in flags.items())
+                    if shown:
+                        detail = f"{detail} (HWDB status: {shown})"
+                except Exception:
+                    pass
+            failed.append((pid, detail))
+
+    if added:
+        _refresh_box_quietly(api, inst, ptid, part_id)
+        messages.success(request, f"Added {len(added)} item(s): {', '.join(added)}.")
+    for pid, detail in failed:
+        messages.error(request, f"{pid} was not added — {detail}")
+    return redirect(back if failed else part_url)
 
 
 @login_not_required

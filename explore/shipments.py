@@ -23,7 +23,7 @@ from django.utils import timezone
 
 from hwdb.api_client import FnalDbApiClient
 
-from .models import HierarchyNode, ShipmentItem
+from .models import HierarchyNode, HwdbComponentEvent, ShipmentItem
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +155,19 @@ def fold_entries(entries: list) -> tuple[list, list]:
     return fields, attachments
 
 
+def _mirror_box_parent(instance: str, box_pid: str, manifest: list[dict]) -> None:
+    """Stamp a box's members' ``parent_part_id`` in the item mirror (#63):
+    members point at the box, ex-members are cleared. Child rows only exist
+    once their type has had an item sync — missing rows are simply skipped."""
+    members = [m["part_id"] for m in manifest if m.get("part_id")]
+    (HwdbComponentEvent.for_instance(instance)
+     .filter(parent_part_id=box_pid).exclude(part_id__in=members)
+     .update(parent_part_id=""))
+    if members:
+        (HwdbComponentEvent.for_instance(instance)
+         .filter(part_id__in=members).update(parent_part_id=box_pid))
+
+
 def refresh_box(api, instance: str, part_type_id: str, part_id: str) -> None:
     """Re-mirror ONE box's ShipmentItem row from HWDB — the targeted re-sync
     after the explorer itself writes to that box (issue #61). Same row shape as
@@ -172,6 +185,7 @@ def refresh_box(api, instance: str, part_type_id: str, part_id: str) -> None:
         last_arrived=_parse_dt((latest or {}).get("arrived")),
         shipped_date=shipped, received_date=received,
     )
+    _mirror_box_parent(instance, part_id, manifest)
 
 
 def _list_boxes(api, part_type_id: str) -> list[str]:
@@ -271,6 +285,9 @@ def sync_shipments(api_base_url: str, bearer: str, part_type_id: str,
         ShipmentItem.for_instance(instance).filter(part_type_id=part_type_id).delete()
     if ship_rows:
         ShipmentItem.objects.bulk_create(ship_rows, batch_size=1000)
+    # The same manifest fetch also keeps items' parent_part_id honest (#63).
+    for pid, _locs, manifest in results:
+        _mirror_box_parent(instance, pid, manifest)
 
     # Mark the leaf synced even when 0 boxes — so the page stops
     # auto-syncing (NULL would read as "never synced" and re-trigger forever).

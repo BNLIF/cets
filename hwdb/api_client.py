@@ -123,6 +123,24 @@ class FnalDbApiClient:
         """
         return self._make_request("GET", f"components/{part_id}/subcomponents")
 
+    def get_component_status(self, part_id):
+        """Per-item status flags (``GET components/{pid}/status``): a dict
+        mixing named status refs and booleans — HWDB's own word on why an
+        item is/isn't "available" for packing. In the OpenAPI spec, not in
+        the official Python client (issue #63).
+        """
+        return self._make_request("GET", f"components/{part_id}/status")
+
+    def get_container(self, part_id):
+        """The item's parent(s) (``GET components/{pid}/container``) — the
+        reverse of ``get_subcomponents``: mount/unmount rows whose
+        ``container`` ref names the box/assembly holding this item. Present
+        in the HWDB OpenAPI spec but never wrapped by the official Python
+        client (found via the live spec, 2026-07-11; also unwrapped there:
+        PATCH pack-in / unpack).
+        """
+        return self._make_request("GET", f"components/{part_id}/container")
+
     def get_component(self, part_id):
         """Full item record, including the free-form ``specifications`` blob.
 
@@ -179,6 +197,16 @@ class FnalDbApiClient:
 
     def patch_component(self, part_id, payload):
         return self._make_request("PATCH", f"components/{part_id}", data=payload)
+
+    def patch_subcomponents(self, part_id, payload):
+        """Set a component's functional positions (issue #63). The payload is
+        ``{"component": {"part_id": …}, "subcomponents": {pos: pid|None, …}}``;
+        the official clients always send the COMPLETE positions dict, with
+        ``None`` for a position to be (or stay) empty.
+        """
+        return self._make_request(
+            "PATCH", f"components/{part_id}/subcomponents", data=payload
+        )
 
     def post_location(self, part_id, payload):
         return self._make_request(

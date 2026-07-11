@@ -96,6 +96,21 @@
     border-radius: var(--r-sm); padding: 6px 15px; cursor: pointer; }
   .sd-locform button:hover { border-color: var(--accent); }
   .sd-locform .hint { font-size: 11.5px; color: var(--faint); }
+
+  .pk-unlink { font: inherit; font-size: 12px; font-weight: 600; color: var(--dim);
+    background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm);
+    padding: 3px 11px; cursor: pointer; }
+  .pk-unlink:hover { border-color: var(--rule-hard); }
+  .pk-actions { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+  .pk-link { font: inherit; font-size: 13px; font-weight: 600; color: var(--accent-ink);
+    background: var(--accent-soft); border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--rule));
+    border-radius: var(--r-sm); padding: 6px 15px; cursor: pointer; text-decoration: none;
+    display: inline-block; }
+  .pk-link:hover { border-color: var(--accent); }
+  .pk-hint { font-size: 11.5px; color: var(--faint); }
+  .pk-slots { max-height: 380px; overflow-y: auto; }
+  .pk-tid { font-family: var(--font-mono); font-size: 11px; color: var(--faint); }
+  .pk-empty-slot { color: var(--faint); font-family: var(--font-body, inherit); font-size: 12.5px; }
 </style>
 
 <div class="sd-page">
@@ -141,11 +156,17 @@
 
   <div class="sd-grid">
     <div>
-      {% if detail.facts %}
+      {% if detail.facts or mirror_parent %}
       <div class="sd-card">
         <h2>Item</h2>
         <table class="sd-kv">
           {% for f in detail.facts %}<tr><td class="k">{{ f.label }}</td><td>{{ f.value }}</td></tr>{% endfor %}
+          {% if detail.container %}<tr><td class="k">Inside</td>
+            <td><a class="mono" style="color:var(--accent-ink);text-decoration:none;" href="{% url 'explore:part' part_id=detail.container.part_id %}">{{ detail.container.part_id }}</a>
+            {% if detail.container.type_name %} — {{ detail.container.type_name }}{% endif %}{% if detail.container.functional_position %} <span style="color:var(--faint);font-size:11px;">· position “{{ detail.container.functional_position }}”</span>{% endif %}</td></tr>
+          {% elif mirror_parent %}<tr><td class="k">Inside</td>
+            <td><a class="mono" style="color:var(--accent-ink);text-decoration:none;" href="{% url 'explore:part' part_id=mirror_parent %}">{{ mirror_parent }}</a>
+            <span style="color:var(--faint);font-size:11px;">(from the mirror)</span></td></tr>{% endif %}
         </table>
       </div>
       {% endif %}
@@ -194,6 +215,38 @@
           </tbody>
         </table>
       </div>
+
+      {% if packing %}
+      <div class="sd-card">
+        <h2>Packing</h2>
+        {% if packing.n_total %}
+        <form method="post" action="{% url 'explore:box_pack' part_id=part_id %}">
+          {% csrf_token %}
+          <div class="pk-slots">
+          <table class="sd-table">
+            <thead><tr><th>Position</th><th>Accepts</th><th>Item</th><th></th></tr></thead>
+            <tbody>
+            {% for p in packing.positions %}
+              <tr>
+                <td>{{ p.position }}</td>
+                <td>{{ p.child_type_name }} <span class="pk-tid">{{ p.child_type_id }}</span></td>
+                <td class="mono">{% if p.current %}<a href="{% url 'explore:part' part_id=p.current %}">{{ p.current }}</a>{% else %}<span class="pk-empty-slot">empty</span>{% endif %}</td>
+                <td>{% if p.current %}<button class="pk-unlink" name="unlink" value="{{ p.position }}" title="Remove {{ p.current }} from this box">Unlink</button>{% endif %}</td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+          </div>
+        </form>
+        <div class="pk-actions">
+          {% if packing.n_free %}<a class="pk-link" href="{% url 'explore:box_pack' part_id=part_id %}">Add items…</a>{% endif %}
+          <span class="pk-hint">{{ packing.n_free }} of {{ packing.n_total }} positions free.</span>
+        </div>
+        {% else %}
+        <div class="sd-empty">This box type defines no functional positions (connectors) in HWDB, so contents can’t be linked.</div>
+        {% endif %}
+      </div>
+      {% endif %}
 
       {% if detail.has_location or can_update_location %}
       <div class="sd-card">

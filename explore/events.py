@@ -67,7 +67,7 @@ def _parse_created(created_s) -> datetime | None:
         return None
 
 
-def _list_part_ids(api, part_type_id: str) -> Iterator[str]:
+def _list_part_ids(api, part_type_id: str, extra_params: dict | None = None) -> Iterator[str]:
     """Paginate the component listing, yielding each component's part_id.
 
     The listing carries ``created`` but NOT ``updated``; the per-component
@@ -78,7 +78,7 @@ def _list_part_ids(api, part_type_id: str) -> Iterator[str]:
         body = api._make_request(
             "GET",
             f"component-types/{part_type_id}/components",
-            params={"page": page, "size": 500},
+            params={"page": page, "size": 500, **(extra_params or {})},
         )
         rows = body.get("data") or []
         for row in rows:
@@ -135,7 +135,7 @@ def _fetch_component(api, part_id: str, date_field: str | None,
                         tests.append((name, dt))
 
     created = updated = None
-    serial = created_by = status = manufacturer = institution = ""
+    serial = created_by = status = manufacturer = institution = parent = ""
     installed = uploaded = certified = None
     if need_detail:
         detail = api._make_request("GET", f"components/{part_id}")
@@ -152,13 +152,15 @@ def _fetch_component(api, part_id: str, date_field: str | None,
         installed = _flag(d.get("is_installed"))
         uploaded = _flag(d.get("qaqc_uploaded"))
         certified = _flag(d.get("certified_qaqc"))
+        # The box/assembly currently holding this item (#63); "" when free.
+        parent = d.get("parent_part_id") or ""
 
     return {
         "part_id": part_id, "created": created, "updated": updated,
         "serial_number": serial, "created_by": created_by, "status": status,
         "manufacturer": manufacturer, "institution": institution,
         "is_installed": installed, "qaqc_uploaded": uploaded,
-        "certified_qaqc": certified,
+        "certified_qaqc": certified, "parent_part_id": parent,
         "tests": tests, "has_detail": need_detail, "has_tests": need_tests,
     }
 
@@ -294,11 +296,32 @@ def sync_test_events(
                     is_installed=r.get("is_installed"),
                     qaqc_uploaded=r.get("qaqc_uploaded"),
                     certified_qaqc=r.get("certified_qaqc"),
+                    parent_part_id=r.get("parent_part_id", ""),
                 )
                 for r in results if r["has_detail"]
             ],
             batch_size=1000,
         )
+
+        # --- Availability sweep (issue #63) ---
+        # The detail record doesn't carry HWDB's approval flag, but the
+        # listing can filter on it: one enabled=false sweep marks the
+        # "not yet available" items. Runs in every mode (it's ~1 call per
+        # 500 such items) so known rows stay fresh too; a failing sweep
+        # just leaves ``enabled`` as-is (NULL = unknown passes the picker).
+        try:
+            disabled = set(_list_part_ids(bootstrap, part_type_id,
+                                          extra_params={"enabled": "false"}))
+        except Exception as e:
+            logger.warning("sync tests: enabled sweep for %s failed: %s",
+                           part_type_id, e)
+            disabled = None
+        if disabled is not None:
+            base = HwdbComponentEvent.for_instance(instance).filter(
+                part_type_id=part_type_id)
+            base.filter(part_id__in=disabled).update(enabled=False)
+            base.exclude(part_id__in=disabled).update(enabled=True)
+            yield f"sync tests: {len(disabled)} item(s) not yet enabled\n"
 
         n_tests = HwdbTestEvent.for_instance(instance).filter(part_type_id=part_type_id).count()
         node.tests_synced_at = timezone.now()
