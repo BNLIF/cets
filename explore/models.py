@@ -252,6 +252,20 @@ class BoxChecklist(InstanceScoped):
         return f"BoxChecklist({self.part_id}, {self.workflow}, scene {self.current_scene})"
 
 
+class PackScan(InstanceScoped):
+    """One PID scanned on a phone, queued for the same user's open packing
+    page (issue #68). The phone's ``/scan/`` page appends rows; the packing
+    picker polls for rows newer than the id it loaded with. Rows are
+    disposable — a user's stale rows are swept on each new scan."""
+
+    username = models.CharField(max_length=150, db_index=True)
+    part_id = models.CharField(max_length=50)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"PackScan({self.username}, {self.part_id})"
+
+
 class HierarchySyncState(models.Model):
     """One row per HWDB instance recording that instance's last hierarchy
     (skeleton) sync run.

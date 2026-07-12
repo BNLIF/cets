@@ -26,14 +26,14 @@ from hwdb.fnal import flow
 from hwdb.fnal import session as fnal_session
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
 
-from . import charts, checklists, curation, execsummary, navigation
+from . import charts, checklists, curation, execsummary, navigation, scanning
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, sync_test_events
 from .hierarchy import sync_hierarchy, sync_system
 from .instances import instance_of, namespace_of
 from .models import (
     BoxChecklist, HierarchyNode, HierarchySyncState, HwdbComponentEvent,
-    ShipmentItem,
+    PackScan, ShipmentItem,
 )
 from .queries import (
     component_breakdowns, component_qc_flags, component_type_progress,
@@ -991,12 +991,23 @@ def explore_box_pack_view(request, part_id):
         return redirect(part_url)
 
     if request.method != "POST":
+        # Phone-as-scanner hookup (issue #68): the picker polls the scan feed
+        # for PIDs this user scans on their phone, starting AFTER the newest
+        # row at page load so stale scans don't flood in.
+        scan_url = request.build_absolute_uri(_rev(request, "explore:scan"))
+        scan_since = (PackScan.for_instance(inst)
+                      .filter(username=request.user.get_username())
+                      .order_by("-id").values_list("id", flat=True).first()) or 0
         return render(request, "explore/pack.html", {
             "active_nav": "shipments",
             "sidebar": navigation.sidebar_tree(inst, {}),
             "part_id": part_id,
             "n_contents": len(manifest),
             "groups": _pack_groups(inst, connectors, manifest),
+            "scan_url": scan_url,
+            "scan_qr_svg": scanning.qr_svg(scan_url),
+            "scan_feed_url": _rev(request, "explore:scan_feed"),
+            "scan_since": scan_since,
         })
 
     unlink = (request.POST.get("unlink") or "").strip()
@@ -1095,6 +1106,62 @@ def explore_box_pack_view(request, part_id):
     for pid, detail in failed:
         messages.error(request, f"{pid} was not added — {detail}")
     return redirect(back if failed else part_url)
+
+
+@login_not_required
+@fnal_login_required
+def explore_scan_view(request):
+    """The phone scanner page (issue #68): camera decoding in the browser
+    (vendored html5-qrcode, same as the Dashboard's scanner), each hit POSTed
+    to the submit endpoint below. No pairing tokens or scanner-specific auth
+    — the phone signs in with the same FNAL session login as any browser,
+    and scans queue for the SAME username's open packing page."""
+    inst = instance_of(request)
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return HttpResponseForbidden("Scanning is not enabled here.")
+    return render(request, "explore/scan.html", {
+        "submit_url": _rev(request, "explore:scan_submit"),
+    })
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_scan_submit_view(request):
+    """One scanned (or typed) text → a queued PackScan row. PID extraction
+    handles bare PIDs, label suffixes and HWDB URLs (the Dashboard's
+    regexes). The user's day-old rows are swept opportunistically."""
+    inst = instance_of(request)
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return JsonResponse({"error": "writes disabled"}, status=403)
+    pid = scanning.extract_pid(request.POST.get("text") or "")
+    if not pid:
+        return JsonResponse({"error": "no PID in the scanned text"}, status=422)
+    user = request.user.get_username()
+    PackScan.objects.filter(
+        username=user, created_at__lt=timezone.now() - timedelta(days=1)).delete()
+    row = PackScan.objects.create(instance=inst, username=user, part_id=pid)
+    return JsonResponse({"pid": pid, "id": row.id})
+
+
+@login_not_required
+@fnal_login_required
+def explore_scan_feed_view(request):
+    """The desktop packing page's poll target: this user's scans newer than
+    ``?since=<id>``, oldest first."""
+    inst = instance_of(request)
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return JsonResponse({"error": "writes disabled"}, status=403)
+    try:
+        since = int(request.GET.get("since") or 0)
+    except ValueError:
+        since = 0
+    rows = (PackScan.for_instance(inst)
+            .filter(username=request.user.get_username(), id__gt=since)
+            .order_by("id")[:100])
+    scans = [{"id": r.id, "pid": r.part_id} for r in rows]
+    return JsonResponse({"scans": scans,
+                         "last": scans[-1]["id"] if scans else since})
 
 
 def _whoami_context(api) -> tuple[str, set, dict]:

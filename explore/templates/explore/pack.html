@@ -116,6 +116,19 @@
         individually and doesn’t block the others.</span>
     </div>
   </form>
+
+  <div class="pk-group pk-phone">
+    <h2>Scan with your phone</h2>
+    <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin-top:8px;">
+      <div style="flex-shrink:0;">{{ scan_qr_svg|safe }}</div>
+      <div style="font-size:13px; color:var(--dim); max-width:480px;">
+        Open <a class="mono" href="{{ scan_url }}">{{ scan_url }}</a> on your phone (scan this QR code with
+        the camera app) and sign in with the same account. Labels you scan there land in this page's
+        selection — matching candidates get checked, others go into the add-by-PID box.
+        <div id="pk-scan-status" class="pk-hint" style="margin-top:6px;">Listening for scans…</div>
+      </div>
+    </div>
+  </div>
   {% else %}
   <div class="pk-group"><div class="pk-empty">No free positions left in this box — unlink something on the
     <a href="{% url 'explore:part' part_id=part_id %}">box page</a> first.</div></div>
@@ -154,6 +167,50 @@
       window.location.reload();
     });
   });
+})();
+
+// Phone-as-scanner feed (issue #68): poll for PIDs scanned on the user's
+// phone. A PID listed as a candidate gets its checkbox ticked; anything else
+// (e.g. not yet in the mirror) is appended to the add-by-PID input.
+(function () {
+  var statusEl = document.getElementById("pk-scan-status");
+  var manual = document.getElementById("pk-manual-input");
+  if (!statusEl || !manual) return;
+  var since = {{ scan_since }};
+  var received = 0;
+
+  function take(pid) {
+    var box = document.querySelector('input[name=pid][value="' + pid + '"]');
+    if (box) {
+      box.checked = true;
+      var row = box.closest("tr");
+      if (row) {
+        row.style.background = "var(--good-bg)";
+        row.scrollIntoView({ block: "nearest" });
+      }
+      return;
+    }
+    var parts = manual.value.split(/[\s,]+/).filter(Boolean);
+    if (parts.indexOf(pid) === -1) {
+      parts.push(pid);
+      manual.value = parts.join(", ");
+    }
+  }
+
+  async function poll() {
+    var r, j;
+    try {
+      r = await fetch("{{ scan_feed_url }}?since=" + since);
+      j = await r.json();
+    } catch (e) { return; }
+    if (!r.ok || !j.scans) return;
+    j.scans.forEach(function (s) { take(s.pid); received++; });
+    since = j.last;
+    if (received) {
+      statusEl.textContent = received + " scan(s) received from your phone.";
+    }
+  }
+  setInterval(poll, 2000);
 })();
 </script>
 {% endblock %}

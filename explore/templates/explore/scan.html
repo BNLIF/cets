@@ -1,0 +1,152 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Scan · HWDB Explorer</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { margin: 0; font: 15px/1.45 system-ui, sans-serif; background: #14110c; color: #e7dfce; }
+    .top { padding: 14px 16px 10px; }
+    .top h1 { font-size: 1.05rem; margin: 0; }
+    .top p { margin: 4px 0 0; font-size: 12.5px; color: #9b937f; }
+    #reader { width: 100%; max-width: 480px; margin: 0 auto; }
+    .pane { padding: 12px 16px; max-width: 480px; margin: 0 auto; box-sizing: border-box; }
+    .btn { font: inherit; font-weight: 600; color: #e7dfce; background: #2a251c; border: 1px solid #4a4335;
+      border-radius: 8px; padding: 10px 16px; cursor: pointer; }
+    .btn.primary { background: #3d5a3d; border-color: #5a7a5a; }
+    .row { display: flex; gap: 10px; margin-top: 8px; }
+    #status { min-height: 22px; font-size: 13.5px; margin: 10px 0 0; }
+    #status.ok { color: #8fce8f; }
+    #status.bad { color: #e08a8a; }
+    input[type=text] { font: inherit; font-family: ui-monospace, monospace; font-size: 14px; color: #e7dfce;
+      background: #1c1812; border: 1px solid #4a4335; border-radius: 8px; padding: 10px; flex: 1; min-width: 0; }
+    ul#sent { list-style: none; margin: 10px 0 0; padding: 0; font-family: ui-monospace, monospace; font-size: 13px; }
+    ul#sent li { padding: 5px 2px; border-top: 1px solid #2a251c; }
+    ul#sent li .t { color: #9b937f; font-family: system-ui, sans-serif; font-size: 11.5px; margin-left: 8px; }
+    #zoomWrap { display: none; margin-top: 8px; }
+    #zoomWrap input { width: 100%; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <h1>Scan items into your packing page</h1>
+    <p>Scanned PIDs appear on the “Add items” page you have open on your computer (same login).</p>
+  </div>
+
+  <div id="reader"></div>
+
+  <div class="pane">
+    <form id="csrf" style="display:none;">{% csrf_token %}</form>
+    <div class="row">
+      <button id="startBtn" class="btn primary">Start camera</button>
+      <button id="stopBtn" class="btn">Stop</button>
+    </div>
+    <div id="zoomWrap"><input id="zoomSlider" type="range"></div>
+    <div id="status">Tap “Start camera” and point at a label’s QR code or barcode.</div>
+    <form id="manualForm" class="row">
+      <input type="text" id="manualText" placeholder="…or type/paste a PID" autocomplete="off"
+             autocapitalize="characters">
+      <button class="btn" type="submit">Send</button>
+    </form>
+    <ul id="sent"></ul>
+  </div>
+
+  <script src="{% static 'explore/html5-qrcode.min.js' %}"></script>
+  <script>
+  (function () {
+    var SUBMIT_URL = "{{ submit_url }}";
+    var csrf = document.querySelector("#csrf input[name=csrfmiddlewaretoken]").value;
+    var statusEl = document.getElementById("status");
+    var sentList = document.getElementById("sent");
+    var recent = {};  // decoded text -> timestamp, to suppress rapid re-decodes
+
+    function setStatus(msg, cls) { statusEl.className = cls || ""; statusEl.textContent = msg; }
+
+    async function send(text) {
+      var now = Date.now();
+      if (recent[text] && now - recent[text] < 4000) return;
+      recent[text] = now;
+      var fd = new FormData();
+      fd.append("csrfmiddlewaretoken", csrf);
+      fd.append("text", text);
+      var r, j;
+      try { r = await fetch(SUBMIT_URL, { method: "POST", body: fd }); j = await r.json(); }
+      catch (e) { setStatus("✗ Send failed: " + e, "bad"); return; }
+      if (!r.ok) { setStatus("✗ " + (j.error || "rejected") + " — “" + text + "”", "bad"); return; }
+      setStatus("✓ Sent " + j.pid + " — keep scanning.", "ok");
+      if (navigator.vibrate) navigator.vibrate(80);
+      var li = document.createElement("li");
+      li.textContent = j.pid;
+      var t = document.createElement("span");
+      t.className = "t"; t.textContent = new Date().toLocaleTimeString();
+      li.appendChild(t);
+      sentList.insertBefore(li, sentList.firstChild);
+    }
+
+    // --- camera (the Dashboard's html5-qrcode recipe, continuous mode) ---
+    var html5 = null, started = false;
+    var config = { fps: 12, qrbox: { width: 300, height: 300 }, rememberLastUsedCamera: true };
+
+    async function setupZoomIfAvailable() {
+      try {
+        var video = document.querySelector("#reader video");
+        if (!video || !video.srcObject) return;
+        var track = video.srcObject.getVideoTracks()[0];
+        if (!track || !track.getCapabilities) return;
+        var caps = track.getCapabilities();
+        try {
+          if (caps.focusMode && caps.focusMode.includes("continuous"))
+            await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] });
+        } catch (e) {}
+        if (!caps.zoom) return;
+        var wrap = document.getElementById("zoomWrap"), slider = document.getElementById("zoomSlider");
+        wrap.style.display = "block";
+        slider.min = caps.zoom.min; slider.max = caps.zoom.max; slider.step = caps.zoom.step || 0.1;
+        slider.oninput = function () {
+          track.applyConstraints({ advanced: [{ zoom: parseFloat(slider.value) }] }).catch(function () {});
+        };
+      } catch (e) {}
+    }
+
+    async function start() {
+      if (started) return;
+      if (typeof Html5Qrcode === "undefined") { setStatus("✗ scanner library did not load.", "bad"); return; }
+      setStatus("Starting camera…");
+      html5 = new Html5Qrcode("reader");
+      var cams = null;
+      try { cams = await Html5Qrcode.getCameras(); } catch (e) {}
+      var best = null;
+      if (cams && cams.length) {
+        var byLabel = cams.find(function (c) { return /back|rear|environment/i.test(c.label || ""); });
+        best = (byLabel || cams[cams.length - 1]).id;
+      }
+      try { await html5.start({ facingMode: "environment" }, config, send, function () {}); }
+      catch (e1) {
+        if (!best) { setStatus("✗ Camera start failed: " + e1, "bad"); return; }
+        try { await html5.start(best, config, send, function () {}); }
+        catch (e2) { setStatus("✗ Camera start failed: " + e2, "bad"); return; }
+      }
+      started = true;
+      setStatus("Camera ready — scan a label.");
+      setupZoomIfAvailable();
+    }
+
+    async function stop() {
+      if (html5) { try { await html5.stop(); } catch (e) {} try { html5.clear(); } catch (e) {} }
+      html5 = null; started = false;
+      setStatus("Camera stopped.");
+    }
+
+    document.getElementById("startBtn").onclick = start;
+    document.getElementById("stopBtn").onclick = stop;
+    document.getElementById("manualForm").onsubmit = function (ev) {
+      ev.preventDefault();
+      var input = document.getElementById("manualText");
+      if (input.value.trim()) send(input.value.trim());
+      input.value = "";
+    };
+  })();
+  </script>
+</body>
+</html>
