@@ -91,6 +91,7 @@
       .eh-foot a:hover { text-decoration: underline; }
       .eh-foot .sep { color: var(--rule-hard); }
     </style>
+    <script src="https://unpkg.com/htmx.org@1.9.5"></script>
 </head>
 <body>
     <script>
@@ -213,6 +214,16 @@
           if (d.dataset.key === e.detail.key && d.open !== e.detail.open) d.open = e.detail.open;
         });
       });
+      // Scroll the sidebar so the current node is visible (centered when it
+      // would otherwise be off-screen). Scroll the container directly rather
+      // than scrollIntoView, which would also scroll the page.
+      var side = document.getElementById("ex-side");
+      var cur = side && side.querySelector(".is-cur");
+      if (cur) {
+        var top = cur.getBoundingClientRect().top - side.getBoundingClientRect().top + side.scrollTop;
+        if (top < side.scrollTop || top + cur.offsetHeight > side.scrollTop + side.clientHeight)
+          side.scrollTop = top - side.clientHeight / 2;
+      }
     })();
     </script>
     <script>

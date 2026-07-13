@@ -256,6 +256,16 @@ def explore_view(request, trail=None):
         breakdowns = component_breakdowns(inst, leaf.part_type_id)
         qc_flags = component_qc_flags(inst, leaf.part_type_id)
 
+    # htmx pager clicks swap just their pane (keyed by hx-target), so the page
+    # keeps its scroll position instead of reloading and jumping to the top.
+    if getattr(request, "htmx", False):
+        fragment = {"parts-pane": "explore/_parts_table.html",
+                    "empty-boxes-pane": "explore/_empty_boxes_table.html",
+                    }.get(request.htmx.target)
+        if fragment:
+            return render(request, fragment, {
+                "parts_page": parts_page, "empty_boxes_page": empty_boxes_page})
+
     return render(
         request,
         "explore/explore.html",
@@ -399,6 +409,9 @@ def shipments_view(request):
         -(x["box"].last_arrived.timestamp() if x["box"].last_arrived else 0),
     ))
     page_obj = Paginator(boxes, 50).get_page(request.GET.get("page"))
+    # htmx pager clicks swap just the boxes pane in place (no scroll-to-top).
+    if getattr(request, "htmx", False) and request.htmx.target == "shipments-pane":
+        return render(request, "explore/_shipments_table.html", {"page_obj": page_obj})
     return render(request, "explore/shipments.html", {
         "active_nav": "shipments",
         "sidebar": navigation.sidebar_tree(inst, {}),
@@ -649,8 +662,7 @@ def explore_part_view(request, part_id):
     leaf = HierarchyNode.for_instance(inst).filter(
         level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
     # Open + highlight this part's component type in the sidebar tree.
-    side_ctx = ({"kind": "leaf", "part_type_id": ptid, "system_id": leaf.system_id,
-                 "subsystem_id": leaf.subsystem_id} if leaf else {})
+    side_ctx = navigation.leaf_sidebar_ctx(inst, leaf) if leaf else {}
     box = (ShipmentItem.for_instance(inst).filter(part_id=part_id).first()
            if is_shipping else None)
     # Mirror fallback for containment (issue #63): used only when the live

@@ -292,6 +292,13 @@ class ShipmentPanelViewTest(TestCase):
         html2 = self.client.get(url, {"bpage": 2}).content.decode()
         self.assertIn("E050", html2)
         self.assertNotIn("E000", html2)
+        # An htmx pager click gets just the pane back (in-place swap, no
+        # full-page reload / scroll-to-top).
+        frag = self.client.get(url, {"bpage": 2}, HTTP_HX_REQUEST="true",
+                               HTTP_HX_TARGET="empty-boxes-pane").content.decode()
+        self.assertIn('id="empty-boxes-pane"', frag)
+        self.assertIn("E050", frag)
+        self.assertNotIn("<html", frag)
 
     def test_unsynced_shipping_leaf_autosyncs_components_first(self):
         # Never-synced leaf: the component auto-sync fires; the shipments
@@ -570,6 +577,22 @@ class ShipmentsPageTest(TestCase):
         self.assertIn(navigation.leaf_path_for("prod", self.leaf.part_type_id), html)
         self.assertIn("ship-pill is-transit", html)
         self.assertIn("ship-pill is-delivered", html)
+
+    def test_htmx_pager_click_returns_just_the_pane(self):
+        # 51 boxes with contents → 2 pages; an hx-get from the pager swaps the
+        # boxes pane in place (fragment only, no full page / scroll-to-top).
+        for i in range(49):
+            ShipmentItem.objects.create(part_type_id=self.leaf.part_type_id,
+                                        part_id=f"C{i:03d}", location_id=200,
+                                        n_contents=1)
+        frag = self.client.get(reverse("explore:shipments"), {"page": 2},
+                               HTTP_HX_REQUEST="true",
+                               HTTP_HX_TARGET="shipments-pane").content.decode()
+        self.assertTrue(frag.strip().startswith('<div id="shipments-pane"'))
+        self.assertIn("Page 2 of 2", frag)
+        self.assertNotIn("<html", frag)                # not the full page
+        self.assertIn('hx-get="?page=1"', frag)
+        self.assertIn('hx-target="#shipments-pane"', frag)
 
     def test_nav_has_shipments_tab_active(self):
         html = self.client.get(reverse("explore:shipments")).content.decode()

@@ -356,7 +356,8 @@ def sidebar_tree(instance: str, ctx: dict) -> list[dict]:
                     l.n_components,
                     ctx.get("kind") == "leaf" and ctx.get("part_type_id") == l.part_type_id,
                     False, is_leaf=True,
-                    empty=lempty, synced=not lempty and _leaf_synced(l)))
+                    empty=lempty, synced=not lempty and _leaf_synced(l),
+                    title=f"{l.name} ({l.part_type_id})"))
             sempty, ssynced = _state(*sub_stats.get((sid, ssid), (0, 0)))
             out.append(_tnode(sub.subsystem_name,
                               node_path(instance, rk, fk,
@@ -527,6 +528,23 @@ def curated_tree(instance: str) -> dict:
         regions_out.append(rnode)
     return {"kind": "root", "name": "DUNE", "sub": "Project D",
             "children": regions_out, "n": sum(r["n"] for r in regions_out)}
+
+
+def leaf_sidebar_ctx(instance: str, leaf) -> dict:
+    """Sidebar ctx for a component-type leaf: carries the region/family keys so
+    ``sidebar_tree`` opens the whole branch down to (and highlights) the leaf."""
+    ctx = {"kind": "leaf", "part_type_id": leaf.part_type_id,
+           "system_id": leaf.system_id, "subsystem_id": leaf.subsystem_id}
+    for region in all_regions(instance):
+        if not curation.region_is_browsable(region):
+            continue
+        for family in region.get("families", []) or []:
+            if not curation.family_is_browsable(family):
+                continue
+            if leaf.system_id in (family.get("systems") or []):
+                ctx["region_key"], ctx["family_key"] = region["key"], family["key"]
+                return ctx
+    return ctx
 
 
 def leaf_path_for(instance: str, part_type_id: str) -> str | None:

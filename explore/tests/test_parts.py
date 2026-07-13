@@ -355,6 +355,22 @@ class LeafPartsTableTest(TestCase):
         self.assertIn("« First", html)
         self.assertIn('href="?page=1"', html)                                  # First → page 1
 
+    def test_htmx_pager_click_returns_just_the_pane(self):
+        # An hx-get from the pager swaps the pane in place (no full page, no
+        # scroll-to-top): the response is the fragment only.
+        html = self.client.get(self.url + "?page=2", HTTP_HX_REQUEST="true",
+                               HTTP_HX_TARGET="parts-pane").content.decode()
+        # Nothing renders outside the swapped div — stray text (e.g. a broken
+        # template comment) would accumulate above the table on every swap.
+        self.assertTrue(html.strip().startswith('<div id="parts-pane"'))
+        self.assertIn('id="parts-pane"', html)
+        self.assertIn("Page 2 of 2", html)
+        self.assertNotIn("<html", html)                # not the full page
+        self.assertNotIn("extree-leaf", html)          # no sidebar
+        # Pager links carry the htmx swap attributes (inherited from the pane).
+        self.assertIn('hx-get="?page=1"', html)
+        self.assertIn('hx-target="#parts-pane"', html)
+
     def test_component_breakdown_panel_when_facets_present(self):
         # Mirror-only breakdown bar charts appear once components carry a facet.
         HwdbComponentEvent.objects.filter(part_type_id=self.leaf.part_type_id).update(
@@ -400,3 +416,29 @@ class SearchTest(TestCase):
     def test_short_query_returns_empty(self):
         d = self.client.get("/hw/search/api/", {"q": "a"}).json()
         self.assertEqual(d, {"types": [], "parts": [], "direct_part": None})
+
+
+class LeafSidebarCtxTest(TestCase):
+    """A part page's sidebar ctx must open the whole branch down to the
+    part's component-type leaf (region + family included), so the sidebar
+    shows and can scroll to where you are."""
+
+    def test_ctx_carries_region_and_family_keys(self):
+        leaf = _comp_leaf()
+        ctx = navigation.leaf_sidebar_ctx("prod", leaf)
+        self.assertEqual(ctx, {"kind": "leaf", "part_type_id": "D05700200099",
+                               "system_id": 81, "subsystem_id": 300,
+                               "region_key": "FD", "family_key": "FD-CE"})
+
+    def test_sidebar_tree_opens_branch_and_flags_leaf_current(self):
+        leaf = _comp_leaf()
+        tree = navigation.sidebar_tree("prod", navigation.leaf_sidebar_ctx("prod", leaf))
+        region = next(r for r in tree if r["label"] == "Far Detector")
+        self.assertTrue(region["open"])
+        family = next(f for f in region["children"] if f["label"] == "FD CE")
+        self.assertTrue(family["open"])
+        # FD CE is a flat family (one system) → its children are subsystems.
+        sub = next(s for s in family["children"] if s["label"] == "ColdADC")
+        self.assertTrue(sub["open"])
+        leaf_node = next(l for l in sub["children"] if l["is_leaf"])
+        self.assertTrue(leaf_node["current"])

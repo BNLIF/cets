@@ -1,0 +1,25 @@
+{% comment %} Empty-boxes table + pager for a shipping leaf. Pager links swap
+just this pane via htmx (?bpage=), so the page keeps its scroll position. {% endcomment %}
+<div id="empty-boxes-pane" hx-target="#empty-boxes-pane" hx-swap="outerHTML" hx-push-url="true">
+    {% if empty_boxes_page.paginator.num_pages > 1 %}
+    <div style="display:flex; gap:10px; align-items:center; font-size:12px; margin: 8px 0 4px;">
+        {% if empty_boxes_page.has_previous %}<a style="color:var(--accent-ink);text-decoration:none;" href="?bpage=1" hx-get="?bpage=1">« First</a><a style="color:var(--accent-ink);text-decoration:none;" href="?bpage={{ empty_boxes_page.previous_page_number }}" hx-get="?bpage={{ empty_boxes_page.previous_page_number }}">‹ Prev</a>{% else %}<span class="cell-muted">« First</span><span class="cell-muted">‹ Prev</span>{% endif %}
+        <span class="cell-muted" style="font-variant-numeric:tabular-nums;">Page {{ empty_boxes_page.number }} of {{ empty_boxes_page.paginator.num_pages }} · {{ empty_boxes_page.paginator.count }} boxes</span>
+        {% if empty_boxes_page.has_next %}<a style="color:var(--accent-ink);text-decoration:none;" href="?bpage={{ empty_boxes_page.next_page_number }}" hx-get="?bpage={{ empty_boxes_page.next_page_number }}">Next ›</a><a style="color:var(--accent-ink);text-decoration:none;" href="?bpage={{ empty_boxes_page.paginator.num_pages }}" hx-get="?bpage={{ empty_boxes_page.paginator.num_pages }}">Last »</a>{% else %}<span class="cell-muted">Next ›</span><span class="cell-muted">Last »</span>{% endif %}
+    </div>
+    {% endif %}
+    <table class="ship-table">
+        <thead><tr><th>Box PID</th><th>Status</th><th>Latest location</th><th>Arrived</th></tr></thead>
+        <tbody>
+        {% for s in empty_boxes_page %}
+            <tr class="ship-row" onclick="if(!getSelection().toString())location.href='{% url 'explore:part' part_id=s.part_id %}'" title="Open shipping details for {{ s.part_id }}">
+                <td class="mono"><a href="{% url 'explore:part' part_id=s.part_id %}" onclick="event.stopPropagation()" title="Open this box’s detail page">{{ s.part_id }}</a></td>
+                <td><span class="ship-pill {% if s.is_in_transit %}is-transit{% elif s.location_id is not None %}is-delivered{% else %}is-unknown{% endif %}">{{ s.status_label }}</span></td>
+                <td>{{ s.location_name|default:"—" }}</td>
+                <td class="mono">{% if s.last_arrived %}{{ s.last_arrived|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">Boxes with no current contents — not shown in the table above or on the Shipments tab.</p>
+</div>

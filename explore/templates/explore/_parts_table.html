@@ -1,0 +1,27 @@
+{% comment %} Items table + pager for a component-type leaf. Pager links swap
+just this pane via htmx (?page=), so the page keeps its scroll position. {% endcomment %}
+<div id="parts-pane" hx-target="#parts-pane" hx-swap="outerHTML" hx-push-url="true">
+    {% if parts_page.paginator.num_pages > 1 %}
+    <div style="display:flex;gap:14px;justify-content:center;align-items:center;margin:4px 0 14px;font-size:13px;">
+        {% if parts_page.has_previous %}<a style="color:var(--accent-ink);text-decoration:none;" href="?page=1" hx-get="?page=1">« First</a><a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.previous_page_number }}" hx-get="?page={{ parts_page.previous_page_number }}">‹ Prev</a>{% else %}<span class="cell-muted">« First</span><span class="cell-muted">‹ Prev</span>{% endif %}
+        <span class="cell-muted" style="font-variant-numeric:tabular-nums;">Page {{ parts_page.number }} of {{ parts_page.paginator.num_pages }} · {{ parts_page.paginator.count }} items</span>
+        {% if parts_page.has_next %}<a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.next_page_number }}" hx-get="?page={{ parts_page.next_page_number }}">Next ›</a><a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.paginator.num_pages }}" hx-get="?page={{ parts_page.paginator.num_pages }}">Last »</a>{% else %}<span class="cell-muted">Next ›</span><span class="cell-muted">Last »</span>{% endif %}
+    </div>
+    {% endif %}
+    <table class="ship-table">
+        <thead><tr><th>Part ID</th><th>Serial number</th><th>Created by</th><th>Updated</th></tr></thead>
+        <tbody>
+        {% for p in parts_page %}
+            <tr class="ship-row" onclick="if(!getSelection().toString())window.open('{% url 'explore:part' part_id=p.part_id %}','_blank')" title="Open {{ p.part_id }} in a new tab">
+                <td class="mono"><a href="{% url 'explore:part' part_id=p.part_id %}" target="_blank" rel="noopener" onclick="event.stopPropagation()">{{ p.part_id }} <span aria-hidden="true">&#x2197;</span></a></td>
+                <td class="mono">{{ p.serial_number|default:"—" }}</td>
+                <td>{{ p.created_by|default:"—" }}</td>
+                <td class="mono">{% if p.updated %}{{ p.updated|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+            </tr>
+        {% empty %}
+            <tr><td colspan="4" class="cell-muted">No items mirrored.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">Mirrored from HWDB on sync, newest update first. Serial number appears after a re-sync; click a row to open the part in a new tab.</p>
+</div>

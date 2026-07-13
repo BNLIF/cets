@@ -1,0 +1,36 @@
+{% comment %} Boxes table + pager for the Shipments tab. Pager links swap just
+this pane via htmx (?page=), so the page keeps its scroll position. {% endcomment %}
+<div id="shipments-pane" hx-target="#shipments-pane" hx-swap="outerHTML" hx-push-url="true">
+  {% if page_obj.paginator.count %}
+  <div class="ship-table-wrap">
+    <table class="ship-table">
+      <thead><tr><th>Box PID</th><th>Type</th><th>Status</th><th>Latest location</th><th>Contents</th><th>Shipped</th><th>Received</th></tr></thead>
+      <tbody>
+      {% for item in page_obj %}
+        <tr onclick="if(!getSelection().toString())location.href='{% url 'explore:part' part_id=item.box.part_id %}'" title="Open shipping details for {{ item.box.part_id }}">
+          <td class="mono"><a class="ship-link" href="{% url 'explore:part' part_id=item.box.part_id %}" onclick="event.stopPropagation()" title="Open this box’s detail page">{{ item.box.part_id }}</a></td>
+          <td><a class="ship-link" href="{{ item.path }}" onclick="event.stopPropagation()" title="Open the component type page">{{ item.type_name }}</a></td>
+          <td><span class="ship-pill {% if item.box.is_in_transit %}is-transit{% elif item.box.location_id is not None %}is-delivered{% endif %}">{{ item.box.status_label }}</span></td>
+          <td>{{ item.box.location_name|default:"—" }}</td>
+          <td class="mono">{{ item.box.n_contents }}</td>
+          <td class="mono">{% if item.box.shipped_date %}{{ item.box.shipped_date|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+          <td class="mono">{% if item.box.received_date %}{{ item.box.received_date|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if page_obj.paginator.num_pages > 1 %}
+  <div class="pager">
+    {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}" hx-get="?page={{ page_obj.previous_page_number }}">← Prev</a>{% else %}<span class="off">← Prev</span>{% endif %}
+    <span class="pager-mid">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }} · {{ page_obj.paginator.count }} boxes</span>
+    {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}" hx-get="?page={{ page_obj.next_page_number }}">Next →</a>{% else %}<span class="off">Next →</span>{% endif %}
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="empty">
+    <p>No shipments mirrored yet.</p>
+    <p>Open a shipping type below and click <strong>Sync shipments</strong> to pull its boxes from HWDB.</p>
+  </div>
+  {% endif %}
+</div>
