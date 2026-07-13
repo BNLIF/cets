@@ -1,0 +1,115 @@
+{% extends 'explore/base.html' %}
+{% block title %}Positions · {{ part_type_id }} · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .pk-page { padding: 22px 30px 56px; max-width: 860px; }
+  .pk-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .pk-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .pk-crumbs a:hover { text-decoration: underline; }
+  .pk-crumbs .sep { color: var(--faint); margin: 0 7px; }
+  .pk-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 4px; }
+  .pk-page h1 .mono { font-family: var(--font-mono); }
+  .pk-sub { color: var(--dim); font-size: 13.5px; margin: 0 0 18px; }
+  .pk-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
+  .pk-flash.success { color: var(--good); background: var(--good-bg);
+    border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule)); }
+  .pk-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
+    border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+  .pk-flash.warning { color: var(--ink); background: color-mix(in oklch, orange 10%, var(--page));
+    border: 1px solid color-mix(in oklch, orange 35%, var(--rule)); }
+  .pk-group { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg);
+    padding: 16px 18px; margin-bottom: 18px; }
+  .pk-group h2 { font-size: 12px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; margin: 0 0 12px; }
+  .pk-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .pk-table th { text-align: left; font-weight: 500; color: var(--faint); font-size: 11px; padding: 4px 8px; }
+  .pk-table td { padding: 5px 8px; border-top: 1px solid var(--rule); }
+  .pk-table .mono { font-family: var(--font-mono); font-size: 12.5px; }
+  .pk-scroll { max-height: 340px; overflow-y: auto; border: 1px solid var(--rule); border-radius: var(--r-sm); }
+  .pk-empty { color: var(--faint); font-size: 13px; padding: 6px 2px; }
+  .pk-hint { font-size: 11.5px; color: var(--faint); }
+  .bt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .bt-grid label { font-size: 12px; color: var(--faint); display: flex; flex-direction: column; gap: 3px; }
+  .bt-grid input { font: inherit; font-size: 13px; color: var(--ink); background: var(--surface);
+    border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 6px 8px; }
+  .bt-grid input.mono { font-family: var(--font-mono); }
+  .pk-submit { font: inherit; font-size: 13px; font-weight: 600; color: var(--accent-ink);
+    background: var(--accent-soft); border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--rule));
+    border-radius: var(--r-sm); padding: 7px 17px; cursor: pointer; margin-top: 14px; }
+  .pk-submit:hover { border-color: var(--accent); }
+</style>
+
+<div class="pk-page">
+  <div class="pk-crumbs">
+    <a href="{% url 'explore:shipments' %}">Shipments</a>
+    {% if leaf_path %}<span class="sep">›</span><a href="{{ leaf_path }}">{{ type_name }}</a>{% endif %}
+    <span class="sep">›</span>Box positions
+  </div>
+
+  {% for m in messages %}<div class="pk-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+
+  <h1>{{ type_name }} — <span class="mono">{{ part_type_id }}</span></h1>
+  <p class="pk-sub">The named positions every box of this type has, and which component type each accepts.
+    Changes apply to the type — every existing and future box of it.</p>
+
+  <div class="pk-group">
+    <h2>Current positions ({{ positions|length }})</h2>
+    {% if positions %}
+    <div class="pk-scroll">
+      <table class="pk-table">
+        <thead><tr><th>Position</th><th>Accepts</th></tr></thead>
+        <tbody>
+        {% for p in positions %}
+          <tr><td class="mono">{{ p.name }}</td>
+              <td>{% if p.child_name %}{{ p.child_name }} {% endif %}<span class="mono">{{ p.child }}</span></td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="pk-hint" style="margin:10px 0 0;">Existing positions are read-only here: HWDB does not allow
+      deleting or renaming a position that any linked item occupies, so the Explorer only ever adds.</p>
+    {% else %}
+    <div class="pk-empty">This type has no positions yet — boxes of it can’t hold anything until some are added.</div>
+    {% endif %}
+  </div>
+
+  <form method="post" class="pk-group">
+    {% csrf_token %}
+    <h2>Add positions</h2>
+    <div class="bt-grid">
+      <label>Name prefix
+        <input name="prefix" required maxlength="40" placeholder="e.g. FEMB" value="{{ request.POST.prefix }}"></label>
+      <label>How many
+        <input name="count" type="number" required min="1" max="200" value="1"></label>
+      <label>Accepting component type
+        <input name="child_type" class="mono" required pattern="[A-Za-z]\d{11}" list="bt-child-options"
+               placeholder="e.g. D05700300001"></label>
+    </div>
+    <datalist id="bt-child-options">
+      {% for c in child_options %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+    </datalist>
+    <p class="pk-hint" style="margin:10px 0 0;">Names continue the numbering: with FEMB1…FEMB10 present,
+      adding 2 × “FEMB” creates FEMB11 and FEMB12. The accepting type can be any component type id, not
+      just ones already used.</p>
+    <button type="submit" class="pk-submit">Add to the type in HWDB</button>
+  </form>
+
+  <form method="post" class="pk-group">
+    {% csrf_token %}<input type="hidden" name="action" value="clone">
+    <h2>Clone into a new type</h2>
+    <p style="font-size:13px; color:var(--ink); margin:0 0 10px;">Creates a NEW component type in the same
+      subsystem, copying this type’s {{ positions|length }} position(s), spec datasheet, manufacturers and
+      roles. Use it when a differently-shaped box is needed and this type’s boxes should keep their shape.</p>
+    <div class="bt-grid">
+      <label>New type name
+        <input name="new_name" required maxlength="100" placeholder="e.g. CE Shipping Box (large)"></label>
+      <label>Numeric type id
+        <input name="type_number" type="number" min="0" placeholder="blank = let HWDB assign"></label>
+      <label>Comments <input name="comments" maxlength="500" placeholder="optional"></label>
+    </div>
+    <p class="pk-hint" style="margin:10px 0 0;">Component types cannot be deleted from HWDB — double-check
+      the name before creating.</p>
+    <button type="submit" class="pk-submit">Create new type in HWDB</button>
+  </form>
+</div>
+{% endblock %}

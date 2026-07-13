@@ -291,7 +291,8 @@
         <label>Comments <input name="comments" maxlength="500" placeholder="optional"></label>
         <button type="submit">Mint in HWDB</button>
       </form>
-      <div class="nb-hint">Requests a new {{ leaf.name }} PID from the {{ hwdb_instance }} HWDB; you'll land on the new box's page.</div>
+      <div class="nb-hint">Requests a new {{ leaf.name }} PID from the {{ hwdb_instance }} HWDB; you'll land on the new box's page.
+        · <a href="{% url 'explore:box_type' part_type_id=leaf.part_type_id %}">Edit the type's positions…</a></div>
       {% if empty_pids %}
       <div class="nb-existing">
         …or reuse an existing empty box:

@@ -131,7 +131,8 @@
   </div>
   {% else %}
   <div class="pk-group"><div class="pk-empty">No free positions left in this box — unlink something on the
-    <a href="{% url 'explore:part' part_id=part_id %}">box page</a> first.</div></div>
+    <a href="{% url 'explore:part' part_id=part_id %}">box page</a> first, or
+    <a href="{% url 'explore:box_type' part_type_id=part_type_id %}">add positions to the box type</a>.</div></div>
   {% endif %}
 </div>
 

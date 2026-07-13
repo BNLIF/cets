@@ -167,6 +167,29 @@ class FnalDbApiClient:
         """
         return self._make_request("GET", f"component-types/{part_type_id}")
 
+    def patch_component_type(self, part_type_id, payload):
+        """Update a component-type definition (issue #69). Following the
+        official Encoder, the payload always carries the COMPLETE envelope —
+        comments, connectors, manufacturer ids, name (the type's full dotted
+        name), part_type_id, properties.specifications.datasheet, role ids —
+        echoed from a fresh GET with only the intended change applied.
+        """
+        return self._make_request(
+            "PATCH", f"component-types/{part_type_id}", data=payload
+        )
+
+    def post_component_type(self, project_id, system_id, subsystem_id, payload):
+        """Create a component type under a subsystem (issue #69):
+        ``POST component-types/{project}/{system}/{subsystem}`` with the
+        spec's ComponentTypeStub fields (name, category, comments,
+        connectors). No official client exercises this endpoint; the spec's
+        stub schema is our only guide.
+        """
+        return self._make_request(
+            "POST", f"component-types/{project_id}/{system_id}/{subsystem_id}",
+            data=payload,
+        )
+
     def whoami(self):
         """The calling user's HWDB record (``GET users/whoami``): full_name
         and roles — the executive-summary signing gate matches signee roles

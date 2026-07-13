@@ -21,6 +21,8 @@ urlpatterns = [
     path("scan/feed/", views.explore_scan_feed_view, name="scan_feed"),
     path("box-create/<str:part_type_id>/", views.explore_box_create_view,
          name="box_create"),
+    path("box-type/<str:part_type_id>/", views.explore_box_type_view,
+         name="box_type"),
     path("login/", views.login_view, name="login"),
     path("login/poll/", views.login_poll_view, name="login_poll"),
     path("sync/", views.explore_sync_view, name="sync"),

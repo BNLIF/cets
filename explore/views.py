@@ -1002,6 +1002,7 @@ def explore_box_pack_view(request, part_id):
             "active_nav": "shipments",
             "sidebar": navigation.sidebar_tree(inst, {}),
             "part_id": part_id,
+            "part_type_id": ptid,
             "n_contents": len(manifest),
             "groups": _pack_groups(inst, connectors, manifest),
             "scan_url": scan_url,
@@ -1162,6 +1163,220 @@ def explore_scan_feed_view(request):
     scans = [{"id": r.id, "pid": r.part_id} for r in rows]
     return JsonResponse({"scans": scans,
                          "last": scans[-1]["id"] if scans else since})
+
+
+def _next_position_names(existing, prefix: str, count: int) -> list[str]:
+    """``count`` new position names ``{prefix}{n}``, numbering on from the
+    highest existing ``{prefix}<number>`` so re-runs never collide."""
+    pat = re.compile(rf"^{re.escape(prefix)}(\d+)$")
+    start = max((int(m.group(1)) for p in existing if (m := pat.match(p))),
+                default=0) + 1
+    return [f"{prefix}{n}" for n in range(start, start + count)]
+
+
+def _type_patch_envelope(type_record: dict, connectors: dict) -> dict:
+    """The complete PATCH body for a component type — the official Encoder's
+    envelope (everything echoed from a fresh GET, ``name`` carrying the full
+    dotted name) with our connectors dict swapped in."""
+    specs = ((type_record.get("properties") or {}).get("specifications")) or []
+    datasheet = (specs[-1] or {}).get("datasheet") if specs else {}
+    return {
+        "comments": type_record.get("comments"),
+        "connectors": connectors,
+        "manufacturers": [m["id"] for m in type_record.get("manufacturers") or []
+                          if isinstance(m, dict) and m.get("id") is not None],
+        "name": type_record.get("full_name"),
+        "part_type_id": type_record.get("part_type_id"),
+        "properties": {"specifications": {
+            "datasheet": datasheet if isinstance(datasheet, dict) else {}}},
+        "roles": [r["id"] for r in type_record.get("roles") or []
+                  if isinstance(r, dict) and r.get("id") is not None],
+    }
+
+
+def _find_part_type_id(body, exclude: str):
+    """Dig the new type's part_type_id out of the create response — the
+    OpenAPI spec leaves the response shape undocumented, so search any
+    nesting for a plausible id that isn't the source type's."""
+    if isinstance(body, str):
+        m = re.search(r"\b[A-Z]\d{11}\b", body)
+        return m.group(0) if m and m.group(0) != exclude else None
+    if isinstance(body, dict):
+        for key in ("part_type_id", "data"):
+            found = _find_part_type_id(body.get(key), exclude)
+            if found:
+                return found
+    return None
+
+
+def _clone_box_type(request, api, inst, part_type_id, record, connectors, page_url):
+    """The clone flow (issue #69): POST a new component type under the SAME
+    subsystem with the source's connectors, then (create can't carry them)
+    PATCH the source's datasheet / manufacturers / roles onto it, and give
+    it a mirror leaf so the tree shows it without a full hierarchy sync.
+    No official client exercises the create endpoint — errors are surfaced
+    verbatim so a schema surprise explains itself."""
+    new_name = (request.POST.get("new_name") or "").strip()
+    comments = (request.POST.get("comments") or "").strip()
+    m = re.match(r"^([A-Z])(\d{3})(\d{3})", part_type_id)
+    if not 1 <= len(new_name) <= 100:
+        messages.error(request, "Give the new type a name (up to 100 characters).")
+        return redirect(page_url)
+    if not m:
+        messages.error(request, f"Can’t decode system/subsystem from {part_type_id}.")
+        return redirect(page_url)
+
+    # HWDB lets the caller assign the type's numeric id explicitly;
+    # component_type_id is required even on a create (live-probed
+    # 2026-07-13). Blank → 0, hopefully "assign one for me".
+    try:
+        type_number = int(request.POST.get("type_number") or "0")
+    except ValueError:
+        messages.error(request, "Numeric type id must be a number (or blank).")
+        return redirect(page_url)
+    payload = {"component_type_id": type_number,
+               "name": new_name,
+               "category": record.get("category") or "generic",
+               "comments": comments,
+               "connectors": dict(connectors)}
+    try:
+        body = api.post_component_type(m.group(1), int(m.group(2)), int(m.group(3)), payload)
+        ok, detail = body.get("status") == "OK", body.get("data")
+    except requests.RequestException as e:
+        ok, detail = False, _hwdb_error_detail(e)
+    if not ok:
+        messages.error(request, f"HWDB rejected the new type — {detail}")
+        return redirect(page_url)
+
+    new_ptid = _find_part_type_id(body, exclude=part_type_id)
+    if not new_ptid:
+        messages.success(
+            request, f"“{new_name}” created, but HWDB didn’t return its id — find it "
+                     "via a hierarchy sync; the source spec was NOT copied onto it.")
+        return redirect(page_url)
+
+    # Copy what the create endpoint can't carry: datasheet, manufacturers, roles.
+    warn = ""
+    src = _type_patch_envelope(record, {})
+    if src["properties"]["specifications"]["datasheet"] or src["manufacturers"] or src["roles"]:
+        try:
+            new_record = api.get_component_type(new_ptid).get("data") or {}
+            env = _type_patch_envelope(new_record, dict(new_record.get("connectors") or {}))
+            env.update({"properties": src["properties"],
+                        "manufacturers": src["manufacturers"],
+                        "roles": src["roles"]})
+            body = api.patch_component_type(new_ptid, env)
+            if body.get("status") != "OK":
+                warn = f" (spec copy failed: {body.get('data') or body})"
+        except requests.RequestException as e:
+            warn = f" (spec copy failed: {_hwdb_error_detail(e)})"
+
+    leaf = HierarchyNode.for_instance(inst).filter(
+        level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
+    if leaf:  # a sibling mirror leaf, so the tree shows the type right away
+        HierarchyNode.objects.update_or_create(
+            instance=inst, level=HierarchyNode.LEVEL_TYPE, part_type_id=new_ptid,
+            defaults={"parent": leaf.parent, "project": leaf.project,
+                      "system_id": leaf.system_id, "system_name": leaf.system_name,
+                      "subsystem_id": leaf.subsystem_id,
+                      "subsystem_name": leaf.subsystem_name,
+                      "name": new_name,
+                      "full_name": (leaf.full_name.rsplit(".", 1)[0] + "." + new_name
+                                    if "." in leaf.full_name else new_name)})
+
+    messages.success(request, f"Created “{new_name}” as {new_ptid} with "
+                              f"{len(connectors)} position(s).{warn}")
+    if curation.is_shipping_type(inst, new_ptid):
+        return redirect(_rev(request, "explore:box_type", args=[new_ptid]))
+    messages.warning(
+        request, f"{new_ptid} isn’t covered by the shipping-type curation yet — add it "
+                 "to curation.yaml’s shipping_types to enable box workflows on it.")
+    return redirect(page_url)
+
+
+@login_not_required
+@fnal_login_required
+def explore_box_type_view(request, part_type_id):
+    """Extend a shipping-box type's positions (issue #69): bulk-add connector
+    slots ("N positions named PREFIX# accepting type X") via a complete-
+    envelope ``PATCH component-types/{id}``. Add-only by design — HWDB
+    forbids deleting or renaming positions that linked items use, so
+    existing positions render read-only and are echoed untouched. The
+    packing pages read connectors live, so changes show up immediately.
+    """
+    inst = instance_of(request)
+    if inst not in settings.HWDB_WRITE_INSTANCES or not curation.is_shipping_type(inst, part_type_id):
+        return HttpResponseForbidden("Box-type editing is not enabled here.")
+    page_url = _rev(request, "explore:box_type", args=[part_type_id])
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(_rev(request, "explore:home"))
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+
+    try:
+        record = api.get_component_type(part_type_id).get("data") or {}
+    except requests.RequestException as e:
+        messages.error(request, f"Couldn’t read the type from HWDB — {_hwdb_error_detail(e)}")
+        return redirect(_rev(request, "explore:home"))
+    connectors = dict(record.get("connectors") or {})
+
+    if request.method == "POST" and (request.POST.get("action") or "extend") == "clone":
+        return _clone_box_type(request, api, inst, part_type_id, record,
+                               connectors, page_url)
+
+    if request.method == "POST":
+        prefix = (request.POST.get("prefix") or "").strip()
+        child = (request.POST.get("child_type") or "").strip().upper()
+        try:
+            count = int(request.POST.get("count") or "0")
+        except ValueError:
+            count = 0
+        if not re.fullmatch(r"[A-Za-z0-9 _.-]{1,40}", prefix):
+            messages.error(request, "Position prefix must be 1–40 plain characters.")
+        elif not 1 <= count <= 200:
+            messages.error(request, "Count must be between 1 and 200.")
+        elif not re.fullmatch(r"[A-Z]\d{11}", child):
+            messages.error(request, f"“{child}” doesn’t look like a component-type id.")
+        else:
+            new_names = _next_position_names(connectors, prefix, count)
+            payload = _type_patch_envelope(
+                record, {**connectors, **{n: child for n in new_names}})
+            try:
+                body = api.patch_component_type(part_type_id, payload)
+                ok, detail = body.get("status") == "OK", body.get("data")
+            except requests.RequestException as e:
+                ok, detail = False, _hwdb_error_detail(e)
+            if ok:
+                messages.success(
+                    request, f"Added {count} position(s) {new_names[0]}…{new_names[-1]} "
+                             f"accepting {child}.")
+            else:
+                messages.error(request, f"HWDB rejected the type update — {detail}")
+        return redirect(page_url)
+
+    # Names for the accepted child types, from the mirror where known.
+    child_ids = sorted(set(connectors.values()))
+    child_names = dict(HierarchyNode.for_instance(inst)
+                       .filter(level=HierarchyNode.LEVEL_TYPE, part_type_id__in=child_ids)
+                       .values_list("part_type_id", "name"))
+    leaf = HierarchyNode.for_instance(inst).filter(
+        level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
+    return render(request, "explore/box_type.html", {
+        "active_nav": "shipments",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "part_type_id": part_type_id,
+        "type_name": (leaf.name if leaf else record.get("full_name")) or part_type_id,
+        "positions": sorted(
+            ({"name": pos, "child": ctid, "child_name": child_names.get(ctid, "")}
+             for pos, ctid in connectors.items()), key=lambda p: p["name"]),
+        "child_options": [{"id": c, "name": child_names.get(c, "")} for c in child_ids],
+        "leaf_path": navigation.leaf_path_for(inst, part_type_id) if leaf else None,
+    })
 
 
 def _whoami_context(api) -> tuple[str, set, dict]:
