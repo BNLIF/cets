@@ -10,7 +10,7 @@ import json
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from explore import scanning
 from explore.models import PackScan
@@ -75,6 +75,7 @@ class ScanEndpointsTest(TestCase):
         body = json.loads(self.client.get(f"{FEED}?since={mine1.id}").content)
         self.assertEqual([s["pid"] for s in body["scans"]], ["D05700300001-00013"])
 
+    @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_prod_is_forbidden(self):
         self.assertEqual(self.client.get("/hw/scan/").status_code, 403)
         self.assertEqual(self.client.post("/hw/scan/submit/", {"text": PID}).status_code, 403)

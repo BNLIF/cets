@@ -117,10 +117,10 @@ if HWDB_INSTANCE not in HWDB_PROFILES:
     raise ImproperlyConfigured(
         f"HWDB_INSTANCE must be one of {sorted(HWDB_PROFILES)}; got {HWDB_INSTANCE!r}"
     )
-# Instances the explorer may WRITE to (issue #61). Dev-only until the write
-# workflows are proven; add "prod" here to enable them there. Views gate both
-# the UI (forms absent) and the POST endpoints on this.
-HWDB_WRITE_INSTANCES = ["dev"]
+# Instances the explorer may WRITE to (issue #61). Views gate both the UI
+# (forms absent) and the POST endpoints on this. Actual write authorization
+# is enforced by HWDB user roles on the server side.
+HWDB_WRITE_INSTANCES = ["dev", "prod"]
 # Default-instance values (the env baseline). A per-session override may pick a
 # different profile at request time — see hwdb.instance.active_profile.
 HWDB_API_BASE_URL = HWDB_PROFILES[HWDB_INSTANCE]["api"]

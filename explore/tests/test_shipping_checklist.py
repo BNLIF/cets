@@ -11,7 +11,7 @@ from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from explore import checklists
@@ -206,6 +206,7 @@ class ShippingFlowTest(TestCase):
         api.patch_component.assert_not_called()
         api.post_location.assert_called_once()
 
+    @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_prod_is_forbidden(self):
         api = _api()
         m1, m2 = _mocked(api)

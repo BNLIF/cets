@@ -11,7 +11,7 @@ from __future__ import annotations
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -277,6 +277,7 @@ class ShipmentPanelViewTest(TestCase):
         # Summary cards count boxes with contents only.
         self.assertIn("Boxes with contents", html)
 
+    @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_empty_boxes_pane_paginates(self):
         leaf = _ship_leaf()
         for i in range(51):

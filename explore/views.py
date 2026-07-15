@@ -186,6 +186,9 @@ def explore_view(request, trail=None):
     # mirror-only on render: the form's institution list lazy-loads via the
     # explore:institutions JSON endpoint when the pane is first opened.
     can_create_box = is_shipping and inst in settings.HWDB_WRITE_INSTANCES
+    # ES config editor link (any leaf type, even ones without a config yet —
+    # saving a config there is what marks a type as requiring an exec summary).
+    can_edit_es = bool(leaf) and inst in settings.HWDB_WRITE_INSTANCES
     empty_pids = []
     if is_shipping:
         # Shipping extras — boxes are regular components too (charts/breakdown
@@ -283,6 +286,7 @@ def explore_view(request, trail=None):
             "shipment_summary": shipment_summary,
             "empty_boxes_page": empty_boxes_page,
             "can_create_box": can_create_box,
+            "can_edit_es": can_edit_es,
             "empty_pids": empty_pids,
             # Deep-link the part type to this instance's FNAL web UI.
             "hwdb_ui_base": settings.HWDB_PROFILES[inst]["ui"],

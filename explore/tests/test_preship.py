@@ -10,7 +10,7 @@ from __future__ import annotations
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from explore import checklists
@@ -243,6 +243,7 @@ class ChecklistFlowTest(TestCase):
         self.assertEqual(resp["Content-Type"], "text/csv")
         self.assertIn("DUNE PID," + BOX, resp.content.decode())
 
+    @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_prod_and_non_shipping_forbidden(self):
         api = _api()
         m1, m2 = _mocked(api)

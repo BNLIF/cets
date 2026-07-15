@@ -11,7 +11,7 @@ from __future__ import annotations
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from explore import checklists
@@ -211,6 +211,7 @@ class ReceivingFlowTest(TestCase):
         cl = BoxChecklist.for_instance("dev").get(part_id=BOX, workflow="receiving")
         self.assertEqual(cl.route, "confirm_non_surf")
 
+    @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_prod_is_forbidden(self):
         api = _api()
         m1, m2 = _mocked(api)

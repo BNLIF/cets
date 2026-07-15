@@ -10,7 +10,7 @@ from __future__ import annotations
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from explore import navigation
@@ -75,6 +75,7 @@ class NewBoxPaneRenderTest(TestCase):
         self.assertIn("/hw/dev/institutions/", html)
         self.assertIn(f"{PTID}-00007", html)  # reuse-existing option
 
+    @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_pane_absent_on_prod_leaf(self):
         sys, _ = H.objects.get_or_create(
             level=H.LEVEL_SYSTEM, system_id=81, subsystem_id=None, part_type_id="",
@@ -130,6 +131,7 @@ class BoxCreateTest(TestCase):
         payload = api.create_component.call_args.args[1]
         self.assertEqual(payload["manufacturer"], {"id": 7})
 
+    @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_prod_post_is_forbidden(self):
         api = _api()
         m1, m2 = _mocked(api)
@@ -191,6 +193,7 @@ class InstitutionsEndpointTest(TestCase):
         self.assertEqual(data["institutions"][1],
                          {"id": 186, "name": "SURF", "country_code": "US"})
 
+    @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_prod_is_forbidden(self):
         resp = self.client.get("/hw/institutions/")
         self.assertEqual(resp.status_code, 403)

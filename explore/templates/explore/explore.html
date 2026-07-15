@@ -170,6 +170,9 @@
         <dt>Subsystem</dt><dd>{{ leaf.subsystem_name }} ({{ leaf.subsystem_id }})</dd>
         <dt>{% if is_shipping %}Boxes in HWDB{% else %}Items in HWDB{% endif %}</dt><dd>{{ leaf.n_components }}</dd>
         <dt>Test events</dt><dd>{{ leaf.n_tests }}</dd>
+        {% if can_edit_es %}
+        <dt>Exec summary</dt><dd><a href="{% url 'explore:es_config' part_type_id=leaf.part_type_id %}?next={{ request.path|urlencode }}" title="Create or edit the type’s executive-summary config (ES_{{ leaf.part_type_id }}_*.json in HWDB)">Add / edit the ES config…</a></dd>
+        {% endif %}
     </dl>
 
     {% if leaf.tests_synced_at %}

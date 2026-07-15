@@ -9,7 +9,7 @@ from __future__ import annotations
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -303,6 +303,19 @@ class NavigationTest(TestCase):
         detail = self._html(leaf_url)
         self.assertIn("Part type ID", detail)        # leaf detail panel
         self.assertIn("node-sync-btn", detail)
+
+    def test_leaf_links_the_es_config_editor(self):
+        # Any leaf on a write instance links the ES-config editor — even types
+        # without a config yet (saving one there marks the type as needing an ES).
+        leaf_url = navigation.node_path("prod", "FD", "FD-VD", system_id=57,
+                                        subsystem_id=2, part_type_id="D05700200001")
+        self.assertIn("/hw/es-config/D05700200001/", self._html(leaf_url))
+
+    @override_settings(HWDB_WRITE_INSTANCES=["dev"])
+    def test_es_config_link_absent_off_write_instances(self):
+        leaf_url = navigation.node_path("prod", "FD", "FD-VD", system_id=57,
+                                        subsystem_id=2, part_type_id="D05700200001")
+        self.assertNotIn("es-config", self._html(leaf_url))
 
     def test_legacy_node_query_redirects_to_path(self):
         resp = self.client.get(reverse("explore:home") + "?node=D05700200001")

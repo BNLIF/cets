@@ -11,7 +11,7 @@ from __future__ import annotations
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from explore.models import ShipmentItem
 from hwdb.fnal.bearer import FnalLinkRequired
@@ -63,6 +63,7 @@ class LocationFormRenderTest(TestCase):
         self.assertIn(f"{DEV_POST}", html)
         self.assertIn("Brookhaven National Laboratory", html)
 
+    @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_form_absent_on_prod_box_page(self):
         api = _api()
         m1, m2 = _mocked(api)
@@ -93,6 +94,7 @@ class LocationPostTest(TestCase):
         self.assertEqual(row.part_type_id, "D00599800007")
         self.assertEqual(row.location_name, "BNL")  # from the mocked re-fetch
 
+    @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_prod_post_is_forbidden_server_side(self):
         api = _api()
         m1, m2 = _mocked(api)

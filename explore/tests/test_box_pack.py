@@ -11,7 +11,7 @@ from __future__ import annotations
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from explore.models import HwdbComponentEvent, ShipmentItem
 
@@ -87,6 +87,7 @@ class PackingCardRenderTest(TestCase):
         self.assertIn(f'href="{PACK}"', html)             # Add items… page link
         self.assertIn("2 of 3 positions free", html)
 
+    @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_card_absent_on_prod_box_page(self):
         api = _api()
         m1, m2 = _mocked(api)
@@ -186,6 +187,7 @@ class PackPageTest(TestCase):
             html = self.client.get(PACK).content.decode()
         self.assertIn(f'value="{GOOD}"', html)
 
+    @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_picker_is_forbidden_on_prod(self):
         api = _api()
         m1, m2 = _mocked(api)
@@ -343,6 +345,7 @@ class PackPostTest(TestCase):
         api.patch_subcomponents.assert_not_called()
         self.assertIn("nothing to unlink", resp.content.decode())
 
+    @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_prod_and_non_shipping_are_forbidden(self):
         api = _api()
         m1, m2 = _mocked(api)
