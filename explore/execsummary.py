@@ -23,14 +23,15 @@ from __future__ import annotations
 import io
 import json
 import logging
+import re
 from datetime import datetime
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import (
-    PageBreak, Paragraph, Preformatted, SimpleDocTemplate, Spacer, Table,
-    TableStyle,
+    Image, PageBreak, Paragraph, Preformatted, SimpleDocTemplate, Spacer,
+    Table, TableStyle,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,21 +61,54 @@ FILENAME_TS_FMT = "%Y%m%d_%H%M%S"     # PDF filename timestamps
 
 # ---- Config ---------------------------------------------------------------
 
-def load_config(api, part_type_id: str):
-    """The newest ``ES_{typeid}_*.json`` from the type's images, normalized.
-    Returns ``(cfg | None, message)`` — None means DEFAULT mode."""
+def _newest_config_row(rows, part_type_id: str) -> dict | None:
+    """The newest ``ES_{typeid}_*.json`` row from a type-images listing."""
     prefix = f"ES_{part_type_id}_"
-    try:
-        rows = api.get_component_type_images(part_type_id).get("data") or []
-    except Exception as e:
-        logger.warning("ES config listing for %s failed: %s", part_type_id, e)
-        return None, f"Couldn’t list the type’s attachments ({e})."
     matches = [r for r in rows if isinstance(r, dict)
                and (r.get("image_name") or "").startswith(prefix)
                and (r.get("image_name") or "").lower().endswith(".json")]
-    if not matches:
-        return None, f"No ES config on the type (expected {prefix}*.json)."
-    newest = max(matches, key=lambda r: r.get("created") or "")
+    return max(matches, key=lambda r: r.get("created") or "") if matches else None
+
+
+# Starting point for a type with no config yet — the Dashboard's schema
+# (the same fields ES_Z00100300001_test_v8.json carries), empty.
+CONFIG_TEMPLATE = {
+    "consortium_name": "",
+    "test_description": "",
+    "todos": {"title": "QC Checks", "check_list": []},
+    "signees": [],
+    "references": [],
+    "plots": [],
+}
+
+
+def load_raw_config(api, part_type_id: str):
+    """``(raw config dict, filename)`` — the newest ES config verbatim
+    (unnormalized, unknown fields preserved), for the editor page.
+    ``(None, None)`` when the type has none or it can't be read."""
+    try:
+        rows = api.get_component_type_images(part_type_id).get("data") or []
+        newest = _newest_config_row(rows, part_type_id)
+        if newest is None:
+            return None, None
+        raw = json.loads(api.get_image_response(str(newest["image_id"])).content)
+        return (raw if isinstance(raw, dict) else None), newest.get("image_name")
+    except Exception as e:
+        logger.warning("ES raw config load for %s failed: %s", part_type_id, e)
+        return None, None
+
+
+def load_config(api, part_type_id: str):
+    """The newest ``ES_{typeid}_*.json`` from the type's images, normalized.
+    Returns ``(cfg | None, message)`` — None means DEFAULT mode."""
+    try:
+        rows = api.get_component_type_images(part_type_id).get("data") or []
+        newest = _newest_config_row(rows, part_type_id)
+    except Exception as e:
+        logger.warning("ES config listing for %s failed: %s", part_type_id, e)
+        return None, f"Couldn’t list the type’s attachments ({e})."
+    if newest is None:
+        return None, f"No ES config on the type (expected ES_{part_type_id}_*.json)."
     try:
         resp = api.get_image_response(str(newest["image_id"]))
         cfg = json.loads(resp.content)
@@ -110,6 +144,33 @@ def _normalize(cfg: dict) -> dict:
             refs.append({"url": r, "comments": ""})
         elif isinstance(r, dict) and r.get("url"):
             refs.append({"url": str(r["url"]), "comments": str(r.get("comments") or "")})
+    # Plots: every entry becomes a slot the page can fill. image_path entries
+    # resolve from a test record (the Dashboard convention); numeric
+    # data_paths entries aren't rendered here — either kind can instead carry
+    # a manually-uploaded image (see plot_upload_prefix).
+    plots = []
+    for i, p in enumerate(cfg.get("plots") or []):
+        if not isinstance(p, dict):
+            continue
+        base = {"index": i,
+                "title": str(p.get("title") or "Plot"),
+                "test_type_name": str(p.get("test_type_name") or "").strip(),
+                "slug": _plot_slug(i, p.get("title"))}
+        ip = p.get("image_path")
+        if isinstance(ip, dict) and (ip.get("image_name") or "").strip():
+            try:
+                ho = int(ip.get("history_order") or 0)
+            except (TypeError, ValueError):
+                ho = 0
+            plots.append({**base, "kind": "image",
+                          "image_name": (ip.get("image_name") or "").strip(),
+                          "history_order": max(ho, 0),
+                          "part_id": str(p.get("part_id") or "").strip(),
+                          "sub_part_id": (p.get("sub_part_id")
+                                          if isinstance(p.get("sub_part_id"), dict) else None)})
+        else:
+            plots.append({**base, "kind": "numeric",
+                          "data_paths": [str(x) for x in p.get("data_paths") or []]})
     return {
         "consortium_name": cfg.get("consortium_name") or cfg.get("consortium name") or "",
         "test_description": str(desc or ""),
@@ -117,7 +178,7 @@ def _normalize(cfg: dict) -> dict:
                   "check_list": [str(t) for t in todos.get("check_list") or []]},
         "signees": signees,
         "references": refs,
-        "has_plots": bool(cfg.get("plots")),
+        "plots": plots,
     }
 
 
@@ -166,6 +227,173 @@ def todos_payload(cfg, checked: list[int]) -> dict:
     check_list = cfg["todos"]["check_list"]
     return {"title": cfg["todos"]["title"], "check_list": check_list,
             "checked": sorted(i for i in set(checked) if 0 <= i < len(check_list))}
+
+
+# ---- Config plots -----------------------------------------------------------
+# The Dashboard's image plots: each image_path entry points at an image
+# already attached to a test record in HWDB. Numeric data_paths plots (Plotly
+# histograms, optional type-wide "sum") are NOT rendered: the sum variant
+# means a live fetch across every item of the type, which the Explorer's
+# keep-the-mirror-light rule forbids. Instead, ANY slot accepts a manually
+# uploaded image (rendered elsewhere, e.g. by the Dashboard), posted onto the
+# item under a deterministic ESPlot_* name; the newest upload wins the slot.
+
+def _plot_slug(index: int, title) -> str:
+    """Filename-safe identity of one config plot slot, e.g. ``p02-Gain-hist``.
+    The index keeps same-titled plots apart; a reordered config shifts which
+    uploads each slot sees, like every other newest-wins convention here."""
+    words = re.sub(r"[^A-Za-z0-9]+", "-", str(title or "plot")).strip("-")[:40]
+    return f"p{index:02d}-{words or 'plot'}"
+
+
+def plot_upload_prefix(part_id: str, plot: dict) -> str:
+    """Name prefix for a manually-uploaded plot image on the item — unique per
+    config slot, so the newest matching upload is findable later (HWDB is
+    append-only; uploads are never replaced, just superseded)."""
+    return f"ESPlot_{part_id}_{plot['slug']}_"
+
+
+def _newest_upload(item_images, prefix: str):
+    ups = [r for r in item_images or [] if isinstance(r, dict)
+           and (r.get("image_name") or "").startswith(prefix)]
+    return max(ups, key=lambda r: (r.get("created") or "",
+                                   r.get("image_name") or ""), default=None)
+
+
+def _find_image_id(test_rec, image_name: str) -> str | None:
+    """The image_id for ``image_name`` within one test record — the
+    Dashboard's lookup: common list fields first, then a recursive walk."""
+    want = (image_name or "").strip()
+    if not want or not isinstance(test_rec, dict):
+        return None
+    for k in ("images", "test_images", "image_list", "images_list", "attachments"):
+        v = test_rec.get(k)
+        if not isinstance(v, list):
+            continue
+        for it in v:
+            if isinstance(it, dict) and (it.get("image_name") or it.get("name")
+                                         or it.get("filename") or "").strip() == want:
+                iid = it.get("image_id") or it.get("id")
+                if iid:
+                    return str(iid)
+
+    def walk(obj):
+        if isinstance(obj, dict):
+            if ((obj.get("image_name") or "").strip() == want
+                    and (obj.get("image_id") or obj.get("id"))):
+                return str(obj.get("image_id") or obj.get("id"))
+            for v in obj.values():
+                if (out := walk(v)):
+                    return out
+        elif isinstance(obj, list):
+            for v in obj:
+                if (out := walk(v)):
+                    return out
+        return None
+
+    return walk(test_rec)
+
+
+def _test_record_at(api, pid: str, test_type_name: str, history_order: int):
+    """``(record, error)`` — the test record at ``history_order`` (0 = latest),
+    the Dashboard's addressing into the history list."""
+    if not pid or not test_type_name:
+        return None, "Missing pid/test_type_name."
+    try:
+        data = api.get_tests(pid, test_type_id=test_type_name,
+                             history=True).get("data") or []
+    except Exception as e:
+        return None, f"Test fetch failed for {pid} / {test_type_name}: {e}"
+    if not data:
+        return None, f"No test history found for {pid} / {test_type_name}."
+    if history_order >= len(data):
+        return None, f"history_order={history_order} out of range (N={len(data)})."
+    rec = data[history_order]
+    return (rec if isinstance(rec, dict) else None), None
+
+
+def _resolve_sub_part_id(children_of, part_id: str, layer, pos_name) -> str | None:
+    """The Dashboard's subtree addressing: layer 1 = the item's direct
+    children, matched by functional position; ties break on lowest PID."""
+    try:
+        layer = int(layer)
+    except (TypeError, ValueError):
+        return None
+    want = (pos_name or "").strip()
+    if layer < 1 or not want:
+        return None
+    level = [part_id]
+    for depth in range(1, layer + 1):
+        rows = [m for pid in level for m in children_of(pid)]
+        if depth == layer:
+            matches = sorted({m["part_id"] for m in rows if m.get("part_id")
+                              and (m.get("functional_position") or "").strip() == want})
+            return matches[0] if matches else None
+        level = [m["part_id"] for m in rows if m.get("part_id")]
+        if not level:
+            return None
+    return None
+
+
+def resolve_plots(api, cfg, part_id: str, children_of, item_images) -> list[dict]:
+    """Resolve every config plot slot to an HWDB image_id (listing only — the
+    page streams the bytes through the existing image proxy). The newest
+    manual ESPlot_* upload on the item wins a slot; image_path slots without
+    one fall back to their test record (``children_of(pid)`` returns manifest
+    rows for sub_part_id addressing). Failures land in ``error``, shown
+    verbatim; a numeric slot with no upload has neither image nor error —
+    the page offers the upload there."""
+    blocks = []
+    for p in cfg["plots"]:
+        blk = {**p, "pid": part_id, "image_id": None, "error": None,
+               "uploaded": False, "upload_name": None, "is_pdf": False}
+        up = _newest_upload(item_images, plot_upload_prefix(part_id, p))
+        if up:
+            blk.update(image_id=str(up["image_id"]), uploaded=True,
+                       upload_name=up.get("image_name"))
+            blocks.append(blk)
+            continue
+        if p["kind"] == "image":
+            blk["is_pdf"] = p["image_name"].lower().endswith(".pdf")
+            if p["sub_part_id"]:
+                resolved = _resolve_sub_part_id(
+                    children_of, part_id,
+                    p["sub_part_id"].get("layer"), p["sub_part_id"].get("pos_name"))
+                blk["pid"] = resolved or part_id
+            elif p["part_id"]:
+                blk["pid"] = p["part_id"]
+            rec, err = _test_record_at(api, blk["pid"], p["test_type_name"],
+                                       p["history_order"])
+            if err:
+                blk["error"] = err
+            else:
+                blk["image_id"] = _find_image_id(rec, p["image_name"])
+                if not blk["image_id"]:
+                    blk["error"] = (
+                        f"Could not find image_name='{p['image_name']}' in test record "
+                        f"(pid={blk['pid']}, test={p['test_type_name']}, "
+                        f"history_order={p['history_order']}).")
+        blocks.append(blk)
+    return blocks
+
+
+def download_plot_images(api, blocks) -> None:
+    """Fill ``bytes`` on resolved blocks for PDF embedding. PDF attachments
+    are linked on the page but not rasterized into the summary (that needs
+    pymupdf, which we don't carry)."""
+    for b in blocks:
+        if not b.get("image_id"):
+            if not b.get("error"):
+                b["error"] = "No image available for this plot (nothing uploaded)."
+            continue
+        if b["is_pdf"]:
+            b["error"] = (f"PDF attachment {b['image_name']} is not embedded "
+                          "in the summary (view it on the ES page).")
+            continue
+        try:
+            b["bytes"] = api.get_image_response(str(b["image_id"])).content
+        except Exception as e:
+            b["error"] = f"Failed to download image (image_id={b['image_id']}): {e}"
 
 
 # ---- Signing order / gating -----------------------------------------------
@@ -290,6 +518,36 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
             if r.get("comments"):
                 story.append(Paragraph(
                     f'<font color="#777777">{r["comments"]}</font>', styles["Normal"]))
+    plot_blocks = form.get("plot_blocks") or []
+    if plot_blocks:
+        story.append(PageBreak())
+        story.append(Paragraph("Plots", styles["Heading2"]))
+        for pb in plot_blocks:
+            if pb.get("uploaded"):
+                src = f"Uploaded image: {pb['upload_name']}"
+            elif pb.get("kind") == "numeric":
+                src = f"Numeric plot (data_paths: {', '.join(pb.get('data_paths') or [])})"
+            else:
+                src = (f"Image: {pb['image_name']} "
+                       f"(history_order={pb['history_order']}) · {pb['pid']}")
+            story += [
+                Spacer(1, 8),
+                Paragraph(f"{pb['title']} — {pb['test_type_name']}", styles["Heading3"]),
+                Paragraph(src, styles["Normal"]),
+            ]
+            if pb.get("bytes"):
+                try:
+                    img = Image(io.BytesIO(pb["bytes"]))
+                    iw, ih = img.imageWidth, img.imageHeight
+                    # fit the letter body (~468x648pt) with room for captions
+                    scale = min(460 / iw, 400 / ih, 1.0) if iw and ih else 1.0
+                    img.drawWidth, img.drawHeight = iw * scale, ih * scale
+                    story += [Spacer(1, 6), img]
+                except Exception as e:
+                    story.append(Paragraph(f"(image could not be embedded: {e})",
+                                           styles["Normal"]))
+            elif pb.get("error"):
+                story.append(Paragraph(f"⚠ {pb['error']}", styles["Normal"]))
     if form.get("subcomponents"):
         story.append(PageBreak())
         story.append(Paragraph("Sub-components", styles["Heading2"]))

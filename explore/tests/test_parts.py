@@ -271,6 +271,37 @@ class PartViewTest(TestCase):
         self.assertEqual(resp.status_code, 301)
         self.assertEqual(resp["Location"], self.url)
 
+    def test_es_card_on_dev_part_whose_type_has_an_es_config(self):
+        # A non-shipping part on the write instance gets the Executive-summary
+        # card when its type carries an ES_{ptid}_*.json config in HWDB (the
+        # interim "requires ES" mark until the hierarchy-chart one exists).
+        api = self._api()
+        api.get_component_type_images.return_value = {"data": [
+            {"image_id": "c1", "image_name": "ES_D05700200099_test_v8.json",
+             "created": "2026-07-01T00:00:00"}]}
+        api.get_image_response.return_value = mock.Mock(content=json.dumps({
+            "consortium_name": "CE (test)",
+            "test_description": "Check the chip"}).encode())
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            html = self.client.get("/hw/dev/part/D05700200099-00007/").content.decode()
+        self.assertIn("Executive summary", html)
+        # Dashboard-style header lines, from the config JSON
+        self.assertIn("Consortium:", html)
+        self.assertIn("CE (test)", html)
+        self.assertIn("Description:", html)
+        self.assertIn("Check the chip", html)
+        self.assertIn("ES_D05700200099_test_v8.json", html)   # config named
+        self.assertIn("/hw/dev/part/D05700200099-00007/exec-summary/", html)
+
+    def test_no_es_card_when_type_has_no_config(self):
+        api = self._api()
+        api.get_component_type_images.return_value = {"data": []}
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            html = self.client.get("/hw/dev/part/D05700200099-00007/").content.decode()
+        self.assertNotIn("Executive summary", html)
+
 
 class TestDataDownloadTest(TestCase):
     """Per-test test_data JSON download (the dashboard's test-data export)."""

@@ -246,25 +246,41 @@
         <div class="sd-empty">This box type defines no functional positions (connectors) in HWDB, so contents can’t be linked.</div>
         {% endif %}
       </div>
+      {% endif %}
 
+      {% if packing or es_cfg %}
       <div class="sd-card">
         <h2>Executive summary</h2>
+        {% if es_cfg.consortium_name %}<div style="font-size:13px; color:var(--ink); margin:3px 0;"><b>Consortium:</b> {{ es_cfg.consortium_name }}</div>{% endif %}
+        {% if es_cfg.test_description %}<div style="font-size:13px; color:var(--ink); margin:3px 0;"><b>Description:</b> {{ es_cfg.test_description }}</div>{% endif %}
         {% if exec_summaries %}
-        <div class="sd-atts" style="margin: 0 0 10px;">
-          {% for a in exec_summaries %}
-          <a class="sd-dl" href="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.image_name|urlencode }}" title="{{ a.image_name }}"><span aria-hidden="true">&#x2913;</span> {{ a.image_name }}</a>
-          {% endfor %}
+        <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; margin: 8px 0 10px;">
+          <label style="font-size:12px; color:var(--faint); display:flex; flex-direction:column; gap:3px;">
+            Summary PDFs ({{ exec_summaries|length }})
+            <select id="pd-sums" title="{{ exec_summaries.0.image_name }}" style="font:inherit; font-size:13px; color:var(--ink); background:var(--surface);
+                    border:1px solid var(--rule); border-radius:var(--r-sm); padding:6px 8px; max-width:320px;">
+              {% for a in exec_summaries %}<option value="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.image_name|urlencode }}&amp;inline=1" title="{{ a.image_name }}">{{ a.label }}{% if forloop.first %} — latest{% endif %}</option>{% endfor %}
+            </select></label>
+          <button type="button" id="pd-sums-open" style="font:inherit; font-size:13px; font-weight:600; color:var(--dim);
+                  background:var(--surface); border:1px solid var(--rule); border-radius:var(--r-sm);
+                  padding:6px 15px; cursor:pointer;">Open</button>
         </div>
-        <p class="pk-hint" style="margin: 0 0 10px;">A summary is present — this box passes the pre-shipping gate’s summary check.</p>
+        <script>
+        document.getElementById("pd-sums-open").addEventListener("click", function () {
+          window.open(document.getElementById("pd-sums").value, "_blank");
+        });
+        </script>
         {% else %}
-        <div class="sd-empty" style="margin-bottom: 10px;">No executive summary on this box yet — the pre-shipping checklist requires one.</div>
+        <div class="sd-empty" style="margin: 8px 0 10px;">No executive summary on this {% if is_shipping %}box yet — the pre-shipping checklist requires one{% else %}item yet{% endif %}.</div>
         {% endif %}
         <div class="pk-actions" style="margin: 0;">
           <a class="pk-link" href="{% url 'explore:exec_summary' part_id=part_id %}">Sign / generate summary…</a>
-          <span class="pk-hint">Config-driven signing flow, matching the Dashboard.</span>
+          <span class="pk-hint">{% if es_cfg %}{{ es_cfg_msg }} · {% endif %}Config-driven signing flow, matching the Dashboard.</span>
         </div>
       </div>
+      {% endif %}
 
+      {% if packing %}
       <div class="sd-card">
         <h2>Workflows</h2>
         <table class="sd-kv">

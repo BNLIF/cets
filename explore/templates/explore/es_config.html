@@ -1,0 +1,343 @@
+{% extends 'explore/base.html' %}
+{% block title %}ES config · {{ part_type_id }} · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .ec-page { padding: 22px 30px 56px; max-width: 940px; }
+  .ec-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .ec-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .ec-crumbs a:hover { text-decoration: underline; }
+  .ec-crumbs .sep { color: var(--faint); margin: 0 7px; }
+  .ec-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 2px; }
+  .ec-page h1 .mono { font-family: var(--font-mono); }
+  .ec-sub { color: var(--dim); font-size: 13px; margin: 0 0 12px; }
+  .ec-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
+  .ec-flash.success { color: var(--good); background: var(--good-bg);
+    border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule)); }
+  .ec-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
+    border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+  .ec-card { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg);
+    padding: 12px 16px; margin-bottom: 12px; }
+  .ec-card h2 { font-size: 12px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em;
+    margin: 0 0 8px; }
+  .ec-page input, .ec-page select, .ec-page textarea { font: inherit; font-size: 13px;
+    color: var(--ink); background: var(--surface); border: 1px solid var(--rule);
+    border-radius: var(--r-sm); padding: 5px 8px; }
+  .ec-page textarea { font-family: var(--font-mono); font-size: 12px; }
+  .ec-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 5px 0; }
+  .ec-row input { flex: 1 1 120px; min-width: 0; }
+  .ec-row input[type=number] { flex: 0 0 88px; }
+  .ec-row input[type=checkbox] { flex: none; }
+  .ec-inline { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--dim); }
+  .ec-del { flex: none; font: inherit; font-size: 12px; color: var(--faint); background: none;
+    border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 4px 9px; cursor: pointer; }
+  .ec-del:hover { color: var(--bad, #a33); border-color: color-mix(in oklch, var(--bad, #a33) 40%, var(--rule)); }
+  .ec-add { font: inherit; font-size: 12.5px; color: var(--accent-ink); background: none;
+    border: 1px dashed color-mix(in oklch, var(--accent) 40%, var(--rule)); border-radius: var(--r-sm);
+    padding: 5px 12px; cursor: pointer; margin-top: 6px; }
+  .ec-add:hover { border-style: solid; }
+  .ec-plot { border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 8px 10px; margin: 8px 0; }
+  .ec-hint { font-size: 11.5px; color: var(--faint); }
+  .ec-label { font-size: 11px; color: var(--faint); }
+  .ec-save { font: inherit; font-size: 13.5px; font-weight: 600; color: #fff;
+    background: var(--accent); border: 1px solid var(--accent); border-radius: var(--r-sm);
+    padding: 8px 22px; cursor: pointer; }
+  .ec-quiet { font: inherit; font-size: 12.5px; font-weight: 600; color: var(--dim);
+    background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm);
+    padding: 6px 13px; cursor: pointer; }
+  #ec-preview { width: 100%; min-height: 220px; }
+</style>
+
+<div class="ec-page">
+  <div class="ec-crumbs">
+    <a href="{% url 'explore:shipments' %}">Shipments</a>
+    {% if next %}<span class="sep">›</span><a href="{{ next }}">Executive summary</a>{% endif %}
+    <span class="sep">›</span>ES config
+  </div>
+
+  {% for m in messages %}<div class="ec-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+
+  <h1>{% if is_new %}Create{% else %}Edit{% endif %} the ES config — <span class="mono">{{ part_type_id }}</span></h1>
+  <p class="ec-sub">{% if is_new %}This type has no config yet — starting from the template. Saving one marks
+    the type as carrying an executive summary.{% else %}Editing <span class="mono">{{ current_name }}</span>.{% endif %}
+    Saving posts a new <span class="mono">ES_{{ part_type_id }}_&lt;timestamp&gt;.json</span> onto the type —
+    newest wins, for every item of the type; HWDB keeps every version.</p>
+
+  <form method="post" id="ec-form">
+    {% csrf_token %}
+    <input type="hidden" name="config_json" id="ec-json">
+    <input type="hidden" name="next" value="{{ next }}">
+
+    <div class="ec-card">
+      <h2>Basics</h2>
+      <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Type id</span>
+        <span id="f-ctid" class="mono" style="font-size:12.5px; color:var(--dim);"></span>
+        <span class="ec-hint">component_type_id — auto-filled from the component type</span></div>
+      <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Consortium</span>
+        <input id="f-consortium" placeholder="e.g. CRP Consortium"></div>
+      <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Description</span>
+        <input id="f-desc" placeholder="e.g. Top CRU Executive summary - …"></div>
+    </div>
+
+    <div class="ec-card">
+      <h2>QC checks (todos)</h2>
+      <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">List title</span>
+        <input id="f-todos-title" placeholder="QC Checks"></div>
+      <div id="ec-todos"></div>
+      <button type="button" class="ec-add" data-add="todo">+ add check</button>
+    </div>
+
+    <div class="ec-card">
+      <h2>Signees</h2>
+      <p class="ec-hint" style="margin:0 0 4px;">Negative ranks sign first (any order), then ranks descending —
+        rank 0 signs last (the final approver). Roles are HWDB role ids; empty = anyone.</p>
+      <div id="ec-signees"></div>
+      <button type="button" class="ec-add" data-add="signee">+ add signee</button>
+    </div>
+
+    <div class="ec-card">
+      <h2>Reference URLs</h2>
+      <div id="ec-refs"></div>
+      <button type="button" class="ec-add" data-add="ref">+ add reference</button>
+    </div>
+
+    <div class="ec-card">
+      <h2>Plots</h2>
+      <p class="ec-hint" style="margin:0 0 4px;">An <b>image</b> plot shows an image already attached to a test
+        record; a <b>numeric</b> plot (data_paths) is rendered by the Dashboard — the Explorer shows an
+        uploaded image for it. Leave part_id and sub-position blank to target the item itself.</p>
+      <div id="ec-plots"></div>
+      <button type="button" class="ec-add" data-add="plot">+ add plot</button>
+    </div>
+
+    <div class="ec-card">
+      <h2>Extra fields</h2>
+      <p class="ec-hint" style="margin:0 0 4px;">Any other top-level key the config should carry. Values are
+        JSON — quote strings (<span class="mono">"text"</span>).</p>
+      <div id="ec-extras"></div>
+      <button type="button" class="ec-add" data-add="extra">+ add field</button>
+    </div>
+
+    <details class="ec-card">
+      <summary class="ec-hint" style="cursor:pointer; text-transform:uppercase; letter-spacing:.04em;">Raw JSON</summary>
+      <textarea id="ec-preview" rows="12" spellcheck="false" style="margin-top:8px;"></textarea>
+      <div class="ec-row">
+        <button type="button" class="ec-quiet" id="ec-apply">Apply JSON to the form</button>
+        <span class="ec-hint">The JSON follows the form as you edit it. Hand-edits here take effect
+          only after “Apply” — the form is what gets saved.</span>
+      </div>
+    </details>
+
+    <button type="submit" class="ec-save">Save config to HWDB</button>
+    {% if next %}<a href="{{ next }}" class="ec-quiet" style="text-decoration:none; margin-left:8px; display:inline-block;">Cancel</a>{% endif %}
+  </form>
+</div>
+
+<template id="t-todo">
+  <div class="ec-row"><input class="f-todo" placeholder="e.g. Contents match the manifest">
+    <button type="button" class="ec-del" title="Remove">&#x2715;</button></div>
+</template>
+<template id="t-signee">
+  <div class="ec-row"><input class="f-name" placeholder="Full name (as in HWDB)">
+    <input class="f-rank" type="number" value="0" title="rank">
+    <input class="f-roles" placeholder="role ids, e.g. 41, 7" title="HWDB role ids, comma-separated">
+    <button type="button" class="ec-del" title="Remove">&#x2715;</button></div>
+</template>
+<template id="t-ref">
+  <div class="ec-row"><input class="f-url" placeholder="https://…">
+    <input class="f-comments" placeholder="link text / comment">
+    <button type="button" class="ec-del" title="Remove">&#x2715;</button></div>
+</template>
+<template id="t-extra">
+  <div class="ec-row"><input class="f-key" placeholder="field name" style="flex:0 0 160px;">
+    <input class="f-value" placeholder='JSON value, e.g. "text" or {"a": 1}' style="font-family:var(--font-mono); font-size:12px;">
+    <button type="button" class="ec-del" title="Remove">&#x2715;</button></div>
+</template>
+<template id="t-plot">
+  <div class="ec-plot">
+    <div class="ec-row">
+      <select class="f-kind" style="flex:0 0 210px;">
+        <option value="image">image (from a test record)</option>
+        <option value="numeric">numeric (data_paths)</option>
+      </select>
+      <input class="f-title" placeholder="title">
+      <input class="f-ttn" placeholder="test type name, e.g. RoomT QC Test">
+      <button type="button" class="ec-del" title="Remove plot">&#x2715;</button>
+    </div>
+    <div class="ec-row g-image">
+      <input class="f-image-name" placeholder="image_name, e.g. noise.png">
+      <input class="f-ho" type="number" value="0" title="history_order — 0 = latest test record">
+      <span class="ec-hint">history_order (0 = latest)</span>
+    </div>
+    <div class="ec-row g-numeric" style="display:none;">
+      <input class="f-paths" placeholder="data_paths into test_data, comma-separated">
+      <input class="f-bins" type="number" placeholder="bins">
+      <label class="ec-inline"><input class="f-sum" type="checkbox"> sum over the whole type</label>
+    </div>
+    <div class="ec-row">
+      <input class="f-pid" placeholder="part_id (blank = the item itself)">
+      <input class="f-layer" type="number" placeholder="sub layer" title="sub_part_id layer: 1 = direct children">
+      <input class="f-pos" placeholder="sub position name" title="sub_part_id pos_name">
+    </div>
+  </div>
+</template>
+
+{{ initial|json_script:"ec-initial" }}
+<script>
+(function () {
+  var KNOWN = ["consortium_name", "test_description", "todos", "signees", "references",
+               "plots", "component_type_id"];
+  var PTID = "{{ part_type_id }}";
+  var ctid = PTID;   // auto-filled; an existing config's explicit value wins
+  var form = document.getElementById("ec-form");
+  var preview = document.getElementById("ec-preview");
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+
+  function add(tpl, container) {
+    var node = document.getElementById(tpl).content.firstElementChild.cloneNode(true);
+    document.getElementById(container).appendChild(node);
+    return node;
+  }
+  function syncPlotKind(p) {
+    var kind = $(".f-kind", p).value;
+    $(".g-image", p).style.display = kind === "image" ? "" : "none";
+    $(".g-numeric", p).style.display = kind === "numeric" ? "" : "none";
+  }
+  var adders = {
+    todo: function (text) { $(".f-todo", add("t-todo", "ec-todos")).value = text || ""; },
+    signee: function (s) {
+      var n = add("t-signee", "ec-signees"); s = s || {};
+      $(".f-name", n).value = s.name || "";
+      $(".f-rank", n).value = (s.rank === undefined ? 0 : s.rank);
+      $(".f-roles", n).value = (s.roles || []).join(", ");
+    },
+    ref: function (r) {
+      var n = add("t-ref", "ec-refs"); r = typeof r === "string" ? {url: r} : (r || {});
+      $(".f-url", n).value = r.url || "";
+      $(".f-comments", n).value = r.comments || "";
+    },
+    extra: function (k, v) {
+      var n = add("t-extra", "ec-extras");
+      $(".f-key", n).value = k || "";
+      $(".f-value", n).value = v === undefined ? "" : JSON.stringify(v);
+    },
+    plot: function (p) {
+      var n = add("t-plot", "ec-plots");
+      var isNew = !p; p = p || {};
+      var ip = p.image_path || null;
+      // a fresh plot defaults to image; a config-loaded one keeps its kind
+      $(".f-kind", n).value = (ip || isNew) ? "image" : "numeric";
+      $(".f-title", n).value = p.title || "";
+      $(".f-ttn", n).value = p.test_type_name || "";
+      if (ip) { $(".f-image-name", n).value = ip.image_name || ""; $(".f-ho", n).value = ip.history_order || 0; }
+      $(".f-paths", n).value = (p.data_paths || []).join(", ");
+      if (p.bins) $(".f-bins", n).value = p.bins;
+      $(".f-sum", n).checked = !!p.sum;
+      $(".f-pid", n).value = p.part_id || "";
+      if (p.sub_part_id) { $(".f-layer", n).value = p.sub_part_id.layer; $(".f-pos", n).value = p.sub_part_id.pos_name || ""; }
+      syncPlotKind(n);
+    },
+  };
+
+  function collect() {
+    var cfg = {"component_type_id": ctid};
+    if ($("#f-consortium").value.trim()) cfg.consortium_name = $("#f-consortium").value.trim();
+    if ($("#f-desc").value.trim()) cfg.test_description = $("#f-desc").value.trim();
+    var checks = $$("#ec-todos .f-todo").map(function (i) { return i.value.trim(); }).filter(Boolean);
+    var ttl = $("#f-todos-title").value.trim();
+    if (checks.length || ttl) cfg.todos = {title: ttl || "QC Checks", check_list: checks};
+    var signees = $$("#ec-signees .ec-row").map(function (r) {
+      var name = $(".f-name", r).value.trim();
+      if (!name) return null;
+      var roles = $(".f-roles", r).value.split(",").map(function (x) { return parseInt(x, 10); })
+                    .filter(function (x) { return !isNaN(x); });
+      return {name: name, rank: parseInt($(".f-rank", r).value, 10) || 0, roles: roles};
+    }).filter(Boolean);
+    if (signees.length) cfg.signees = signees;
+    var refs = $$("#ec-refs .ec-row").map(function (r) {
+      var url = $(".f-url", r).value.trim();
+      if (!url) return null;
+      return {url: url, comments: $(".f-comments", r).value.trim()};
+    }).filter(Boolean);
+    if (refs.length) cfg.references = refs;
+    var plots = $$("#ec-plots .ec-plot").map(function (p) {
+      var title = $(".f-title", p).value.trim(), ttn = $(".f-ttn", p).value.trim();
+      var kind = $(".f-kind", p).value;
+      var imageName = $(".f-image-name", p).value.trim();
+      var paths = $(".f-paths", p).value.split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      if (!title && !ttn && !imageName && !paths.length) return null;
+      var o = {title: title || "Plot", test_type_name: ttn};
+      if ($(".f-pid", p).value.trim()) o.part_id = $(".f-pid", p).value.trim();
+      var layer = parseInt($(".f-layer", p).value, 10), pos = $(".f-pos", p).value.trim();
+      if (!isNaN(layer) && pos) o.sub_part_id = {layer: layer, pos_name: pos};
+      if (kind === "image") {
+        o.image_path = {image_name: imageName, history_order: parseInt($(".f-ho", p).value, 10) || 0};
+      } else {
+        o.data_paths = paths;
+        var bins = parseInt($(".f-bins", p).value, 10);
+        if (!isNaN(bins)) o.bins = bins;
+        if ($(".f-sum", p).checked) o.sum = true;
+      }
+      return o;
+    }).filter(Boolean);
+    if (plots.length) cfg.plots = plots;
+    $$("#ec-extras .ec-row").forEach(function (r) {
+      var k = $(".f-key", r).value.trim();
+      if (!k) return;
+      var raw = $(".f-value", r).value.trim();
+      try { cfg[k] = JSON.parse(raw); } catch (e) { cfg[k] = raw; }
+    });
+    return cfg;
+  }
+
+  function render(cfg) {
+    ctid = cfg.component_type_id || PTID;
+    $("#f-ctid").textContent = ctid;
+    $("#f-consortium").value = cfg.consortium_name || cfg["consortium name"] || "";
+    $("#f-desc").value = typeof cfg.test_description === "string" ? cfg.test_description
+      : ((cfg.test_description || {}).default_text || "");
+    var todos = cfg.todos || {};
+    if (Array.isArray(todos)) todos = {check_list: todos};
+    $("#f-todos-title").value = todos.title || "";
+    ["ec-todos", "ec-signees", "ec-refs", "ec-plots", "ec-extras"].forEach(function (id) {
+      document.getElementById(id).innerHTML = "";
+    });
+    (todos.check_list || []).forEach(adders.todo);
+    (cfg.signees || []).forEach(adders.signee);
+    (cfg.references || []).forEach(adders.ref);
+    (cfg.plots || []).forEach(adders.plot);
+    Object.keys(cfg).forEach(function (k) {
+      if (KNOWN.indexOf(k) === -1 && k !== "consortium name") adders.extra(k, cfg[k]);
+    });
+    refresh();
+  }
+
+  function refresh() { preview.value = JSON.stringify(collect(), null, 2); }
+
+  form.addEventListener("click", function (e) {
+    var addKind = e.target.getAttribute && e.target.getAttribute("data-add");
+    if (addKind) { adders[addKind](); refresh(); return; }
+    if (e.target.classList.contains("ec-del")) {
+      var row = e.target.closest(".ec-plot") || e.target.closest(".ec-row");
+      if (row) { row.remove(); refresh(); }
+    }
+  });
+  form.addEventListener("input", function (e) { if (e.target !== preview) refresh(); });
+  form.addEventListener("change", function (e) {
+    var p = e.target.closest && e.target.closest(".ec-plot");
+    if (p && e.target.classList.contains("f-kind")) syncPlotKind(p);
+    if (e.target !== preview) refresh();
+  });
+  document.getElementById("ec-apply").addEventListener("click", function () {
+    try { render(JSON.parse(preview.value)); }
+    catch (e) { alert("That JSON doesn’t parse: " + e.message); }
+  });
+  form.addEventListener("submit", function () {
+    document.getElementById("ec-json").value = JSON.stringify(collect());
+  });
+
+  render(JSON.parse(document.getElementById("ec-initial").textContent));
+})();
+</script>
+{% endblock %}

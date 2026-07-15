@@ -23,6 +23,8 @@ urlpatterns = [
          name="box_create"),
     path("box-type/<str:part_type_id>/", views.explore_box_type_view,
          name="box_type"),
+    path("es-config/<str:part_type_id>/", views.explore_es_config_view,
+         name="es_config"),
     path("login/", views.login_view, name="login"),
     path("login/poll/", views.login_poll_view, name="login_poll"),
     path("sync/", views.explore_sync_view, name="sync"),

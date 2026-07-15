@@ -3,14 +3,14 @@
 
 {% block content %}
 <style>
-  .es-page { padding: 22px 30px 56px; max-width: 900px; }
+  .es-page { padding: 22px 30px 56px; }
   .es-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
   .es-crumbs a { color: var(--accent-ink); text-decoration: none; }
   .es-crumbs a:hover { text-decoration: underline; }
   .es-crumbs .sep { color: var(--faint); margin: 0 7px; }
-  .es-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 4px; }
+  .es-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 2px; }
   .es-page h1 .mono { font-family: var(--font-mono); }
-  .es-sub { color: var(--dim); font-size: 13.5px; margin: 0 0 18px; }
+  .es-sub { color: var(--dim); font-size: 13px; margin: 0 0 12px; }
 
   .es-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
   .es-flash.success { color: var(--good); background: var(--good-bg);
@@ -19,9 +19,9 @@
     border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
 
   .es-card { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg);
-    padding: 16px 18px; margin-bottom: 18px; }
+    padding: 12px 16px; margin-bottom: 12px; }
   .es-card h2 { font-size: 12px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em;
-    margin: 0 0 12px; }
+    margin: 0 0 8px; }
   .es-hint { font-size: 11.5px; color: var(--faint); }
   .es-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
   .es-row label { font-size: 12px; color: var(--faint); display: flex; flex-direction: column; gap: 3px; }
@@ -36,16 +36,48 @@
   .es-btn:disabled { opacity: .45; cursor: default; }
   .es-btn.quiet { color: var(--dim); background: var(--surface); border-color: var(--rule); }
 
-  .es-signee { border-top: 1px solid var(--rule); padding: 12px 0; }
-  .es-signee:first-of-type { border-top: none; }
+  .es-signee { border-top: 1px solid var(--rule); padding: 8px 0; }
+  .es-signee:first-of-type { border-top: none; padding-top: 0; }
   .es-signee .who { font-weight: 600; color: var(--ink); font-size: 13.5px; }
   .es-signee .meta { font-size: 11.5px; color: var(--faint); margin-left: 8px; }
   .es-signed { color: var(--good); font-weight: 700; font-size: 12px; }
   .es-waiting { color: var(--faint); font-size: 12px; }
-  .es-todo { display: block; font-size: 13px; color: var(--ink); margin: 4px 0; }
+  .es-todo { display: block; font-size: 13px; color: var(--ink); margin: 2px 0; }
   .es-dl { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500;
     color: var(--good); text-decoration: none; border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule));
     background: var(--good-bg); border-radius: 999px; padding: 4px 13px; margin: 2px 6px 2px 0; }
+  .es-plots-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 0 20px; }
+  .es-plot { border-top: 1px solid var(--rule); padding: 8px 0; }
+  .es-plot:first-of-type { border-top: none; padding-top: 0; }
+  .es-plot-title { font-weight: 600; color: var(--ink); font-size: 13px; margin-bottom: 2px; }
+  .es-plot img { max-width: 100%; max-height: 260px; width: auto; height: auto; margin-top: 6px;
+    display: block; border: 1px solid var(--rule); border-radius: var(--r-sm); background: #fff; }
+  .es-plot-err { font-size: 12.5px; color: var(--bad, #a33); margin-top: 4px; overflow-wrap: anywhere; }
+  .es-sum { cursor: pointer; font-size: 12px; color: var(--faint); text-transform: uppercase;
+    letter-spacing: .04em; }
+  .es-sum:hover { color: var(--dim); }
+  /* two columns: everything left, plots right (stacked on narrow windows,
+     plots first — matching the reading order: review plots, then sign) */
+  .es-cols { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    gap: 0 16px; align-items: start; }
+  .es-cols.es-one { grid-template-columns: minmax(0, 1fr); max-width: 900px; }
+  .es-cols > .es-main { grid-column: 1; grid-row: 1; min-width: 0; }
+  .es-cols > .es-side { grid-column: 2; grid-row: 1; min-width: 0;
+    position: sticky; top: 12px; }
+  @media (max-width: 1100px) {
+    .es-cols { grid-template-columns: minmax(0, 1fr); }
+    .es-cols > .es-main, .es-cols > .es-side { grid-column: auto; grid-row: auto; position: static; }
+  }
+  .es-kv { font-size: 13px; color: var(--ink); margin: 3px 0; }
+  .es-kv b { font-weight: 600; }
+  .es-row select { max-width: 320px; }
+  .es-ref { font-size: 13px; margin: 4px 0; overflow-wrap: anywhere; }
+  .es-ref a { color: var(--accent-ink); }
+  /* required confirmations: red until ticked, green once ticked */
+  .es-req { border-left: 3px solid var(--bad, #c0392b); padding-left: 8px;
+    color: var(--bad, #a33); accent-color: var(--bad, #c0392b); font-weight: 500; }
+  .es-req.is-ok { border-left-color: var(--good); color: var(--good); accent-color: var(--good); }
 </style>
 
 <div class="es-page">
@@ -58,22 +90,80 @@
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
 
   <h1>Executive summary — <span class="mono">{{ part_id }}</span></h1>
-  <p class="es-sub">{% if cfg %}{{ cfg.consortium_name }} · {{ cfg_msg }}{% else %}{{ cfg_msg }} Running in
+  <p class="es-sub">{% if cfg %}{{ cfg_msg }}{% else %}{{ cfg_msg }} Running in
     DEFAULT mode — a single sign-off, no checklist.{% endif %}
     Signatures live in the box’s “ES” test record in HWDB; this page has no local state.</p>
 
-  {% if summaries %}
+  <div class="es-cols{% if not plot_blocks %} es-one{% endif %}">
+
+  {% if plot_blocks %}
+  <div class="es-side">
   <div class="es-card">
-    <h2>Summaries on this box</h2>
-    {% for s in summaries %}
-    <a class="es-dl" href="{% url 'explore:shipment_image' image_id=s.image_id %}?name={{ s.image_name|urlencode }}"><span aria-hidden="true">&#x2913;</span> {{ s.image_name }}</a>
+    <h2>Plots ({{ plot_blocks|length }} configured)</h2>
+    <div class="es-plots-grid">
+    {% for b in plot_blocks %}
+    <div class="es-plot">
+      <div class="es-plot-title">{{ b.title }}{% if b.test_type_name %} — {{ b.test_type_name }}{% endif %}</div>
+      {% if b.uploaded %}
+      <div class="es-hint">Uploaded image <span class="mono">{{ b.upload_name }}</span>{% if b.kind == "image" %} — supersedes the config’s test-record image{% endif %}</div>
+      {% elif b.kind == "image" %}
+      <div class="es-hint">Image: <span class="mono">{{ b.image_name }}</span> (history_order={{ b.history_order }}) · <span class="mono">{{ b.pid }}</span></div>
+      {% else %}
+      <div class="es-hint">Numeric plot (data_paths: <span class="mono">{{ b.data_paths|join:", " }}</span>) — not rendered here; upload an image rendered elsewhere (e.g. by the Dashboard).</div>
+      {% endif %}
+      {% if b.error %}<div class="es-plot-err">&#9888; {{ b.error }}</div>{% endif %}
+      {% if b.image_id %}
+        {% if b.is_pdf %}<a class="es-dl" style="margin-top:8px;" href="{% url 'explore:shipment_image' image_id=b.image_id %}?name={{ b.image_name|urlencode }}&amp;inline=1" target="_blank" rel="noopener">{{ b.image_name }} <span aria-hidden="true">&#x2197;</span></a>
+        {% else %}<a href="{% url 'explore:shipment_image' image_id=b.image_id %}?inline=1" target="_blank" rel="noopener" title="Open full size in a new tab"><img src="{% url 'explore:shipment_image' image_id=b.image_id %}" alt="{{ b.title }}" loading="lazy"></a>
+        {% endif %}
+      {% endif %}
+      <form method="post" enctype="multipart/form-data" class="es-row" style="margin-top:6px;">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="upload_plot">
+        <input type="hidden" name="plot_index" value="{{ b.index }}">
+        <input type="file" name="plot_image" accept=".png,.jpg,.jpeg,.gif,image/*" required style="font-size:12px; color:var(--dim); max-width: 230px;">
+        <button class="es-btn quiet">{% if b.image_id %}Upload replacement{% else %}Upload plot image{% endif %}</button>
+      </form>
+    </div>
     {% endfor %}
+    </div>
+    <p class="es-hint" style="margin: 8px 0 0;">Click a plot for full size. Uploads post onto the item as
+      <span class="mono" style="font-size:11px;">ESPlot_{{ part_id }}_p&lt;n&gt;-&lt;title&gt;_&lt;timestamp&gt;.&lt;ext&gt;</span> —
+      the newest upload fills its slot (HWDB keeps every version).</p>
+  </div>
+  </div>
+  {% endif %}
+
+  <div class="es-main">
+
+  {% if cfg or summaries %}
+  <div class="es-card">
+    <h2>Summary</h2>
+    {% if cfg.consortium_name %}<div class="es-kv"><b>Consortium:</b> {{ cfg.consortium_name }}</div>{% endif %}
+    {% if cfg.test_description %}<div class="es-kv"><b>Description:</b> {{ cfg.test_description }}</div>{% endif %}
+    {% if summaries %}
+    <div class="es-row" style="margin-top: 8px;">
+      <label>Summary PDFs ({{ summaries|length }})
+        <select id="es-sums" title="{{ summaries.0.image_name }}">
+          {% for s in summaries %}<option value="{% url 'explore:shipment_image' image_id=s.image_id %}?name={{ s.image_name|urlencode }}&amp;inline=1" title="{{ s.image_name }}">{{ s.label }}{% if forloop.first %} — latest{% endif %}</option>{% endfor %}
+        </select></label>
+      <button type="button" class="es-btn quiet" id="es-sums-open">Open</button>
+    </div>
+    {% endif %}
   </div>
   {% endif %}
 
   {% if cfg %}
-  {% if cfg.test_description %}<div class="es-card"><h2>Test description</h2>
-    <div style="font-size:13px; color:var(--ink);">{{ cfg.test_description }}</div></div>{% endif %}
+  {% if cfg.references %}
+  <div class="es-card">
+    <h2>Reference URLs</h2>
+    {% for r in cfg.references %}
+    <div class="es-ref">
+      <a href="{{ r.url }}" target="_blank" rel="noopener" title="{{ r.url }}">{% if r.comments %}{{ r.comments }}{% else %}{{ r.url }}{% endif %} <span aria-hidden="true">&#x2197;</span></a>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
 
   <form method="post">
     {% csrf_token %}
@@ -81,10 +171,10 @@
     <div class="es-card">
       <h2>{{ cfg.todos.title }}</h2>
       {% for item in cfg.todos.check_list %}
-      <label class="es-todo"><input type="checkbox" name="todo" value="{{ forloop.counter0 }}"
+      <label class="es-todo es-req{% if forloop.counter0 in todos_checked %} is-ok{% endif %}"><input type="checkbox" name="todo" value="{{ forloop.counter0 }}"
         {% if forloop.counter0 in todos_checked %}checked{% endif %}> {{ item }}</label>
       {% endfor %}
-      <p class="es-hint">Checklist state is saved with each signature.</p>
+      <p class="es-hint">Every check must be confirmed before signing; the state is saved with each signature.</p>
     </div>
     {% endif %}
 
@@ -96,12 +186,12 @@
             {% for o in status_options %}<option value="{{ o.value }}"{% if o.value == status_current_id %} selected{% endif %}>{{ o.label }}</option>{% endfor %}
           </select>
         </label>
-        <label style="flex-direction:row; align-items:center; gap:6px;">
+        <label class="es-req{% if certified %} is-ok{% endif %}" style="flex-direction:row; align-items:center; gap:6px;">
           <input type="checkbox" name="certified" {% if certified %}checked{% endif %}> Consortium Certified QA/QC</label>
-        <label style="flex-direction:row; align-items:center; gap:6px;">
+        <label class="es-req{% if uploaded %} is-ok{% endif %}" style="flex-direction:row; align-items:center; gap:6px;">
           <input type="checkbox" name="uploaded" {% if uploaded %}checked{% endif %}> All QA/QC Uploaded</label>
       </div>
-      <p class="es-hint">Patched onto the item with every signature, like the Dashboard.</p>
+      <p class="es-hint">Both flags must be confirmed before signing; patched onto the item with every signature, like the Dashboard.</p>
     </div>
 
     <div class="es-card">
@@ -141,8 +231,8 @@
       </form>
     </div>
     <p class="es-hint">Generates the DETAIL summary (description, checklist, sign-off table, status
-      fields, references, contents){% if cfg.has_plots %} — config plots are not supported here yet{% endif %},
-      named to the pre-shipping gate’s convention.</p>
+      fields, references{% if plot_blocks %}, plots{% endif %}, contents), named to the pre-shipping
+      gate’s convention. A plot slot with no image is noted in the PDF, not skipped silently.</p>
   </div>
 
   {% else %}
@@ -159,35 +249,51 @@
           {% for o in status_options %}<option value="{{ o.value }}"{% if o.value == status_current_id %} selected{% endif %}>{{ o.label }}</option>{% endfor %}
         </select>
       </label>
-      <label style="flex-direction:row; align-items:center; gap:6px;">
+      <label class="es-req{% if certified %} is-ok{% endif %}" style="flex-direction:row; align-items:center; gap:6px;">
         <input type="checkbox" name="certified" {% if certified %}checked{% endif %}> Certified QA/QC</label>
-      <label style="flex-direction:row; align-items:center; gap:6px;">
+      <label class="es-req{% if uploaded %} is-ok{% endif %}" style="flex-direction:row; align-items:center; gap:6px;">
         <input type="checkbox" name="uploaded" {% if uploaded %}checked{% endif %}> All QA/QC Uploaded</label>
       <button class="es-btn">Sign &amp; post summary PDF</button>
     </div>
-    <p class="es-hint">Patches the item’s status/flags and posts the minimal DEFAULT summary in one step.</p>
+    <p class="es-hint">Both flags must be confirmed before signing; patches the item’s status/flags and posts the minimal DEFAULT summary in one step.</p>
   </form>
   {% endif %}
 
-  <form method="post" enctype="multipart/form-data" class="es-card">
-    {% csrf_token %}<input type="hidden" name="action" value="upload_config">
-    <h2>{% if cfg %}Replace{% else %}Upload{% endif %} the type’s ES config</h2>
+  <div class="es-card">
+    <h2>Type config</h2>
     <div class="es-row">
-      <input type="file" name="config" accept=".json,application/json" required style="font-size:12.5px; color:var(--dim);">
-      <button class="es-btn quiet">Post config to HWDB</button>
+      <a class="es-btn quiet" style="text-decoration:none;" href="{% url 'explore:es_config' part_type_id=ptid %}?next={{ request.path|urlencode }}">{% if cfg %}Edit{% else %}Create{% endif %} the type’s ES config…</a>
+      <span class="es-hint">Structured editor (consortium, checklist, signees, references, plots) —
+        saves a new <span class="mono" style="font-size:11px;">ES_{{ ptid }}_&lt;timestamp&gt;.json</span> onto the type; newest wins, for every item of the type.</span>
     </div>
-    <p class="es-hint">A JSON file (signees, checklist, references) posted onto the component type as
-      <span class="mono" style="font-size:11px;">ES_{{ part_id|slice:":12" }}_&lt;timestamp&gt;.json</span> — newest config wins, for all boxes of the type.</p>
-  </form>
+  </div>
 
-  <form method="post" enctype="multipart/form-data" class="es-card">
-    {% csrf_token %}<input type="hidden" name="action" value="upload">
-    <h2>Or upload a ready-made PDF</h2>
-    <div class="es-row">
-      <input type="file" name="pdf" accept=".pdf,application/pdf" required style="font-size:12.5px; color:var(--dim);">
-      <button class="es-btn quiet">Post to HWDB</button>
-    </div>
-    <p class="es-hint">Renamed to <span class="mono" style="font-size:11px;">ExecutiveSummary_{{ part_id }}_&lt;timestamp&gt;.pdf</span> — the gate convention.</p>
-  </form>
+  <details class="es-card">
+    <summary class="es-sum">Or upload a ready-made PDF</summary>
+    <form method="post" enctype="multipart/form-data" style="margin-top: 10px;">
+      {% csrf_token %}<input type="hidden" name="action" value="upload">
+      <div class="es-row">
+        <input type="file" name="pdf" accept=".pdf,application/pdf" required style="font-size:12.5px; color:var(--dim);">
+        <button class="es-btn quiet">Post to HWDB</button>
+      </div>
+      <p class="es-hint">Renamed to <span class="mono" style="font-size:11px;">ExecutiveSummary_{{ part_id }}_&lt;timestamp&gt;.pdf</span> — the gate convention.</p>
+    </form>
+  </details>
+
+  </div>{# /es-main #}
+  </div>{# /es-cols #}
 </div>
+<script>
+// Required confirmations flip red → green as they're ticked.
+document.querySelectorAll(".es-req").forEach(function (l) {
+  var c = l.querySelector("input[type=checkbox]");
+  if (!c) return;
+  c.addEventListener("change", function () { l.classList.toggle("is-ok", c.checked); });
+});
+// Summary PDFs open from the selection list (latest is the default choice).
+var sumsOpen = document.getElementById("es-sums-open");
+if (sumsOpen) sumsOpen.addEventListener("click", function () {
+  window.open(document.getElementById("es-sums").value, "_blank");
+});
+</script>
 {% endblock %}

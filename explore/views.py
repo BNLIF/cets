@@ -673,6 +673,18 @@ def explore_part_view(request, part_id):
     # First write feature (issue #61): boxes on a write-enabled instance get
     # the Update-location form; its dropdown needs the institution list.
     can_update_location = is_shipping and inst in settings.HWDB_WRITE_INSTANCES
+    # The type's ES config (consortium, description) for the Executive-summary
+    # card. Any type carrying one is "marked" for an ES — the interim mark
+    # until the hierarchy-chart one exists.
+    es_cfg, es_cfg_msg = (execsummary.load_config(api, ptid)
+                          if inst in settings.HWDB_WRITE_INSTANCES else (None, ""))
+    exec_summaries = sorted(
+        (a for a in detail["attachments"]
+         if (a["image_name"] or "").lower().startswith(
+             f"executivesummary_{part_id.lower()}_")),
+        key=lambda a: a["image_name"] or "", reverse=True)
+    for a in exec_summaries:
+        a["label"] = _summary_label(a["image_name"])
     return render(request, "explore/part_detail.html", {
         # A box belongs to the Shipments tab; everything else to Hardware.
         "active_nav": "shipments" if is_shipping else "hardware",
@@ -695,16 +707,26 @@ def explore_part_view(request, part_id):
         "packing": (_packing_context(api, inst, ptid, detail["manifest"])
                     if can_update_location else None),
         # Executive summaries already on this item (issue #53): attachments
-        # matching the Dashboard's gate convention, newest first.
-        "exec_summaries": [
-            a for a in detail["attachments"]
-            if (a["image_name"] or "").lower().startswith(
-                f"executivesummary_{part_id.lower()}_")],
+        # matching the Dashboard's gate convention, newest first (the gate
+        # filename embeds the timestamp, so name order is chronological).
+        "exec_summaries": exec_summaries,
+        "es_cfg": es_cfg,
+        "es_cfg_msg": es_cfg_msg,
         # Ship/receive checklist runs on this box (issue #65), by workflow.
         "checklists": ({c.workflow: c for c in
                         BoxChecklist.for_instance(inst).filter(part_id=part_id)}
                        if can_update_location else {}),
     })
+
+
+def _summary_label(name: str) -> str:
+    """Short label for a summary PDF: the timestamp its gate-convention
+    filename embeds (``ExecutiveSummary_{pid}_{YYYYmmdd_HHMMSS}.pdf``)."""
+    m = re.search(r"_(\d{8})_(\d{6})\.pdf$", name or "", re.IGNORECASE)
+    if not m:
+        return name or ""
+    d, t = m.groups()
+    return f"{d[:4]}-{d[4:6]}-{d[6:]} {t[:2]}:{t[2:4]}"
 
 
 def _institution_options(api) -> list[dict]:
@@ -1450,7 +1472,7 @@ def explore_exec_summary_view(request, part_id):
     part_url = _rev(request, "explore:part", args=[part_id])
     page_url = _rev(request, "explore:exec_summary", args=[part_id])
     ptid = part_id.rsplit("-", 1)[0]
-    if inst not in settings.HWDB_WRITE_INSTANCES or not curation.is_shipping_type(inst, ptid):
+    if inst not in settings.HWDB_WRITE_INSTANCES:
         return HttpResponseForbidden("Executive summaries are not enabled here.")
 
     try:
@@ -1464,12 +1486,22 @@ def explore_exec_summary_view(request, part_id):
 
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
     cfg, cfg_msg = execsummary.load_config(api, ptid)
+    # Any type can carry an executive summary, not just shipping boxes. Until
+    # the hierarchy-chart "requires ES" marking exists, the mark is the type's
+    # ES_{ptid}_*.json config in HWDB; shipping types additionally run
+    # configless (DEFAULT mode), as before.
+    if cfg is None and not curation.is_shipping_type(inst, ptid):
+        return HttpResponseForbidden("Executive summaries are not enabled for this type.")
 
     if request.method == "POST":
         return _exec_summary_action(request, api, part_id, ptid, cfg,
                                     page_url)
 
     # ---- GET: assemble the signing page, all state live from HWDB ----
+    images_rows = _safe_get_data(api.get_images, part_id)
+    plot_blocks = (execsummary.resolve_plots(
+        api, cfg, part_id, _children_of(api), images_rows)
+        if cfg and cfg["plots"] else [])
     es_list, saved_todos = execsummary.fetch_es_state(api, part_id)
     full_name, role_ids, role_names = _whoami_context(api)
     try:
@@ -1477,14 +1509,15 @@ def explore_exec_summary_view(request, part_id):
     except requests.RequestException:
         comp = {}
     status_name = (comp.get("status") or {}).get("name") if isinstance(comp.get("status"), dict) else comp.get("status")
-    summaries = []
-    try:
-        summaries = [i for i in (api.get_images(part_id).get("data") or [])
-                     if (i.get("image_name") or "").lower().startswith(
-                         f"executivesummary_{part_id.lower()}_")]
-        summaries.sort(key=lambda i: i.get("created") or "", reverse=True)
-    except Exception as e:
-        logger.warning("exec summary: images list failed: %s", e)
+    summaries = [i for i in images_rows
+                 if (i.get("image_name") or "").lower().startswith(
+                     f"executivesummary_{part_id.lower()}_")]
+    summaries.sort(key=lambda i: i.get("created") or "", reverse=True)
+    for s in summaries:
+        # Short label for the selection list — the filenames all share the
+        # long ExecutiveSummary_{pid}_ prefix, so show the posted time.
+        s["label"] = ((s.get("created") or "")[:16].replace("T", " ")
+                      or s.get("image_name"))
     return render(request, "explore/exec_summary.html", {
         "active_nav": "shipments",
         "sidebar": navigation.sidebar_tree(inst, {}),
@@ -1499,6 +1532,77 @@ def explore_exec_summary_view(request, part_id):
         "certified": bool(comp.get("certified_qaqc")),
         "uploaded": bool(comp.get("qaqc_uploaded")),
         "summaries": summaries,
+        "plot_blocks": plot_blocks,
+        "ptid": ptid,
+    })
+
+
+def _children_of(api):
+    """Manifest-row lookup for ES plot sub_part_id addressing."""
+    return lambda pid: current_manifest(_safe_get_data(api.get_subcomponents, pid))
+
+
+@login_not_required
+@fnal_login_required
+def explore_es_config_view(request, part_type_id):
+    """Structured editor for a type's ES config: consortium/description,
+    todos, signees, references, plots, plus arbitrary extra fields. Saving
+    posts a NEW ``ES_{ptid}_{ts}.json`` onto the type (newest wins — HWDB
+    keeps every version). A type with no config starts from the template;
+    saving one is what marks the type as carrying an executive summary."""
+    inst = instance_of(request)
+    page_url = _rev(request, "explore:es_config", args=[part_type_id])
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return HttpResponseForbidden("ES configs can only be edited on the dev instance.")
+
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(_rev(request, "explore:home"))
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+
+    next_url = request.POST.get("next") or request.GET.get("next") or ""
+    back = f"{page_url}?{urlencode({'next': next_url})}" if next_url else page_url
+
+    if request.method == "POST":
+        try:
+            cfg = json.loads(request.POST.get("config_json") or "")
+        except ValueError as e:
+            messages.error(request, f"The config isn’t valid JSON — {e}")
+            return redirect(back)
+        if not isinstance(cfg, dict):
+            messages.error(request, "The config must be a JSON object.")
+            return redirect(back)
+        # Required field, auto-derivable — fill it in rather than reject.
+        cfg.setdefault("component_type_id", part_type_id)
+        name = f"ES_{part_type_id}_{timezone.now():{execsummary.FILENAME_TS_FMT}}.json"
+        try:
+            body = api.post_component_type_image(
+                part_type_id, io.BytesIO(json.dumps(cfg, indent=2).encode()), name,
+                comments="Executive Summary config (Explorer editor)")
+        except requests.RequestException as e:
+            messages.error(request, f"HWDB rejected the config — {_hwdb_error_detail(e)}")
+            return redirect(back)
+        if body.get("status") != "OK":
+            messages.error(request, f"HWDB rejected the config — {body.get('data') or body}")
+            return redirect(back)
+        messages.success(request, f"Config posted as {name} — it now applies to "
+                                  f"every {part_type_id} item.")
+        return redirect(next_url or back)
+
+    raw, current_name = execsummary.load_raw_config(api, part_type_id)
+    return render(request, "explore/es_config.html", {
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "part_type_id": part_type_id,
+        "current_name": current_name,
+        "initial": (raw if raw is not None else
+                    {**execsummary.CONFIG_TEMPLATE, "component_type_id": part_type_id}),
+        "is_new": raw is None,
+        "next": next_url,
     })
 
 
@@ -1515,31 +1619,6 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             sid = 0
         return (sid, bool(request.POST.get("certified")),
                 bool(request.POST.get("uploaded")))
-
-    if action == "upload_config":  # ES config JSON onto the TYPE's images
-        cfg_file = request.FILES.get("config")
-        if cfg_file is None or not cfg_file.name.lower().endswith(".json"):
-            messages.error(request, "Pick a .json config file.")
-            return redirect(page_url)
-        raw = cfg_file.read()
-        try:
-            json.loads(raw)
-        except ValueError as e:
-            messages.error(request, f"That file isn’t valid JSON — {e}")
-            return redirect(page_url)
-        name = f"ES_{ptid}_{timezone.now():{execsummary.FILENAME_TS_FMT}}.json"
-        try:
-            body = api.post_component_type_image(
-                ptid, io.BytesIO(raw), name, comments="Executive Summary config")
-        except requests.RequestException as e:
-            messages.error(request, f"HWDB rejected the config — {_hwdb_error_detail(e)}")
-            return redirect(page_url)
-        if body.get("status") != "OK":
-            messages.error(request, f"HWDB rejected the config — {body.get('data') or body}")
-            return redirect(page_url)
-        messages.success(request, f"Config posted as {name} — it now applies to every "
-                                  f"{ptid} box.")
-        return redirect(page_url)
 
     if action == "upload":  # ready-made PDF (the #53 spike path)
         pdf = request.FILES.get("pdf")
@@ -1560,6 +1639,12 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
     if action == "default_sign":  # no-config mode: sign + patch + PDF, one shot
         full_name, _ids, _names = _whoami_context(api)
         sid, certified, uploaded = _form_flags()
+        missing = [label for ok, label in ((certified, "“Certified QA/QC”"),
+                                           (uploaded, "“All QA/QC Uploaded”")) if not ok]
+        if missing:
+            messages.error(request, "Both QA/QC flags must be confirmed before "
+                                    "signing — still unchecked: " + ", ".join(missing) + ".")
+            return redirect(page_url)
         ts = timezone.localtime().strftime(execsummary.TIMESTAMP_FMT)
         comments = (request.POST.get("comments") or "").strip() or f"signed by {full_name}"
         _patch_item_flags(api, part_id, sid, certified, uploaded, comments)
@@ -1579,6 +1664,35 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
 
     if cfg is None:
         messages.error(request, "This action needs an ES config on the type.")
+        return redirect(page_url)
+
+    if action == "upload_plot":  # an image for one configured plot slot
+        try:
+            idx = int(request.POST.get("plot_index") or "")
+        except ValueError:
+            idx = -1
+        plot = next((p for p in cfg["plots"] if p["index"] == idx), None)
+        img = request.FILES.get("plot_image")
+        ext = img.name.rsplit(".", 1)[-1].lower() if img and "." in img.name else ""
+        if plot is None or img is None or ext not in ("png", "jpg", "jpeg", "gif"):
+            messages.error(request, "Pick a PNG/JPG/GIF image for a configured plot.")
+            return redirect(page_url)
+        if img.size > 10 * 1024 * 1024:
+            messages.error(request, "That image is over 10 MB — too large for a plot.")
+            return redirect(page_url)
+        name = (execsummary.plot_upload_prefix(part_id, plot)
+                + f"{timezone.now():{execsummary.FILENAME_TS_FMT}}.{ext}")
+        try:
+            body = api.post_component_image(
+                part_id, img, name, comments=f"ES plot upload: {plot['title']}")
+        except requests.RequestException as e:
+            messages.error(request, f"HWDB rejected the plot image — {_hwdb_error_detail(e)}")
+            return redirect(page_url)
+        if body.get("status") != "OK":
+            messages.error(request, f"HWDB rejected the plot image — {body.get('data') or body}")
+            return redirect(page_url)
+        messages.success(request, f"Plot image posted as {name} — it now fills "
+                                  f"the “{plot['title']}” slot.")
         return redirect(page_url)
 
     es_list, saved_todos = execsummary.fetch_es_state(api, part_id)
@@ -1607,6 +1721,21 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
         if not signature:
             messages.error(request, f"Type the signature text for “{name}”.")
             return redirect(page_url)
+        # Nothing gets signed until every QC check and both QA/QC flags are
+        # ticked — the confirmations are the point of the summary.
+        sid, certified, uploaded = _form_flags()
+        missing = []
+        n_checks = len(cfg["todos"]["check_list"])
+        if len(todos["checked"]) < n_checks:
+            missing.append(f"{n_checks - len(todos['checked'])} QC check(s)")
+        if not certified:
+            missing.append("“Consortium Certified QA/QC”")
+        if not uploaded:
+            missing.append("“All QA/QC Uploaded”")
+        if missing:
+            messages.error(request, "Everything must be confirmed before signing — "
+                                    "still unchecked: " + ", ".join(missing) + ".")
+            return redirect(page_url)
         ts = timezone.localtime().strftime(execsummary.TIMESTAMP_FMT)
         merged = execsummary.merge_es_entry(
             es_list, name, signature, row["rank"], ts,
@@ -1615,7 +1744,6 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
         if err:
             messages.error(request, f"HWDB rejected the signature — {err}")
             return redirect(page_url)
-        sid, certified, uploaded = _form_flags()
         _patch_item_flags(
             api, part_id, sid, certified, uploaded,
             f"[ExecSum] signature '{name}' uploaded, also Status, QAQC Certified, "
@@ -1650,6 +1778,12 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
         manifest = current_manifest(_safe_get_data(api.get_subcomponents, part_id))
         leaf = HierarchyNode.for_instance(inst).filter(
             level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
+        plot_blocks = []
+        if cfg["plots"]:
+            plot_blocks = execsummary.resolve_plots(
+                api, cfg, part_id, _children_of(api),
+                _safe_get_data(api.get_images, part_id))
+            execsummary.download_plot_images(api, plot_blocks)
         pdf_bytes = execsummary.build_detail_pdf(part_id, {
             "type_name": leaf.name if leaf else "",
             "description": cfg["test_description"],
@@ -1660,6 +1794,7 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             "uploaded_flag": bool(comp.get("qaqc_uploaded")),
             "references": cfg["references"],
             "subcomponents": execsummary.subcomponent_lines(manifest),
+            "plot_blocks": plot_blocks,
         })
         name = f"ExecutiveSummary_{part_id}_{timezone.now():{execsummary.FILENAME_TS_FMT}}.pdf"
         err = _upload_summary_pdf(api, part_id, io.BytesIO(pdf_bytes), name)
