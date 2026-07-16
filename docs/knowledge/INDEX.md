@@ -12,6 +12,10 @@ Full-text markdown conversions of CE reference documents (converted 2026-06-04 f
 - [ColdADC_datasheet.md](ColdADC_datasheet.md) — ColdADC: power domains, reference voltages/currents, configuration-memory map, all control registers (page 1 + page 2 I2C), I2C/UART protocol, ring-oscillator process monitors, wirebond pad list.
 - [COLDATA_datasheet.md](COLDATA_datasheet.md) — COLDATA: register maps (main page, page-5 PLL/serializer/line-driver, LArASIC pages 1–4), 8b10b flow control, FASTACT commands, frame formats, line-driver settings per cable case, pad/pin list.
 
+## HWDB data geography
+
+- [test-date-registry.md](test-date-registry.md) — where each component type stores its physics test date in `test_data` (path + format + parsing rule), with spike evidence. Mirrors `TEST_DATE_SPECS` in `explore/events.py`.
+
 ## QC procedures
 
 - [CE_QC_plan.md](CE_QC_plan.md) — overall CE QC plan: cold cables, flanges (pressure/leak criteria), patch panels, WIB and PTC QC item tables, burn-in requirements, yields and quantities.

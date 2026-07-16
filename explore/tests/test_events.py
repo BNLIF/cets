@@ -291,6 +291,70 @@ class PhysicsDatePathTest(TestCase):
         self.assertEqual(events.physics_date_field("prod", self.ptid), "Test Date")
 
 
+SIPM_SPEC = events.TEST_DATE_SPECS["D00400100003"]
+
+
+class TestDateRegistryTest(TestCase):
+    """The per-type test-date registry (issue #70): path walking through
+    dicts/list indices and the dm-or-md disambiguation rule, spike-verified
+    against the SiPM board's real records."""
+
+    def _extract(self, raw):
+        return events.extract_test_date({"Test Results": [{"Date": raw}]}, SIPM_SPEC)
+
+    def test_dd_mm_record(self):
+        # Recent-batch shape (D00400100003-00047): day > 12 → firmly DD-MM.
+        dt = self._extract("20-07-2023-10:19 UTC")
+        self.assertEqual((dt.year, dt.month, dt.day), (2023, 7, 20))
+
+    def test_mm_dd_record(self):
+        # Early-batch shape (-00001, 2025-12 upload): 17 > 12 → firmly MM-DD.
+        dt = self._extract("05-17-2024-09:23 UTC")
+        self.assertEqual((dt.year, dt.month, dt.day), (2024, 5, 17))
+
+    def test_ambiguous_day_defers_to_day_first(self):
+        dt = self._extract("05-06-2024-09:23 UTC")
+        self.assertEqual((dt.month, dt.day), (6, 5))  # day_first: 5 June
+
+    def test_missing_or_malformed_gives_none(self):
+        self.assertIsNone(events.extract_test_date({}, SIPM_SPEC))
+        self.assertIsNone(events.extract_test_date({"Test Results": []}, SIPM_SPEC))
+        self.assertIsNone(events.extract_test_date({"Test Results": "oops"}, SIPM_SPEC))
+        self.assertIsNone(self._extract("sometime in July"))
+        self.assertIsNone(self._extract("40-40-2024-00:00 UTC"))  # neither ordering valid
+
+    def test_sipm_registered_with_caption_label(self):
+        self.assertEqual(events.physics_date_field("prod", "D00400100003"),
+                         "Test Results → Date")
+
+    def test_sync_bins_sipm_by_physics_date(self):
+        # End-to-end through sync_test_events: the mirror row gets the physics
+        # date (2023-07-20), not the record's created stamp (2026-07-06).
+        _node("D00400100003", system_id=4, system_name="FD PDS",
+              subsystem_name="SiPMs", component_type_name="SiPM board")
+        client = mock.MagicMock()
+
+        def _make_request(method, endpoint, data=None, params=None):
+            if endpoint.endswith("/components"):
+                return {"data": [{"part_id": "P1"}], "pagination": {"pages": 1}}
+            return {"data": {"created": "2026-07-06T00:00:00+00:00",
+                             "updated": "2026-07-06T00:00:00+00:00"}}
+
+        client._make_request.side_effect = _make_request
+        client.get_test_types.return_value = {
+            "data": [{"name": "Dark Noise SiPM Counts", "id": 29}]}
+        client.get_tests.return_value = {
+            "data": [{"created": "2026-07-06T00:00:00+00:00",
+                      "test_data": {"Test Results": [{"Date": "20-07-2023-10:19 UTC"}],
+                                    "_meta": {}}}]}
+        with mock.patch("explore.events.FnalDbApiClient", return_value=client):
+            list(events.sync_test_events("https://x", "b", "D00400100003"))
+
+        e = HwdbTestEvent.objects.get(part_type_id="D00400100003")
+        self.assertEqual((e.created.year, e.created.month, e.created.day), (2023, 7, 20))
+        self.assertEqual(e.test_type_name, "Dark Noise SiPM Counts")
+
+
 class ComponentUpdateProgressTest(TestCase):
     def test_single_series_by_component_updated_date(self):
         ptid = "D05500300001"

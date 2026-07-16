@@ -14,6 +14,7 @@ lines for a ``StreamingHttpResponse`` to wrap.
 from __future__ import annotations
 
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from threading import local as _thread_local_cls
@@ -23,7 +24,6 @@ from django.conf import settings
 from django.utils import timezone
 
 from hwdb.api_client import FnalDbApiClient
-from hwdb.sync import _parse_test_date  # reuse the dashboard's YYYY/MM/DD parser
 
 from .models import HierarchyNode, HwdbComponentEvent, HwdbTestEvent
 
@@ -32,20 +32,110 @@ logger = logging.getLogger(__name__)
 _DEFAULT_WORKERS = 20
 
 
-def physics_date_field(instance: str, part_type_id: str) -> str | None:
-    """The ``test_data`` field holding the real (physics) test date for this
-    component type, or ``None`` if we don't know one (→ fall back to the HWDB
-    record ``created`` stamp). The deferred refinement of ADR-0010: only the CE
-    chip families are mapped today; other consortia stay on ``created`` until
-    their datasheet date field is validated.
-    """
+# Where each mapped component type keeps its physics test date inside
+# ``test_data``, and how to read it (issue #70). The registry IS the record —
+# add a type here (with spike evidence in docs/knowledge/test-date-registry.md)
+# and its chart bins by physics date after a full re-sync. Fields:
+# - "path": dict keys / list indices from test_data down to the raw value.
+# - "style": how the raw string is parsed —
+#     "ymd":      YYYY/MM/DD or YYYY-MM-DD (the CE chip "Test Date" shape).
+#     "dm-or-md": DD-MM-YYYY-HH:MM or MM-DD-YYYY-HH:MM. Both orderings exist
+#                 on the SAME types (upload batches differ; HWDB is append-only
+#                 so old records never change), so each record disambiguates
+#                 itself via day > 12, ambiguous days deferring to "day_first".
+# - "label": names the field in the chart caption.
+# CE chips aren't listed — their per-instance type ids come from the HWDB
+# profile (see test_date_spec).
+TEST_DATE_SPECS = {
+    # SiPM board — verified 2026-07-16 (.idea/spike/hwdb_sipm_test_date.py):
+    # the 2025-12 upload batch wrote MM-DD, later batches DD-MM.
+    "D00400100003": {
+        "label": "Test Results → Date",
+        "path": ["Test Results", 0, "Date"],
+        "style": "dm-or-md",
+        "day_first": True,
+    },
+}
+
+_CE_CHIP_SPEC = {"label": "Test Date", "path": ["Test Date"], "style": "ymd"}
+
+
+def test_date_spec(instance: str, part_type_id: str) -> dict | None:
+    """The registry entry for this component type, or ``None`` (→ the type's
+    chart bins on the HWDB record ``created`` stamp and syncs via the cheap
+    summary endpoint). The deferred refinement of ADR-0010."""
     profile = settings.HWDB_PROFILES[instance]
     ce_chip_types = {
         profile["larasic_part_type"],
         profile["coldadc_part_type"],
         profile["coldata_part_type"],
     }
-    return "Test Date" if part_type_id in ce_chip_types else None
+    if part_type_id in ce_chip_types:
+        return _CE_CHIP_SPEC
+    return TEST_DATE_SPECS.get(part_type_id)
+
+
+def physics_date_field(instance: str, part_type_id: str) -> str | None:
+    """The display name of the ``test_data`` field holding the real (physics)
+    test date for this component type, or ``None`` if the type isn't in the
+    registry (→ fall back to the HWDB record ``created`` stamp)."""
+    spec = test_date_spec(instance, part_type_id)
+    return spec["label"] if spec else None
+
+
+def _walk(data, path):
+    """Follow a registry path (dict keys / int list indices) into test_data;
+    ``None`` on any miss or shape mismatch."""
+    cur = data
+    for step in path:
+        if isinstance(step, int):
+            cur = cur[step] if isinstance(cur, list) and 0 <= step < len(cur) else None
+        elif isinstance(cur, dict):
+            cur = cur.get(step)
+        else:
+            cur = None
+        if cur is None:
+            return None
+    return cur
+
+
+_DMY_RE = re.compile(r"^(\d{1,2})-(\d{1,2})-(\d{4})")
+
+
+def _aware_date(year: int, month: int, day: int) -> datetime | None:
+    try:
+        naive = datetime(year, month, day)
+    except ValueError:
+        return None
+    return timezone.make_aware(naive, timezone.get_current_timezone())
+
+
+def extract_test_date(test_data: dict, spec: dict) -> datetime | None:
+    """The physics test date out of one detailed test record, per the spec;
+    ``None`` when missing or unparseable (callers fall back to the record's
+    ``created``, ADR-0009). Chart bins are daily/monthly, so any time-of-day
+    component is ignored."""
+    raw = _walk(test_data or {}, spec["path"])
+    if not isinstance(raw, str):
+        return None
+    if spec["style"] == "ymd":
+        try:
+            naive = datetime.strptime(raw.replace("-", "/"), "%Y/%m/%d")
+        except ValueError:
+            return None
+        return timezone.make_aware(naive, timezone.get_current_timezone())
+    # "dm-or-md": day > 12 settles the ordering; ambiguous days (both parse)
+    # defer to the type's declared default. Worst case an old ambiguous record
+    # lands day/month-swapped inside the same year — invisible at monthly bins.
+    m = _DMY_RE.match(raw)
+    if not m:
+        return None
+    a, b, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    as_dm = _aware_date(year, b, a)  # a=day,   b=month
+    as_md = _aware_date(year, a, b)  # a=month, b=day
+    if as_dm and as_md:
+        return as_dm if spec.get("day_first", True) else as_md
+    return as_dm or as_md
 
 
 def _resolve_test_types(api, part_type_id: str) -> dict[str, int]:
@@ -105,21 +195,21 @@ def _ref_name(v) -> str:
     return str(v) if v else ""
 
 
-def _fetch_component(api, part_id: str, date_field: str | None,
+def _fetch_component(api, part_id: str, date_spec: dict | None,
                      test_type_ids: dict[str, int], *,
                      need_detail: bool, need_tests: bool) -> dict:
     """Per-component fetch; the caller decides which halves to pull.
 
     - ``need_detail`` → one ``components/{pid}`` call for ``created``/``updated``
       (the cheap component-level refresh that keeps the ``updated`` chart fresh).
-    - ``need_tests`` → the test events. With ``date_field`` unset (all-consortia
-      default) that's one summary call; with it set (CE) it's one *detailed*
-      call per defined test type, reading the physics ``test_data[date_field]``
-      with a ``created`` fallback.
+    - ``need_tests`` → the test events. With ``date_spec`` unset (all-consortia
+      default) that's one summary call; with it set (a registry type) it's one
+      *detailed* call per defined test type, reading the physics date out of
+      ``test_data`` per the spec, with a ``created`` fallback.
     """
     tests = []
     if need_tests:
-        if date_field is None:
+        if date_spec is None:
             for t in (api.get_tests(part_id).get("data") or []):
                 dt = _parse_created(t.get("created"))
                 if dt is None:
@@ -129,7 +219,7 @@ def _fetch_component(api, part_id: str, date_field: str | None,
         else:
             for name, ttid in test_type_ids.items():
                 for t in (api.get_tests(part_id, test_type_id=ttid).get("data") or []):
-                    dt = (_parse_test_date(t.get("test_data") or {})
+                    dt = (extract_test_date(t.get("test_data") or {}, date_spec)
                           or _parse_created(t.get("created")))
                     if dt is not None:
                         tests.append((name, dt))
@@ -200,13 +290,13 @@ def sync_test_events(
 
     bootstrap = FnalDbApiClient(api_base_url, bearer)
     try:
-        date_field = physics_date_field(instance, part_type_id)
+        date_spec = test_date_spec(instance, part_type_id)
         test_type_ids = (
-            _resolve_test_types(bootstrap, part_type_id) if date_field else {}
+            _resolve_test_types(bootstrap, part_type_id) if date_spec else {}
         )
-        if date_field:
+        if date_spec:
             yield (
-                f"sync tests: using physics date '{date_field}' from "
+                f"sync tests: using physics date '{date_spec['label']}' from "
                 f"{len(test_type_ids)} test type(s)\n"
             )
 
@@ -245,7 +335,7 @@ def sync_test_events(
                 # is not thread-safe — same rule as sync_family).
                 futs = {pool.submit(
                             lambda p=pid: _fetch_component(
-                                tls.client, p, date_field, test_type_ids,
+                                tls.client, p, date_spec, test_type_ids,
                                 need_detail=p in detail_set,
                                 need_tests=p in tests_set)): pid
                         for pid in process}
