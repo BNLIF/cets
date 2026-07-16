@@ -175,6 +175,10 @@ class ImagePlotEngineTest(TestCase):
         self.assertEqual(blocks[0]["image_id"], "up-noise")   # supersedes test record
         self.assertTrue(blocks[0]["uploaded"])
         self.assertEqual(blocks[1]["image_id"], "img-feb")    # no upload → config source
+        # the uploaded numeric slot ALSO renders from data (page toggle), but
+        # the upload keeps the PDF: bytes stays unset for download_plot_images
+        self.assertTrue(blocks[2]["png_b64"])
+        self.assertNotIn("bytes", blocks[2])
 
     def test_numeric_slot_honors_sub_part_id_addressing(self):
         # The Dashboard resolves single_pid for numeric plots too — the data
@@ -286,6 +290,22 @@ class ImagePlotPageTest(TestCase):
         self.assertEqual(html.count('name="plot_image"'), 3)  # one form per slot
         self.assertLess(html.index("Plots (3 configured)"), html.index("Sign-off"))
 
+    def test_uploaded_numeric_slot_offers_source_toggle(self):
+        # Both sources exist → the page carries both images and the toggle;
+        # uploaded is the default (and what the PDF embeds).
+        api = _plots_api()
+        api.get_images.return_value = {"data": [
+            {"image_id": "up-gain", "created": "2026-07-01T00:00:00",
+             "image_name": f"ESPlot_{BOX}_p02-Gain-hist_20260701_000000.png"}]}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("Uploaded image</button>", html)
+        self.assertIn("Plot from data</button>", html)
+        self.assertIn("shipment-image/up-gain/", html)      # uploaded source
+        self.assertIn("data:image/png;base64,", html)       # rendered source
+        self.assertEqual(html.count("es-toggle\" role="), 1)  # only the dual slot
+
     def test_upload_plot_posts_under_the_constructed_name(self):
         api = _plots_api()
         m1, m2 = _mocked(api)
@@ -325,6 +345,27 @@ class ImagePlotPageTest(TestCase):
         self.assertIn("img-feb", fetched)
         pdf = api.post_component_image.call_args.args[1].read()
         self.assertTrue(pdf.startswith(b"%PDF"))
+
+    def test_generate_honors_plot_source_choice(self):
+        # An uploaded numeric slot toggled to "Plot from data" → the PDF
+        # embeds the rendered plot; the mistaken upload isn't even fetched.
+        api = _plots_api(es=[_entry("Chao Zhang", 2), _entry("Hajime Muramatsu", 1)])
+        api.get_images.return_value = {"data": [
+            {"image_id": "up-gain", "created": "2026-07-01T00:00:00",
+             "image_name": f"ESPlot_{BOX}_p02-Gain-hist_20260701_000000.png"}]}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.post(
+                PAGE, {"action": "generate", "plot_src_2": "data"}, follow=True)
+        self.assertIn("Summary generated and posted", resp.content.decode())
+        fetched = [c.args[0] for c in api.get_image_response.call_args_list]
+        self.assertNotIn("up-gain", fetched)
+        # default (no plot_src posted) still embeds the upload
+        api.get_image_response.call_args_list.clear()
+        with m1, m2:
+            self.client.post(PAGE, {"action": "generate"}, follow=True)
+        fetched = [c.args[0] for c in api.get_image_response.call_args_list]
+        self.assertIn("up-gain", fetched)
 
 
 class EngineTest(TestCase):

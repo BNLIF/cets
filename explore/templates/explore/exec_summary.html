@@ -35,6 +35,9 @@
   .es-btn:hover { border-color: var(--accent); }
   .es-btn:disabled { opacity: .45; cursor: default; }
   .es-btn.quiet { color: var(--dim); background: var(--surface); border-color: var(--rule); }
+  .es-toggle { display: flex; gap: 6px; margin-top: 6px; }
+  .es-toggle .es-btn { font-size: 12px; padding: 2px 8px; }
+  .es-toggle .es-btn.is-on { color: var(--accent-ink); border-color: var(--accent-ink); }
 
   .es-signee { border-top: 1px solid var(--rule); padding: 8px 0; }
   .es-signee:first-of-type { border-top: none; padding-top: 0; }
@@ -113,12 +116,20 @@
       <div class="es-hint">Numeric plot (data_paths: <span class="mono">{{ b.data_paths|join:", " }}</span>) — rendered from this item’s latest <span class="mono">{{ b.test_type_name }}</span> record.</div>
       {% endif %}
       {% if b.error %}<div class="es-plot-err">&#9888; {{ b.error }}</div>{% endif %}
+      {% if b.png_b64 and b.image_id %}
+      {# both sources exist (numeric slot with an upload) — toggle; the generated PDF embeds whichever is showing #}
+      <div class="es-toggle" role="group" aria-label="Plot source" data-index="{{ b.index }}">
+        <button type="button" class="es-btn quiet is-on" data-show="upload">Uploaded image</button>
+        <button type="button" class="es-btn quiet" data-show="data">Plot from data</button>
+      </div>
+      {% endif %}
       {% if b.png_b64 %}
-      <img src="data:image/png;base64,{{ b.png_b64 }}" alt="{{ b.title }}">
+      {# data: URLs are blocked in new tabs — the click handler below opens a blob: URL instead. #}
+      <img src="data:image/png;base64,{{ b.png_b64 }}" alt="{{ b.title }}" class="es-plot-rendered es-src-data" style="cursor: zoom-in;" title="Open full size in a new tab"{% if b.image_id %} hidden{% endif %}>
       {% endif %}
       {% if b.image_id %}
         {% if b.is_pdf %}<a class="es-dl" style="margin-top:8px;" href="{% url 'explore:shipment_image' image_id=b.image_id %}?name={{ b.image_name|urlencode }}&amp;inline=1" target="_blank" rel="noopener">{{ b.image_name }} <span aria-hidden="true">&#x2197;</span></a>
-        {% else %}<a href="{% url 'explore:shipment_image' image_id=b.image_id %}?inline=1" target="_blank" rel="noopener" title="Open full size in a new tab"><img src="{% url 'explore:shipment_image' image_id=b.image_id %}" alt="{{ b.title }}" loading="lazy"></a>
+        {% else %}<a class="es-src-upload" href="{% url 'explore:shipment_image' image_id=b.image_id %}?inline=1" target="_blank" rel="noopener" title="Open full size in a new tab"><img src="{% url 'explore:shipment_image' image_id=b.image_id %}" alt="{{ b.title }}" loading="lazy"></a>
         {% endif %}
       {% endif %}
       <form method="post" enctype="multipart/form-data" class="es-row" style="margin-top:6px;">
@@ -227,6 +238,7 @@
     <h2>Generate</h2>
     <div class="es-row">
       <form method="post">{% csrf_token %}<input type="hidden" name="action" value="generate">
+        {% for b in plot_blocks %}{% if b.png_b64 and b.image_id %}<input type="hidden" name="plot_src_{{ b.index }}" value="upload" data-plot-src="{{ b.index }}">{% endif %}{% endfor %}
         <button class="es-btn" {% if not signing.all_signed %}disabled title="Every configured signee must sign first"{% endif %}>Generate PDF &amp; upload to HWDB</button>
       </form>
       <form method="post" onsubmit="return confirm('Clear ALL signatures on this box?');">
@@ -288,6 +300,35 @@
   </div>{# /es-cols #}
 </div>
 <script>
+// Numeric slots with an upload carry both sources — the toggle swaps which
+// one is shown, and the generated PDF embeds whichever source is showing
+// (the choice rides along in the Generate form's hidden inputs).
+document.querySelectorAll(".es-plot .es-toggle").forEach(function (tog) {
+  var card = tog.closest(".es-plot");
+  tog.querySelectorAll("button").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var showData = btn.dataset.show === "data";
+      var up = card.querySelector(".es-src-upload");
+      var da = card.querySelector(".es-src-data");
+      if (up) up.hidden = showData;
+      if (da) da.hidden = !showData;
+      tog.querySelectorAll("button").forEach(function (b2) {
+        b2.classList.toggle("is-on", b2 === btn);
+      });
+      var pref = document.querySelector('[data-plot-src="' + tog.dataset.index + '"]');
+      if (pref) pref.value = showData ? "data" : "upload";
+    });
+  });
+});
+// Rendered (data-URI) plots open full size via a blob: URL — browsers block
+// top-level data: URLs in new tabs.
+document.querySelectorAll(".es-plot-rendered").forEach(function (img) {
+  img.addEventListener("click", function () {
+    fetch(img.src).then(function (r) { return r.blob(); }).then(function (b) {
+      window.open(URL.createObjectURL(b), "_blank");
+    });
+  });
+});
 // Required confirmations flip red → green as they're ticked.
 document.querySelectorAll(".es-req").forEach(function (l) {
   var c = l.querySelector("input[type=checkbox]");

@@ -466,8 +466,10 @@ def resolve_plots(api, cfg, part_id: str, children_of, item_images) -> list[dict
     the newest manual ESPlot_* upload on the item wins any slot; image_path
     slots without one fall back to their test record (``children_of(pid)``
     returns manifest rows for sub_part_id addressing); numeric data_paths
-    slots render from the item's own latest test record (``png_b64`` +
-    ``bytes`` — single-item only, no type-wide "sum" fan-out). Failures land
+    slots render from the resolved pid's latest test record (``png_b64``,
+    single-item only — no type-wide "sum" fan-out). An uploaded numeric slot
+    still renders (page toggle between the two) but the upload keeps the PDF
+    (``bytes`` stays unset so download_plot_images fetches it). Failures land
     in ``error``, shown verbatim."""
     blocks = []
     for p in cfg["plots"]:
@@ -477,8 +479,9 @@ def resolve_plots(api, cfg, part_id: str, children_of, item_images) -> list[dict
         if up:
             blk.update(image_id=str(up["image_id"]), uploaded=True,
                        upload_name=up.get("image_name"))
-            blocks.append(blk)
-            continue
+            if p["kind"] == "image":
+                blocks.append(blk)
+                continue
         # single_pid addressing (both kinds, the Dashboard's rule): explicit
         # part_id or sub_part_id in the config, else the item itself.
         if p["sub_part_id"]:
@@ -503,16 +506,16 @@ def resolve_plots(api, cfg, part_id: str, children_of, item_images) -> list[dict
                         f"history_order={p['history_order']}).")
         else:  # numeric — draw from the resolved pid's latest test record
             rec, err = _test_record_at(api, blk["pid"], p["test_type_name"], 0)
-            if err:
-                blk["error"] = err
-            else:
-                png, note = render_numeric_plot(
-                    rec.get("test_data") or {}, p, blk["pid"])
-                if png:
+            png, note = (None, err) if err else render_numeric_plot(
+                rec.get("test_data") or {}, p, blk["pid"])
+            if png:
+                blk["png_b64"] = base64.b64encode(png).decode()
+                blk["render_bytes"] = png   # kept for a "plot from data" PDF choice
+                if not blk["uploaded"]:
                     blk["bytes"] = png
-                    blk["png_b64"] = base64.b64encode(png).decode()
-                else:
-                    blk["error"] = note
+            elif not blk["uploaded"]:
+                # only a real problem when the upload isn't covering the slot
+                blk["error"] = note
         blocks.append(blk)
     return blocks
 

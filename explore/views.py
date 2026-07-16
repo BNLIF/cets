@@ -1787,6 +1787,14 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             plot_blocks = execsummary.resolve_plots(
                 api, cfg, part_id, _children_of(api),
                 _safe_get_data(api.get_images, part_id))
+            # The page's per-slot source toggle travels with the POST: the
+            # PDF embeds whichever source is showing (a mistaken upload can
+            # be overridden by the data_paths plot).
+            for b in plot_blocks:
+                if (request.POST.get(f"plot_src_{b['index']}") == "data"
+                        and b.get("render_bytes")):
+                    b.update(bytes=b["render_bytes"], uploaded=False,
+                             upload_name=None, image_id=None)
             execsummary.download_plot_images(api, plot_blocks)
         pdf_bytes = execsummary.build_detail_pdf(part_id, {
             "type_name": leaf.name if leaf else "",
