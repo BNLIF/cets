@@ -83,7 +83,7 @@ CFG_PLOTS = {**CFG, "plots": [
      "sub_part_id": {"layer": 1, "pos_name": "FEB1"},
      "image_path": {"image_name": "feb.png"}},
     {"title": "Gain hist", "test_type_name": "RoomT QC",
-     "data_paths": ["DATA/gain"]},                       # numeric → unsupported
+     "data_paths": ["DATA/gain"]},                       # numeric → rendered from test data
 ]}
 
 # a real 1x1 PNG so reportlab can embed it
@@ -104,7 +104,8 @@ def _plots_api(**kw):
             return es_resp
         return {"data": [{"images": [
             {"image_name": "noise.png", "image_id": "img-noise"},
-            {"image_name": "feb.png", "image_id": "img-feb"}]}]}
+            {"image_name": "feb.png", "image_id": "img-feb"}],
+            "test_data": {"DATA/gain": [0.9, 1.0, 1.05, 1.1]}}]}
 
     def get_image_response(image_id):
         return cfg_resp if image_id == "cfg1" else mock.Mock(content=PNG)
@@ -137,9 +138,11 @@ class ImagePlotEngineTest(TestCase):
         self.assertIsNone(blocks[0]["error"])
         self.assertEqual(blocks[1]["pid"], "D05700300001-00012")      # via sub_part_id
         self.assertEqual(blocks[1]["image_id"], "img-feb")
-        # the numeric slot has no source and no error — the page offers upload
+        # the numeric slot renders from the item's test data (no HWDB image)
         self.assertIsNone(blocks[2]["image_id"])
         self.assertIsNone(blocks[2]["error"])
+        self.assertTrue(blocks[2]["bytes"].startswith(b"\x89PNG"))
+        self.assertTrue(blocks[2]["png_b64"])
 
     def test_resolve_reports_missing_history_and_missing_image(self):
         api = _plots_api()
@@ -173,6 +176,29 @@ class ImagePlotEngineTest(TestCase):
         self.assertTrue(blocks[0]["uploaded"])
         self.assertEqual(blocks[1]["image_id"], "img-feb")    # no upload → config source
 
+    def test_numeric_slot_honors_sub_part_id_addressing(self):
+        # The Dashboard resolves single_pid for numeric plots too — the data
+        # often lives on a child (e.g. a SiPM board inside the box). Fetching
+        # from the box itself gave "No test history found" (Hajime's report).
+        cfg = execsummary._normalize({**CFG, "plots": [
+            {"title": "IV curve", "test_type_name": "IV SiPM Characterization",
+             "sub_part_id": {"layer": 1, "pos_name": "SIPM1"},
+             "data_paths": ["DATA/gain"]}]})
+        api = _plots_api()
+
+        def get_tests(pid, test_type_id=None, history=False):
+            if pid == "D00400100003-00047":   # only the child has the test
+                return {"data": [{"test_data": {"DATA/gain": [1.0, 1.1]}}]}
+            return {"data": []}
+
+        api.get_tests.side_effect = get_tests
+        children = lambda pid: [{"part_id": "D00400100003-00047",
+                                 "functional_position": "SIPM1"}]
+        blocks = execsummary.resolve_plots(api, cfg, BOX, children, [])
+        self.assertIsNone(blocks[0]["error"])
+        self.assertEqual(blocks[0]["pid"], "D00400100003-00047")
+        self.assertTrue(blocks[0]["bytes"].startswith(b"\x89PNG"))
+
     def test_download_skips_pdfs_and_fills_bytes(self):
         api = _plots_api()
         blocks = [
@@ -185,6 +211,59 @@ class ImagePlotEngineTest(TestCase):
         self.assertNotIn("bytes", blocks[1])
         self.assertIn("not embedded", blocks[1]["error"])
         self.assertNotIn("bytes", blocks[2])
+
+    def test_download_keeps_rendered_numeric_bytes(self):
+        api = _plots_api()
+        blocks = [{"image_id": None, "bytes": b"\x89PNGrendered", "error": None}]
+        execsummary.download_plot_images(api, blocks)
+        self.assertEqual(blocks[0]["bytes"], b"\x89PNGrendered")  # untouched
+        self.assertIsNone(blocks[0]["error"])                     # no "nothing uploaded"
+
+
+class NumericPlotRenderTest(TestCase):
+    """The Dashboard's single-PID data_paths plots, drawn with matplotlib:
+    1 path → histogram/categorical, 2 paths → scatter (issue: Hajime's ES
+    review — data_paths plots are cheap for a single item)."""
+
+    def _plot(self, paths, bins=40):
+        return {"title": "Gain hist", "data_paths": paths, "bins": bins}
+
+    def test_numeric_histogram(self):
+        png, note = execsummary.render_numeric_plot(
+            {"DATA/gain": [0.9, 1.0, "1.05", 1.1]}, self._plot(["DATA/gain"]), "B1")
+        self.assertIsNone(note)
+        self.assertTrue(png.startswith(b"\x89PNG"))
+
+    def test_categorical_bar_when_mostly_non_numeric(self):
+        png, note = execsummary.render_numeric_plot(
+            {"DATA/gain": ["pass", "pass", "fail", True]},
+            self._plot(["DATA/gain"]), "B1")
+        self.assertIsNone(note)
+        self.assertTrue(png.startswith(b"\x89PNG"))
+
+    def test_dotted_path_with_list_index_scatter(self):
+        td = {"DATA": [{"x": [1, 2, 3], "y": [4, 5, 6]}]}
+        png, note = execsummary.render_numeric_plot(
+            td, self._plot(["DATA[0].x", "DATA[0].y"]), "B1")
+        self.assertIsNone(note)
+        self.assertTrue(png.startswith(b"\x89PNG"))
+
+    def test_missing_data_and_bad_path_count(self):
+        png, note = execsummary.render_numeric_plot({}, self._plot(["nope"]), "B1")
+        self.assertIsNone(png)
+        self.assertIn("No data at data_path", note)
+        png, note = execsummary.render_numeric_plot(
+            {"a": 1}, self._plot(["a", "a", "a"]), "B1")
+        self.assertIsNone(png)
+        self.assertIn("length 1", note)
+
+    def test_get_by_path(self):
+        self.assertEqual(execsummary._get_by_path({"MRB Resistance": 5},
+                                                  "MRB Resistance"), 5)
+        self.assertEqual(execsummary._get_by_path(
+            {"DATA": [{"SiPM": [0, 0, 0, {"V": 42}]}]}, "DATA[0].SiPM[3].V"), 42)
+        self.assertIsNone(execsummary._get_by_path({"DATA": []}, "DATA[0].x"))
+        self.assertIsNone(execsummary._get_by_path({"a": {"b": 1}}, "a.c"))
 
 
 class ImagePlotPageTest(TestCase):
@@ -201,8 +280,9 @@ class ImagePlotPageTest(TestCase):
         self.assertIn("shipment-image/img-noise/", html)   # img via bearer proxy
         self.assertIn("shipment-image/img-feb/", html)
         self.assertIn("D05700300001-00012", html)          # sub_part_id resolved pid
-        self.assertIn("Numeric plot (data_paths:", html)   # unfilled numeric slot
-        self.assertIn("Upload plot image", html)           # ...offers the upload
+        self.assertIn("Numeric plot (data_paths:", html)   # rendered numeric slot
+        self.assertIn("data:image/png;base64,", html)      # ...as an inline image
+        self.assertIn("Upload replacement", html)          # ...upload overrides it
         self.assertEqual(html.count('name="plot_image"'), 3)  # one form per slot
         self.assertLess(html.index("Plots (3 configured)"), html.index("Sign-off"))
 

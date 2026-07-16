@@ -82,7 +82,8 @@
 
 <div class="es-page">
   <div class="es-crumbs">
-    <a href="{% url 'explore:shipments' %}">Shipments</a>
+    {# ES is not shipping-specific (large assemblies get one too) — root at the explorer, not Shipments. #}
+    <a href="{% url 'explore:home' %}">Explorer</a>
     <span class="sep">›</span><a href="{% url 'explore:part' part_id=part_id %}">{{ part_id }}</a>
     <span class="sep">›</span>Executive summary
   </div>
@@ -109,9 +110,12 @@
       {% elif b.kind == "image" %}
       <div class="es-hint">Image: <span class="mono">{{ b.image_name }}</span> (history_order={{ b.history_order }}) · <span class="mono">{{ b.pid }}</span></div>
       {% else %}
-      <div class="es-hint">Numeric plot (data_paths: <span class="mono">{{ b.data_paths|join:", " }}</span>) — not rendered here; upload an image rendered elsewhere (e.g. by the Dashboard).</div>
+      <div class="es-hint">Numeric plot (data_paths: <span class="mono">{{ b.data_paths|join:", " }}</span>) — rendered from this item’s latest <span class="mono">{{ b.test_type_name }}</span> record.</div>
       {% endif %}
       {% if b.error %}<div class="es-plot-err">&#9888; {{ b.error }}</div>{% endif %}
+      {% if b.png_b64 %}
+      <img src="data:image/png;base64,{{ b.png_b64 }}" alt="{{ b.title }}">
+      {% endif %}
       {% if b.image_id %}
         {% if b.is_pdf %}<a class="es-dl" style="margin-top:8px;" href="{% url 'explore:shipment_image' image_id=b.image_id %}?name={{ b.image_name|urlencode }}&amp;inline=1" target="_blank" rel="noopener">{{ b.image_name }} <span aria-hidden="true">&#x2197;</span></a>
         {% else %}<a href="{% url 'explore:shipment_image' image_id=b.image_id %}?inline=1" target="_blank" rel="noopener" title="Open full size in a new tab"><img src="{% url 'explore:shipment_image' image_id=b.image_id %}" alt="{{ b.title }}" loading="lazy"></a>
@@ -122,7 +126,7 @@
         <input type="hidden" name="action" value="upload_plot">
         <input type="hidden" name="plot_index" value="{{ b.index }}">
         <input type="file" name="plot_image" accept=".png,.jpg,.jpeg,.gif,image/*" required style="font-size:12px; color:var(--dim); max-width: 230px;">
-        <button class="es-btn quiet">{% if b.image_id %}Upload replacement{% else %}Upload plot image{% endif %}</button>
+        <button class="es-btn quiet">{% if b.image_id or b.png_b64 %}Upload replacement{% else %}Upload plot image{% endif %}</button>
       </form>
     </div>
     {% endfor %}

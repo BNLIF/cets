@@ -12,14 +12,14 @@ Dashboard's behavior (mechanics mapped on #53/#54):
 - **Order** — negative-rank signees sign first (any order among them), then
   non-negative ranks descending (rank 0 last); each row additionally
   role-gated against the caller's ``whoami`` roles.
-- **PDF** — reportlab platypus (the Dashboard's stack), DETAIL layout minus
-  config plots (unsupported here yet); filename
-  ``ExecutiveSummary_{pid}_{YYYYmmdd_HHMMSS}.pdf`` — the pre-shipping gate's
-  convention.
+- **PDF** — reportlab platypus (the Dashboard's stack), DETAIL layout incl.
+  config plots; filename ``ExecutiveSummary_{pid}_{YYYYmmdd_HHMMSS}.pdf`` —
+  the pre-shipping gate's convention.
 """
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import logging
@@ -146,8 +146,9 @@ def _normalize(cfg: dict) -> dict:
             refs.append({"url": str(r["url"]), "comments": str(r.get("comments") or "")})
     # Plots: every entry becomes a slot the page can fill. image_path entries
     # resolve from a test record (the Dashboard convention); numeric
-    # data_paths entries aren't rendered here — either kind can instead carry
-    # a manually-uploaded image (see plot_upload_prefix).
+    # data_paths entries render from the item's latest test record (single
+    # item only — no type-wide "sum"); either kind can instead carry a
+    # manually-uploaded image (see plot_upload_prefix).
     plots = []
     for i, p in enumerate(cfg.get("plots") or []):
         if not isinstance(p, dict):
@@ -155,7 +156,13 @@ def _normalize(cfg: dict) -> dict:
         base = {"index": i,
                 "title": str(p.get("title") or "Plot"),
                 "test_type_name": str(p.get("test_type_name") or "").strip(),
-                "slug": _plot_slug(i, p.get("title"))}
+                "slug": _plot_slug(i, p.get("title")),
+                # single_pid addressing — the Dashboard applies it to BOTH
+                # plot kinds (numeric data often lives on a child, e.g. a
+                # SiPM board inside a box).
+                "part_id": str(p.get("part_id") or "").strip(),
+                "sub_part_id": (p.get("sub_part_id")
+                                if isinstance(p.get("sub_part_id"), dict) else None)}
         ip = p.get("image_path")
         if isinstance(ip, dict) and (ip.get("image_name") or "").strip():
             try:
@@ -164,12 +171,13 @@ def _normalize(cfg: dict) -> dict:
                 ho = 0
             plots.append({**base, "kind": "image",
                           "image_name": (ip.get("image_name") or "").strip(),
-                          "history_order": max(ho, 0),
-                          "part_id": str(p.get("part_id") or "").strip(),
-                          "sub_part_id": (p.get("sub_part_id")
-                                          if isinstance(p.get("sub_part_id"), dict) else None)})
+                          "history_order": max(ho, 0)})
         else:
-            plots.append({**base, "kind": "numeric",
+            try:
+                bins = int(p.get("bins") or 40)
+            except (TypeError, ValueError):
+                bins = 40
+            plots.append({**base, "kind": "numeric", "bins": bins,
                           "data_paths": [str(x) for x in p.get("data_paths") or []]})
     return {
         "consortium_name": cfg.get("consortium_name") or cfg.get("consortium name") or "",
@@ -335,14 +343,132 @@ def _resolve_sub_part_id(children_of, part_id: str, layer, pos_name) -> str | No
     return None
 
 
+def _get_by_path(obj, path: str):
+    """The Dashboard's data_path addressing into test_data: a plain key
+    (``"MRB Resistance"``) wins verbatim, else dotted keys with ``[idx]``
+    list indices (``"DATA[0].SiPM[3].V"``). ``None`` on any miss."""
+    if not isinstance(obj, dict) or not isinstance(path, str) or not path.strip():
+        return None
+    if path in obj:
+        return obj.get(path)
+    cur = obj
+    for part in path.split("."):
+        m = re.match(r"^([^\[\]]*)((?:\[\d+\])*)$", part)
+        if not m:
+            return None
+        key, idxs = m.group(1), re.findall(r"\[(\d+)\]", m.group(2))
+        if key:
+            if not isinstance(cur, dict) or key not in cur:
+                return None
+            cur = cur[key]
+        for i in map(int, idxs):
+            if not isinstance(cur, list) or i >= len(cur):
+                return None
+            cur = cur[i]
+    return cur
+
+
+def _flatten_numeric(value) -> list[float]:
+    """Nested lists/scalars → flat list[float]; non-numbers (and bools)
+    dropped, dicts ignored — the Dashboard's rule."""
+    out = []
+
+    def rec(v):
+        if isinstance(v, bool) or v is None:
+            return
+        if isinstance(v, (int, float)):
+            out.append(float(v))
+            return
+        if isinstance(v, str):
+            try:
+                out.append(float(v.strip()))
+            except ValueError:
+                pass
+            return
+        if isinstance(v, (list, tuple)):
+            for t in v:
+                rec(t)
+
+    rec(value)
+    return out
+
+
+def render_numeric_plot(test_data: dict, plot: dict, label: str):
+    """``(png bytes | None, note | None)`` — the Dashboard's single-PID
+    numeric plots, drawn with matplotlib instead of Plotly: 1 data_path →
+    histogram (numeric when >80% of values parse, else categorical bar);
+    2 paths → scatter. Type-wide "sum" populations are NOT rendered (that's
+    a fan-out over every item of the type — see the mirror-light rule)."""
+    try:
+        from matplotlib.figure import Figure
+    except ImportError:
+        return None, "matplotlib is not installed on the server."
+    paths = plot.get("data_paths") or []
+    title = f"{plot['title']} — {label}"
+
+    def _png(draw):
+        # Figure (not pyplot) — no global state, safe under threaded gunicorn.
+        fig = Figure(figsize=(5.2, 3.4), dpi=110)
+        ax = fig.add_subplot()
+        draw(ax)
+        ax.set_title(title, fontsize=10)
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", bbox_inches="tight")
+        return buf.getvalue()
+
+    if len(paths) == 1:
+        v = _get_by_path(test_data, paths[0])
+        values = v if isinstance(v, list) else ([] if v is None else [v])
+        if not values:
+            return None, f"No data at data_path '{paths[0]}'."
+        nums = _flatten_numeric(values)
+        if len(nums) > 0.8 * len(values):
+            stats = (f"N={len(nums)}  mean={sum(nums) / len(nums):.4g}  "
+                     f"min={min(nums):.4g}  max={max(nums):.4g}")
+
+            def draw(ax):
+                ax.hist(nums, bins=plot.get("bins") or 40)
+                ax.set_xlabel(f"{paths[0]}\n{stats}", fontsize=8)
+                ax.set_ylabel("count", fontsize=8)
+            return _png(draw), None
+        cats = {}
+        for x in values:
+            k = "True" if x is True else ("False" if x is False else str(x))
+            cats[k] = cats.get(k, 0) + 1
+
+        def draw(ax):
+            ax.bar(list(cats), list(cats.values()))
+            ax.set_xlabel(f"{paths[0]}  (N={len(values)}, unique={len(cats)})",
+                          fontsize=8)
+            ax.set_ylabel("count", fontsize=8)
+            ax.tick_params(axis="x", rotation=25, labelsize=7)
+        return _png(draw), None
+
+    if len(paths) == 2:
+        xs = _flatten_numeric(_get_by_path(test_data, paths[0]))
+        ys = _flatten_numeric(_get_by_path(test_data, paths[1]))
+        n = min(len(xs), len(ys))
+        if not n:
+            return None, f"No numeric (x,y) pairs at data_paths {paths}."
+
+        def draw(ax):
+            ax.scatter(xs[:n], ys[:n], s=12, alpha=0.7)
+            ax.set_xlabel(f"{paths[0]}  (N={n})", fontsize=8)
+            ax.set_ylabel(paths[1], fontsize=8)
+        return _png(draw), None
+
+    return None, "Invalid config: data_paths must have length 1 (histogram) or 2 (scatter)."
+
+
 def resolve_plots(api, cfg, part_id: str, children_of, item_images) -> list[dict]:
-    """Resolve every config plot slot to an HWDB image_id (listing only — the
-    page streams the bytes through the existing image proxy). The newest
-    manual ESPlot_* upload on the item wins a slot; image_path slots without
-    one fall back to their test record (``children_of(pid)`` returns manifest
-    rows for sub_part_id addressing). Failures land in ``error``, shown
-    verbatim; a numeric slot with no upload has neither image nor error —
-    the page offers the upload there."""
+    """Resolve every config plot slot. Image slots resolve to an HWDB
+    image_id (the page streams the bytes through the existing image proxy);
+    the newest manual ESPlot_* upload on the item wins any slot; image_path
+    slots without one fall back to their test record (``children_of(pid)``
+    returns manifest rows for sub_part_id addressing); numeric data_paths
+    slots render from the item's own latest test record (``png_b64`` +
+    ``bytes`` — single-item only, no type-wide "sum" fan-out). Failures land
+    in ``error``, shown verbatim."""
     blocks = []
     for p in cfg["plots"]:
         blk = {**p, "pid": part_id, "image_id": None, "error": None,
@@ -353,15 +479,17 @@ def resolve_plots(api, cfg, part_id: str, children_of, item_images) -> list[dict
                        upload_name=up.get("image_name"))
             blocks.append(blk)
             continue
+        # single_pid addressing (both kinds, the Dashboard's rule): explicit
+        # part_id or sub_part_id in the config, else the item itself.
+        if p["sub_part_id"]:
+            resolved = _resolve_sub_part_id(
+                children_of, part_id,
+                p["sub_part_id"].get("layer"), p["sub_part_id"].get("pos_name"))
+            blk["pid"] = resolved or part_id
+        elif p["part_id"]:
+            blk["pid"] = p["part_id"]
         if p["kind"] == "image":
             blk["is_pdf"] = p["image_name"].lower().endswith(".pdf")
-            if p["sub_part_id"]:
-                resolved = _resolve_sub_part_id(
-                    children_of, part_id,
-                    p["sub_part_id"].get("layer"), p["sub_part_id"].get("pos_name"))
-                blk["pid"] = resolved or part_id
-            elif p["part_id"]:
-                blk["pid"] = p["part_id"]
             rec, err = _test_record_at(api, blk["pid"], p["test_type_name"],
                                        p["history_order"])
             if err:
@@ -373,6 +501,18 @@ def resolve_plots(api, cfg, part_id: str, children_of, item_images) -> list[dict
                         f"Could not find image_name='{p['image_name']}' in test record "
                         f"(pid={blk['pid']}, test={p['test_type_name']}, "
                         f"history_order={p['history_order']}).")
+        else:  # numeric — draw from the resolved pid's latest test record
+            rec, err = _test_record_at(api, blk["pid"], p["test_type_name"], 0)
+            if err:
+                blk["error"] = err
+            else:
+                png, note = render_numeric_plot(
+                    rec.get("test_data") or {}, p, blk["pid"])
+                if png:
+                    blk["bytes"] = png
+                    blk["png_b64"] = base64.b64encode(png).decode()
+                else:
+                    blk["error"] = note
         blocks.append(blk)
     return blocks
 
@@ -382,6 +522,8 @@ def download_plot_images(api, blocks) -> None:
     are linked on the page but not rasterized into the summary (that needs
     pymupdf, which we don't carry)."""
     for b in blocks:
+        if b.get("bytes"):  # numeric slot, already rendered from test data
+            continue
         if not b.get("image_id"):
             if not b.get("error"):
                 b["error"] = "No image available for this plot (nothing uploaded)."
