@@ -143,13 +143,13 @@
             </div>
             {% endif %}
             {% if fnal_credkey %}
-            <span class="eh-user" title="Signed in via FNAL">
+            <a class="eh-user" href="{% url 'explore:profile' %}" title="Signed in via FNAL — view your profile">
                 <span class="eh-user-dot">{{ fnal_credkey|slice:":2"|upper }}</span>{{ fnal_credkey }}
-            </span>
+            </a>
             {% elif user.is_authenticated %}
-            <span class="eh-user" title="{{ user.username }}">
+            <a class="eh-user" href="{% url 'explore:profile' %}" title="{{ user.username }} — view your profile">
                 <span class="eh-user-dot">{{ user.get_full_name|default:user.username|slice:":2"|upper }}</span>{{ user.get_full_name|default:user.username }}
-            </span>
+            </a>
             {% endif %}
             {% if user.is_authenticated %}
             <form action="{% url 'rest_framework:logout' %}" method="post" style="margin:0;">

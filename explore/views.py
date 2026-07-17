@@ -2496,6 +2496,44 @@ def explore_docs_view(request):
 
 @login_not_required
 @fnal_login_required
+def explore_profile_view(request):
+    """The signed-in user's HWDB identity for this instance: name, username,
+    email, account flags, and the roles their FNAL account holds (``users/
+    whoami``). Roles are instance-scoped — the same person has different ids
+    and grants on dev vs prod — so the page states which instance it reflects.
+    Reachable from the user chip in the top nav. Read-only."""
+    inst = instance_of(request)
+    home_url = _rev(request, "explore:home")
+    page_url = _rev(request, "explore:profile")
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(home_url)
+
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    try:
+        who = api.whoami().get("data") or {}
+    except requests.RequestException as e:
+        messages.error(request, f"HWDB didn’t return your account — {_hwdb_error_detail(e)}")
+        return redirect(home_url)
+
+    roles = sorted((r for r in who.get("roles") or [] if isinstance(r, dict)),
+                   key=lambda r: r.get("name") or "")
+    return render(request, "explore/profile.html", {
+        "active_nav": "profile",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "instance": inst,
+        "who": who,
+        "roles": roles,
+    })
+
+
+@login_not_required
+@fnal_login_required
 def explore_search_api_view(request):
     """JSON results for the instant search box — component types + mirrored
     parts matching ``q`` (substring, case-insensitive), plus a direct-open hint

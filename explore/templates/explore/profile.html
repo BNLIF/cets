@@ -1,0 +1,81 @@
+{% extends 'explore/base.html' %}
+{% block title %}Profile · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .pf-page { padding: 26px 30px 56px; max-width: 720px; }
+  .pf-page h1 { font-size: 1.5rem; color: var(--ink); margin: 0 0 4px; letter-spacing: -0.01em; }
+  .pf-sub { color: var(--dim); font-size: 13.5px; margin: 0 0 20px; }
+  .pf-sub .mono { font-family: var(--font-mono); }
+
+  .pf-head { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+  .pf-avatar { width: 54px; height: 54px; border-radius: 50%; flex: 0 0 54px;
+    background: var(--accent); color: #fff; display: inline-flex; align-items: center;
+    justify-content: center; font-size: 20px; font-weight: 600; }
+  .pf-name { font-size: 1.15rem; font-weight: 600; color: var(--ink); }
+  .pf-uname { font-family: var(--font-mono); font-size: 13px; color: var(--faint); }
+
+  .pf-card { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg);
+    padding: 4px 16px; margin-bottom: 18px; }
+  .pf-row { display: flex; align-items: baseline; gap: 12px; padding: 11px 0;
+    border-top: 1px solid var(--rule); }
+  .pf-row:first-child { border-top: none; }
+  .pf-key { flex: 0 0 150px; font-size: 12px; color: var(--faint); text-transform: uppercase;
+    letter-spacing: .04em; }
+  .pf-val { color: var(--ink); font-size: 13.5px; }
+  .pf-val.mono { font-family: var(--font-mono); }
+  .pf-yes { color: var(--good); font-weight: 600; }
+  .pf-no { color: var(--faint); }
+
+  .pf-group h2 { font-size: 12px; color: var(--faint); text-transform: uppercase;
+    letter-spacing: .04em; margin: 0 0 8px; }
+  .pf-roles { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pf-role { display: inline-flex; align-items: baseline; gap: 7px; font-size: 13px;
+    color: var(--accent-ink); background: var(--accent-soft); border-radius: 999px;
+    padding: 5px 13px; }
+  .pf-role .id { font-family: var(--font-mono); font-size: 11px; color: var(--faint); }
+  .pf-noroles { font-size: 13px; color: var(--faint); }
+</style>
+
+<div class="pf-page">
+  {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+
+  <h1>Your profile</h1>
+  <p class="pf-sub">Your DUNE HWDB identity on the
+    <span class="mono">{{ instance }}</span> instance, as HWDB reports it
+    (<span class="mono">users/whoami</span>). Roles and ids are per-instance —
+    the same account differs between production and development.</p>
+
+  <div class="pf-head">
+    <span class="pf-avatar">{{ who.full_name|default:who.username|slice:":2"|upper }}</span>
+    <div>
+      <div class="pf-name">{{ who.full_name|default:"—" }}</div>
+      <div class="pf-uname">{{ who.username }}</div>
+    </div>
+  </div>
+
+  <div class="pf-card">
+    <div class="pf-row"><div class="pf-key">Username</div><div class="pf-val mono">{{ who.username|default:"—" }}</div></div>
+    <div class="pf-row"><div class="pf-key">Email</div><div class="pf-val">{{ who.email|default:"—" }}</div></div>
+    <div class="pf-row"><div class="pf-key">User ID</div><div class="pf-val mono">{{ who.user_id|default:"—" }}</div></div>
+    {% if who.affiliation %}<div class="pf-row"><div class="pf-key">Affiliation</div><div class="pf-val">{{ who.affiliation }}</div></div>{% endif %}
+    <div class="pf-row"><div class="pf-key">Active</div><div class="pf-val">{% if who.active %}<span class="pf-yes">Yes</span>{% else %}<span class="pf-no">No</span>{% endif %}</div></div>
+    <div class="pf-row"><div class="pf-key">Administrator</div><div class="pf-val">{% if who.administrator %}<span class="pf-yes">Yes</span>{% else %}<span class="pf-no">No</span>{% endif %}</div></div>
+    <div class="pf-row"><div class="pf-key">Architect</div><div class="pf-val">{% if who.architect %}<span class="pf-yes">Yes</span>{% else %}<span class="pf-no">No</span>{% endif %}</div></div>
+  </div>
+
+  <div class="pf-group">
+    <h2>Roles ({{ roles|length }})</h2>
+    {% if roles %}
+    <div class="pf-roles">
+      {% for r in roles %}
+      <span class="pf-role">{{ r.name }}<span class="id">#{{ r.id }}</span></span>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="pf-noroles">No roles on this instance — HWDB writes (test submission,
+      executive-summary signing) will be refused until an HWDB architect grants one.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
