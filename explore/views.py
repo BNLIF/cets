@@ -985,6 +985,24 @@ def _pack_groups(instance, connectors, manifest) -> list[dict]:
     return groups
 
 
+def _pack_body_context(instance, part_id, ptid, connectors, current):
+    """Context for the pack page's two-column body (``_pack_body.html``):
+    the left column's candidate groups and the right column's contents,
+    both derived from ``current`` (position → occupant or None)."""
+    manifest = [{"functional_position": pos, "part_id": pid}
+                for pos, pid in current.items() if pid]
+    contents = [{"position": pos, "type_id": connectors.get(pos) or "",
+                 "part_id": current[pos]}
+                for pos in sorted(current, key=str)]
+    return {
+        "part_id": part_id,
+        "part_type_id": ptid,
+        "groups": _pack_groups(instance, connectors, manifest),
+        "contents": contents,
+        "n_filled": sum(1 for c in contents if c["part_id"]),
+    }
+
+
 @login_not_required
 @fnal_login_required
 def explore_box_pack_view(request, part_id):
@@ -994,7 +1012,8 @@ def explore_box_pack_view(request, part_id):
     GET renders the item picker: one candidate group per child type with free
     slots (mirror rows with status + QC flags), plus an add-by-PID box for
     typed/scanned entries. POST either unlinks one position (``unlink=<pos>``,
-    from the box page) or links the picked ``pid`` values — users pick items,
+    from the box page or the picker's contents pane) or links the picked
+    ``pid`` values — users pick items,
     not slots; the server assigns each item to a free slot of its type.
     Following the official clients, the PATCH always carries the COMPLETE
     positions dict (current state + this request's changes).
@@ -1041,22 +1060,28 @@ def explore_box_pack_view(request, part_id):
         return render(request, "explore/pack.html", {
             "active_nav": "shipments",
             "sidebar": navigation.sidebar_tree(inst, {}),
-            "part_id": part_id,
-            "part_type_id": ptid,
-            "n_contents": len(manifest),
-            "groups": _pack_groups(inst, connectors, manifest),
+            **_pack_body_context(inst, part_id, ptid, connectors, current),
             "scan_url": scan_url,
             "scan_qr_svg": scanning.qr_svg(scan_url),
             "scan_feed_url": _rev(request, "explore:scan_feed"),
             "scan_since": scan_since,
         })
 
+    # POST. htmx requests (the pack page's per-group, add-by-PID and unlink
+    # forms) get the two-column body re-rendered in place of a redirect, so
+    # the page updates without a reload.
+    is_htmx = bool(getattr(request, "htmx", False))
+
+    def _body(state_):
+        return render(request, "explore/_pack_body.html",
+                      _pack_body_context(inst, part_id, ptid, connectors, state_))
+
     unlink = (request.POST.get("unlink") or "").strip()
     if unlink:
         removed = current.get(unlink)
         if unlink not in current or not removed:
             messages.error(request, f"Position “{unlink}” has nothing to unlink.")
-            return redirect(part_url)
+            return _body(current) if is_htmx else redirect(part_url)
         payload = {"component": {"part_id": part_id},
                    "subcomponents": {**current, unlink: None}}
         try:
@@ -1064,23 +1089,27 @@ def explore_box_pack_view(request, part_id):
         except requests.RequestException as e:
             logger.warning("packing: unlink patch for %s failed: %s", part_id, e)
             messages.error(request, f"HWDB rejected the packing change — {_hwdb_error_detail(e)}")
-            return redirect(part_url)
+            return _body(current) if is_htmx else redirect(part_url)
         if body.get("status") != "OK":
             messages.error(request, f"HWDB rejected the packing change — {body.get('data') or body}")
-            return redirect(part_url)
+            return _body(current) if is_htmx else redirect(part_url)
         _refresh_box_quietly(api, inst, ptid, part_id)
         messages.success(request, f"Unlinked {removed} from “{unlink}”.")
-        return redirect(part_url)
+        return _body({**current, unlink: None}) if is_htmx else redirect(part_url)
 
     # Add mode. Checked candidates + the add-by-PID box, deduped, order kept.
     back = pack_url  # keep the user on the picker when an add fails
+
+    def _fail():
+        return _body(current) if is_htmx else redirect(back)
+
     picked = list(dict.fromkeys(
         [p.strip() for p in request.POST.getlist("pid") if p.strip()]
         + re.split(r"[\s,]+", (request.POST.get("manual") or "").strip())))
     picked = [p for p in picked if p]
     if not picked:
         messages.error(request, "Pick at least one item to add.")
-        return redirect(back)
+        return _fail()
     # Free slots per child type, in stable position order.
     free_by_type: dict[str, list] = {}
     for pos in sorted(current, key=str):
@@ -1090,20 +1119,20 @@ def explore_box_pack_view(request, part_id):
     for pid in picked:
         if not re.fullmatch(r"[A-Z]\d{11}-\d{5}", pid):
             messages.error(request, f"“{pid}” doesn’t look like a PID.")
-            return redirect(back)
+            return _fail()
         if pid in current.values():
             messages.error(request, f"{pid} is already in this box.")
-            return redirect(back)
+            return _fail()
         ctid = pid.rsplit("-", 1)[0]
         free = free_by_type.get(ctid)
         if free is None:
             messages.error(request,
                            f"This box has no positions for {ctid} items ({pid}).")
-            return redirect(back)
+            return _fail()
         if not free:
             messages.error(request,
                            f"No free positions left for {ctid} items ({pid}).")
-            return redirect(back)
+            return _fail()
         changes[free.pop(0)] = pid
 
     # One PATCH per item: HWDB has no "is it free?" lookup, so an item that's
@@ -1146,6 +1175,8 @@ def explore_box_pack_view(request, part_id):
         messages.success(request, f"Added {len(added)} item(s): {', '.join(added)}.")
     for pid, detail in failed:
         messages.error(request, f"{pid} was not added — {detail}")
+    if is_htmx:
+        return _body(state)
     return redirect(back if failed else part_url)
 
 

@@ -1,0 +1,104 @@
+{% comment %} The pack page's two-column working area: candidate panes on the
+left (one "Add to box" per pane), the box's live contents on the right. Each
+form POSTs via htmx and swaps this whole block, so adds update both columns
+without a page reload. {% endcomment %}
+<div id="pk-body">
+  {% for m in messages %}<div class="pk-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+
+  <div class="pk-cols">
+    <div class="pk-picker">
+      {% if groups %}
+      {% for g in groups %}
+      <form method="post" action="{% url 'explore:box_pack' part_id=part_id %}"
+            hx-post="{% url 'explore:box_pack' part_id=part_id %}"
+            hx-target="#pk-body" hx-swap="outerHTML">
+        {% csrf_token %}
+        <div class="pk-group">
+          <div class="pk-group-head">
+            <h2>{{ g.name }} <span class="mono">{{ g.type_id }}</span></h2>
+            <button type="button" class="pk-sync" data-sync-url="{% url 'explore:node_sync' part_type_id=g.type_id %}"
+                    title="Fetch this type’s new items from HWDB into the mirror, then reload">Sync new items</button>
+          </div>
+          <p class="pk-free">{{ g.n_free }} free position(s) for this type
+            · {{ g.total }} free candidate item(s) in the mirror{% if g.total > g.candidates|length %} (first {{ g.candidates|length }} listed — add others by PID below){% endif %}.
+            Items known to sit inside another box/assembly, or known-unapproved in HWDB, are hidden;
+            if HWDB still refuses one, the error reports its live status flags.</p>
+          <pre class="pk-sync-log"></pre>
+          {% if g.candidates %}
+          <div class="pk-scroll">
+            <table class="pk-table">
+              <thead><tr><th></th><th>Item</th><th>Status</th><th>QC</th><th>Institution</th></tr></thead>
+              <tbody>
+              {% for c in g.candidates %}
+                <tr>
+                  <td><input type="checkbox" name="pid" value="{{ c.part_id }}" id="c-{{ c.part_id }}"></td>
+                  <td class="mono"><label for="c-{{ c.part_id }}">{{ c.part_id }}</label></td>
+                  <td>{{ c.status }}</td>
+                  <td>{% if c.qc_ok %}<span class="pk-qc-ok" title="QA/QC uploaded and certified">✓</span>{% else %}<span class="pk-qc-bad" title="QA/QC not uploaded/certified yet">✗</span>{% endif %}</td>
+                  <td>{{ c.institution }}</td>
+                </tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <div class="pk-actions">
+            <button type="submit" class="pk-submit">Add to box</button>
+          </div>
+          {% else %}
+          <div class="pk-empty">No candidates in the mirror yet — sync this type’s items first, or add by PID below.</div>
+          {% endif %}
+        </div>
+      </form>
+      {% endfor %}
+
+      <form method="post" action="{% url 'explore:box_pack' part_id=part_id %}"
+            hx-post="{% url 'explore:box_pack' part_id=part_id %}"
+            hx-target="#pk-body" hx-swap="outerHTML">
+        {% csrf_token %}
+        <div class="pk-group">
+          <div class="pk-manual">
+            <label for="pk-manual-input">Add by PID (typed or scanned, separated by spaces or commas):</label>
+            <input id="pk-manual-input" name="manual" placeholder="e.g. D08100100004-00123, D08100100004-00124">
+          </div>
+          <div class="pk-actions">
+            <button type="submit" class="pk-submit">Add to box</button>
+            <span class="pk-hint">Items are assigned to free positions automatically and linked one by one —
+              an item HWDB refuses (e.g. already inside an assembly the mirror can’t see) is reported
+              individually and doesn’t block the others.</span>
+          </div>
+        </div>
+      </form>
+      {% else %}
+      <div class="pk-group"><div class="pk-empty">No free positions left in this box — unlink something on the
+        <a href="{% url 'explore:part' part_id=part_id %}">box page</a> first, or
+        <a href="{% url 'explore:box_type' part_type_id=part_type_id %}">add positions to the box type</a>.</div></div>
+      {% endif %}
+    </div>
+
+    <form method="post" action="{% url 'explore:box_pack' part_id=part_id %}"
+          hx-post="{% url 'explore:box_pack' part_id=part_id %}"
+          hx-target="#pk-body" hx-swap="outerHTML"
+          class="pk-group pk-contents">
+      {% csrf_token %}
+      <h2>In the box <span class="mono">{{ n_filled }} of {{ contents|length }} positions filled</span></h2>
+      <table class="pk-table">
+        <thead><tr><th>Position</th><th>Item</th><th></th></tr></thead>
+        <tbody>
+        {% for c in contents %}
+          <tr>
+            <td>{{ c.position }}</td>
+            {% if c.part_id %}
+            <td class="mono"><a href="{% url 'explore:part' part_id=c.part_id %}">{{ c.part_id }}</a></td>
+            <td><button class="pk-unlink" name="unlink" value="{{ c.position }}"
+                        title="Remove {{ c.part_id }} from this box">Unlink</button></td>
+            {% else %}
+            <td class="pk-slot-empty">— empty ({{ c.type_id }})</td>
+            <td></td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </form>
+  </div>
+</div>

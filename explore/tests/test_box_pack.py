@@ -358,6 +358,65 @@ class PackPostTest(TestCase):
         self.assertEqual(nonship.status_code, 403)
         api.patch_subcomponents.assert_not_called()
 
+    def test_picker_shows_box_contents_column(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PACK).content.decode()
+        self.assertIn("pk-contents", html)
+        self.assertIn("1 of 3 positions filled", html)
+        self.assertIn(f">{IN_BOX}</a>", html)             # occupant linked
+        self.assertIn("pk-slot-empty", html)              # free slots listed too
+
+    def test_htmx_add_rerenders_the_body_in_place(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.post(PACK, {"pid": [GOOD]}, HTTP_HX_REQUEST="true")
+        self.assertEqual(resp.status_code, 200)           # partial, not redirect
+        html = resp.content.decode()
+        self.assertIn('id="pk-body"', html)
+        self.assertIn("Added 1 item(s)", html)            # flash inline
+        self.assertIn("2 of 3 positions filled", html)
+        self.assertIn(f">{GOOD}</a>", html)               # now in the box column
+        self.assertNotIn(f'value="{GOOD}"', html)         # no longer a candidate
+
+    def test_contents_pane_offers_unlink(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PACK).content.decode()
+        self.assertIn('name="unlink" value="Slot 1"', html)   # occupied slot
+        self.assertNotIn('name="unlink" value="Slot 2"', html)  # empty slot
+
+    def test_htmx_unlink_rerenders_the_body_in_place(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.post(PACK, {"unlink": "Slot 1"},
+                                    HTTP_HX_REQUEST="true")
+        api.patch_subcomponents.assert_called_once_with(BOX, {
+            "component": {"part_id": BOX},
+            "subcomponents": {"Slot 1": None, "Slot 2": None, "Doc": None}})
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertIn('id="pk-body"', html)
+        self.assertIn(f"Unlinked {IN_BOX}", html)
+        self.assertIn("0 of 3 positions filled", html)
+
+    def test_htmx_rejection_rerenders_with_the_error(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.post(PACK, {"manual": "not-a-pid"},
+                                    HTTP_HX_REQUEST="true")
+        api.patch_subcomponents.assert_not_called()
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertIn('id="pk-body"', html)
+        self.assertIn("doesn’t look like a PID", html)
+        self.assertIn("1 of 3 positions filled", html)    # state unchanged
+
     def test_app_level_error_surfaces_on_the_picker(self):
         api = _api()
         api.patch_subcomponents.return_value = {

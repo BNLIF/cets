@@ -3,7 +3,7 @@
 
 {% block content %}
 <style>
-  .pk-page { padding: 22px 30px 56px; max-width: 980px; }
+  .pk-page { padding: 22px 30px 56px; max-width: 1280px; }
   .pk-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
   .pk-crumbs a { color: var(--accent-ink); text-decoration: none; }
   .pk-crumbs a:hover { text-decoration: underline; }
@@ -11,6 +11,16 @@
   .pk-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 4px; }
   .pk-page h1 .mono { font-family: var(--font-mono); }
   .pk-sub { color: var(--dim); font-size: 13.5px; margin: 0 0 18px; }
+
+  .pk-cols { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; align-items: start; }
+  .pk-contents { position: sticky; top: 18px; }
+  .pk-contents h2 { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .pk-slot-empty { color: var(--faint); font-size: 12px; }
+  .pk-unlink { font: inherit; font-size: 12px; font-weight: 600; color: var(--dim);
+    background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm);
+    padding: 3px 11px; cursor: pointer; }
+  .pk-unlink:hover { border-color: var(--rule-hard); }
+  @media (max-width: 1000px) { .pk-cols { grid-template-columns: 1fr; } .pk-contents { position: static; } }
 
   .pk-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
   .pk-flash.success { color: var(--good); background: var(--good-bg);
@@ -32,11 +42,11 @@
   .pk-qc-bad { color: var(--bad, #a33); font-weight: 700; }
   .pk-empty { color: var(--faint); font-size: 13px; padding: 6px 2px; }
 
-  .pk-manual { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 16px 0; font-size: 13px; color: var(--dim); }
+  .pk-manual { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 10px; font-size: 13px; color: var(--dim); }
   .pk-manual input { font: inherit; font-size: 12.5px; font-family: var(--font-mono); color: var(--ink);
     background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm);
     padding: 6px 8px; flex: 1; min-width: 260px; }
-  .pk-actions { display: flex; gap: 12px; align-items: center; margin-top: 6px; }
+  .pk-actions { display: flex; gap: 12px; align-items: center; margin-top: 10px; }
   .pk-submit { font: inherit; font-size: 13px; font-weight: 600; color: var(--accent-ink);
     background: var(--accent-soft); border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--rule));
     border-radius: var(--r-sm); padding: 7px 17px; cursor: pointer; }
@@ -60,63 +70,13 @@
     <span class="sep">›</span>Add items
   </div>
 
-  {% for m in messages %}<div class="pk-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
-
   <h1>Add items to <span class="mono">{{ part_id }}</span></h1>
   <p class="pk-sub">Pick items below (or type/scan PIDs) and they’ll be linked into the box’s
-    free positions in the {{ hwdb_instance }} HWDB. Currently holding {{ n_contents }} item(s).</p>
+    free positions in the {{ hwdb_instance }} HWDB.</p>
+
+  {% include "explore/_pack_body.html" %}
 
   {% if groups %}
-  <form method="post" action="{% url 'explore:box_pack' part_id=part_id %}">
-    {% csrf_token %}
-    {% for g in groups %}
-    <div class="pk-group">
-      <div class="pk-group-head">
-        <h2>{{ g.name }} <span class="mono">{{ g.type_id }}</span></h2>
-        <button type="button" class="pk-sync" data-sync-url="{% url 'explore:node_sync' part_type_id=g.type_id %}"
-                title="Fetch this type’s new items from HWDB into the mirror, then reload">Sync new items</button>
-      </div>
-      <p class="pk-free">{{ g.n_free }} free position(s) for this type
-        · {{ g.total }} free candidate item(s) in the mirror{% if g.total > g.candidates|length %} (first {{ g.candidates|length }} listed — add others by PID below){% endif %}.
-        Items known to sit inside another box/assembly, or known-unapproved in HWDB, are hidden;
-        if HWDB still refuses one, the error reports its live status flags.</p>
-      <pre class="pk-sync-log"></pre>
-      {% if g.candidates %}
-      <div class="pk-scroll">
-        <table class="pk-table">
-          <thead><tr><th></th><th>Item</th><th>Status</th><th>QC</th><th>Institution</th></tr></thead>
-          <tbody>
-          {% for c in g.candidates %}
-            <tr>
-              <td><input type="checkbox" name="pid" value="{{ c.part_id }}" id="c-{{ c.part_id }}"></td>
-              <td class="mono"><label for="c-{{ c.part_id }}">{{ c.part_id }}</label></td>
-              <td>{{ c.status }}</td>
-              <td>{% if c.qc_ok %}<span class="pk-qc-ok" title="QA/QC uploaded and certified">✓</span>{% else %}<span class="pk-qc-bad" title="QA/QC not uploaded/certified yet">✗</span>{% endif %}</td>
-              <td>{{ c.institution }}</td>
-            </tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% else %}
-      <div class="pk-empty">No candidates in the mirror yet — sync this type’s items first, or add by PID below.</div>
-      {% endif %}
-    </div>
-    {% endfor %}
-
-    <div class="pk-manual">
-      <label for="pk-manual-input">Add by PID (typed or scanned, separated by spaces or commas):</label>
-      <input id="pk-manual-input" name="manual" placeholder="e.g. D08100100004-00123, D08100100004-00124">
-    </div>
-
-    <div class="pk-actions">
-      <button type="submit" class="pk-submit">Add to box</button>
-      <span class="pk-hint">Items are assigned to free positions automatically and linked one by one —
-        an item HWDB refuses (e.g. already inside an assembly the mirror can’t see) is reported
-        individually and doesn’t block the others.</span>
-    </div>
-  </form>
-
   <div class="pk-group pk-phone">
     <h2>Scan with your phone</h2>
     <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin-top:8px;">
@@ -129,54 +89,49 @@
       </div>
     </div>
   </div>
-  {% else %}
-  <div class="pk-group"><div class="pk-empty">No free positions left in this box — unlink something on the
-    <a href="{% url 'explore:part' part_id=part_id %}">box page</a> first, or
-    <a href="{% url 'explore:box_type' part_type_id=part_type_id %}">add positions to the box type</a>.</div></div>
   {% endif %}
 </div>
 
 <script>
 // Per-type "Sync new items" (same streaming pattern as the leaf page): pulls
 // the type's new items into the mirror, then reloads so the picker refreshes.
-(function () {
+// Delegated because htmx swaps #pk-body (and the buttons in it) on each add.
+document.addEventListener("click", function (e) {
+  var btn = e.target.closest(".pk-sync");
+  if (!btn || btn.disabled) return;
   var csrfEl = document.querySelector("input[name=csrfmiddlewaretoken]");
+  if (!csrfEl) return;
   var btns = document.querySelectorAll(".pk-sync");
-  if (!csrfEl || !btns.length) return;
-  btns.forEach(function (btn) {
-    btn.addEventListener("click", async function () {
-      btns.forEach(function (b) { b.disabled = true; });
-      var log = btn.closest(".pk-group").querySelector(".pk-sync-log");
-      log.style.display = "block"; log.textContent = "Syncing new items from HWDB…\n";
-      var fd = new FormData();
-      fd.append("csrfmiddlewaretoken", csrfEl.value);
-      fd.append("mode", "incremental");
-      var resp;
-      try { resp = await fetch(btn.dataset.syncUrl, { method: "POST", body: fd }); }
-      catch (e) {
-        log.textContent += "network error: " + e + "\n";
-        btns.forEach(function (b) { b.disabled = false; });
-        return;
-      }
-      if (resp.redirected) { window.location = resp.url; return; }
-      var reader = resp.body.getReader(), dec = new TextDecoder();
-      while (true) {
-        var r = await reader.read(); if (r.done) break;
-        log.textContent += dec.decode(r.value, { stream: true });
-        log.scrollTop = log.scrollHeight;
-      }
-      window.location.reload();
-    });
-  });
-})();
+  (async function () {
+    btns.forEach(function (b) { b.disabled = true; });
+    var log = btn.closest(".pk-group").querySelector(".pk-sync-log");
+    log.style.display = "block"; log.textContent = "Syncing new items from HWDB…\n";
+    var fd = new FormData();
+    fd.append("csrfmiddlewaretoken", csrfEl.value);
+    fd.append("mode", "incremental");
+    var resp;
+    try { resp = await fetch(btn.dataset.syncUrl, { method: "POST", body: fd }); }
+    catch (e) {
+      log.textContent += "network error: " + e + "\n";
+      btns.forEach(function (b) { b.disabled = false; });
+      return;
+    }
+    if (resp.redirected) { window.location = resp.url; return; }
+    var reader = resp.body.getReader(), dec = new TextDecoder();
+    while (true) {
+      var r = await reader.read(); if (r.done) break;
+      log.textContent += dec.decode(r.value, { stream: true });
+      log.scrollTop = log.scrollHeight;
+    }
+    window.location.reload();
+  })();
+});
 
 // Phone-as-scanner feed (issue #68): poll for PIDs scanned on the user's
 // phone. A PID listed as a candidate gets its checkbox ticked; anything else
-// (e.g. not yet in the mirror) is appended to the add-by-PID input.
+// (e.g. not yet in the mirror) is appended to the add-by-PID input. Elements
+// are looked up per scan, so this keeps working across htmx swaps.
 (function () {
-  var statusEl = document.getElementById("pk-scan-status");
-  var manual = document.getElementById("pk-manual-input");
-  if (!statusEl || !manual) return;
   var since = {{ scan_since }};
   var received = 0;
 
@@ -191,6 +146,8 @@
       }
       return;
     }
+    var manual = document.getElementById("pk-manual-input");
+    if (!manual) return;
     var parts = manual.value.split(/[\s,]+/).filter(Boolean);
     if (parts.indexOf(pid) === -1) {
       parts.push(pid);
@@ -199,6 +156,8 @@
   }
 
   async function poll() {
+    var statusEl = document.getElementById("pk-scan-status");
+    if (!statusEl) return;
     var r, j;
     try {
       r = await fetch("{{ scan_feed_url }}?since=" + since);
