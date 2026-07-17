@@ -615,6 +615,22 @@ def _signoff_table(rows) -> Table:
     return table
 
 
+def append_pdf(base: bytes, extra: bytes) -> bytes:
+    """The generated summary with the supplemental-material PDF appended.
+    Raises ``ValueError`` on an unreadable supplemental file (the summary is
+    never posted half-merged)."""
+    from pypdf import PdfReader, PdfWriter
+    writer = PdfWriter()
+    writer.append(io.BytesIO(base))
+    try:
+        writer.append(PdfReader(io.BytesIO(extra)))
+    except Exception as e:
+        raise ValueError(f"unreadable supplemental PDF ({e})") from e
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
 def build_detail_pdf(part_id: str, form: dict) -> bytes:
     """The Dashboard's DETAIL summary, minus plots: title, type name,
     generated timestamp, description, todos checklist, sign-off table, the

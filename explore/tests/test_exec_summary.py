@@ -92,6 +92,17 @@ PNG = base64.b64decode(
     "z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
 
 
+def _tiny_pdf() -> bytes:
+    """A real 1-page PDF (pypdf must be able to parse it)."""
+    import io
+    from reportlab.pdfgen import canvas
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf)
+    c.drawString(100, 700, "supplemental")
+    c.save()
+    return buf.getvalue()
+
+
 def _plots_api(**kw):
     """_api() with the plots config and per-test-type dispatch: the "ES"
     record keeps its shape; QC test history carries the referenced images."""
@@ -634,16 +645,43 @@ class GenerateResetUploadTest(TestCase):
         api.post_test.assert_not_called()
         self.assertIn("final approver", resp.content.decode())
 
-    def test_manual_upload_still_works(self):
-        api = _api()
+    def test_supplemental_pdf_is_appended_to_the_summary(self):
+        # "Supplemental material": a PDF appended to the GENERATED summary —
+        # the sign-off flow isn't bypassed and the file itself is never
+        # posted to HWDB (only the merged summary is).
+        api = _api(es=[_entry("Chao Zhang", 2), _entry("Hajime Muramatsu", 1)])
         m1, m2 = _mocked(api)
         with m1, m2:
-            self.client.post(PAGE, {
-                "action": "upload",
-                "pdf": SimpleUploadedFile("s.pdf", b"%PDF-1.4",
-                                          content_type="application/pdf")})
+            self.client.post(PAGE, {"action": "generate"}, follow=True)
+        from pypdf import PdfReader
+        base_pages = len(PdfReader(api.post_component_image.call_args.args[1]).pages)
+        with m1, m2:
+            resp = self.client.post(PAGE, {
+                "action": "generate",
+                "supplemental_pdf": SimpleUploadedFile(
+                    "extra.pdf", _tiny_pdf(), content_type="application/pdf")},
+                follow=True)
         (pid, fileobj, name), kwargs = api.post_component_image.call_args
         self.assertRegex(name, rf"^ExecutiveSummary_{BOX}_\d{{8}}_\d{{6}}\.pdf$")
+        self.assertEqual(len(PdfReader(fileobj).pages), base_pages + 1)
+        self.assertIn("Summary generated and posted", resp.content.decode())
+
+    def test_supplemental_pdf_rejected_when_invalid(self):
+        api = _api(es=[_entry("Chao Zhang", 2), _entry("Hajime Muramatsu", 1)])
+        m1, m2 = _mocked(api)
+        with m1, m2:   # wrong extension → refused up front
+            resp = self.client.post(PAGE, {
+                "action": "generate",
+                "supplemental_pdf": SimpleUploadedFile("x.png", b"nope")}, follow=True)
+        api.post_component_image.assert_not_called()
+        self.assertIn("must be a PDF", resp.content.decode())
+        with m1, m2:   # unreadable content → summary NOT posted half-merged
+            resp = self.client.post(PAGE, {
+                "action": "generate",
+                "supplemental_pdf": SimpleUploadedFile("x.pdf", b"not a pdf")},
+                follow=True)
+        api.post_component_image.assert_not_called()
+        self.assertIn("unreadable supplemental PDF", resp.content.decode())
 
     def test_default_sign_patches_and_posts_pdf_without_es(self):
         api = _api(cfg=None)

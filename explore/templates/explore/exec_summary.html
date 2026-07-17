@@ -237,7 +237,7 @@
   <div class="es-card">
     <h2>Generate</h2>
     <div class="es-row">
-      <form method="post">{% csrf_token %}<input type="hidden" name="action" value="generate">
+      <form method="post" enctype="multipart/form-data" id="es-generate">{% csrf_token %}<input type="hidden" name="action" value="generate">
         {% for b in plot_blocks %}{% if b.png_b64 and b.image_id %}<input type="hidden" name="plot_src_{{ b.index }}" value="upload" data-plot-src="{{ b.index }}">{% endif %}{% endfor %}
         <button class="es-btn" {% if not signing.all_signed %}disabled title="Every configured signee must sign first"{% endif %}>Generate PDF &amp; upload to HWDB</button>
       </form>
@@ -250,6 +250,17 @@
       fields, references{% if plot_blocks %}, plots{% endif %}, contents), named to the pre-shipping
       gate’s convention. A plot slot with no image is noted in the PDF, not skipped silently.</p>
   </div>
+
+  <details class="es-card">
+    <summary class="es-sum">Supplemental material (optional)</summary>
+    <div class="es-row" style="margin-top: 10px;">
+      {# form= ties this input to the Generate form above — it submits with "Generate PDF". #}
+      <input type="file" name="supplemental_pdf" form="es-generate" accept=".pdf,application/pdf" style="font-size:12.5px; color:var(--dim);">
+    </div>
+    <p class="es-hint">A PDF appended to the generated summary (after the plots) when you click
+      “Generate PDF &amp; upload to HWDB”. Used only for that generation — it is not stored in
+      HWDB on its own, so re-attach it if you regenerate.</p>
+  </details>
 
   {% else %}
   <form method="post" class="es-card">
@@ -283,18 +294,6 @@
         saves a new <span class="mono" style="font-size:11px;">ES_{{ ptid }}_&lt;timestamp&gt;.json</span> onto the type; newest wins, for every item of the type.</span>
     </div>
   </div>
-
-  <details class="es-card">
-    <summary class="es-sum">Or upload a ready-made PDF</summary>
-    <form method="post" enctype="multipart/form-data" style="margin-top: 10px;">
-      {% csrf_token %}<input type="hidden" name="action" value="upload">
-      <div class="es-row">
-        <input type="file" name="pdf" accept=".pdf,application/pdf" required style="font-size:12.5px; color:var(--dim);">
-        <button class="es-btn quiet">Post to HWDB</button>
-      </div>
-      <p class="es-hint">Renamed to <span class="mono" style="font-size:11px;">ExecutiveSummary_{{ part_id }}_&lt;timestamp&gt;.pdf</span> — the gate convention.</p>
-    </form>
-  </details>
 
   </div>{# /es-main #}
   </div>{# /es-cols #}

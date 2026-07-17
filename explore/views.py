@@ -1469,8 +1469,9 @@ def explore_exec_summary_view(request, part_id):
     config the page runs DEFAULT mode: one whoami signature, status/flag
     patch, and a minimal PDF. HWDB holds all state.
 
-    POST actions: ``sign`` / ``default_sign`` / ``generate`` / ``reset`` /
-    ``upload`` (a ready-made PDF, the #53 spike path).
+    POST actions: ``sign`` / ``default_sign`` / ``generate`` (optionally with
+    a supplemental-material PDF appended to the summary) / ``reset`` /
+    ``upload_plot``.
     """
     inst = instance_of(request)
     part_url = _rev(request, "explore:part", args=[part_id])
@@ -1624,22 +1625,6 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
         return (sid, bool(request.POST.get("certified")),
                 bool(request.POST.get("uploaded")))
 
-    if action == "upload":  # ready-made PDF (the #53 spike path)
-        pdf = request.FILES.get("pdf")
-        if pdf is None or not pdf.name.lower().endswith(".pdf"):
-            messages.error(request, "Pick a PDF file to upload.")
-            return redirect(page_url)
-        if pdf.size > 25 * 1024 * 1024:
-            messages.error(request, "That PDF is over 25 MB — too large for a summary.")
-            return redirect(page_url)
-        name = f"ExecutiveSummary_{part_id}_{timezone.now():{execsummary.FILENAME_TS_FMT}}.pdf"
-        err = _upload_summary_pdf(api, part_id, pdf, name)
-        if err:
-            messages.error(request, f"HWDB rejected the summary — {err}")
-        else:
-            messages.success(request, f"Executive summary posted as {name}.")
-        return redirect(page_url)
-
     if action == "default_sign":  # no-config mode: sign + patch + PDF, one shot
         full_name, _ids, _names = _whoami_context(api)
         sid, certified, uploaded = _form_flags()
@@ -1773,6 +1758,15 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
         if not status["all_signed"]:
             messages.error(request, "Every configured signee must sign before generating.")
             return redirect(page_url)
+        # Supplemental material (optional): a PDF appended to the generated
+        # summary. Lives only inside this request — never posted to HWDB on
+        # its own, so it can't bypass the checklist/sign-off.
+        supp = request.FILES.get("supplemental_pdf")
+        if supp is not None:
+            if not supp.name.lower().endswith(".pdf") or supp.size > 25 * 1024 * 1024:
+                messages.error(request, "Supplemental material must be a PDF under 25 MB.")
+                return redirect(page_url)
+            supp = supp.read()
         try:
             comp = api.get_component(part_id).get("data") or {}
         except requests.RequestException:
@@ -1808,6 +1802,12 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             "subcomponents": execsummary.subcomponent_lines(manifest),
             "plot_blocks": plot_blocks,
         })
+        if supp:
+            try:
+                pdf_bytes = execsummary.append_pdf(pdf_bytes, supp)
+            except ValueError as e:
+                messages.error(request, f"Summary not posted — {e}")
+                return redirect(page_url)
         name = f"ExecutiveSummary_{part_id}_{timezone.now():{execsummary.FILENAME_TS_FMT}}.pdf"
         err = _upload_summary_pdf(api, part_id, io.BytesIO(pdf_bytes), name)
         if err:
