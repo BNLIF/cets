@@ -81,6 +81,21 @@
   .es-req { border-left: 3px solid var(--bad, #c0392b); padding-left: 8px;
     color: var(--bad, #a33); accent-color: var(--bad, #c0392b); font-weight: 500; }
   .es-req.is-ok { border-left-color: var(--good); color: var(--good); accent-color: var(--good); }
+  /* recursive sub-component tree (htmx-loaded) */
+  .es-tree { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .es-tree th { text-align: left; font-size: 11px; color: var(--faint); text-transform: uppercase;
+    letter-spacing: .04em; padding: 4px 10px 4px 0; border-bottom: 1px solid var(--rule); }
+  .es-tree td { padding: 3px 10px 3px 0; border-bottom: 1px solid var(--rule); color: var(--ink); }
+  .es-tree td.mono { font-family: var(--font-mono); font-size: 12px;
+    padding-left: calc(var(--depth, 0) * 16px); }
+  .es-tree td.mono a { color: var(--accent-ink); text-decoration: none; }
+  .es-tree td.mono a:hover { text-decoration: underline; }
+  .es-yes { color: var(--good); font-weight: 600; }
+  .es-no { color: var(--bad, #a33); font-weight: 600; }
+  .es-spin { display: inline-block; width: 11px; height: 11px; border-radius: 50%;
+    border: 2px solid var(--rule); border-top-color: var(--accent-ink);
+    animation: es-spin .8s linear infinite; vertical-align: -2px; }
+  @keyframes es-spin { to { transform: rotate(360deg); } }
 </style>
 
 <div class="es-page">
@@ -285,6 +300,14 @@
     <p class="es-hint">Both flags must be confirmed before signing; patches the item’s status/flags and posts the minimal DEFAULT summary in one step.</p>
   </form>
   {% endif %}
+
+  <div class="es-card">
+    <h2>Sub-components</h2>
+    <div hx-get="{% url 'explore:es_subtree' part_id=part_id %}" hx-trigger="load" hx-swap="outerHTML">
+      <p class="es-hint">Loading the full sub-component tree from HWDB — this can take a
+        while on deep assemblies… <span class="es-spin"></span></p>
+    </div>
+  </div>
 
   <div class="es-card">
     <h2>Type config</h2>

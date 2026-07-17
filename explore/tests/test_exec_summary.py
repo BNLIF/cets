@@ -57,6 +57,10 @@ def _api(cfg=CFG, es=None, todos=None, roles=(41,)):
     api.get_subcomponents.return_value = {"data": [
         {"part_id": "D05700300001-00012", "type_name": "FEB",
          "functional_position": "FEB1", "operation": "mount"}]}
+    # the subtree walk revisits children; the seen-guard stops the recursion
+    # even though this constant manifest names the same child at every level
+    api.get_test_types.return_value = {"data": [{"id": 17, "name": "ES"}]}
+    api.post_test_type.return_value = {"status": "OK"}
     api.post_test.return_value = {"status": "OK"}
     api.patch_component.return_value = {"status": "OK"}
     api.post_component_image.return_value = {"status": "OK", "image_id": "img-9"}
@@ -431,18 +435,46 @@ class EngineTest(TestCase):
         cfg = execsummary._normalize(CFG)
         rows = execsummary.compute_status(
             cfg, [_entry("Chao Zhang", 2), _entry("Hajime Muramatsu", 1)], {41})["rows"]
+        subtree = ([
+            {"part_id": "D05700300001-00012", "type_name": "FEB",
+             "functional_position": "FEB1", "depth": 0,
+             "status": "QA/QC Tests - Passed All", "uploaded": True, "certified": True},
+            {"part_id": "Z00100300001-07630", "type_name": "LArASIC",
+             "functional_position": "U1", "depth": 1,
+             "status": None, "uploaded": None, "certified": None},
+        ], False)
         detail = execsummary.build_detail_pdf(BOX, {
             "type_name": "Test Type 007", "description": cfg["test_description"],
             "todos": {**cfg["todos"], "checked": [0]}, "signee_rows": rows,
             "status_label": "QA/QC Tests - Passed All",
             "certified_flag": True, "uploaded_flag": False,
-            "references": cfg["references"], "subcomponents": ["a (b) @ c"]})
+            "references": cfg["references"], "subtree": subtree})
         default = execsummary.build_default_pdf(BOX, {
             "signature": "Chao", "comments": "", "timestamp": "now",
             "status_label": "Unknown", "certified_flag": False,
-            "uploaded_flag": False}, [])
+            "uploaded_flag": False}, ([], False))
         self.assertTrue(detail.startswith(b"%PDF"))
         self.assertTrue(default.startswith(b"%PDF"))
+        # the recursive tree lands on the detail PDF's last page, with the
+        # nested (depth-1) node and the status columns
+        import io
+        from pypdf import PdfReader
+        last = PdfReader(io.BytesIO(detail)).pages[-1].extract_text()
+        self.assertIn("Sub-components", last)
+        self.assertIn("D05700300001-00012", last)
+        self.assertIn("Z00100300001-07630", last)
+        self.assertIn("Certified", last)
+        # the default PDF says so when there's nothing inside
+        last = PdfReader(io.BytesIO(default)).pages[-1].extract_text()
+        self.assertIn("No sub-components.", last)
+
+    def test_subtree_flowables_reports_truncation(self):
+        rows = [{"part_id": "D05700300001-00012", "type_name": "FEB",
+                 "functional_position": "FEB1", "depth": 0,
+                 "status": "In Fabrication", "uploaded": False, "certified": False}]
+        flows = execsummary.subtree_flowables(rows, True)
+        texts = [getattr(f, "text", "") for f in flows]
+        self.assertTrue(any("truncated" in t for t in texts))
 
 
 class PageTest(TestCase):
@@ -496,6 +528,17 @@ class PageTest(TestCase):
             html = self.client.get(PAGE).content.decode()
         self.assertIn("Default sign-off", html)
         self.assertIn("Chao Zhang", html)                  # whoami prefill
+
+    def test_subtree_section_lazy_loads_in_both_modes(self):
+        # The recursive tree is slow (2 calls/node) — the page ships a
+        # placeholder that htmx fills after load, in DETAIL and DEFAULT mode.
+        for api in (_api(), _api(cfg=None)):
+            m1, m2 = _mocked(api)
+            with m1, m2:
+                html = self.client.get(PAGE).content.decode()
+            self.assertIn(f'hx-get="/hw/dev/part/{BOX}/es-subtree/"', html)
+            self.assertIn('hx-trigger="load"', html)
+            api.get_subcomponents.assert_not_called()      # nothing walked inline
 
     @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_prod_is_forbidden(self):
@@ -582,6 +625,54 @@ class SignTest(TestCase):
         self.assertIn("still unchecked", html)
         self.assertIn("1 QC check(s)", html)
         self.assertIn("All QA/QC Uploaded", html)
+
+    def _sign_post(self):
+        return {"sign": "Chao Zhang", "sig:Chao Zhang": "Chao Zhang",
+                "todo": ["0", "1"], "status_id": "120",
+                "certified": "on", "uploaded": "on"}
+
+    def test_existing_es_test_type_is_not_recreated(self):
+        api = _api(es=[])   # fixture: the type already lists "ES"
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, self._sign_post())
+        api.post_test_type.assert_not_called()
+        api.post_test.assert_called_once()
+
+    def test_missing_es_test_type_is_auto_created_before_posting(self):
+        api = _api(es=[])
+        api.get_test_types.return_value = {"data": [{"id": 1, "name": "RoomT QC Test"}]}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.post(PAGE, self._sign_post(), follow=True)
+        (ptid, payload), _ = api.post_test_type.call_args
+        self.assertEqual(ptid, "D00599800007")
+        self.assertEqual(payload["name"], "ES")
+        self.assertEqual(payload["component_type"], {"part_type_id": "D00599800007"})
+        api.post_test.assert_called_once()
+        self.assertIn("posted", resp.content.decode())
+
+    def test_failed_es_test_type_creation_blocks_the_signature(self):
+        api = _api(es=[])
+        api.get_test_types.return_value = {"data": []}
+        api.post_test_type.return_value = {"status": "ERROR", "data": "nope"}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.post(PAGE, self._sign_post(), follow=True)
+        api.post_test.assert_not_called()
+        html = resp.content.decode()
+        self.assertIn("couldn’t create the “ES” test type", html)
+        self.assertIn("nope", html)
+
+    def test_unreadable_test_type_listing_does_not_block_signing(self):
+        # Listing failure is best-effort: proceed and let post_test speak.
+        api = _api(es=[])
+        api.get_test_types.side_effect = Exception("boom")
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, self._sign_post())
+        api.post_test_type.assert_not_called()
+        api.post_test.assert_called_once()
 
     def test_out_of_turn_sign_is_refused(self):
         api = _api(es=[])   # nobody signed → rank 1 must wait for rank 2

@@ -56,3 +56,24 @@ class FnalDbApiClientSessionTest(TestCase):
         # files kwarg present, headers not overridden (so session auth applies).
         self.assertIn("files", kwargs)
         self.assertNotIn("headers", kwargs)
+
+    def test_post_test_type_hits_the_spec_endpoint_with_json_body(self):
+        """Test-type creation (the ES auto-create) must POST the TestTypeIn
+        body to ``component-types/{ptid}/test-types`` — the path is from the
+        OpenAPI spec (v2.27.0RC), unwrapped by any official client."""
+        api = FnalDbApiClient("https://example/api", "fake-bearer")
+        payload = {"name": "ES", "specifications": {},
+                   "component_type": {"part_type_id": "D00599800007"}}
+
+        fake_resp = mock.Mock()
+        fake_resp.ok = True
+        fake_resp.json.return_value = {"status": "OK"}
+
+        with mock.patch.object(api.session, "request", return_value=fake_resp) as req:
+            body = api.post_test_type("D00599800007", payload)
+
+        self.assertEqual(body, {"status": "OK"})
+        args, kwargs = req.call_args
+        self.assertEqual(args[0], "POST")
+        self.assertEqual(args[1], "https://example/api/component-types/D00599800007/test-types")
+        self.assertEqual(kwargs["json"], payload)

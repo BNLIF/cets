@@ -39,7 +39,7 @@ from .queries import (
     component_breakdowns, component_qc_flags, component_type_progress,
     component_update_filters, component_update_progress,
 )
-from .parts import assembly_children, current_container, part_detail
+from .parts import assembly_children, current_container, part_detail, subtree_rows
 from .shipments import _spec_data, current_manifest, refresh_box, sync_shipments
 
 logger = logging.getLogger(__name__)
@@ -1469,8 +1469,39 @@ def _whoami_context(api) -> tuple[str, set, dict]:
     return full_name, role_ids, role_names
 
 
+def _ensure_es_test_type(api, ptid) -> str | None:
+    """The type must define an "ES" test type before the record can post —
+    the Dashboard has one created by hand per component type; auto-create it
+    on first use instead (Hajime's ES review, 2026-07-17). A failed listing
+    is non-fatal (proceed and let post_test surface the real error); a failed
+    creation is returned. Runs once per write — every ES post funnels through
+    ``_post_es``."""
+    try:
+        rows = api.get_test_types(ptid).get("data") or []
+        if any(isinstance(r, dict) and r.get("name") == "ES" for r in rows):
+            return None
+    except Exception as e:
+        logger.warning("ES test-type listing for %s failed: %s", ptid, e)
+        return None
+    try:
+        # TestTypeIn per the HWDB OpenAPI spec (v2.27.0RC): name +
+        # specifications + component_type echo, nothing else allowed.
+        body = api.post_test_type(ptid, {
+            "name": "ES",
+            "comments": "Executive Summary signatures (auto-created by HWDB Explorer)",
+            "specifications": {},
+            "component_type": {"part_type_id": ptid},
+        })
+    except requests.RequestException as e:
+        return _hwdb_error_detail(e)
+    return None if body.get("status") == "OK" else str(body.get("data") or body)
+
+
 def _post_es(api, part_id, es_list, todos, comments) -> str | None:
     """Post the consolidated ES test record; returns an error string or None."""
+    err = _ensure_es_test_type(api, part_id.rsplit("-", 1)[0])
+    if err:
+        return f"couldn’t create the “ES” test type — {err}"
     try:
         body = api.post_test(part_id, execsummary.es_test_payload(es_list, todos, comments))
     except requests.RequestException as e:
@@ -1673,9 +1704,8 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
         signinfo = {"signature": full_name, "comments": comments, "timestamp": ts,
                     "status_label": execsummary.STATUS_LABEL_BY_ID.get(sid, "Unknown"),
                     "certified_flag": certified, "uploaded_flag": uploaded}
-        manifest = current_manifest(_safe_get_data(api.get_subcomponents, part_id))
         pdf_bytes = execsummary.build_default_pdf(
-            part_id, signinfo, execsummary.subcomponent_lines(manifest))
+            part_id, signinfo, subtree_rows(api, part_id))
         name = f"ExecutiveSummary_{part_id}_{timezone.now():{execsummary.FILENAME_TS_FMT}}.pdf"
         err = _upload_summary_pdf(api, part_id, io.BytesIO(pdf_bytes), name)
         if err:
@@ -1806,7 +1836,6 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             comp = {}
         status_name = ((comp.get("status") or {}).get("name")
                        if isinstance(comp.get("status"), dict) else comp.get("status"))
-        manifest = current_manifest(_safe_get_data(api.get_subcomponents, part_id))
         leaf = HierarchyNode.for_instance(inst).filter(
             level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
         plot_blocks = []
@@ -1832,7 +1861,7 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             "certified_flag": bool(comp.get("certified_qaqc")),
             "uploaded_flag": bool(comp.get("qaqc_uploaded")),
             "references": cfg["references"],
-            "subcomponents": execsummary.subcomponent_lines(manifest),
+            "subtree": subtree_rows(api, part_id),
             "plot_blocks": plot_blocks,
         })
         if supp:
@@ -2406,6 +2435,31 @@ def explore_assembly_view(request, part_id):
         c["url"] = (_rev(request, "explore:part", args=[c["part_id"]])
                     if c.get("part_id") else None)
     return JsonResponse({"children": children})
+
+
+@login_not_required
+@fnal_login_required
+def explore_es_subtree_view(request, part_id):
+    """The executive summary's recursive sub-component list (Hajime's ES
+    review): the full tree to the leaves with per-item status / uploaded /
+    certified, loaded lazily via htmx so the signing page renders fast.
+    Read-only; the walk can take a while on deep assemblies. Errors render
+    as in-page hints at 200 — htmx 1.x doesn't swap non-2xx responses."""
+    ctx = {"part_id": part_id, "rows": [], "truncated": False, "error": None}
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        ctx["error"] = "link"
+    except FnalUnavailable:
+        ctx["error"] = "unavailable"
+    if ctx["error"] is None:
+        api = FnalDbApiClient(settings.HWDB_PROFILES[instance_of(request)]["api"], bearer)
+        try:
+            ctx["rows"], ctx["truncated"] = subtree_rows(api, part_id)
+        except Exception:
+            logger.exception("explore_es_subtree_view(%s) crashed", part_id)
+            ctx["error"] = "fetch_failed"
+    return render(request, "explore/_es_subtree.html", ctx)
 
 
 # A full part id, e.g. ``D08100100003-00226`` — type-id segment then a sequence.

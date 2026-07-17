@@ -1,0 +1,33 @@
+{% comment %}The ES page's recursive sub-component list — swapped in by htmx
+after page load (the walk is slow: ~2 HWDB calls per node). Errors render at
+200 as in-place hints; htmx 1.x doesn't swap non-2xx responses.{% endcomment %}
+{% if error == "link" %}
+<p class="es-hint">FNAL session expired —
+  <a href="{% url 'hwdb:link' %}?next={{ request.path|urlencode }}">re-link</a>
+  to load the sub-component tree.</p>
+{% elif error %}
+<p class="es-plot-err">&#9888; Couldn’t load the sub-component tree from HWDB
+  {% if error == "unavailable" %}— FNAL authentication is unavailable{% endif %}.
+  Reload the page to retry.</p>
+{% elif not rows %}
+<p class="es-hint">No sub-components.</p>
+{% else %}
+<table class="es-tree">
+  <thead><tr><th>Part</th><th>Type</th><th>Position</th><th>Status</th><th>Uploaded</th><th>Certified</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td class="mono" style="--depth: {{ r.depth }};"><a href="{% url 'explore:part' part_id=r.part_id %}">{{ r.part_id }}</a></td>
+      <td>{{ r.type_name|default:"—" }}</td>
+      <td>{{ r.functional_position|default:"—" }}</td>
+      <td>{{ r.status|default:"—" }}</td>
+      <td>{% if r.uploaded == None %}—{% elif r.uploaded %}<span class="es-yes">Yes</span>{% else %}<span class="es-no">No</span>{% endif %}</td>
+      <td>{% if r.certified == None %}—{% elif r.certified %}<span class="es-yes">Yes</span>{% else %}<span class="es-no">No</span>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="es-hint">{{ rows|length }} sub-component{{ rows|length|pluralize }} down to the leaves,
+  statuses live from HWDB; included in the generated summary PDF.
+  {% if truncated %}<span class="es-no">&#9888; Tree truncated — too many sub-components to list them all.</span>{% endif %}</p>
+{% endif %}

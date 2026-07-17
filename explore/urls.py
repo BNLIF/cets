@@ -39,6 +39,8 @@ urlpatterns = [
     path("part/<str:part_id>/pack/", views.explore_box_pack_view, name="box_pack"),
     path("part/<str:part_id>/exec-summary/", views.explore_exec_summary_view,
          name="exec_summary"),
+    path("part/<str:part_id>/es-subtree/", views.explore_es_subtree_view,
+         name="es_subtree"),
     path("part/<str:part_id>/preship/", views.explore_preship_view, name="preship"),
     path("part/<str:part_id>/shipping/", views.explore_shipping_view, name="shipping"),
     path("part/<str:part_id>/receiving/", views.explore_receiving_view, name="receiving"),

@@ -125,6 +125,59 @@ def assembly_children(api, parent_pid: str) -> list[dict]:
     return kids
 
 
+# Full-subtree bound for the executive summary's contents list — ~2 HTTP calls
+# per node; past this the walk stops and the cut is reported, not silent.
+_SUBTREE_NODE_CAP = 300
+
+
+def _manifest_children(api, pid: str, depth: int, seen: set) -> list[dict]:
+    """One node's unvisited mounted children as subtree rows-in-waiting."""
+    kids = []
+    for m in current_manifest(_safe_data("subcomponents", lambda: api.get_subcomponents(pid))):
+        cid = m.get("part_id")
+        if not cid or cid in seen:
+            continue
+        seen.add(cid)
+        kids.append({**m, "depth": depth})
+    return kids
+
+
+def subtree_rows(api, root_pid: str, *, max_nodes: int = _SUBTREE_NODE_CAP
+                 ) -> tuple[list[dict], bool]:
+    """The recursive sub-component tree of ``root_pid`` down to the leaves
+    (Hajime's ES review): pre-order rows, each with the three QC statuses —
+    ``status`` name, ``uploaded``, ``certified`` (``None`` = record fetch
+    failed). The root itself is excluded — its statuses already headline the
+    executive summary. Returns ``(rows, truncated)``.
+
+    Deliberately sequential: the one client keeps its keep-alive Session, and
+    a shared Session must not fan out across threads (see FnalDbApiClient).
+    If a representative box proves too slow, parallelize per level with
+    per-thread clients as in shipments' mirror sync."""
+    rows: list[dict] = []
+    seen = {root_pid}
+    stack = list(reversed(_manifest_children(api, root_pid, 0, seen)))
+    truncated = False
+    while stack:
+        if len(rows) >= max_nodes:
+            truncated = True
+            logger.warning("subtree for %s truncated at %d nodes", root_pid, max_nodes)
+            break
+        row = stack.pop()
+        status = uploaded = certified = None
+        try:
+            comp = api.get_component(row["part_id"]).get("data") or {}
+            status = _named(comp.get("status"))
+            uploaded = comp.get("qaqc_uploaded")
+            certified = comp.get("certified_qaqc")
+        except Exception as e:
+            logger.warning("subtree: record for %s failed: %s", row["part_id"], e)
+        row.update(status=status, uploaded=uploaded, certified=certified)
+        rows.append(row)
+        stack.extend(reversed(_manifest_children(api, row["part_id"], row["depth"] + 1, seen)))
+    return rows, truncated
+
+
 def _yesno(v):
     """Boolean flag → Yes/No; None (field absent) stays None so the fact is
     skipped rather than shown as a false No."""

@@ -270,6 +270,21 @@ class FnalDbApiClient:
     def post_test(self, part_id, payload):
         return self._make_request("POST", f"components/{part_id}/tests", data=payload)
 
+    def post_test_type(self, part_type_id, payload):
+        """Define a new test type on a component type
+        (``POST component-types/{part_type_id}/test-types``) — the executive
+        summary auto-creates its "ES" test type on first signature when the
+        type lacks one. Payload is the spec's TestTypeIn: ``name``,
+        ``specifications`` and a ``component_type.part_type_id`` echo, plus
+        optional ``comments`` (additionalProperties: false). Path and schema
+        from the saved OpenAPI spec (.idea/ref/hwdb-openapi-v2.27.0RC.json);
+        verified live on dev 2026-07-17 (created "ES" test_type_id=918 on
+        D00599800025). No official Python client wraps it.
+        """
+        return self._make_request(
+            "POST", f"component-types/{part_type_id}/test-types", data=payload
+        )
+
     def post_component_image(self, part_id, fileobj, filename, comments=""):
         """Multipart upload of an attachment onto an item
         (``POST components/{pid}/images``). ``filename`` becomes the HWDB

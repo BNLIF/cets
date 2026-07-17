@@ -26,11 +26,13 @@ import logging
 import re
 from datetime import datetime
 
+from xml.sax.saxutils import escape
+
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import (
-    Image, PageBreak, Paragraph, Preformatted, SimpleDocTemplate, Spacer,
+    Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer,
     Table, TableStyle,
 )
 
@@ -709,15 +711,15 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
                                            styles["Normal"]))
             elif pb.get("error"):
                 story.append(Paragraph(f"⚠ {pb['error']}", styles["Normal"]))
-    if form.get("subcomponents"):
-        story.append(PageBreak())
-        story.append(Paragraph("Sub-components", styles["Heading2"]))
-        story.append(Preformatted("\n".join(form["subcomponents"]), styles["Code"]))
+    story.append(PageBreak())
+    story.append(Paragraph("Sub-components", styles["Heading2"]))
+    story += subtree_flowables(*(form.get("subtree") or ([], False)))
     SimpleDocTemplate(buf, pagesize=letter).build(story)
     return buf.getvalue()
 
 
-def build_default_pdf(part_id: str, signinfo: dict, subcomponents: list[str]) -> bytes:
+def build_default_pdf(part_id: str, signinfo: dict,
+                      subtree: tuple[list[dict], bool]) -> bytes:
     """The Dashboard's DEFAULT summary: the three status fields and a single
     sign-off row — no config, no checklist, no references."""
     buf = io.BytesIO()
@@ -745,16 +747,49 @@ def build_default_pdf(part_id: str, signinfo: dict, subcomponents: list[str]) ->
         ("FONTSIZE", (0, 0), (-1, -1), 9),
     ]))
     story.append(table)
-    if subcomponents:
-        story.append(PageBreak())
-        story.append(Paragraph("Sub-components", styles["Heading2"]))
-        story.append(Preformatted("\n".join(subcomponents), styles["Code"]))
+    story.append(PageBreak())
+    story.append(Paragraph("Sub-components", styles["Heading2"]))
+    story += subtree_flowables(*subtree)
     SimpleDocTemplate(buf, pagesize=letter).build(story)
     return buf.getvalue()
 
 
-def subcomponent_lines(manifest) -> list[str]:
-    """One-level ASCII contents tree for the PDF's last page (the Dashboard
-    renders the full recursive subtree; one level is enough for a box)."""
-    return [f"{m['part_id'] or '—'}  ({m.get('type_name') or '?'})  @ {m.get('functional_position') or '—'}"
-            for m in manifest]
+def subtree_flowables(rows: list[dict], truncated: bool) -> list:
+    """The Sub-components page: the full recursive contents tree, one row per
+    node indented by depth, with the three QC statuses (Hajime's ES review).
+    ``rows`` come from ``parts.subtree_rows``."""
+    styles = getSampleStyleSheet()
+    if not rows:
+        return [Paragraph("No sub-components.", styles["Normal"])]
+    cell = ParagraphStyle("subtree-cell", parent=styles["Normal"],
+                          fontSize=8, leading=10)
+
+    def _yn(flag):
+        if flag is None:
+            return Paragraph("—", cell)
+        color, text = ("#19b478", "Yes") if flag else ("#dc3c3c", "No")
+        return Paragraph(f'<font color="{color}"><b>{text}</b></font>', cell)
+
+    body = [["Part", "Status", "Uploaded", "Certified"]]
+    for r in rows:
+        label = (f"{r['part_id']} ({r.get('type_name') or '?'}) "
+                 f"@ {r.get('functional_position') or '—'}")
+        body.append([
+            Paragraph("&nbsp;" * 4 * r["depth"] + escape(label), cell),
+            Paragraph(escape(r.get("status") or "—"), cell),
+            _yn(r.get("uploaded")), _yn(r.get("certified")),
+        ])
+    table = Table(body, colWidths=[248, 110, 55, 55], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8e8e8")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+    ]))
+    out = [table]
+    if truncated:
+        out.append(Spacer(1, 6))
+        out.append(Paragraph(
+            "⚠ Tree truncated — too many sub-components to list them all.",
+            styles["Normal"]))
+    return out
