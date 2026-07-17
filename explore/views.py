@@ -1032,7 +1032,9 @@ def explore_box_pack_view(request, part_id):
         # Phone-as-scanner hookup (issue #68): the picker polls the scan feed
         # for PIDs this user scans on their phone, starting AFTER the newest
         # row at page load so stale scans don't flood in.
-        scan_url = request.build_absolute_uri(_rev(request, "explore:scan"))
+        scan_path = _rev(request, "explore:scan")
+        scan_url = (settings.PUBLIC_ORIGIN + scan_path if settings.PUBLIC_ORIGIN
+                    else request.build_absolute_uri(scan_path))
         scan_since = (PackScan.for_instance(inst)
                       .filter(username=request.user.get_username())
                       .order_by("-id").values_list("id", flat=True).first()) or 0

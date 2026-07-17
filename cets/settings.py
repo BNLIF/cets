@@ -42,6 +42,11 @@ TEST_RUNNER = "cets.test_runner.CetsTestRunner"
 
 CSRF_TRUSTED_ORIGINS = config("CSRF_TRUSTED_ORIGINS", default="", cast=Csv())
 
+# Public scheme+host for URLs handed to other devices (e.g. the pack page's
+# scan QR code). Behind the www.phy.bnl.gov proxy the Host header is the
+# backend's, so build_absolute_uri() alone gives the wrong domain.
+PUBLIC_ORIGIN = config("PUBLIC_ORIGIN", default="").rstrip("/")
+
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SESSION_COOKIE_SECURE = True
