@@ -22,10 +22,11 @@ instances:
     # systems (names only) and each system walks lazily on first visit, like
     # Uncurated. System ids are per-project — a Z system 5 is not D's system 5.
     # Names audited from `GET projects` 2026-07-24 (they differ per instance).
-    # Prod's Z ("Test Project", 2 test systems) is deliberately not mirrored —
-    # testing happens on dev; the next refresh prunes any old prod Z rows.
+    # Prod's Z is upstream-named "Test Project" but displayed as Sandbox to
+    # match dev — Hajime expects real entries there in the future (2026-07-24).
     extra_projects:
       - {id: L, name: LBNF}
+      - {id: Z, name: Sandbox, test: true}   # excluded from overview stats
 
     regions:
       - name: Far Detector
