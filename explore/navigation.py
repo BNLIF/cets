@@ -35,7 +35,7 @@ def overflow_region(instance: str) -> dict | None:
     if not curation.has_overflow(instance):
         return None
     curated = curation.curated_system_ids(instance)
-    systems = (H.for_instance(instance).filter(level=H.LEVEL_SYSTEM)
+    systems = (H.for_instance(instance).filter(level=H.LEVEL_SYSTEM, project="D")
                .exclude(system_id__in=curated).order_by("system_id"))
     families = [{"name": s.system_name, "key": str(s.system_id),
                  "sub": f"system {s.system_id}", "systems": [s.system_id]}
@@ -47,9 +47,43 @@ def overflow_region(instance: str) -> dict | None:
             "families": families}
 
 
+def project_regions(instance: str) -> list[dict]:
+    """One synthetic region per extra HWDB project (#71), built from the
+    mirror at render time like ``overflow_region``: one flattened
+    single-system family per mirrored system, each walked lazily on first
+    visit (``overflow: True`` triggers the same auto-walk). The region's
+    ``project`` scopes every mirror read below it — system/subsystem ids are
+    per-project. A project the refresh hasn't recorded yet renders nothing."""
+    out = []
+    for prj in curation.extra_projects(instance):
+        systems = (H.for_instance(instance)
+                   .filter(level=H.LEVEL_SYSTEM, project=prj)
+                   .order_by("system_id"))
+        families = [{"name": s.system_name, "key": str(s.system_id),
+                     "sub": f"system {s.system_id}", "systems": [s.system_id]}
+                    for s in systems]
+        if not families:
+            continue
+        out.append({"name": curation.project_label(instance, prj),
+                    "key": prj, "project": prj,
+                    "overflow": True,
+                    "test": curation.project_is_test(instance, prj),
+                    "note": f"HWDB project {prj} · each system loads on first visit",
+                    "families": families})
+    return out
+
+
+def region_project(region: dict) -> str:
+    """The HWDB project a region's systems belong to ("D" unless the region
+    is an extra-project one, #71)."""
+    return region.get("project", "D")
+
+
 def all_regions(instance: str) -> list[dict]:
-    """Curated regions plus the synthetic overflow region (when present)."""
+    """Curated regions plus the synthetic extra-project and overflow regions
+    (when present)."""
     out = list(curation.regions(instance))
+    out.extend(project_regions(instance))
     extra = overflow_region(instance)
     if extra:
         out.append(extra)
@@ -97,10 +131,12 @@ def _region_cards(instance):
 
 def _family_cards(instance, region):
     cards = []
+    prj = region_project(region)
     for f in region.get("families", []) or []:
         browsable = curation.family_is_browsable(f)
         sys_ids = f.get("systems") or []
-        comps = sum(_rollup(instance, system_id=i)[0] for i in sys_ids) if browsable else None
+        comps = sum(_rollup(instance, project=prj, system_id=i)[0]
+                    for i in sys_ids) if browsable else None
         cards.append({
             "level": "Family", "name": f["name"], "sub": f.get("sub", ""), "ident": "",
             "url": node_path(instance, region["key"], f["key"]) if browsable else None,
@@ -113,12 +149,15 @@ def _family_cards(instance, region):
 
 def _system_cards(instance, region, family):
     cards = []
+    prj = region_project(region)
     for sid in family.get("systems") or []:
-        node = H.for_instance(instance).filter(level=H.LEVEL_SYSTEM, system_id=sid).first()
+        node = H.for_instance(instance).filter(level=H.LEVEL_SYSTEM, project=prj,
+                                               system_id=sid).first()
         if not node:
             continue
-        comps, tests = _rollup(instance, system_id=sid)
-        nsubs = H.for_instance(instance).filter(level=H.LEVEL_SUBSYSTEM, system_id=sid).count()
+        comps, tests = _rollup(instance, project=prj, system_id=sid)
+        nsubs = H.for_instance(instance).filter(level=H.LEVEL_SUBSYSTEM, project=prj,
+                                                system_id=sid).count()
         cards.append({
             "level": "System", "name": node.system_name, "sub": "", "ident": str(sid),
             "url": node_path(instance, region["key"], family["key"], system_id=sid),
@@ -131,10 +170,13 @@ def _system_cards(instance, region, family):
 
 def _subsystem_cards(instance, region, family, system, flat):
     cards = []
-    sid = system.system_id
-    for sub in H.for_instance(instance).filter(level=H.LEVEL_SUBSYSTEM, system_id=sid):
-        comps, tests = _rollup(instance, system_id=sid, subsystem_id=sub.subsystem_id)
-        nleaves = H.for_instance(instance).filter(level=H.LEVEL_TYPE, system_id=sid,
+    sid, prj = system.system_id, system.project
+    for sub in H.for_instance(instance).filter(level=H.LEVEL_SUBSYSTEM, project=prj,
+                                               system_id=sid):
+        comps, tests = _rollup(instance, project=prj, system_id=sid,
+                               subsystem_id=sub.subsystem_id)
+        nleaves = H.for_instance(instance).filter(level=H.LEVEL_TYPE, project=prj,
+                                                  system_id=sid,
                                                   subsystem_id=sub.subsystem_id).count()
         cards.append({
             "level": "Subsystem", "name": sub.subsystem_name, "sub": "",
@@ -151,7 +193,8 @@ def _subsystem_cards(instance, region, family, system, flat):
 
 def _leaf_cards(instance, region, family, system, subsystem, flat):
     cards = []
-    leaves = H.for_instance(instance).filter(level=H.LEVEL_TYPE, system_id=system.system_id,
+    leaves = H.for_instance(instance).filter(level=H.LEVEL_TYPE, project=system.project,
+                                             system_id=system.system_id,
                                              subsystem_id=subsystem.subsystem_id)
     for leaf in leaves:
         cards.append({
@@ -176,10 +219,12 @@ def _int(seg):
 
 
 def _ctx(kind, region_key=None, family_key=None, flat=False,
-         system_id=None, subsystem_id=None, part_type_id=None):
+         system_id=None, subsystem_id=None, part_type_id=None, project="D"):
+    # ``project`` disambiguates the sidebar's current-node checks: system/
+    # subsystem ids repeat across projects (#71).
     return {"kind": kind, "region_key": region_key, "family_key": family_key,
             "flat": flat, "system_id": system_id, "subsystem_id": subsystem_id,
-            "part_type_id": part_type_id}
+            "part_type_id": part_type_id, "project": project}
 
 
 def resolve(instance: str, trail: str | None) -> dict:
@@ -207,23 +252,26 @@ def resolve(instance: str, trail: str | None) -> dict:
     if not family or not curation.family_is_browsable(family):
         raise Http404("unknown family")
     fk = family["key"]
+    prj = region_project(region)
     flat = curation.family_is_flat(family)
     crumbs.append({"name": family["name"], "url": node_path(instance, rk, fk)})
     rest = segs[2:]
 
     # Resolve the system (implicit for flattened families).
     if flat:
-        system = H.for_instance(instance).filter(level=H.LEVEL_SYSTEM,
+        system = H.for_instance(instance).filter(level=H.LEVEL_SYSTEM, project=prj,
                                                  system_id=family["systems"][0]).first()
     else:
         if not rest:
             return {"kind": "family", "name": family["name"], "sub": family.get("sub", ""),
                     "crumbs": crumbs, "cards": _system_cards(instance, region, family),
-                    "ctx": _ctx("family", region_key=rk, family_key=fk, flat=flat)}
+                    "ctx": _ctx("family", region_key=rk, family_key=fk, flat=flat,
+                                project=prj)}
         sid = _int(rest[0])
         if sid not in (family.get("systems") or []):
             raise Http404("system not in family")
-        system = H.for_instance(instance).filter(level=H.LEVEL_SYSTEM, system_id=sid).first()
+        system = H.for_instance(instance).filter(level=H.LEVEL_SYSTEM, project=prj,
+                                                 system_id=sid).first()
         if not system:
             raise Http404("system not mirrored")
         crumbs.append({"name": system.system_name,
@@ -241,14 +289,16 @@ def resolve(instance: str, trail: str | None) -> dict:
                "crumbs": crumbs,
                "cards": _subsystem_cards(instance, region, family, system, flat),
                "ctx": _ctx("family" if flat else "system", region_key=rk,
-                           family_key=fk, flat=flat, system_id=sysid)}
+                           family_key=fk, flat=flat, system_id=sysid, project=prj)}
         if region.get("overflow"):
-            # Uncurated system page: the template auto-walks it on first visit.
+            # Uncurated / extra-project system page: the template auto-walks
+            # it on first visit.
             out["overflow_system"] = system
         return out
 
     ssid = _int(rest[0])
-    subsystem = H.for_instance(instance).filter(level=H.LEVEL_SUBSYSTEM, system_id=sysid,
+    subsystem = H.for_instance(instance).filter(level=H.LEVEL_SUBSYSTEM, project=prj,
+                                                system_id=sysid,
                                                 subsystem_id=ssid).first()
     if not subsystem:
         raise Http404("unknown subsystem")
@@ -262,7 +312,7 @@ def resolve(instance: str, trail: str | None) -> dict:
                 "crumbs": crumbs,
                 "cards": _leaf_cards(instance, region, family, system, subsystem, flat),
                 "ctx": _ctx("subsystem", region_key=rk, family_key=fk, flat=flat,
-                            system_id=sysid, subsystem_id=ssid)}
+                            system_id=sysid, subsystem_id=ssid, project=prj)}
 
     leaf = H.for_instance(instance).filter(level=H.LEVEL_TYPE, part_type_id=rest[0]).first()
     if not leaf:
@@ -272,19 +322,23 @@ def resolve(instance: str, trail: str | None) -> dict:
                                     subsystem_id=ssid, part_type_id=leaf.part_type_id)})
     return {"kind": "leaf", "name": leaf.name, "sub": "", "crumbs": crumbs, "leaf": leaf,
             "ctx": _ctx("leaf", region_key=rk, family_key=fk, flat=flat,
-                        system_id=sysid, subsystem_id=ssid, part_type_id=leaf.part_type_id)}
+                        system_id=sysid, subsystem_id=ssid, part_type_id=leaf.part_type_id,
+                        project=prj)}
 
 
 def _component_totals(instance):
-    """({system_id: components}, {(system_id, subsystem_id): components}) in one
-    grouped query — for the sidebar count badges."""
+    """({(project, system_id): components}, {(project, system_id, subsystem_id):
+    components}) in one grouped query — for the sidebar count badges. Keys
+    carry the project because system ids repeat across projects (#71)."""
     by_sys, by_sub = {}, {}
     rows = (H.for_instance(instance).filter(level=H.LEVEL_TYPE)
-            .values("system_id", "subsystem_id").annotate(c=Sum("n_components")))
+            .values("project", "system_id", "subsystem_id")
+            .annotate(c=Sum("n_components")))
     for r in rows:
         c = r["c"] or 0
-        by_sys[r["system_id"]] = by_sys.get(r["system_id"], 0) + c
-        by_sub[(r["system_id"], r["subsystem_id"])] = c
+        k = (r["project"], r["system_id"])
+        by_sys[k] = by_sys.get(k, 0) + c
+        by_sub[(r["project"], r["system_id"], r["subsystem_id"])] = c
     return by_sys, by_sub
 
 
@@ -321,33 +375,36 @@ def sidebar_tree(instance: str, ctx: dict) -> list[dict]:
     sys_by_id, subs_by_sys, leaves_by_sub = {}, {}, {}
     for n in H.for_instance(instance).order_by("system_id", "subsystem_id", "name"):
         if n.level == H.LEVEL_SYSTEM:
-            sys_by_id[n.system_id] = n
+            sys_by_id[(n.project, n.system_id)] = n
         elif n.level == H.LEVEL_SUBSYSTEM:
-            subs_by_sys.setdefault(n.system_id, []).append(n)
+            subs_by_sys.setdefault((n.project, n.system_id), []).append(n)
         else:
-            leaves_by_sub.setdefault((n.system_id, n.subsystem_id), []).append(n)
+            leaves_by_sub.setdefault((n.project, n.system_id, n.subsystem_id), []).append(n)
 
     # Sync/empty stats per scope: (#leaves with components, #of those synced).
     sub_stats, sys_stats = {}, {}
-    for (sid, ssid), leaves in leaves_by_sub.items():
+    for (prj, sid, ssid), leaves in leaves_by_sub.items():
         w = sum(1 for l in leaves if l.n_components > 0)
         s = sum(1 for l in leaves if l.n_components > 0 and _leaf_synced(l))
-        sub_stats[(sid, ssid)] = (w, s)
-        cw, cs = sys_stats.get(sid, (0, 0))
-        sys_stats[sid] = (cw + w, cs + s)
+        sub_stats[(prj, sid, ssid)] = (w, s)
+        cw, cs = sys_stats.get((prj, sid), (0, 0))
+        sys_stats[(prj, sid)] = (cw + w, cs + s)
 
-    def _agg(system_ids):
-        w = sum(sys_stats.get(i, (0, 0))[0] for i in system_ids)
-        s = sum(sys_stats.get(i, (0, 0))[1] for i in system_ids)
+    def _agg(prj, system_ids):
+        w = sum(sys_stats.get((prj, i), (0, 0))[0] for i in system_ids)
+        s = sum(sys_stats.get((prj, i), (0, 0))[1] for i in system_ids)
         return w, s
 
-    def subs_of(rk, fk, flat, sid):
+    def subs_of(rk, fk, flat, sid, prj):
         out = []
-        for sub in subs_by_sys.get(sid, []):
+        # The current-node checks compare project too: system/subsystem ids
+        # repeat across projects (#71).
+        here = ctx.get("project", "D") == prj
+        for sub in subs_by_sys.get((prj, sid), []):
             ssid = sub.subsystem_id
-            on = ctx.get("system_id") == sid and ctx.get("subsystem_id") == ssid
+            on = here and ctx.get("system_id") == sid and ctx.get("subsystem_id") == ssid
             leaves = []
-            for l in leaves_by_sub.get((sid, ssid), []):
+            for l in leaves_by_sub.get((prj, sid, ssid), []):
                 lempty = l.n_components == 0
                 leaves.append(_tnode(
                     l.name,
@@ -358,82 +415,106 @@ def sidebar_tree(instance: str, ctx: dict) -> list[dict]:
                     False, is_leaf=True,
                     empty=lempty, synced=not lempty and _leaf_synced(l),
                     title=f"{l.name} ({l.part_type_id})"))
-            sempty, ssynced = _state(*sub_stats.get((sid, ssid), (0, 0)))
+            sempty, ssynced = _state(*sub_stats.get((prj, sid, ssid), (0, 0)))
             out.append(_tnode(sub.subsystem_name,
                               node_path(instance, rk, fk,
                                         system_id=None if flat else sid, subsystem_id=ssid),
-                              by_sub.get((sid, ssid), 0),
+                              by_sub.get((prj, sid, ssid), 0),
                               ctx.get("kind") == "subsystem" and on, on, children=leaves,
                               empty=sempty, synced=ssynced,
                               title=f"{sub.subsystem_name} ({sid}.{ssid})"))
         return out
 
-    tree = []
+    # D regions group under a "DUNE (D)" folder; extra-project regions are
+    # its siblings — the projects sit at the same tree level (#71).
+    dune_children, extra_nodes = [], []
+    dune_count, dune_w, dune_s = 0, 0, 0
     for region in all_regions(instance):
         rbr = curation.region_is_browsable(region)
         rk = region["key"]
+        prj = region_project(region)
+        here = ctx.get("project", "D") == prj
         fams, rcount = [], 0
         if rbr:
             for fam in region.get("families", []) or []:
                 fbr = curation.family_is_browsable(fam)
                 fk = fam["key"]
-                fcount = sum(by_sys.get(i, 0) for i in fam.get("systems") or []) if fbr else None
+                fcount = sum(by_sys.get((prj, i), 0)
+                             for i in fam.get("systems") or []) if fbr else None
                 children = []
                 if fbr:
                     rcount += fcount
                     flat = curation.family_is_flat(fam)
                     if flat:
-                        sn = sys_by_id.get(fam["systems"][0])
+                        sn = sys_by_id.get((prj, fam["systems"][0]))
                         if sn:
-                            children = subs_of(rk, fk, True, sn.system_id)
+                            children = subs_of(rk, fk, True, sn.system_id, prj)
                     else:
                         for sid in fam.get("systems") or []:
-                            sn = sys_by_id.get(sid)
+                            sn = sys_by_id.get((prj, sid))
                             if not sn:
                                 continue
-                            sysempty, syssynced = _state(*sys_stats.get(sid, (0, 0)))
+                            sysempty, syssynced = _state(*sys_stats.get((prj, sid), (0, 0)))
                             children.append(_tnode(
                                 sn.system_name,
                                 node_path(instance, rk, fk, system_id=sid),
-                                by_sys.get(sid, 0),
-                                ctx.get("kind") == "system" and ctx.get("system_id") == sid,
-                                ctx.get("system_id") == sid,
-                                children=subs_of(rk, fk, False, sid),
+                                by_sys.get((prj, sid), 0),
+                                here and ctx.get("kind") == "system"
+                                and ctx.get("system_id") == sid,
+                                here and ctx.get("system_id") == sid,
+                                children=subs_of(rk, fk, False, sid, prj),
                                 empty=sysempty, synced=syssynced,
                                 title=f"{sn.system_name} ({sid})"))
-                    fempty, fsynced = _state(*_agg(fam.get("systems") or []))
+                    fempty, fsynced = _state(*_agg(prj, fam.get("systems") or []))
                 else:
                     fempty, fsynced = False, False
+                # Region key qualifies the family checks: synthetic families
+                # are keyed by system id, which repeats across regions (#71).
+                fam_here = ctx.get("region_key") == rk and ctx.get("family_key") == fk
                 fams.append(_tnode(
                     fam["name"], node_path(instance, rk, fk) if fbr else None, fcount,
-                    ctx.get("kind") == "family" and ctx.get("family_key") == fk,
-                    ctx.get("family_key") == fk, dim=not fbr, children=children,
+                    ctx.get("kind") == "family" and fam_here,
+                    fam_here, dim=not fbr, children=children,
                     empty=fbr and fempty, synced=fsynced))
         rempty, rsynced = (False, False)
+        rw, rs = 0, 0
         if rbr:
             r_systems = [i for fam in region.get("families", []) or []
                          if curation.family_is_browsable(fam)
                          for i in fam.get("systems") or []]
-            rempty, rsynced = _state(*_agg(r_systems))
-        tree.append(_tnode(
+            rw, rs = _agg(prj, r_systems)
+            rempty, rsynced = _state(rw, rs)
+        node = _tnode(
             region["name"], node_path(instance, rk) if rbr else None, rcount if rbr else None,
             ctx.get("kind") == "region" and ctx.get("region_key") == rk,
             ctx.get("region_key") == rk, dim=not rbr, children=fams,
-            empty=rbr and rempty, synced=rsynced))
-    return tree
+            empty=rbr and rempty, synced=rsynced)
+        if prj == "D":
+            dune_children.append(node)
+            dune_count += rcount
+            dune_w += rw
+            dune_s += rs
+        else:
+            extra_nodes.append(node)
+    dempty, dsynced = _state(dune_w, dune_s)
+    dune = _tnode(curation.project_label(instance, "D"), None, dune_count,
+                  False, ctx.get("project", "D") == "D",
+                  children=dune_children, empty=dempty, synced=dsynced)
+    return [dune] + extra_nodes
 
 
-def _tree_subs(instance, region_key, family_key, sid, flat):
+def _tree_subs(instance, region_key, family_key, sid, flat, project="D"):
     """Subsystem nodes (+ their component-type leaves) for one system. Returns
     ``(nodes, n_with_components, n_synced)`` — the leaf tallies roll up so each
     node can carry the sidebar's ``empty``/``synced`` state. Leaves carry a
     ``url`` to their explorer page."""
     out, sys_w, sys_s = [], 0, 0
-    for sub in (H.for_instance(instance).filter(level=H.LEVEL_SUBSYSTEM, system_id=sid)
+    for sub in (H.for_instance(instance).filter(level=H.LEVEL_SUBSYSTEM, project=project,
+                                                system_id=sid)
                 .order_by("subsystem_id")):
         types, w, s = [], 0, 0
         for leaf in (H.for_instance(instance)
-                     .filter(level=H.LEVEL_TYPE, system_id=sid,
+                     .filter(level=H.LEVEL_TYPE, project=project, system_id=sid,
                              subsystem_id=sub.subsystem_id).order_by("name")):
             n = leaf.n_components or 0
             has, syn = n > 0, (leaf.n_components or 0) > 0 and _leaf_synced(leaf)
@@ -469,11 +550,19 @@ def curated_tree(instance: str) -> dict:
     node carries ``empty`` (no component-bearing leaves) and ``synced`` (all of
     them synced) — the same grey/green convention as the sidebar.
     """
-    regions_out = []
+    # D regions group under a "DUNE (D)" project node; extra-project regions
+    # sit next to it — projects share the top tree level (#71).
+    d_regions, extra_regions = [], []
+    dune_w = dune_s = 0
     for r in all_regions(instance):
+        prj = region_project(r)
         browsable = curation.region_is_browsable(r)
         rnode = {"kind": "region", "name": r["name"], "key": r["key"],
                  "locked": not browsable, "note": r.get("note", ""), "children": []}
+        if r.get("test"):
+            # Test/sandbox project (#71): rendered, but the overview stats
+            # tally skips this subtree.
+            rnode["test"] = True
         if browsable:
             # Folder urls double as the shared expansion key with the sidebar
             # (both trees address a node by its explorer page URL).
@@ -497,14 +586,15 @@ def curated_tree(instance: str) -> dict:
                 fw = fs = 0
                 if flat:
                     fam["children"], fw, fs = _tree_subs(instance, r["key"], fkey,
-                                                         sysids[0], flat=True)
+                                                         sysids[0], flat=True, project=prj)
                 else:
                     for sid in sysids:
                         node = H.for_instance(instance).filter(
-                            level=H.LEVEL_SYSTEM, system_id=sid).first()
+                            level=H.LEVEL_SYSTEM, project=prj, system_id=sid).first()
                         if not node:
                             continue
-                        subs, sw, ss = _tree_subs(instance, r["key"], fkey, sid, flat=False)
+                        subs, sw, ss = _tree_subs(instance, r["key"], fkey, sid,
+                                                  flat=False, project=prj)
                         s_empty, s_synced = _state(sw, ss)
                         fam["children"].append({
                             "kind": "system", "name": node.system_name, "id": sid,
@@ -525,18 +615,33 @@ def curated_tree(instance: str) -> dict:
                 rs += fs
         rnode["n"] = sum(c.get("n", 0) for c in rnode["children"])
         rnode["empty"], rnode["synced"] = _state(rw, rs)
-        regions_out.append(rnode)
-    return {"kind": "root", "name": "DUNE", "sub": "Project D",
-            "children": regions_out, "n": sum(r["n"] for r in regions_out)}
+        if prj == "D":
+            d_regions.append(rnode)
+            dune_w += rw
+            dune_s += rs
+        else:
+            extra_regions.append(rnode)
+    dempty, dsynced = _state(dune_w, dune_s)
+    dune = {"kind": "project", "name": curation.project_label(instance, "D"),
+            "key": "D", "children": d_regions,
+            "n": sum(r["n"] for r in d_regions), "empty": dempty, "synced": dsynced}
+    children = [dune] + extra_regions
+    labels = [curation.project_label(instance, p)
+              for p in ["D"] + curation.extra_projects(instance)]
+    return {"kind": "root", "name": "HWDB", "sub": " · ".join(labels),
+            "children": children, "n": sum(r["n"] for r in children)}
 
 
 def leaf_sidebar_ctx(instance: str, leaf) -> dict:
     """Sidebar ctx for a component-type leaf: carries the region/family keys so
     ``sidebar_tree`` opens the whole branch down to (and highlights) the leaf."""
     ctx = {"kind": "leaf", "part_type_id": leaf.part_type_id,
-           "system_id": leaf.system_id, "subsystem_id": leaf.subsystem_id}
+           "system_id": leaf.system_id, "subsystem_id": leaf.subsystem_id,
+           "project": leaf.project}
     for region in all_regions(instance):
         if not curation.region_is_browsable(region):
+            continue
+        if region_project(region) != leaf.project:
             continue
         for family in region.get("families", []) or []:
             if not curation.family_is_browsable(family):
@@ -557,6 +662,8 @@ def leaf_path_for(instance: str, part_type_id: str) -> str | None:
         return None
     for region in all_regions(instance):
         if not curation.region_is_browsable(region):
+            continue
+        if region_project(region) != leaf.project:
             continue
         for family in region.get("families", []) or []:
             if not curation.family_is_browsable(family):

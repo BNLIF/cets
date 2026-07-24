@@ -17,6 +17,16 @@
 # /explore/FD/FD-VD/57/2/D05700200001). Keep keys stable across edits.
 instances:
   prod:
+    # Extra HWDB projects (PID part1 letters) mirrored besides "D" (#71).
+    # Each renders at the same tree level as DUNE; the refresh records its
+    # systems (names only) and each system walks lazily on first visit, like
+    # Uncurated. System ids are per-project — a Z system 5 is not D's system 5.
+    # Names audited from `GET projects` 2026-07-24 (they differ per instance).
+    # Prod's Z ("Test Project", 2 test systems) is deliberately not mirrored —
+    # testing happens on dev; the next refresh prunes any old prod Z rows.
+    extra_projects:
+      - {id: L, name: LBNF}
+
     regions:
       - name: Far Detector
         key: FD
@@ -100,6 +110,12 @@ instances:
     # walk), and each is walked lazily on first visit. Dev-only affordance —
     # prod keeps its deliberate dimmed placeholders.
     overflow: true
+
+    # Extra projects (#71) — Hajime tests Z/L entries on dev; prod mirrors
+    # only LBNF. List order is display order: LBNF above the sandbox.
+    extra_projects:
+      - {id: L, name: LBNF}
+      - {id: Z, name: Sandbox, test: true}   # excluded from overview stats
 
     regions:
       - name: Far Detector

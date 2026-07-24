@@ -376,11 +376,11 @@
     <div class="explore-empty">
         <p>This system hasn’t been loaded from HWDB.</p>
         <p><button id="system-walk-btn" class="btn btn-primary" type="button"
-                   data-sync-url="{% url 'explore:system_sync' system_id=view.overflow_system.system_id %}">Retry loading this system</button></p>
+                   data-sync-url="{% url 'explore:system_sync' system_id=view.overflow_system.system_id %}?project={{ view.overflow_system.project }}">Retry loading this system</button></p>
     </div>
     {% else %}
     <div class="explore-empty" id="system-unwalked"
-         data-sync-url="{% url 'explore:system_sync' system_id=view.overflow_system.system_id %}">
+         data-sync-url="{% url 'explore:system_sync' system_id=view.overflow_system.system_id %}?project={{ view.overflow_system.project }}">
         <p>This system isn’t curated — loading its structure from HWDB now…</p>
         <p class="cell-muted">(needs your FNAL link)</p>
     </div>

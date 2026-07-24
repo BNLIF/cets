@@ -34,9 +34,12 @@ def _chain(ptid, sid=57, sname="FD-VD TDE", ssid=2, ssname="Digital electronics"
         subsystem_id=ssid, subsystem_name=ssname, name=tname, part_type_id=ptid, **leaf)
 
 
-def _fake_api(systems, subsystems, part_types, counts):
+def _fake_api(systems, subsystems, part_types, counts, projects=None):
+    """``projects`` maps extra project letters to their ``systems/{P}`` lists
+    (#71); unlisted projects return empty — ``systems`` is project D's."""
     api = mock.MagicMock()
-    api.get_systems.return_value = {"data": systems}
+    api.get_systems.side_effect = (
+        lambda p1="D": {"data": systems if p1 == "D" else (projects or {}).get(p1, [])})
     api.get_subsystems.side_effect = lambda p1, p2: {"data": subsystems.get(int(p2), [])}
     api.get_part_types_for_subsystem.side_effect = (
         lambda p1, p2, ssid: {"data": part_types.get((int(p2), ssid), [])}
@@ -224,7 +227,10 @@ class NavigationTest(TestCase):
     def test_curated_tree_flattens_and_locks(self):
         tree = navigation.curated_tree("prod")
         self.assertEqual(tree["kind"], "root")
-        regions = {r["key"]: r for r in tree["children"]}
+        # D regions sit under a "DUNE (D)" project node (#71).
+        dune = tree["children"][0]
+        self.assertEqual((dune["kind"], dune["name"]), ("project", "DUNE (D)"))
+        regions = {r["key"]: r for r in dune["children"]}
         self.assertFalse(regions["FD"]["locked"])
         self.assertFalse(regions["ND"]["locked"])        # curated 2026-07-02
         self.assertFalse(regions["OT"]["locked"])
@@ -242,7 +248,8 @@ class NavigationTest(TestCase):
         # Folder urls double as the shared expansion key with the sidebar —
         # they must be exactly the node_path the sidebar uses.
         tree = navigation.curated_tree("prod")
-        fd = next(r for r in tree["children"] if r["key"] == "FD")
+        dune = tree["children"][0]
+        fd = next(r for r in dune["children"] if r["key"] == "FD")
         self.assertEqual(fd["url"], navigation.node_path("prod", "FD"))
         fams = {f["key"]: f for f in fd["children"]}
         self.assertEqual(fams["FD-VD"]["url"], navigation.node_path("prod", "FD", "FD-VD"))
@@ -256,7 +263,7 @@ class NavigationTest(TestCase):
         flat_sub = fams["FD-CE"]["children"][0]
         self.assertEqual(flat_sub["url"], navigation.node_path(
             "prod", "FD", "FD-CE", subsystem_id=flat_sub["id"]))
-        nd = next(r for r in tree["children"] if r["key"] == "ND")
+        nd = next(r for r in dune["children"] if r["key"] == "ND")
         self.assertEqual(nd["url"], navigation.node_path("prod", "ND"))
 
     def test_curated_tree_empty_and_synced_flags(self):
@@ -267,7 +274,7 @@ class NavigationTest(TestCase):
         _chain("D05700200091", tname="EMPTYLEAF", ssid=10, ssname="Empty sub",
                n_components=0)
         tree = navigation.curated_tree("prod")
-        fd = next(r for r in tree["children"] if r["key"] == "FD")
+        fd = next(r for r in tree["children"][0]["children"] if r["key"] == "FD")
         sys57 = next(s for s in next(f for f in fd["children"] if f["key"] == "FD-VD")["children"]
                      if s.get("id") == 57)
         subs = {s["name"]: s for s in sys57["children"]}
@@ -370,7 +377,11 @@ class SidebarTest(TestCase):
 
     def test_full_tree_built_with_all_regions_and_families(self):
         tree = self._tree("")  # root
-        regions = [n["label"] for n in tree]
+        # Projects share the top level (#71): D regions group under DUNE;
+        # no extra project is mirrored in this fixture, so DUNE stands alone.
+        self.assertEqual([n["label"] for n in tree], ["DUNE (D)"])
+        self.assertTrue(tree[0]["open"])
+        regions = [n["label"] for n in tree[0]["children"]]
         self.assertEqual(regions, ["Far Detector", "Near Detector", "Others"])
         fd = self._find(tree, "Far Detector")
         fams = [f["label"] for f in fd["children"]]
@@ -581,3 +592,214 @@ class SyncSystemTest(TestCase):
         api = self._api()
         with mock.patch("explore.hierarchy.FnalDbApiClient", return_value=api):
             return list(hierarchy.sync_system(api, "dev", 999))
+
+
+class MultiProjectSyncTest(TestCase):
+    """Extra HWDB projects (Z, L) recorded by the refresh and walked lazily,
+    with per-project system-id scoping (#71)."""
+
+    def setUp(self):
+        p = mock.patch("explore.hierarchy.curation.curated_system_ids",
+                       return_value={57})
+        p.start()
+        self.addCleanup(p.stop)
+        q = mock.patch("explore.hierarchy.curation.extra_projects",
+                       return_value=["Z"])
+        q.start()
+        self.addCleanup(q.stop)
+
+    def _run(self, api):
+        with mock.patch("explore.hierarchy.FnalDbApiClient", return_value=api):
+            return list(hierarchy.sync_hierarchy(api, "prod"))
+
+    def _api(self, z_systems=None):
+        # Z's system 57 deliberately collides with D's — ids are per-project.
+        return _fake_api(
+            systems=[{"id": 57, "name": "FD-VD TDE"}],
+            subsystems={57: [{"subsystem_id": 2, "subsystem_name": "Digital electronics"}]},
+            part_types={(57, 2): [{"part_type_id": "D05700200001",
+                                   "full_name": "D.FD-VD TDE.Digital electronics.AMC"}]},
+            counts={"D05700200001": 5},
+            projects={"Z": z_systems if z_systems is not None
+                      else [{"id": 57, "name": "Z Machine"}]},
+        )
+
+    def test_records_extra_project_systems_without_walking(self):
+        api = self._api()
+        lines = self._run(api)
+        zrow = H.objects.get(instance="prod", project="Z",
+                             level=H.LEVEL_SYSTEM, system_id=57)
+        self.assertIsNone(zrow.structure_synced_at)
+        drow = H.objects.get(instance="prod", project="D",
+                             level=H.LEVEL_SYSTEM, system_id=57)
+        self.assertNotEqual(zrow.pk, drow.pk)        # no cross-project clobber
+        self.assertEqual(drow.system_name, "FD-VD TDE")
+        self.assertEqual(zrow.system_name, "Z Machine")
+        called = {c.args for c in api.get_subsystems.call_args_list}
+        self.assertEqual(called, {("D", "057")})     # Z listed, never walked
+        self.assertTrue(any("project Z" in l for l in lines))
+
+    def test_listing_failure_keeps_previous_rows(self):
+        self._run(self._api())
+
+        def _fail(p1="D"):
+            if p1 == "D":
+                return {"data": [{"id": 57, "name": "FD-VD TDE"}]}
+            raise RuntimeError("HWDB 503")
+
+        api = self._api()
+        api.get_systems.side_effect = _fail
+        with mock.patch("explore.hierarchy.time.sleep"):
+            lines = self._run(api)
+        self.assertTrue(H.objects.filter(instance="prod", project="Z",
+                                         system_id=57).exists())
+        self.assertTrue(any("WARNING: project Z" in l for l in lines))
+
+    def test_vanished_extra_project_system_pruned_with_subtree(self):
+        self._run(self._api())
+        zsys = H.objects.get(instance="prod", project="Z",
+                             level=H.LEVEL_SYSTEM, system_id=57)
+        zsub = H.objects.create(
+            instance="prod", project="Z", level=H.LEVEL_SUBSYSTEM, parent=zsys,
+            system_id=57, subsystem_id=1, system_name="Z Machine",
+            subsystem_name="Z Optics", name="Z Optics")
+        H.objects.create(
+            instance="prod", project="Z", level=H.LEVEL_TYPE, parent=zsub,
+            system_id=57, subsystem_id=1, system_name="Z Machine",
+            subsystem_name="Z Optics", name="Z Widget", part_type_id="Z05700100001")
+        # Still listed → the lazily-walked subtree survives the refresh.
+        self._run(self._api())
+        self.assertTrue(H.objects.filter(part_type_id="Z05700100001").exists())
+        # Gone from the listing → system + subtree pruned; D's 57 untouched.
+        self._run(self._api(z_systems=[]))
+        self.assertFalse(H.objects.filter(instance="prod", project="Z").exists())
+        self.assertTrue(H.objects.filter(instance="prod", project="D",
+                                         level=H.LEVEL_SYSTEM, system_id=57).exists())
+
+    def test_sync_system_scopes_by_project(self):
+        self._run(self._api())
+        api = _fake_api(
+            systems=[],
+            subsystems={57: [{"subsystem_id": 1, "subsystem_name": "Z Optics"}]},
+            part_types={(57, 1): [{"part_type_id": "Z05700100001",
+                                   "full_name": "Z.Z Machine.Z Optics.Z Widget"}]},
+            counts={"Z05700100001": 4},
+        )
+        with mock.patch("explore.hierarchy.FnalDbApiClient", return_value=api):
+            list(hierarchy.sync_system(api, "prod", 57, project="Z"))
+        leaf = H.objects.get(part_type_id="Z05700100001")
+        self.assertEqual(leaf.project, "Z")
+        self.assertEqual(leaf.n_components, 4)
+        called = {c.args for c in api.get_subsystems.call_args_list}
+        self.assertEqual(called, {("Z", "057")})
+        # The Z walk's prune must not eat D's subtree under the same system id.
+        self.assertTrue(H.objects.filter(part_type_id="D05700200001").exists())
+        zsys = H.objects.get(instance="prod", project="Z",
+                             level=H.LEVEL_SYSTEM, system_id=57)
+        self.assertIsNotNone(zsys.structure_synced_at)
+
+
+class ProjectRegionTest(TestCase):
+    """Synthetic per-project regions and project-scoped navigation (#71).
+    Pins a controlled ``extra_projects`` block (the real yaml shifts — prod
+    now lists only LBNF), so the machinery is tested independent of curation
+    edits."""
+
+    def setUp(self):
+        real_block = curation._block
+
+        def fake_block(instance):
+            b = dict(real_block(instance))
+            b["extra_projects"] = [{"id": "Z", "name": "Test Project", "test": True},
+                                   {"id": "L", "name": "LBNF"}]
+            return b
+
+        p = mock.patch.object(curation, "_block", side_effect=fake_block)
+        p.start()
+        self.addCleanup(p.stop)
+        self.user = get_user_model().objects.create_user("explorer", "e@e.io", "pw")
+        self.client.force_login(self.user)
+        _chain("D05700200001", tname="AMC", n_components=10)   # D system 57
+        # Z system 57: same numeric id as D's, already lazily walked.
+        zsys = H.objects.create(
+            level=H.LEVEL_SYSTEM, project="Z", system_id=57,
+            system_name="Z Machine", name="Z Machine",
+            structure_synced_at=timezone.now())
+        zsub = H.objects.create(
+            level=H.LEVEL_SUBSYSTEM, project="Z", parent=zsys, system_id=57,
+            subsystem_id=2, system_name="Z Machine",
+            subsystem_name="Z Optics", name="Z Optics")
+        H.objects.create(
+            level=H.LEVEL_TYPE, project="Z", parent=zsub, system_id=57,
+            subsystem_id=2, system_name="Z Machine", subsystem_name="Z Optics",
+            name="Z Widget", part_type_id="Z05700200042", n_components=7)
+
+    def test_project_region_listed_when_mirrored(self):
+        regions = {r["key"]: r for r in navigation.all_regions("prod")}
+        self.assertIn("Z", regions)
+        # Label = upstream project name from the yaml (prod's Z = Test Project).
+        self.assertEqual(regions["Z"]["name"], "Test Project (Z)")
+        self.assertEqual([f["key"] for f in regions["Z"]["families"]], ["57"])
+        self.assertNotIn("L", regions)   # curated but nothing mirrored yet
+
+    def test_drill_into_project_region(self):
+        html = self.client.get(navigation.node_path("prod", "Z")).content.decode()
+        self.assertIn("Z Machine", html)
+        html = self.client.get(
+            navigation.node_path("prod", "Z", "57", subsystem_id=2)).content.decode()
+        self.assertIn("Z Widget", html)
+
+    def test_leaf_path_for_resolves_project_leaf(self):
+        path = navigation.leaf_path_for("prod", "Z05700200042")
+        self.assertEqual(path, navigation.node_path(
+            "prod", "Z", "57", subsystem_id=2, part_type_id="Z05700200042"))
+        # D leaf still resolves into its curated FD region, not Project Z.
+        self.assertIn("/FD/", navigation.leaf_path_for("prod", "D05700200001"))
+
+    def test_counts_do_not_bleed_across_projects(self):
+        tree = navigation.sidebar_tree("prod", {})
+        # Top level = project peers (#71): DUNE folder + the mirrored Z.
+        self.assertEqual([n["label"] for n in tree],
+                         ["DUNE (D)", "Test Project (Z)"])
+        dune = tree[0]
+        fd = next(r for r in dune["children"] if r["label"] == "Far Detector")
+        fdvd = next(f for f in fd["children"] if f["label"] == "FD-VD")
+        sys57 = next(s for s in fdvd["children"] if s["label"] == "FD-VD TDE")
+        self.assertEqual(sys57["count"], 10)     # D only, no Z bleed
+        self.assertEqual(tree[1]["count"], 7)
+
+    def test_project_region_order_follows_yaml(self):
+        # List order in ``extra_projects`` is display order (dev puts LBNF
+        # above the sandbox), not alphabetical.
+        H.objects.create(level=H.LEVEL_SYSTEM, project="L", system_id=3,
+                         system_name="FD Cryostat", name="FD Cryostat")
+        keys = [r["key"] for r in navigation.project_regions("prod")]
+        self.assertEqual(keys, ["Z", "L"])   # patched block lists Z first
+
+    def test_sandbox_project_marked_test_for_overview_stats(self):
+        # ``test: true`` in the yaml → the overview tree marks the subtree so
+        # the stats tally skips it; DUNE (and non-test projects) carry no flag.
+        tree = navigation.curated_tree("prod")
+        z = next(r for r in tree["children"] if r.get("key") == "Z")
+        self.assertTrue(z["test"])
+        self.assertNotIn("test", tree["children"][0])   # DUNE (D)
+
+    def test_dune_folder_closes_on_project_pages(self):
+        ctx = navigation.resolve("prod", "Z/57")["ctx"]
+        tree = navigation.sidebar_tree("prod", ctx)
+        self.assertFalse(tree[0]["open"])                  # DUNE (D)
+        self.assertTrue(tree[1]["open"])                   # Test Project (Z)
+
+    def test_unwalked_project_system_auto_walks_with_project_param(self):
+        H.objects.filter(project="Z", level=H.LEVEL_SYSTEM).update(
+            structure_synced_at=None)
+        html = self.client.get(navigation.node_path("prod", "Z", "57")).content.decode()
+        self.assertIn("project=Z", html)
+
+    def test_project_system_never_lands_in_uncurated_overflow(self):
+        H.objects.create(instance="dev", level=H.LEVEL_SYSTEM, project="Z",
+                         system_id=99, system_name="Z Stray", name="Z Stray")
+        region = navigation.overflow_region("dev")
+        keys = {f["key"] for f in (region or {}).get("families", [])}
+        self.assertNotIn("99", keys)
+        self.assertEqual([r["key"] for r in navigation.project_regions("dev")], ["Z"])

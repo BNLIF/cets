@@ -363,8 +363,10 @@ def shipments_view(request):
     # (the "86.990" selectors).
     ptids = set(curation.shipping_types(inst))
     for sid, ssid in curation.shipping_subsystems(inst):
+        # Selectors are project-D coordinates (#71) — see curation._ptid_coord.
         ptids.update(HierarchyNode.for_instance(inst).filter(
-            level=HierarchyNode.LEVEL_TYPE, system_id=sid, subsystem_id=ssid,
+            level=HierarchyNode.LEVEL_TYPE, project="D",
+            system_id=sid, subsystem_id=ssid,
         ).values_list("part_type_id", flat=True))
     # Tracked types grouped by subsystem — the page renders one collapsible
     # card per group with a compact per-type table (boxes-first, 0-box rows
@@ -465,8 +467,10 @@ def explore_system_sync_view(request, system_id):
     """Stream a one-system structure walk (the overflow section's lazy sync,
     #49). FNAL-gated; reads the URL's instance. Fired automatically on first
     visit to an unwalked uncurated system, and by the retry button after a
-    failed walk."""
+    failed walk. ``?project=`` scopes the walk — system ids are per-project
+    (#71); absent means project D."""
     inst = instance_of(request)
+    project = request.GET.get("project") or "D"
     try:
         bearer = mint_for(request)
     except FnalLinkRequired:
@@ -479,7 +483,7 @@ def explore_system_sync_view(request, system_id):
 
     def _iter():
         try:
-            yield from sync_system(api, inst, system_id)
+            yield from sync_system(api, inst, system_id, project=project)
         except Exception as e:
             logger.exception("explore_system_sync_view(%s) crashed", system_id)
             yield f"walk system: CRASH · {e}\n"

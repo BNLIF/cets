@@ -78,12 +78,9 @@
     background: var(--accent-soft); border: 1px solid color-mix(in oklab, var(--accent) 24%, var(--rule)); }
   .tr-firstrun strong { color: var(--accent-ink); }
 
-  .tr-row--root { min-height: 44px; padding: 6px 14px 6px 10px; border-radius: 10px; margin-bottom: 4px;
-    background: color-mix(in oklab, var(--accent) 6%, var(--surface));
-    border: 1px solid color-mix(in oklab, var(--accent) 22%, var(--rule)); }
-  .tr-row--root .tr-nm { font-size: 16px; color: color-mix(in oklab, var(--accent) 30%, var(--ink)); }
-  .tr-row--root .tr-sub { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .12em;
-    text-transform: uppercase; }
+  /* Top-level rows are the projects — DUNE (D), Sandbox (Z), LBNF (L) —
+     in parallel (#71); same weight regardless of node kind. */
+  #tr-tree > .tr-branch > .tr-row .tr-nm { font-size: 15px; font-weight: 650; }
   .tr-row--region .tr-nm { font-size: 14.5px; }
   .tr-row--family { border-left: 3px solid var(--rc); background: color-mix(in oklab, var(--rc) 5%, transparent); }
   .tr-row--family .tr-nm { color: color-mix(in oklab, var(--rc) 55%, var(--ink)); }
@@ -174,25 +171,31 @@
   var esc = function (s) { var d = document.createElement("div"); d.textContent = s == null ? "" : s; return d.innerHTML; };
 
   // ---- stats ----
-  function tally(n, k) { var c = n.kind === k ? 1 : 0; (n.children || []).forEach(function (x) { c += tally(x, k); }); return c; }
-  function tallyLocked(n, k) { var c = (n.kind === k && n.locked) ? 1 : 0; (n.children || []).forEach(function (x) { c += tallyLocked(x, k); }); return c; }
-  var flatFams = 0;
-  (root.children || []).forEach(function (r) { (r.children || []).forEach(function (f) {
-    if (f.kind === "family" && !f.locked && (f.children || []).some(function (c) { return c.kind === "sub"; })) flatFams++;
-  }); });
+  // Test/sandbox subtrees (n.test — e.g. the Z project, #71) render in the
+  // tree but stay out of every stat: they hold test copies, not hardware.
+  function tally(n, k) { if (n.test) return 0; var c = n.kind === k ? 1 : 0; (n.children || []).forEach(function (x) { c += tally(x, k); }); return c; }
+  function tallyLocked(n, k) { if (n.test) return 0; var c = (n.kind === k && n.locked) ? 1 : 0; (n.children || []).forEach(function (x) { c += tallyLocked(x, k); }); return c; }
+  function tallyFlatFams(n) {
+    if (n.test) return 0;
+    var c = (n.kind === "family" && !n.locked &&
+             (n.children || []).some(function (x) { return x.kind === "sub"; })) ? 1 : 0;
+    (n.children || []).forEach(function (x) { c += tallyFlatFams(x); });
+    return c;
+  }
+  var itemsN = (root.children || []).reduce(function (a, c) { return a + (c.test ? 0 : (c.n || 0)); }, 0);
   var stats = [
     [tally(root, "family") - tallyLocked(root, "family"), "families"],
-    [tally(root, "system") + flatFams, "systems"],
+    [tally(root, "system") + tallyFlatFams(root), "systems"],
     [tally(root, "sub"), "subsystems"],
     [tally(root, "type"), "component types"],
-    [root.n, "items in HWDB"],
+    [itemsN, "items in HWDB"],
   ];
   document.getElementById("tr-stats").innerHTML = stats.map(function (s) {
     return "<div class='tr-stat'><div class='n'>" + fmt(s[0]) + "</div><div class='l'>" + s[1] + "</div></div>";
   }).join("");
 
   // ---- render ----
-  var CHILD_LABEL = { region: "families", family: "systems", system: "subsystems", sub: "types" };
+  var CHILD_LABEL = { project: "regions", region: "families", family: "systems", system: "subsystems", sub: "types" };
   function childCount(n) {
     var kids = n.children || [];
     if (n.unwalked) return "not loaded · click to load";
@@ -212,8 +215,7 @@
       name += "<span class='tr-id'>(" + esc(n.sys != null ? n.sys + "." + n.id : n.id) + ")</span>";
     if (n.kind === "region" && n.locked) name = "<span class='tr-swatch'></span>" + name;
     var sub = "";
-    if (n.kind === "root") sub = "<span class='tr-sub'>" + esc(n.sub) + "</span>";
-    else if (n.kind === "family" && n.sub) sub = "<span class='tr-sub'>· " + esc(n.sub) + "</span>";
+    if (n.kind === "family" && n.sub) sub = "<span class='tr-sub'>· " + esc(n.sub) + "</span>";
     var compCls = "tr-comp" + (n.n ? "" : " zero") + (n.synced ? " is-synced" : "");
     var meta;
     if (n.locked) meta = "<span class='tr-note'>" + esc(n.note || "not curated") + "</span>";
@@ -260,7 +262,9 @@
     return branch;
   }
   var tree = document.getElementById("tr-tree");
-  tree.appendChild(build(root, null));
+  // No root row: the projects — DUNE (D), Sandbox (Z), LBNF (L) — render in
+  // parallel at the top level, like the sidebar (#71).
+  (root.children || []).forEach(function (c) { tree.appendChild(build(c, null)); });
 
   // ---- interaction (expand toggles; leaf links navigate) ----
   function toggle(row) {

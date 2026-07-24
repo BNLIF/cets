@@ -37,6 +37,39 @@ def regions(instance: str) -> list[dict]:
     return _block(instance).get("regions", []) or []
 
 
+def extra_projects(instance: str) -> list[str]:
+    """Ids of the extra HWDB projects (PID part1 letters) mirrored besides
+    "D" (#71). YAML entries are ``{id: Z, name: Sandbox}`` (or bare letters).
+    Each renders as its own synthetic region at the same tree level as DUNE;
+    its systems are recorded by the full refresh (names only) and walked
+    lazily on first visit, like the overflow section."""
+    out = []
+    for e in _block(instance).get("extra_projects") or []:
+        out.append(str(e["id"]) if isinstance(e, dict) else str(e))
+    return out
+
+
+def project_is_test(instance: str, project_id: str) -> bool:
+    """Whether an extra project is a test/sandbox one (``test: true`` in the
+    yaml) — shown in the tree but excluded from the overview stats."""
+    for e in _block(instance).get("extra_projects") or []:
+        if isinstance(e, dict) and str(e.get("id")) == project_id:
+            return bool(e.get("test"))
+    return False
+
+
+def project_label(instance: str, project_id: str) -> str:
+    """Display label for a project — its upstream name plus the letter, e.g.
+    ``Sandbox (Z)``. Names live in the yaml (audited from ``GET projects``,
+    per instance); an id-only entry falls back to ``Project Z``."""
+    if project_id == "D":
+        return "DUNE (D)"
+    for e in _block(instance).get("extra_projects") or []:
+        if isinstance(e, dict) and str(e.get("id")) == project_id and e.get("name"):
+            return f"{e['name']} ({project_id})"
+    return f"Project {project_id}"
+
+
 def _family_is_browsable(fam: dict) -> bool:
     return fam.get("curated", True) is not False and bool(fam.get("systems"))
 
@@ -102,8 +135,11 @@ def shipping_subsystems(instance: str) -> set[tuple[int, int]]:
 
 def _ptid_coord(part_type_id: str) -> tuple[int, int] | None:
     """(system, subsystem) decoded from a part-type id — HWDB encodes them as
-    D·SSS·PPP·NNNNN (e.g. D08699000012 → (86, 990)). None if it doesn't parse."""
-    m = re.match(r"^[A-Z](\d{3})(\d{3})\d+$", part_type_id or "")
+    D·SSS·PPP·NNNNN (e.g. D08699000012 → (86, 990)). None if it doesn't parse.
+    Project-D only: system ids are per-project (#71), so the "86.990" selectors
+    must not capture a Z/L type that happens to share coordinates — other
+    projects' shipping types are listed as explicit part-type ids."""
+    m = re.match(r"^D(\d{3})(\d{3})\d+$", part_type_id or "")
     return (int(m.group(1)), int(m.group(2))) if m else None
 
 

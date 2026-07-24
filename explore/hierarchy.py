@@ -4,6 +4,9 @@
 whitelist (``systems/D`` → ``subsystems/D/{sys}`` → ``component-types/D/{sys}/{subsys}``)
 and mirrors each component type into ``ComponentTypeNode`` with a true
 component count. Read-only against HWDB; additive locally (ADR-0010).
+Extra projects (Z, L, … — ``curation.extra_projects``, #71) get their systems
+recorded names-only on each refresh and walked lazily via ``sync_system``;
+system/subsystem ids are per-project, so ``project`` is part of a row's key.
 
 Like ``hwdb.sync.sync_family``, the orchestrator yields plain-text progress
 lines so a view can wrap a ``StreamingHttpResponse`` on top without changing
@@ -99,12 +102,14 @@ def _upsert_system_tree(instance, project, sys_node, subs, cts_for, counts, seen
     for ss in subs:
         ssid = ss.get("subsystem_id")
         ssname = ss.get("subsystem_name") or ""
+        # ``project`` is part of the row's identity (#71): system/subsystem ids
+        # are per-project, so a Z system 5 must not overwrite D's system 5.
         sub_node, _ = HierarchyNode.objects.update_or_create(
-            instance=instance,
+            instance=instance, project=project,
             level=HierarchyNode.LEVEL_SUBSYSTEM, system_id=sid,
             subsystem_id=ssid, part_type_id="",
             defaults={
-                "parent": sys_node, "project": project,
+                "parent": sys_node,
                 "system_name": sname, "subsystem_name": ssname, "name": ssname,
             },
         )
@@ -193,17 +198,44 @@ def sync_hierarchy(api, instance: str = "prod", project: str = "D") -> Iterator[
                 key=lambda s: s.get("id") or 0)
             for s in extras:
                 node, _ = HierarchyNode.objects.update_or_create(
-                    instance=instance,
+                    instance=instance, project=project,
                     level=HierarchyNode.LEVEL_SYSTEM, system_id=s["id"],
                     subsystem_id=None, part_type_id="",
-                    defaults={"project": project,
-                              "system_name": s.get("name") or "",
+                    defaults={"system_name": s.get("name") or "",
                               "name": s.get("name") or ""},
                 )
                 seen.add(node.pk)
                 overflow_ids.add(s["id"])
             if overflow_ids:
                 yield f"  overflow: {len(overflow_ids)} uncurated systems recorded (each walks on first visit)\n"
+
+        # Extra projects (#71): record every system of each curated extra
+        # project (Z, L, …) as a bare System row — names only, no walk; each
+        # is walked lazily on first visit, exactly like overflow. A project
+        # whose listing fails keeps its previous rows (skipped from pruning).
+        extra_prj = curation.extra_projects(instance)
+        prj_synced: set[str] = set()
+        for prj in extra_prj:
+            try:
+                prj_systems = _with_retry(
+                    lambda p: api.get_systems(p), prj).get("data") or []
+            except Exception as e:  # noqa: BLE001 — one project mustn't kill the walk
+                logger.warning("hierarchy: systems/%s listing failed: %s", prj, e)
+                yield f"  WARNING: project {prj} listing failed ({e}); previous rows kept\n"
+                continue
+            for s in sorted(prj_systems, key=lambda s: s.get("id") or 0):
+                if s.get("id") is None:
+                    continue
+                node, _ = HierarchyNode.objects.update_or_create(
+                    instance=instance, project=prj,
+                    level=HierarchyNode.LEVEL_SYSTEM, system_id=s["id"],
+                    subsystem_id=None, part_type_id="",
+                    defaults={"system_name": s.get("name") or "",
+                              "name": s.get("name") or ""},
+                )
+                seen.add(node.pk)
+            prj_synced.add(prj)
+            yield f"  project {prj}: {len(prj_systems)} systems recorded (each walks on first visit)\n"
 
         # --- Parallel read phases (no ORM here) ---
         # Phase 1: subsystems per system.
@@ -246,10 +278,10 @@ def sync_hierarchy(api, instance: str = "prod", project: str = "D") -> Iterator[
             sid = s.get("id")
             sname = s.get("name") or ""
             sys_node, _ = HierarchyNode.objects.update_or_create(
-                instance=instance,
+                instance=instance, project=project,
                 level=HierarchyNode.LEVEL_SYSTEM, system_id=sid, subsystem_id=None,
                 part_type_id="",
-                defaults={"project": project, "system_name": sname, "name": sname},
+                defaults={"system_name": sname, "name": sname},
             )
             seen.add(sys_node.pk)
 
@@ -266,11 +298,22 @@ def sync_hierarchy(api, instance: str = "prod", project: str = "D") -> Iterator[
         # Prune within this instance: stale curated-subtree rows and vanished
         # systems go; the lazily-walked subtrees of live overflow systems stay
         # (their system rows are in ``seen``; deeper rows are matched by id).
+        # Extra-project rows (#71) are handled apart: their live systems'
+        # lazily-walked subtrees stay, but a vanished system goes (the parent
+        # FK cascades its subtree); a project whose listing failed is skipped.
         stale = HierarchyNode.for_instance(instance).exclude(pk__in=seen)
         if overflow_ids:
-            stale = stale.exclude(system_id__in=overflow_ids)
+            stale = stale.exclude(project=project, system_id__in=overflow_ids)
+        if extra_prj:
+            stale = stale.exclude(project__in=extra_prj)
         n_stale = stale.count()
         stale.delete()
+        for prj in prj_synced:
+            gone = (HierarchyNode.for_instance(instance)
+                    .filter(project=prj, level=HierarchyNode.LEVEL_SYSTEM)
+                    .exclude(pk__in=seen))
+            n_stale += gone.count()
+            gone.delete()
 
         state.finished_at = timezone.now()
         state.systems_count = systems_done
@@ -302,9 +345,10 @@ def sync_system(api, instance: str, system_id: int, project: str = "D") -> Itera
     """
     try:
         sys_node = HierarchyNode.for_instance(instance).get(
-            level=HierarchyNode.LEVEL_SYSTEM, system_id=system_id)
+            level=HierarchyNode.LEVEL_SYSTEM, system_id=system_id,
+            project=project)
     except HierarchyNode.DoesNotExist:
-        yield f"walk system: unknown system {system_id}\n"
+        yield f"walk system: unknown system {project}/{system_id}\n"
         return
 
     sys_node.tests_sync_error = ""
@@ -350,7 +394,8 @@ def sync_system(api, instance: str, system_id: int, project: str = "D") -> Itera
             yield line
 
         stale = (HierarchyNode.for_instance(instance)
-                 .filter(system_id=system_id).exclude(pk__in=seen))
+                 .filter(project=project, system_id=system_id)
+                 .exclude(pk__in=seen))
         n_stale = stale.count()
         stale.delete()
 

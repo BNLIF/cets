@@ -458,13 +458,15 @@ class LeafSidebarCtxTest(TestCase):
         leaf = _comp_leaf()
         ctx = navigation.leaf_sidebar_ctx("prod", leaf)
         self.assertEqual(ctx, {"kind": "leaf", "part_type_id": "D05700200099",
-                               "system_id": 81, "subsystem_id": 300,
+                               "system_id": 81, "subsystem_id": 300, "project": "D",
                                "region_key": "FD", "family_key": "FD-CE"})
 
     def test_sidebar_tree_opens_branch_and_flags_leaf_current(self):
         leaf = _comp_leaf()
         tree = navigation.sidebar_tree("prod", navigation.leaf_sidebar_ctx("prod", leaf))
-        region = next(r for r in tree if r["label"] == "Far Detector")
+        dune = next(n for n in tree if n["label"] == "DUNE (D)")   # project tier (#71)
+        self.assertTrue(dune["open"])
+        region = next(r for r in dune["children"] if r["label"] == "Far Detector")
         self.assertTrue(region["open"])
         family = next(f for f in region["children"] if f["label"] == "FD CE")
         self.assertTrue(family["open"])
