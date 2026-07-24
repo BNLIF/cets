@@ -403,7 +403,7 @@
             back-reference would loop the tree (cable → flange → cable …), and
             a forward cable end would fan out into the cable's whole
             neighborhood. Follow the link for the cable's own page.{% endcomment %}
-            {% if m.part_id %}{% if m.connection %}<button type="button" class="asm-caret is-leaf" title="{% if m.peer %}Connection — follow the link for its contents{% else %}Cable end — open the cable for its connections{% endif %}">·</button>{% else %}<button type="button" class="asm-caret" aria-label="Expand subcomponents">▸</button>{% endif %}<a href="{% url 'explore:part' part_id=m.part_id %}">{{ m.part_id }}</a>{% if m.connection %}<span class="asm-conn" title="{% if m.peer %}Connected at this cable end{% else %}Cable end · END name : connector #{% endif %}">.{{ m.connection }}</span>{% endif %}{% if m.via %}<span class="asm-conn" title="This cable’s END name : connector # used by the connection"> · via {{ m.via }}</span>{% endif %}{% else %}<span class="asm-caret-spacer"></span>—{% endif %}
+            {% if m.part_id %}{% if m.connection %}<button type="button" class="asm-caret is-leaf" title="{% if m.peer %}Connection — follow the link for its contents{% else %}Cable end — open the cable for its connections{% endif %}">·</button>{% else %}<button type="button" class="asm-caret" aria-label="Expand subcomponents">▸</button>{% endif %}<a href="{% url 'explore:part' part_id=m.part_id %}">{{ m.part_id }}</a>{% if m.connection and not m.peer %}<span class="asm-conn" title="Cable end · END name : connector #">.{{ m.connection }}</span>{% endif %}{% if m.via %}<span class="asm-conn" title="This cable’s END name : connector # used by the connection"> · via {{ m.via }}</span>{% endif %}{% else %}<span class="asm-caret-spacer"></span>—{% endif %}
           </td>
           <td>{{ m.type_name|default:"—" }}</td>
           <td>{{ m.functional_position|default:"—" }}</td>
@@ -441,7 +441,7 @@
     var lead = c.part_id
       ? caret +
         "<a href='" + esc(c.url) + "'>" + esc(c.part_id) + "</a>" +
-        (c.connection ? "<span class='asm-conn'>." + esc(c.connection) + "</span>" : "")
+        (c.connection && !c.peer ? "<span class='asm-conn'>." + esc(c.connection) + "</span>" : "")
       : "<span class='asm-caret-spacer'></span>—";
     tr.innerHTML =
       "<td class='mono asm-lead' style='padding-left:" + (8 + depth * 18) + "px'>" + lead + "</td>" +

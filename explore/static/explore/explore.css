@@ -228,3 +228,12 @@ a.eh-user:hover { color: var(--ink); }
 /* Cable-end diagram (#72) — shared by the part page and the type leaf page */
 #cable-diagram svg { display: block; width: 100%; max-width: 720px; height: auto; margin: 0 auto; }
 .cbl-hint { color: var(--faint); font-size: 11.5px; margin-top: 6px; }
+/* Many-ends fallback: past ~12 ENDs the SVG fan-out is a spider — chips instead. */
+.cbl-end-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; }
+.cbl-end {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  border: 1px solid var(--rule-hard); border-radius: 6px; padding: 5px 9px;
+  background: var(--surface); min-width: 0;
+}
+.cbl-end-name { font-weight: 600; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cbl-end-meta { color: var(--faint); font-size: 10.5px; white-space: nowrap; }

@@ -32,9 +32,16 @@ cabling are still pending upstream, so the contract may shift.
   rows carry `part_id` (base PID — every lookup, link, and location post
   uses this), `connection` (the suffix, or None), and `peer` (True when the
   suffix has no `:n` — a back-reference).
-- **Item pages show everything.** The Assembly table renders the connection
-  suffix as a dimmed annotation after the linked base PID — a cable's page
-  lists its peers (with live status), matching the HWDB UI.
+- **Item pages show everything.** The Assembly table renders a forward
+  ``END:connector`` suffix as a dimmed annotation after the linked base PID.
+  A peer row's suffix is its functional position, which the dedicated
+  Position column already shows — so it stays out of the Part column
+  (Hajime's 2026-07-24 review). A cable's page lists its peers (with live
+  status), matching the HWDB UI, and suppresses the "Inside" fact when the
+  container is one of those peers: a cable's ``/container`` rows include its
+  connections' back-references, so the "newest" one is a single arbitrary
+  connector out of many, not a parent (a genuine container — e.g. a shipping
+  box, never a peer — still shows).
 - **Containment walks skip peers.** `subtree_rows` (the ES contents list)
   drops `peer` rows: keeping them would fold a cable's whole neighborhood
   into the box contents. Forward cable-end mounts stay — recursing into the
@@ -51,6 +58,8 @@ cabling are still pending upstream, so the contract may shift.
   expanded one slot per connector (`Flange:1`…`Flange:8`), so grouping on
   the END name recovers Hajime's `{END: #connectors}` definition, drawn as
   an SVG fan-out (ends left/right of the PID hub, one dot per connector).
+  Past 12 ends the fan-out becomes a very tall spider, so the renderer falls
+  back to a compact chip grid (END name + connectors / in-use per chip).
   The diagram headlines the part page full-width above the two columns.
   A cable's reverse rows don't say which of its own connectors a connection
   uses — that lives on the peer's manifest — so the item page reads each

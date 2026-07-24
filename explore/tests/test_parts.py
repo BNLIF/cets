@@ -323,6 +323,50 @@ class CableConnectionsTest(TestCase):
         self.assertEqual([m["via"] for m in manifest], [None, None, None])
 
 
+class CableContainerTest(TestCase):
+    """#72 follow-up (Hajime): a cable's /container rows include its
+    connections' back-references, so the "newest" one is a single arbitrary
+    connector out of many — "Inside" must not show a connection peer."""
+
+    CABLE = "Z00100300035-00001"
+    FLANGE = "Z00100300037-00001"
+
+    def _api(self, container_rows):
+        api = mock.MagicMock()
+        api.get_component.return_value = {"data": {
+            "category": "cable", "component_type": {"name": "HVS Test Bundle"}}}
+        api.get_component_type.return_value = {"data": {"connectors": {"Flange:1": None}}}
+        api.get_subcomponents.side_effect = lambda pid: {"data": {
+            self.CABLE: [{"part_id": f"{self.FLANGE}.Cold Outer SH",
+                          "operation": "mount", "type_name": "HVS Test Flange",
+                          "functional_position": "Cold Outer SH"}],
+            self.FLANGE: [{"part_id": f"{self.CABLE}.Flange:1", "operation": "mount",
+                           "functional_position": "Cold Outer SH"}],
+        }.get(pid, [])}
+        api.get_container.return_value = {"data": container_rows}
+        api.get_locations.return_value = {"data": []}
+        api.get_images.return_value = {"data": []}
+        api.get_tests.return_value = {"data": []}
+        api.get_test_types.return_value = {"data": []}
+        return api
+
+    def test_connection_peer_is_not_shown_as_inside(self):
+        rows = [{"operation": "mount", "created": "2026-07-01",
+                 "functional_position": "Cold Outer SH",
+                 "container": {"part_id": self.FLANGE,
+                               "component_type": {"name": "HVS Test Flange"}}}]
+        d = parts.part_detail(self._api(rows), self.CABLE, is_shipping=False)
+        self.assertIsNone(d["container"])
+
+    def test_genuine_box_container_still_shows(self):
+        rows = [{"operation": "mount", "created": "2026-07-01",
+                 "functional_position": "Slot 1",
+                 "container": {"part_id": "D08120200001-00001",
+                               "component_type": {"name": "CE Shipping Box"}}}]
+        d = parts.part_detail(self._api(rows), self.CABLE, is_shipping=False)
+        self.assertEqual(d["container"]["part_id"], "D08120200001-00001")
+
+
 class AssemblyTreeTest(TestCase):
     """parts.assembly_children — one level of the assembly tree with QC status
     (ADR-0015)."""
@@ -477,7 +521,9 @@ class PartViewTest(TestCase):
         self.assertIn("FCP Flange", body)
         self.assertIn("Connections (1)", body)            # not "Assembly" on a cable
         self.assertIn("asm-caret is-leaf", body)          # peer row: inert caret
-        self.assertIn(".Cold Bottom FCT", body)           # connection annotation
+        # A peer's suffix is its functional position — the dedicated Position
+        # column already shows it, so the Part column stays clean (Hajime).
+        self.assertNotIn(".Cold Bottom FCT", body)
 
     def test_cable_connection_rows_show_which_end_they_use(self):
         cable = "D05700200099-00007"

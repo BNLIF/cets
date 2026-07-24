@@ -362,11 +362,21 @@ def part_detail(api, part_id: str, is_shipping: bool) -> dict:
             logger.warning("part detail: cable ends for %s failed: %s", part_id, e)
         used = _annotate_cable_connections(api, part_id, manifest)
 
+    container = current_container(
+        _safe_data("container", lambda: api.get_container(part_id)))
+    # A cable's /container rows include its connections' back-references, so
+    # the "newest" one is a single arbitrary connector out of many — not a
+    # parent. Peers already render in the Connections pane; only a genuine
+    # container (e.g. a shipping box, never a peer) shows as "Inside" (#72).
+    if is_cable and container and any(
+            m.get("peer") and m.get("part_id") == container["part_id"]
+            for m in manifest):
+        container = None
+
     ct = comp.get("component_type") or {}
     return {
         "part_id": part_id,
-        "container": current_container(
-            _safe_data("container", lambda: api.get_container(part_id))),
+        "container": container,
         "type_name": _named(ct) or comp.get("type_name"),
         "is_cable": is_cable,
         "cable_ends": ends,

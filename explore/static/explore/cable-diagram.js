@@ -16,6 +16,24 @@
     function (s, k) { s[k] = true; return s; }, {}) : null;
   function esc(s) { var d = document.createElement("div"); d.textContent = (s == null ? "" : s); return d.innerHTML; }
 
+  function meta(e) {
+    var n = e.connectors, inUse = 0;
+    for (var i = 1; i <= n; i++) if (used && used[e.name + ":" + i]) inUse++;
+    return used ? inUse + " / " + n + " in use"
+                : n + " connector" + (n === 1 ? "" : "s");
+  }
+
+  // Past ~12 ends the fan-out becomes a very tall spider — fall back to a
+  // compact chip grid (per Hajime: a list is fine when the picture is hard).
+  if (ends.length > 12) {
+    host.innerHTML = "<div class='cbl-end-grid'>" + ends.map(function (e) {
+      return "<div class='cbl-end'><span class='cbl-end-name' title='" + esc(e.name) +
+             "'>" + esc(e.name) + "</span><span class='cbl-end-meta'>" +
+             meta(e) + "</span></div>";
+    }).join("") + "</div>";
+    return;
+  }
+
   var W = 720, rowH = 50, boxW = 216, boxH = 38, pad = 10;
   var left = ends.slice(0, Math.ceil(ends.length / 2)), right = ends.slice(left.length);
   var rows = Math.max(left.length, right.length, 1);
@@ -28,8 +46,7 @@
     parts.push("<rect x='" + x + "' y='" + y + "' width='" + boxW + "' height='" + boxH +
                "' rx='6' style='fill:var(--surface);stroke:var(--rule-hard)'/>");
     parts.push("<text x='" + (x + 9) + "' y='" + (y + 15) + "' font-size='11' font-weight='600' style='fill:var(--ink)'>" + esc(name) + "</text>");
-    var dots = Math.min(n, 12), dx = x + 12, inUse = 0;
-    for (var i = 1; i <= n; i++) if (used && used[e.name + ":" + i]) inUse++;
+    var dots = Math.min(n, 12), dx = x + 12;
     for (var i = 0; i < dots; i++) {
       // Connectors are numbered 1..n; hollow = free, solid = connected.
       var solid = !used || used[e.name + ":" + (i + 1)];
@@ -38,8 +55,7 @@
                         : "fill:none;stroke:var(--faint);stroke-width:1") + "'/>");
     }
     parts.push("<text x='" + (dx + dots * 9 + 4) + "' y='" + (y + 31) + "' font-size='10' style='fill:var(--faint)'>" +
-               (used ? inUse + " / " + n + " in use"
-                     : n + " connector" + (n === 1 ? "" : "s")) + "</text>");
+               meta(e) + "</text>");
   }
 
   function side(list, isLeft) {
