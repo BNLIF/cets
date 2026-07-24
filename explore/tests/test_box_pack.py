@@ -158,6 +158,19 @@ class PackPageTest(TestCase):
         self.assertIn(f'data-sync-url="/hw/dev/sync-tests/{CHILD_TYPE}/"', html)
         self.assertIn(f'data-sync-url="/hw/dev/sync-tests/{DOC_TYPE}/"', html)
 
+    def test_picker_groups_show_free_functional_positions(self):
+        # Shippers reference sub-components by Functional Position name (#74):
+        # each group lists the free positions its picks will land in. Slot 1
+        # is occupied, so only Slot 2 (and Doc, in its own group) appear.
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PACK).content.decode()
+        self.assertIn("Free positions:", html)
+        self.assertIn('<span class="pk-pos">Slot 2</span>', html)
+        self.assertIn('<span class="pk-pos">Doc</span>', html)
+        self.assertNotIn('<span class="pk-pos">Slot 1</span>', html)  # occupied
+
     def test_items_inside_another_box_are_hidden(self):
         HwdbComponentEvent.objects.filter(part_id=GOOD).update(
             parent_part_id="D00599800007-00150")

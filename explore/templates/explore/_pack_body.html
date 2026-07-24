@@ -19,6 +19,10 @@ without a page reload. {% endcomment %}
             <button type="button" class="pk-sync" data-sync-url="{% url 'explore:node_sync' part_type_id=g.type_id %}"
                     title="Fetch this type’s new items from HWDB into the mirror, then reload">Sync new items</button>
           </div>
+          {% comment %}Shippers reference sub-components by Functional
+          Position name (#74) — the free positions picks will land in.{% endcomment %}
+          <div class="pk-positions"><span class="pk-pos-label">Free positions:</span>
+            {% for p in g.positions %}<span class="pk-pos">{{ p }}</span>{% endfor %}</div>
           <p class="pk-free">{{ g.n_free }} free position(s) for this type
             · {{ g.total }} free candidate item(s) in the mirror{% if g.total > g.candidates|length %} (first {{ g.candidates|length }} listed — add others by PID below){% endif %}.
             Items known to sit inside another box/assembly, or known-unapproved in HWDB, are hidden;

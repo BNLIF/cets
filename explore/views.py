@@ -965,12 +965,12 @@ def _pack_groups(instance, connectors, manifest) -> list[dict]:
     (a refused add reports that item's live HWDB status flags)."""
     occupied = {m["functional_position"] for m in manifest}
     in_box = {m["part_id"] for m in manifest if m["part_id"]}
-    free_by_type: dict[str, int] = {}
+    free_by_type: dict[str, list[str]] = {}
     for pos, ctid in connectors.items():
         if pos not in occupied and ctid:
-            free_by_type[ctid] = free_by_type.get(ctid, 0) + 1
+            free_by_type.setdefault(ctid, []).append(pos)
     groups = []
-    for ctid, n_free in sorted(free_by_type.items()):
+    for ctid, free_pos in sorted(free_by_type.items()):
         rows = (HwdbComponentEvent.for_instance(instance)
                 .filter(part_type_id=ctid, parent_part_id="")
                 .exclude(part_id__in=in_box)
@@ -980,7 +980,10 @@ def _pack_groups(instance, connectors, manifest) -> list[dict]:
             level=HierarchyNode.LEVEL_TYPE, part_type_id=ctid).first()
         groups.append({
             "type_id": ctid, "name": leaf.name if leaf else ctid,
-            "n_free": n_free, "total": rows.count(),
+            # Shippers reference sub-components by Functional Position name
+            # (#74) — show the free ones this group's picks will land in.
+            "positions": sorted(free_pos, key=str),
+            "n_free": len(free_pos), "total": rows.count(),
             "candidates": [
                 {"part_id": r.part_id, "status": r.status or "—",
                  "qc_ok": bool(r.qaqc_uploaded and r.certified_qaqc),
