@@ -1,4 +1,5 @@
 {% extends 'explore/base.html' %}
+{% load static %}
 {% block title %}{{ part_id }} · HWDB Explorer{% endblock %}
 
 {% block content %}
@@ -74,6 +75,7 @@
   .asm-caret.is-leaf:hover { background: none; color: var(--rule-hard); }
   .asm-caret.is-busy { opacity: .5; }
   .asm-caret-spacer { display: inline-block; width: 18px; }
+  .asm-conn { color: var(--faint); font-size: 11px; }
   .asm-row.is-child td { background: color-mix(in oklch, var(--surface) 55%, var(--page)); }
   .sd-banner { border: 1px solid color-mix(in oklch, var(--warn, #b8860b) 40%, var(--rule));
     background: var(--good-bg); border-radius: var(--r-lg); padding: 16px 18px; color: var(--dim); }
@@ -154,6 +156,21 @@
   </div>
   {% endif %}
 
+  {% if detail.is_cable %}
+  {# Full-width, above the two columns — the diagram is the "this is a cable" headline (#72). #}
+  <div class="sd-card">
+    <h2>Cable ends</h2>
+    {% if detail.cable_ends %}
+    {{ detail.cable_ends|json_script:"cable-ends-data" }}
+    {{ detail.used_connectors|json_script:"cable-used-data" }}
+    <div id="cable-diagram" data-label="{{ part_id }}"></div>
+    <p class="cbl-hint">{{ detail.cable_ends|length }} END{{ detail.cable_ends|length|pluralize }} from the type definition ({{ ptid }}). Filled dots are connectors in use by this item — what each plugs into is listed under Connections.</p>
+    {% else %}
+    <div class="sd-empty">The type definition lists no ENDs/connectors.</div>
+    {% endif %}
+  </div>
+  {% endif %}
+
   <div class="sd-grid">
     <div>
       {% if detail.facts or mirror_parent %}
@@ -190,27 +207,6 @@
             </tr>
           {% empty %}
             <tr><td colspan="5" class="sd-empty">No tests recorded.</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </div>
-
-      <div class="sd-card">
-        <h2>Assembly ({{ detail.manifest|length }})</h2>
-        <table class="sd-table asm-table" data-assembly-base="{% url 'explore:assembly' part_id='__PID__' %}">
-          <thead><tr><th>Part</th><th>Type</th><th>Position</th><th>Status</th></tr></thead>
-          <tbody>
-          {% for m in detail.manifest %}
-            <tr class="asm-row" data-pid="{{ m.part_id }}" data-depth="0">
-              <td class="mono asm-lead">
-                {% if m.part_id %}<button type="button" class="asm-caret" aria-label="Expand subcomponents">▸</button><a href="{% url 'explore:part' part_id=m.part_id %}">{{ m.part_id }}</a>{% else %}<span class="asm-caret-spacer"></span>—{% endif %}
-              </td>
-              <td>{{ m.type_name|default:"—" }}</td>
-              <td>{{ m.functional_position|default:"—" }}</td>
-              <td>{{ m.status|default:"—" }}</td>
-            </tr>
-          {% empty %}
-            <tr><td colspan="4" class="sd-empty">None.</td></tr>
           {% endfor %}
           </tbody>
         </table>
@@ -393,9 +389,36 @@
       {% endif %}
     </div>
   </div>
+
+  {# Full width below the grid — the assembly/connections table is the widest pane on the page. #}
+  <div class="sd-card">
+    <h2>{% if detail.is_cable %}Connections{% else %}Assembly{% endif %} ({{ detail.manifest|length }})</h2>
+    <table class="sd-table asm-table" data-assembly-base="{% url 'explore:assembly' part_id='__PID__' %}">
+      <thead><tr><th>Part</th><th>Type</th><th>Position</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for m in detail.manifest %}
+        <tr class="asm-row" data-pid="{{ m.part_id }}" data-depth="0">
+          <td class="mono asm-lead">
+            {% comment %}Any cable-end ref (#72) gets an inert caret: a peer
+            back-reference would loop the tree (cable → flange → cable …), and
+            a forward cable end would fan out into the cable's whole
+            neighborhood. Follow the link for the cable's own page.{% endcomment %}
+            {% if m.part_id %}{% if m.connection %}<button type="button" class="asm-caret is-leaf" title="{% if m.peer %}Connection — follow the link for its contents{% else %}Cable end — open the cable for its connections{% endif %}">·</button>{% else %}<button type="button" class="asm-caret" aria-label="Expand subcomponents">▸</button>{% endif %}<a href="{% url 'explore:part' part_id=m.part_id %}">{{ m.part_id }}</a>{% if m.connection %}<span class="asm-conn" title="{% if m.peer %}Connected at this cable end{% else %}Cable end · END name : connector #{% endif %}">.{{ m.connection }}</span>{% endif %}{% if m.via %}<span class="asm-conn" title="This cable’s END name : connector # used by the connection"> · via {{ m.via }}</span>{% endif %}{% else %}<span class="asm-caret-spacer"></span>—{% endif %}
+          </td>
+          <td>{{ m.type_name|default:"—" }}</td>
+          <td>{{ m.functional_position|default:"—" }}</td>
+          <td>{{ m.status|default:"—" }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="4" class="sd-empty">None.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
   {% endif %}
 </div>
 
+<script src="{% static 'explore/cable-diagram.js' %}" defer></script>
 <script>
 (function () {
   var table = document.querySelector(".asm-table");
@@ -408,9 +431,17 @@
     tr.className = "asm-row is-child";
     tr.dataset.pid = c.part_id || "";
     tr.dataset.depth = depth;
+    // Any cable-end ref (#72) gets an inert caret: peers would loop the tree,
+    // forward ends would fan out into the cable's whole neighborhood.
+    var caret = c.connection
+      ? "<button type='button' class='asm-caret is-leaf' title='" +
+        (c.peer ? "Connection — follow the link for its contents"
+                : "Cable end — open the cable for its connections") + "'>·</button>"
+      : "<button type='button' class='asm-caret' aria-label='Expand subcomponents'>▸</button>";
     var lead = c.part_id
-      ? "<button type='button' class='asm-caret' aria-label='Expand subcomponents'>▸</button>" +
-        "<a href='" + esc(c.url) + "'>" + esc(c.part_id) + "</a>"
+      ? caret +
+        "<a href='" + esc(c.url) + "'>" + esc(c.part_id) + "</a>" +
+        (c.connection ? "<span class='asm-conn'>." + esc(c.connection) + "</span>" : "")
       : "<span class='asm-caret-spacer'></span>—";
     tr.innerHTML =
       "<td class='mono asm-lead' style='padding-left:" + (8 + depth * 18) + "px'>" + lead + "</td>" +

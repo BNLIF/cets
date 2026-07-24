@@ -447,8 +447,12 @@ def part_info(leaf, part_id: str, manifest) -> dict:
     current subcomponents keyed the way its CSV/patch builders expect."""
     subs = {}
     for i, m in enumerate(manifest):
+        # Documents keep the full HWDB ref — a cable-end row (#72) reads
+        # `<PID>.<END>:<connector>` there, while m["part_id"] is the base.
+        conn = m.get("connection")
+        pid = m.get("part_id") or ""
         subs[str(i)] = {
-            "Sub-component PID": m.get("part_id") or "",
+            "Sub-component PID": f"{pid}.{conn}" if pid and conn else pid,
             "Component Type Name": m.get("type_name") or "",
             "Functional Position Name": m.get("functional_position") or "",
         }

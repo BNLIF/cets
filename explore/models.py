@@ -61,6 +61,12 @@ class HierarchyNode(InstanceScoped):
     # Component-type leaves only (blank/zero on System & Subsystem rows):
     part_type_id = models.CharField(max_length=20, blank=True, default="", db_index=True)
     n_components = models.PositiveIntegerField(default=0)
+    # HWDB type category ("cable"/"generic"/"box"…), free from the type list;
+    # for cable types the walk also mirrors the ENDs/connector counts from the
+    # type record (``[{"name", "connectors"}, …]``) so the leaf page draws the
+    # cable diagram mirror-only (#72).
+    category = models.CharField(max_length=32, blank=True, default="")
+    cable_ends = models.JSONField(null=True, blank=True)
     # NULL tests_synced_at = the leaf's tests have never been pulled; the
     # explorer syncs lazily on first visit. n_tests powers the tree accent.
     tests_synced_at = models.DateTimeField(null=True, blank=True)

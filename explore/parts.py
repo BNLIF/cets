@@ -131,11 +131,18 @@ _SUBTREE_NODE_CAP = 300
 
 
 def _manifest_children(api, pid: str, depth: int, seen: set) -> list[dict]:
-    """One node's unvisited mounted children as subtree rows-in-waiting."""
+    """One node's unvisited mounted children as subtree rows-in-waiting.
+
+    Peer back-references are skipped (#72): a cable's manifest lists what its
+    ends plug into — its flange/board/tray peers, including its own parent —
+    which is connectivity, not contents. Keeping them would fold a cable's
+    whole neighborhood into the subtree. Forward cable-end mounts
+    (``END:connector``) stay: the cable is genuinely attached; recursing into
+    it then yields only peer rows, so the walk terminates there."""
     kids = []
     for m in current_manifest(_safe_data("subcomponents", lambda: api.get_subcomponents(pid))):
         cid = m.get("part_id")
-        if not cid or cid in seen:
+        if not cid or cid in seen or m.get("peer"):
             continue
         seen.add(cid)
         kids.append({**m, "depth": depth})
@@ -191,6 +198,7 @@ def part_facts(comp: dict) -> list[dict]:
     candidates = [
         ("Serial number", comp.get("serial_number")),
         ("Type", _named(ct) or comp.get("type_name")),
+        ("Category", comp.get("category")),  # "cable" / "generic" / … (#72)
         ("Status", _named(comp.get("status"))),
         # Binary QC flags off the same record (#51).
         ("Installed", _yesno(comp.get("is_installed"))),
@@ -247,6 +255,47 @@ def _enrich_test_ids(api, part_id: str, tests: list[dict]) -> None:
             t["has_test_data"] = bool(latest.get("test_data"))
 
 
+def _annotate_cable_connections(api, part_id: str, manifest: list[dict]) -> list[str]:
+    """Recover which of this cable's connectors each connection uses (#72).
+
+    A cable's reverse rows only carry the *peer's* position name — the
+    ``END:connector`` on the cable side is recorded on the peer's manifest
+    (``<cable PID>.<END>:<n>``). One ``/subcomponents`` call per distinct
+    peer (capped, best-effort) fills each peer row's ``via`` and returns the
+    sorted occupied slots for the diagram. An only-PID connection (no
+    ENDs/connectors, e.g. a cable tray) keeps ``via`` None and occupies
+    nothing."""
+    peers = [m for m in manifest if m.get("peer") and m.get("part_id")]
+    via: dict[tuple, str] = {}
+    used: set[str] = set()
+    for pid in sorted({m["part_id"] for m in peers})[:_STATUS_FETCH_CAP]:
+        rows = current_manifest(_safe_data(
+            f"peer {pid} manifest", lambda pid=pid: api.get_subcomponents(pid)))
+        for row in rows:
+            if row.get("part_id") == part_id and row.get("connection") and not row.get("peer"):
+                used.add(row["connection"])
+                via[(pid, row.get("functional_position"))] = row["connection"]
+    for m in peers:
+        m["via"] = via.get((m["part_id"], m.get("functional_position")))
+    return sorted(used)
+
+
+def cable_ends(connectors: dict | None) -> list[dict]:
+    """A cable type's ENDs from its ``connectors`` keys (#72): HWDB stores the
+    definition expanded into one ``<END name>:<connector #>`` slot per
+    connector (``Flange:1`` … ``Flange:8``), so grouping on the name yields
+    the shape Hajime defines in the type editor — ``[{"name": "Flange",
+    "connectors": 8}, …]`` in key order. A key without a trailing ``:n``
+    counts as a one-connector end of that name."""
+    ends: dict[str, int] = {}
+    for key in connectors or {}:
+        name, _, conn = str(key).rpartition(":")
+        if not (name and conn.isdigit()):
+            name = str(key)
+        ends[name] = ends.get(name, 0) + 1
+    return [{"name": n, "connectors": c} for n, c in ends.items()]
+
+
 def current_container(rows) -> dict | None:
     """The item's current parent from its ``/container`` rows (the reverse of
     the manifest, same mount/unmount row shape): the newest entry that isn't
@@ -299,12 +348,29 @@ def part_detail(api, part_id: str, is_shipping: bool) -> dict:
                     "is_image": _is_image(i.get("image_name"))}
                    for i in images]
 
+    # The item record's category tells a cable from a generic part (#72); a
+    # cable's page draws its ENDs/connectors from the type definition, with
+    # this item's occupied connectors recovered from its peers' manifests.
+    is_cable = comp.get("category") == "cable"
+    ends, used = [], []
+    if is_cable:
+        try:
+            ends = cable_ends(
+                (api.get_component_type(part_id.rsplit("-", 1)[0]).get("data") or {})
+                .get("connectors"))
+        except Exception as e:
+            logger.warning("part detail: cable ends for %s failed: %s", part_id, e)
+        used = _annotate_cable_connections(api, part_id, manifest)
+
     ct = comp.get("component_type") or {}
     return {
         "part_id": part_id,
         "container": current_container(
             _safe_data("container", lambda: api.get_container(part_id))),
         "type_name": _named(ct) or comp.get("type_name"),
+        "is_cable": is_cable,
+        "cable_ends": ends,
+        "used_connectors": used,
         "status": _named(comp.get("status")),
         "facts": part_facts(comp),
         "tests": tests,

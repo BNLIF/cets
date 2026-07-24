@@ -34,9 +34,11 @@ def _chain(ptid, sid=57, sname="FD-VD TDE", ssid=2, ssname="Digital electronics"
         subsystem_id=ssid, subsystem_name=ssname, name=tname, part_type_id=ptid, **leaf)
 
 
-def _fake_api(systems, subsystems, part_types, counts, projects=None):
+def _fake_api(systems, subsystems, part_types, counts, projects=None, type_records=None):
     """``projects`` maps extra project letters to their ``systems/{P}`` lists
-    (#71); unlisted projects return empty — ``systems`` is project D's."""
+    (#71); unlisted projects return empty — ``systems`` is project D's.
+    ``type_records`` maps ptid → the ``component-types/{ptid}`` record (#72),
+    fetched by the walk for cable-category types."""
     api = mock.MagicMock()
     api.get_systems.side_effect = (
         lambda p1="D": {"data": systems if p1 == "D" else (projects or {}).get(p1, [])})
@@ -44,6 +46,8 @@ def _fake_api(systems, subsystems, part_types, counts, projects=None):
     api.get_part_types_for_subsystem.side_effect = (
         lambda p1, p2, ssid: {"data": part_types.get((int(p2), ssid), [])}
     )
+    api.get_component_type.side_effect = (
+        lambda ptid: {"data": (type_records or {}).get(ptid, {})})
 
     def _make_request(method, endpoint, data=None, params=None):
         ptid = endpoint.split("/")[1]  # component-types/<ptid>/components
@@ -121,6 +125,42 @@ class SyncHierarchyTest(TestCase):
         self.assertEqual(empty.name, "FD-VD Empty")
         self.assertEqual(empty.children.filter(level=H.LEVEL_SUBSYSTEM).count(), 1)
         self.assertEqual(H.objects.filter(level=H.LEVEL_TYPE, system_id=60).count(), 0)
+
+    def test_cable_type_mirrors_category_and_ends(self):
+        api = self._api()
+        api.get_part_types_for_subsystem.side_effect = lambda p1, p2, ssid: {"data": [
+            {"part_type_id": "D05700200001", "category": "cable",
+             "full_name": "D.FD-VD TDE.Digital electronics.HV bundle"},
+            {"part_type_id": "D05700200002", "category": "generic",
+             "full_name": "D.FD-VD TDE.Digital electronics.WR MCH"},
+        ] if (int(p2), ssid) == (57, 2) else []}
+        api.get_component_type.side_effect = lambda ptid: {"data": {
+            "connectors": {"Flange:1": None, "Flange:2": None, "PS:1": None}}}
+        self._run(api)
+        cable = H.objects.get(part_type_id="D05700200001")
+        self.assertEqual(cable.category, "cable")
+        self.assertEqual(cable.cable_ends, [{"name": "Flange", "connectors": 2},
+                                            {"name": "PS", "connectors": 1}])
+        generic = H.objects.get(part_type_id="D05700200002")
+        self.assertEqual(generic.category, "generic")
+        self.assertIsNone(generic.cable_ends)
+        # only the cable type cost an extra type-record call
+        called = {c.args[0] for c in api.get_component_type.call_args_list}
+        self.assertEqual(called, {"D05700200001"})
+
+    def test_failed_ends_fetch_keeps_previous_value(self):
+        api = self._api()
+        api.get_part_types_for_subsystem.side_effect = lambda p1, p2, ssid: {"data": [
+            {"part_type_id": "D05700200001", "category": "cable",
+             "full_name": "D.FD-VD TDE.Digital electronics.HV bundle"},
+        ] if (int(p2), ssid) == (57, 2) else []}
+        api.get_component_type.side_effect = lambda ptid: {"data": {
+            "connectors": {"Flange:1": None}}}
+        self._run(api)
+        api.get_component_type.side_effect = RuntimeError("502")
+        self._run(api)  # re-sync with the type record failing
+        cable = H.objects.get(part_type_id="D05700200001")
+        self.assertEqual(cable.cable_ends, [{"name": "Flange", "connectors": 1}])
 
     def test_excluded_systems_never_walked(self):
         api = self._api()

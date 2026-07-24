@@ -1,5 +1,5 @@
 {% extends 'explore/base.html' %}
-
+{% load static %}
 {% block title %}{{ view.name }} · HWDB Explorer{% endblock %}
 
 {% block content %}
@@ -166,6 +166,11 @@
 
     <dl class="panel-meta">
         <dt>Part type ID</dt><dd><a href="{{ hwdb_ui_base }}/view/components?pa={{ leaf.part_type_id }}" target="_blank" rel="noopener" title="Open this component type in the FNAL HWDB">{{ leaf.part_type_id }} <span aria-hidden="true">&#x2197;</span></a></dd>
+        {# Mirrored on hierarchy walk (#72); rows from before the field exist show "—" until their system is re-walked. #}
+        <dt>Category</dt><dd>{{ leaf.category|default:"—" }}{% if not leaf.category %}
+            <button id="system-walk-btn" class="btn btn-sm btn-ghost" type="button" style="margin-left: 8px;"
+                    data-sync-url="{% url 'explore:system_sync' system_id=leaf.system_id %}?project={{ leaf.project }}"
+                    title="Not mirrored yet — re-walk this system’s structure from HWDB">not mirrored — re-walk system</button>{% endif %}</dd>
         <dt>System</dt><dd>{{ leaf.system_name }} ({{ leaf.system_id }})</dd>
         <dt>Subsystem</dt><dd>{{ leaf.subsystem_name }} ({{ leaf.subsystem_id }})</dd>
         <dt>{% if is_shipping %}Boxes in HWDB{% else %}Items in HWDB{% endif %}</dt><dd>{{ leaf.n_components }}</dd>
@@ -174,6 +179,25 @@
         <dt>Exec summary</dt><dd><a href="{% url 'explore:es_config' part_type_id=leaf.part_type_id %}?next={{ request.path|urlencode }}" title="Create or edit the type’s executive-summary config (ES_{{ leaf.part_type_id }}_*.json in HWDB)">Add / edit the ES config…</a></dd>
         {% endif %}
     </dl>
+    <pre id="system-sync-log"></pre>
+
+    {% if leaf.category == "cable" %}
+    {# Cable type (#72): ENDs/connectors mirrored from the type record by the hierarchy refresh. #}
+    <div class="chart-card">
+        <div class="panel-title" style="font-size: 14px; margin-bottom: 8px;">Cable ends</div>
+        {% if leaf.cable_ends %}
+        {{ leaf.cable_ends|json_script:"cable-ends-data" }}
+        <div id="cable-diagram" data-label="{{ leaf.part_type_id }}"></div>
+        <p class="cbl-hint">{{ leaf.cable_ends|length }} END{{ leaf.cable_ends|length|pluralize }} with each END’s connector count, from the HWDB type definition (mirrored on hierarchy refresh).</p>
+        {% else %}
+        <div class="explore-empty" style="padding: 24px 16px;">
+            <p>This cable type’s ENDs aren’t mirrored yet.</p>
+            <p><button id="system-walk-btn" class="btn btn-sm btn-primary" type="button"
+                       data-sync-url="{% url 'explore:system_sync' system_id=leaf.system_id %}?project={{ leaf.project }}">Re-walk this system</button></p>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
 
     {% if leaf.tests_synced_at %}
         {% for c in charts %}
@@ -416,6 +440,7 @@
 
 {% csrf_token %}
 {% if charts %}{{ charts|json_script:"node-chart-config" }}{% endif %}
+<script src="{% static 'explore/cable-diagram.js' %}" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 (function () {

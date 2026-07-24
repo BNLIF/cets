@@ -17,7 +17,7 @@ after page load (the walk is slow: ~2 HWDB calls per node). Errors render at
   <tbody>
   {% for r in rows %}
     <tr>
-      <td class="mono" style="--depth: {{ r.depth }};"><a href="{% url 'explore:part' part_id=r.part_id %}">{{ r.part_id }}</a></td>
+      <td class="mono" style="--depth: {{ r.depth }};"><a href="{% url 'explore:part' part_id=r.part_id %}">{{ r.part_id }}</a>{% if r.connection %}<span class="es-conn" title="Cable end · END name : connector #">.{{ r.connection }}</span>{% endif %}</td>
       <td>{{ r.type_name|default:"—" }}</td>
       <td>{{ r.functional_position|default:"—" }}</td>
       <td>{{ r.status|default:"—" }}</td>

@@ -25,7 +25,7 @@ from django.utils import timezone
 
 from hwdb.api_client import FnalDbApiClient
 
-from . import curation
+from . import curation, parts
 from .models import HierarchyNode, HierarchySyncState
 
 logger = logging.getLogger(__name__)
@@ -92,11 +92,15 @@ def _count_components(api, part_type_id: str) -> int:
     return len(body.get("data") or [])
 
 
-def _upsert_system_tree(instance, project, sys_node, subs, cts_for, counts, seen):
+def _upsert_system_tree(api, instance, project, sys_node, subs, cts_for, counts, seen):
     """Write one system's Subsystem + Component-Type rows into the mirror —
     shared by the full refresh and the per-system overflow walk (#49). Adds
     written pks to ``seen``; returns ``(n_leaves, progress_lines)``. A ptid
-    missing from ``counts`` (failed count) keeps its previous value."""
+    missing from ``counts`` (failed count) keeps its previous value.
+
+    Type rows also mirror the HWDB ``category``; for cable types (#72) the
+    type record is fetched once to derive the ENDs/connector counts for the
+    leaf-page diagram — a failed fetch keeps the previous value."""
     sid, sname = sys_node.system_id, sys_node.system_name
     leaves, lines = 0, []
     for ss in subs:
@@ -122,15 +126,26 @@ def _upsert_system_tree(instance, project, sys_node, subs, cts_for, counts, seen
                 continue
             full = ct.get("full_name") or ""
             leaf = full.split(".")[-1].strip() if full else ptid
+            category = ct.get("category") or ""
             # defaults exclude the test-sync fields so they survive re-sync.
             defaults = {
                 "parent": sub_node, "project": project,
                 "system_id": sid, "system_name": sname,
                 "subsystem_id": ssid, "subsystem_name": ssname,
                 "name": leaf, "full_name": full,
+                "category": category,
             }
             if ptid in counts:  # a failed count keeps the previous value
                 defaults["n_components"] = counts[ptid]
+            if category == "cable":
+                try:
+                    defaults["cable_ends"] = parts.cable_ends(
+                        (api.get_component_type(ptid).get("data") or {})
+                        .get("connectors"))
+                except Exception as e:  # keep the previous ends on failure
+                    logger.warning("cable ends for %s failed: %s", ptid, e)
+            else:
+                defaults["cable_ends"] = None
             type_node, _ = HierarchyNode.objects.update_or_create(
                 instance=instance,
                 level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid,
@@ -288,7 +303,7 @@ def sync_hierarchy(api, instance: str = "prod", project: str = "D") -> Iterator[
             subs = subs_by_sys.get(sid, [])
             cts_for = {ss.get("subsystem_id"): cts_by_sub.get((sid, ss.get("subsystem_id")), [])
                        for ss in subs}
-            n, lines = _upsert_system_tree(instance, project, sys_node,
+            n, lines = _upsert_system_tree(api, instance, project, sys_node,
                                            subs, cts_for, counts, seen)
             leaves += n
             for line in lines:
@@ -388,7 +403,7 @@ def sync_system(api, instance: str, system_id: int, project: str = "D") -> Itera
                            system_id, p, e)
             yield f"  WARNING: count failed for {p} (leaf kept, previous count retained)\n"
 
-        n_leaves, lines = _upsert_system_tree(instance, project, sys_node,
+        n_leaves, lines = _upsert_system_tree(api, instance, project, sys_node,
                                               subs, cts_for, counts, seen)
         for line in lines:
             yield line

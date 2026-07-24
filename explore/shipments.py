@@ -14,6 +14,7 @@ live on expand (#44), not here.
 from __future__ import annotations
 
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from threading import local as _thread_local_cls
@@ -70,16 +71,43 @@ def shipped_received(locations: list[dict]) -> tuple[datetime | None, datetime |
     return shipped, received
 
 
+# Hajime's cabling model (#72) suffixes the PID in ``/subcomponents`` rows.
+# On the connected component: ``<cable PID>.<END name>:<connector #>``; on the
+# cable's own rows the peer shows as ``<peer PID>.<functional position>`` (no
+# trailing ``:n``) — a back-reference, not containment. Split only when the
+# prefix is PID-shaped so odd future ids pass through untouched.
+_SUBCOMP_REF = re.compile(r"^([A-Za-z0-9]{8,}-\w+)\.(.+)$")
+_FWD_CONNECTOR = re.compile(r":\d+$")
+
+
+def split_subcomp_ref(ref: str | None) -> tuple[str | None, str | None]:
+    """``(base_pid, connection)`` from a subcomponent ``part_id`` ref —
+    connection (``"FCP Flange:1"`` / ``"Cold Bottom FCT"``) is None for a
+    plain PID. The suffixed form 404s on every per-part endpoint, so lookups
+    and links must use the base."""
+    m = _SUBCOMP_REF.match(ref or "")
+    return (m.group(1), m.group(2)) if m else (ref, None)
+
+
 def current_manifest(subs: list[dict] | None) -> list[dict]:
     """A box's current contents from its raw ``/subcomponents`` rows: those whose
     latest state is mounted (``operation`` of ``unmount`` excluded), each as
-    part id / component-type name / functional position."""
-    return [
-        {"part_id": s.get("part_id"),
-         "type_name": s.get("type_name"),
-         "functional_position": s.get("functional_position")}
-        for s in (subs or []) if s.get("operation") != "unmount"
-    ]
+    part id / component-type name / functional position. Cable-end refs (#72)
+    are split: ``part_id`` is the base PID (usable for lookups/links),
+    ``connection`` keeps the ``END:connector`` (or peer-position) suffix and
+    ``peer`` marks a back-reference row (no ``:n`` — the other side of a cable
+    link, not contents)."""
+    out = []
+    for s in subs or []:
+        if s.get("operation") == "unmount":
+            continue
+        pid, conn = split_subcomp_ref(s.get("part_id"))
+        out.append({"part_id": pid,
+                    "connection": conn,
+                    "peer": bool(conn) and not _FWD_CONNECTOR.search(conn),
+                    "type_name": s.get("type_name"),
+                    "functional_position": s.get("functional_position")})
+    return out
 
 
 # The FD shipping workflow writes these checklists into the box item's

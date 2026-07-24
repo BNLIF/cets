@@ -772,7 +772,8 @@ def subtree_flowables(rows: list[dict], truncated: bool) -> list:
 
     body = [["Part", "Status", "Uploaded", "Certified"]]
     for r in rows:
-        label = (f"{r['part_id']} ({r.get('type_name') or '?'}) "
+        conn = f".{r['connection']}" if r.get("connection") else ""  # cable end (#72)
+        label = (f"{r['part_id']}{conn} ({r.get('type_name') or '?'}) "
                  f"@ {r.get('functional_position') or '—'}")
         body.append([
             Paragraph("&nbsp;" * 4 * r["depth"] + escape(label), cell),

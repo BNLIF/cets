@@ -128,6 +128,11 @@ the part-type ID. For LArASIC P5B Prod, `D08100100003` decodes as:
   walked region. See [[0017-multi-project-mirror-and-regions]].
 - **Subsystem**: second level (e.g. `Digital electronics`, `Chimney`). The
   `subsystem_id` is the 3rd PID segment.
+- **Cable-end ref**: in `/subcomponents` rows a cable link overloads
+  `part_id` as `<cable PID>.<END name>:<connector #>` (and, on the cable's
+  own rows, `<peer PID>.<position>` back-references — connectivity, not
+  containment). The explorer splits these into base PID + connection at the
+  manifest. See [[0018-cable-end-subcomponent-refs]].
 - **Component Type**: the leaf type with its own QC test-types and components
   (e.g. `AMC`, `LArASIC P5B Prod`). HWDB exposes a `full_name` like
   `D.FD-VD TDE.Digital electronics.AMC`. This is what the existing models call

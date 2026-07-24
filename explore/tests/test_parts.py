@@ -15,7 +15,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
 
-from explore import navigation, parts
+from explore import navigation, parts, shipments
 from explore.models import HierarchyNode as H
 from explore.models import HwdbComponentEvent
 from hwdb.fnal.bearer import FnalLinkRequired
@@ -143,6 +143,12 @@ class PartFactsTest(TestCase):
         self.assertEqual(facts["Created by"], "Chao Zhang")  # name only, not the dict
         self.assertNotIn("Manufacturer", facts)
 
+    def test_category_fact_from_the_item_record(self):
+        facts = {f["label"]: f["value"] for f in parts.part_facts({"category": "cable"})}
+        self.assertEqual(facts["Category"], "cable")
+        facts = {f["label"]: f["value"] for f in parts.part_facts({"serial_number": "S"})}
+        self.assertNotIn("Category", facts)  # absent field skipped, not shown blank
+
     def test_qc_flags_render_yes_no_and_skip_absent(self):
         # False is meaningful (→ "No"); only a missing field is skipped.
         comp = {"serial_number": "SN-9", "is_installed": False,
@@ -151,6 +157,170 @@ class PartFactsTest(TestCase):
         self.assertEqual(facts["Installed"], "No")
         self.assertEqual(facts["QA/QC Uploaded"], "Yes")
         self.assertNotIn("Certified QA/QC", facts)
+
+
+class SubcompRefTest(TestCase):
+    """shipments.split_subcomp_ref / current_manifest with cable-end refs
+    (#72): ``<PID>.<END name>:<connector #>`` on the connected component,
+    ``<PID>.<position>`` peer back-references on the cable's own rows."""
+
+    def test_cable_end_ref_splits(self):
+        self.assertEqual(shipments.split_subcomp_ref("Z00100300080-00001.FCP Flange:1"),
+                         ("Z00100300080-00001", "FCP Flange:1"))
+
+    def test_peer_ref_splits(self):
+        self.assertEqual(shipments.split_subcomp_ref("Z00100300064-00001.Cold Bottom FCT"),
+                         ("Z00100300064-00001", "Cold Bottom FCT"))
+
+    def test_plain_pid_passes_through(self):
+        self.assertEqual(shipments.split_subcomp_ref("D05700200001-00042"),
+                         ("D05700200001-00042", None))
+        self.assertEqual(shipments.split_subcomp_ref(None), (None, None))
+
+    def test_non_pid_prefix_left_whole(self):
+        self.assertEqual(shipments.split_subcomp_ref("foo.bar"), ("foo.bar", None))
+
+    def test_manifest_rows_carry_base_pid_connection_and_peer_flag(self):
+        rows = shipments.current_manifest([
+            {"part_id": "Z00100300080-00001.FCP Flange:1", "operation": "mount",
+             "type_name": "Cold cable", "functional_position": "Cold Bottom FCT"},
+            {"part_id": "Z00100300069-00005.FC Term Bottom", "operation": "mount",
+             "type_name": "FC Termination board", "functional_position": "FC Term Bottom"},
+            {"part_id": "D05700200001-00042", "operation": "mount",
+             "type_name": "FEMB", "functional_position": "Slot 1"},
+        ])
+        self.assertEqual(
+            [(r["part_id"], r["connection"], r["peer"]) for r in rows],
+            [("Z00100300080-00001", "FCP Flange:1", False),   # cable-end mount
+             ("Z00100300069-00005", "FC Term Bottom", True),  # peer back-reference
+             ("D05700200001-00042", None, False)])            # classic containment
+
+    def test_assembly_status_fetched_with_base_pid(self):
+        api = mock.MagicMock()
+        api.get_subcomponents.return_value = {"data": [
+            {"part_id": "Z00100300080-00001.FCP Flange:1", "operation": "mount"}]}
+        api.get_component.return_value = {"data": {"status": {"name": "Passed"}}}
+        kids = parts.assembly_children(api, "Z00100300064-00001")
+        api.get_component.assert_called_once_with("Z00100300080-00001")
+        self.assertEqual(kids[0]["status"], "Passed")
+
+
+class CableEndsTest(TestCase):
+    """parts.cable_ends — a cable type's ENDs/connector counts from its
+    expanded ``connectors`` keys (#72), e.g. HVS Test Bundle 4 Ends."""
+
+    def test_groups_connector_slots_by_end_in_key_order(self):
+        connectors = {f"Flange:{n}": None for n in range(1, 9)}
+        connectors.update({"FC Termination:1": None, "FC Termination:2": None,
+                           "Inner CRP:1": None, "Inner CRP:2": None, "Inner CRP:3": None})
+        self.assertEqual(parts.cable_ends(connectors), [
+            {"name": "Flange", "connectors": 8},
+            {"name": "FC Termination", "connectors": 2},
+            {"name": "Inner CRP", "connectors": 3}])
+
+    def test_key_without_connector_number_is_a_single_connector_end(self):
+        self.assertEqual(parts.cable_ends({"Bare End": None}),
+                         [{"name": "Bare End", "connectors": 1}])
+        self.assertEqual(parts.cable_ends(None), [])
+
+    def _cable_api(self):
+        api = mock.MagicMock()
+        api.get_component.return_value = {"data": {
+            "category": "cable", "serial_number": "FCP201NW",
+            "component_type": {"name": "Bottom FC termination cold cable"}}}
+        api.get_component_type.return_value = {"data": {
+            "category": "cable",
+            "connectors": {"FCP Flange:1": None, "FCT Board:1": None}}}
+        for m in (api.get_locations, api.get_subcomponents, api.get_images,
+                  api.get_test_types, api.get_tests, api.get_container):
+            m.return_value = {"data": []}
+        return api
+
+    def test_part_detail_flags_cable_and_fetches_type_ends(self):
+        d = parts.part_detail(self._cable_api(), "Z00100300080-00001", is_shipping=False)
+        self.assertTrue(d["is_cable"])
+        self.assertEqual(d["cable_ends"], [{"name": "FCP Flange", "connectors": 1},
+                                           {"name": "FCT Board", "connectors": 1}])
+
+    def test_generic_part_is_not_a_cable_and_skips_the_type_fetch(self):
+        api = self._cable_api()
+        api.get_component.return_value = {"data": {"category": "generic"}}
+        d = parts.part_detail(api, "Z00100300037-00001", is_shipping=False)
+        self.assertFalse(d["is_cable"])
+        self.assertEqual(d["cable_ends"], [])
+        api.get_component_type.assert_not_called()
+
+    def test_failed_type_fetch_degrades_to_no_ends(self):
+        api = self._cable_api()
+        api.get_component_type.side_effect = RuntimeError("502")
+        d = parts.part_detail(api, "Z00100300080-00001", is_shipping=False)
+        self.assertTrue(d["is_cable"])
+        self.assertEqual(d["cable_ends"], [])
+
+
+class CableConnectionsTest(TestCase):
+    """_annotate_cable_connections (#72) — each connection's cable-side
+    ``END:connector`` recovered from the peer's manifest, plus the occupied
+    slots for the diagram."""
+
+    CABLE = "Z00100300035-00001"
+    FLANGE = "Z00100300037-00001"
+    TRAY = "Z00100300070-00001"
+
+    def _api(self):
+        # The flange holds the cable at Flange:1 and Flange:2 (two positions);
+        # the tray holds it by bare PID (only-PID link, no connector).
+        api = mock.MagicMock()
+        api.get_subcomponents.side_effect = lambda pid: {"data": {
+            self.FLANGE: [
+                {"part_id": f"{self.CABLE}.Flange:1", "operation": "mount",
+                 "functional_position": "Cold Inner CO"},
+                {"part_id": f"{self.CABLE}.Flange:2", "operation": "mount",
+                 "functional_position": "Cold Inner IN"},
+            ],
+            self.TRAY: [{"part_id": self.CABLE, "operation": "mount",
+                         "functional_position": "Bottom FCT cables"}],
+        }.get(pid, [])}
+        return api
+
+    def _manifest(self):
+        # The cable's own reverse rows for those three connections.
+        return shipments.current_manifest([
+            {"part_id": f"{self.FLANGE}.Cold Inner CO", "operation": "mount",
+             "functional_position": "Cold Inner CO", "type_name": "Flange"},
+            {"part_id": f"{self.FLANGE}.Cold Inner IN", "operation": "mount",
+             "functional_position": "Cold Inner IN", "type_name": "Flange"},
+            {"part_id": f"{self.TRAY}.Bottom FCT cables", "operation": "mount",
+             "functional_position": "Bottom FCT cables", "type_name": "Tray"},
+        ])
+
+    def test_via_and_used_slots(self):
+        manifest = self._manifest()
+        used = parts._annotate_cable_connections(self._api(), self.CABLE, manifest)
+        self.assertEqual(used, ["Flange:1", "Flange:2"])
+        self.assertEqual([m["via"] for m in manifest],
+                         ["Flange:1", "Flange:2", None])  # only-PID link: no via
+
+    def test_one_fetch_per_distinct_peer(self):
+        api = self._api()
+        parts._annotate_cable_connections(api, self.CABLE, self._manifest())
+        called = [c.args[0] for c in api.get_subcomponents.call_args_list]
+        self.assertEqual(sorted(called), [self.FLANGE, self.TRAY])  # deduped
+
+    def test_failed_peer_fetch_degrades_that_peer_only(self):
+        api = self._api()
+        good = api.get_subcomponents.side_effect
+
+        def side(pid):
+            if pid == self.FLANGE:
+                raise RuntimeError("502")
+            return good(pid)
+
+        api.get_subcomponents.side_effect = side
+        manifest = self._manifest()
+        used = parts._annotate_cable_connections(api, self.CABLE, manifest)
+        self.assertEqual(used, [])
+        self.assertEqual([m["via"] for m in manifest], [None, None, None])
 
 
 class AssemblyTreeTest(TestCase):
@@ -216,6 +386,23 @@ class AssemblyViewTest(TestCase):
             resp = self.client.get("/hw/assembly/B1/")
         self.assertEqual(resp.status_code, 409)
 
+    def test_peer_backref_flagged_with_base_pid_url(self):
+        # Expanding a cable: its rows are peer back-references (#72) — the
+        # JSON must carry the peer flag so the client renders an inert caret.
+        api = mock.MagicMock()
+        api.get_subcomponents.return_value = {"data": [
+            {"part_id": "Z00100300064-00001.Cold Bottom FCT", "operation": "mount",
+             "type_name": "Bias FT flange", "functional_position": "Cold Bottom FCT"}]}
+        api.get_component.return_value = {"data": {"status": "Passed"}}
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            resp = self.client.get("/hw/assembly/Z00100300080-00001/")
+        child = json.loads(resp.content)["children"][0]
+        self.assertEqual(child["part_id"], "Z00100300064-00001")
+        self.assertEqual(child["connection"], "Cold Bottom FCT")
+        self.assertTrue(child["peer"])
+        self.assertEqual(child["url"], "/hw/part/Z00100300064-00001/")
+
 
 class PartViewTest(TestCase):
     def setUp(self):
@@ -270,6 +457,72 @@ class PartViewTest(TestCase):
         resp = self.client.get("/hw/shipment/D05700200099-00007/")
         self.assertEqual(resp.status_code, 301)
         self.assertEqual(resp["Location"], self.url)
+
+    def test_renders_cable_part_with_ends_diagram_and_inert_peer_caret(self):
+        api = self._api()
+        api.get_component.return_value = {"data": {
+            "category": "cable", "serial_number": "FCP201NW",
+            "component_type": {"name": "Bottom FC termination cold cable"}}}
+        api.get_component_type.return_value = {"data": {
+            "connectors": {"FCP Flange:1": None, "FCT Board:1": None}}}
+        api.get_subcomponents.return_value = {"data": [
+            {"part_id": "Z00100300064-00001.Cold Bottom FCT", "operation": "mount",
+             "type_name": "Bias FT flange", "functional_position": "Cold Bottom FCT"}]}
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            body = self.client.get(self.url).content.decode()
+        self.assertIn("<h2>Cable ends</h2>", body)        # diagram card
+        self.assertIn('id="cable-ends-data"', body)       # ends JSON for the SVG
+        self.assertIn('id="cable-used-data"', body)       # occupancy JSON (#72)
+        self.assertIn("FCP Flange", body)
+        self.assertIn("Connections (1)", body)            # not "Assembly" on a cable
+        self.assertIn("asm-caret is-leaf", body)          # peer row: inert caret
+        self.assertIn(".Cold Bottom FCT", body)           # connection annotation
+
+    def test_cable_connection_rows_show_which_end_they_use(self):
+        cable = "D05700200099-00007"
+        flange = "Z00100300064-00001"
+        api = self._api()
+        api.get_component.return_value = {"data": {
+            "category": "cable",
+            "component_type": {"name": "Bottom FC termination cold cable"}}}
+        api.get_component_type.return_value = {"data": {
+            "connectors": {"FCP Flange:1": None, "FCT Board:1": None}}}
+        api.get_subcomponents.side_effect = lambda pid: {"data": {
+            cable: [{"part_id": f"{flange}.Cold Bottom FCT", "operation": "mount",
+                     "type_name": "Bias FT flange",
+                     "functional_position": "Cold Bottom FCT"}],
+            flange: [{"part_id": f"{cable}.FCP Flange:1", "operation": "mount",
+                      "functional_position": "Cold Bottom FCT"}],
+        }.get(pid, [])}
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            body = self.client.get(self.url).content.decode()
+        self.assertIn("via FCP Flange:1", body)            # cable-side end recovered
+        self.assertIn('"FCP Flange:1"', body)              # occupied slot in the used JSON
+
+    def test_generic_part_has_no_cable_card(self):
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=self._api()):
+            body = self.client.get(self.url).content.decode()
+        self.assertNotIn("<h2>Cable ends</h2>", body)
+        self.assertIn("Assembly (0)", body)
+
+    def test_forward_cable_end_row_does_not_expand(self):
+        # A mounted cable end on a normal part (the flange case): the row
+        # links to the cable but its caret is inert — expanding would fan out
+        # into the cable's whole neighborhood, arbitrarily deep (#72).
+        api = self._api()
+        api.get_subcomponents.return_value = {"data": [
+            {"part_id": "Z00100300035-00001.Flange:3", "operation": "mount",
+             "type_name": "HVS Test Bundle 4 Ends",
+             "functional_position": "Cold Inner SH"}]}
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            body = self.client.get(self.url).content.decode()
+        self.assertIn("asm-caret is-leaf", body)
+        self.assertIn("Cable end — open the cable for its connections", body)
+        self.assertIn(".Flange:3", body)
 
     def test_es_card_on_dev_part_whose_type_has_an_es_config(self):
         # A non-shipping part on the write instance gets the Executive-summary
@@ -347,6 +600,58 @@ def _comp_leaf(ptid="D05700200099"):
         subsystem_id=300, subsystem_name="ColdADC", name="ColdADC",
         part_type_id=ptid, n_components=55,
         full_name="D.FD CE.ColdADC.ColdADC", tests_synced_at=timezone.now())
+
+
+class LeafCableCardTest(TestCase):
+    """The type leaf page's cable-ends card (#72) — mirror-only render."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("lc", "l@c.io", "pw")
+        self.client.force_login(self.user)
+        self.leaf = _comp_leaf()
+
+    def _html(self):
+        return self.client.get(
+            navigation.leaf_path_for("prod", self.leaf.part_type_id)).content.decode()
+
+    def test_cable_leaf_renders_ends_diagram(self):
+        self.leaf.category = "cable"
+        self.leaf.cable_ends = [{"name": "FCP Flange", "connectors": 1},
+                                {"name": "FCT Board", "connectors": 1}]
+        self.leaf.save()
+        html = self._html()
+        self.assertIn(">Cable ends<", html)
+        self.assertIn('id="cable-ends-data"', html)
+        self.assertIn("FCP Flange", html)
+        self.assertIn("cable-diagram.js", html)
+
+    def test_cable_leaf_without_mirrored_ends_offers_a_system_rewalk(self):
+        self.leaf.category = "cable"
+        self.leaf.save()
+        html = self._html()
+        self.assertIn(">Cable ends<", html)
+        self.assertIn("aren’t mirrored yet", html)
+        self.assertIn('id="system-walk-btn"', html)
+        self.assertIn("/hw/sync-system/81/?project=D", html)
+
+    def test_generic_leaf_has_no_cable_card(self):
+        html = self._html()
+        self.assertNotIn(">Cable ends<", html)
+
+    def test_category_row_shows_mirrored_value(self):
+        self.leaf.category = "generic"
+        self.leaf.save()
+        html = self._html()
+        self.assertIn("<dt>Category</dt><dd>generic</dd>", html)
+        self.assertNotIn("not mirrored — re-walk system", html)
+
+    def test_unmirrored_category_offers_a_system_rewalk(self):
+        # Mirror rows from before the category field (#72) show "—" plus a
+        # re-walk button, so the fields can be backfilled from the leaf page.
+        html = self._html()
+        self.assertIn("<dt>Category</dt>", html)
+        self.assertIn("not mirrored — re-walk system", html)
+        self.assertIn("/hw/sync-system/81/?project=D", html)
 
 
 class LeafPartsTableTest(TestCase):

@@ -698,6 +698,7 @@ def explore_part_view(request, part_id):
         "active_nav": "shipments" if is_shipping else "hardware",
         "sidebar": navigation.sidebar_tree(inst, side_ctx),
         "part_id": part_id,
+        "ptid": ptid,
         "detail": detail,
         "is_shipping": is_shipping,
         "other_attachments": other_attachments,

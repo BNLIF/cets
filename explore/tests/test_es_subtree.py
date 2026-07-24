@@ -89,6 +89,50 @@ class SubtreeWalkTest(TestCase):
         self.assertEqual(rows[1]["status"], "Passed")
 
 
+class SubtreeCableTest(TestCase):
+    """Cable-end refs in the walk (#72), mirroring Hajime's Sandbox model:
+    a mounted cable row reads ``<cable PID>.<END name>:<connector #>``, and
+    the cable's own manifest lists its peers as ``<PID>.<position>``."""
+
+    FLANGE = "Z00100300064-00001"
+    CABLE = "Z00100300080-00001"
+    BOARD = "Z00100300069-00005"
+    TRAY = "Z00100300070-00001"
+
+    def _cable_api(self):
+        return _walk_api({
+            self.FLANGE: [_row(f"{self.CABLE}.FCP Flange:1",
+                               "Bottom FC termination cold cable", "Cold Bottom FCT")],
+            # the cable's "sub-components" are what its ends plug into —
+            # connectivity (including its own parent), not contents
+            self.CABLE: [_row(f"{self.FLANGE}.Cold Bottom FCT", "Bias FT flange"),
+                         _row(f"{self.BOARD}.FC Term Bottom", "FC Termination board"),
+                         _row(f"{self.TRAY}.Bottom FCT cables", "BDE cable tray")],
+        })
+
+    def test_cable_listed_once_by_base_pid_with_connection(self):
+        rows, truncated = subtree_rows(self._cable_api(), self.FLANGE)
+        self.assertFalse(truncated)
+        self.assertEqual([r["part_id"] for r in rows], [self.CABLE])
+        self.assertEqual(rows[0]["connection"], "FCP Flange:1")
+        self.assertEqual(rows[0]["status"], "Passed")  # fetched with the base PID
+
+    def test_peer_backrefs_do_not_become_contents(self):
+        rows, _ = subtree_rows(self._cable_api(), self.FLANGE)
+        listed = {r["part_id"] for r in rows}
+        self.assertNotIn(self.BOARD, listed)
+        self.assertNotIn(self.TRAY, listed)
+        self.assertNotIn(self.FLANGE, listed)
+
+    def test_multi_connector_cable_listed_once(self):
+        # slide 12: one bundle mounted at Flange:1..8 is one physical item
+        api = _walk_api({self.FLANGE: [
+            _row(f"{self.CABLE}.Flange:{n}", "HVS Test Bundle", f"Pos {n}")
+            for n in range(1, 9)]})
+        rows, _ = subtree_rows(api, self.FLANGE)
+        self.assertEqual([r["part_id"] for r in rows], [self.CABLE])
+
+
 class SubtreePartialViewTest(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user("s", "s@s.io", "pw")

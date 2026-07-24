@@ -224,3 +224,7 @@ a.eh-user:hover { color: var(--ink); }
 }
 *:hover > .chart-save-btn, .chart-save-btn:focus-visible { opacity: 1; }
 .chart-save-btn:hover { color: var(--body); border-color: var(--rule-hard); }
+
+/* Cable-end diagram (#72) — shared by the part page and the type leaf page */
+#cable-diagram svg { display: block; width: 100%; max-width: 720px; height: auto; margin: 0 auto; }
+.cbl-hint { color: var(--faint); font-size: 11.5px; margin-top: 6px; }
