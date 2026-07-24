@@ -130,7 +130,7 @@ class PartFactsTest(TestCase):
             "component_type": {"name": "ColdADC"},
             "institution": {"name": "BNL"},
             "manufacturer": "",                 # blank → skipped
-            "status": {"id": 3, "name": "QA/QC Tests - Passed All"},  # nested ref
+            "status": {"id": 120, "name": "QA/QC Tests - Passed All"},  # nested ref
             "created": "2026-04-02T11:00:00",
             "creator": {"name": "Chao Zhang"},  # nested ref
         }
@@ -157,6 +157,53 @@ class PartFactsTest(TestCase):
         self.assertEqual(facts["Installed"], "No")
         self.assertEqual(facts["QA/QC Uploaded"], "Yes")
         self.assertNotIn("Certified QA/QC", facts)
+
+
+class NormalizeStatusTest(TestCase):
+    """#75: HWDB's obsolete pre-vocabulary statuses (ids 1-3) read as
+    Unknown; the current vocabulary (0 and 100+) passes through."""
+
+    def test_obsolete_ids_become_unknown(self):
+        for i, name in ((1, "Available"), (2, "Temporarily Unavailable"),
+                        (3, "Permanently Unavailable")):
+            self.assertEqual(parts.normalize_status({"id": i, "name": name}),
+                             "Unknown")
+
+    def test_current_vocabulary_ids_pass_through(self):
+        self.assertEqual(parts.normalize_status({"id": 0, "name": "Unknown"}),
+                         "Unknown")
+        # Modern id 170 shares the obsolete id 3's name — the id decides.
+        self.assertEqual(
+            parts.normalize_status({"id": 170, "name": "Permanently Unavailable"}),
+            "Permanently Unavailable")
+        self.assertEqual(
+            parts.normalize_status({"id": 120, "name": "QA/QC Tests - Passed All"}),
+            "QA/QC Tests - Passed All")
+
+    def test_unambiguous_legacy_names_become_unknown(self):
+        # Mirror rows carry bare names; only the unambiguous legacy ones map.
+        self.assertEqual(parts.normalize_status("Available"), "Unknown")
+        self.assertEqual(parts.normalize_status("Temporarily Unavailable"), "Unknown")
+
+    def test_other_values_pass_through(self):
+        # "Permanently Unavailable" by bare name could be modern id 170.
+        for v in ("QA/QC Tests - Passed All", "Permanently Unavailable", "", None):
+            self.assertEqual(parts.normalize_status(v), v)
+
+    def test_part_page_shows_unknown_for_available(self):
+        api = mock.MagicMock()
+        api.get_component.return_value = {"data": {
+            "serial_number": "SN-1", "status": {"id": 1, "name": "Available"},
+            "component_type": {"name": "Test Type 003"}}}
+        api.get_locations.return_value = {"data": []}
+        api.get_subcomponents.return_value = {"data": []}
+        api.get_images.return_value = {"data": []}
+        api.get_tests.return_value = {"data": []}
+        api.get_test_types.return_value = {"data": []}
+        d = parts.part_detail(api, "D00599800003-00210", is_shipping=False)
+        self.assertEqual(d["status"], "Unknown")
+        self.assertIn(("Status", "Unknown"),
+                      [(f["label"], f["value"]) for f in d["facts"]])
 
 
 class SubcompRefTest(TestCase):
@@ -423,7 +470,7 @@ class AssemblyViewTest(TestCase):
         child = json.loads(resp.content)["children"][0]
         self.assertEqual(child["part_id"], "C1")
         self.assertEqual(child["url"], "/hw/part/C1/")
-        self.assertEqual(child["status"], "Available")
+        self.assertEqual(child["status"], "Unknown")   # obsolete default (#75)
 
     def test_fnal_link_required_returns_409(self):
         with mock.patch("explore.views.mint_for", side_effect=FnalLinkRequired()):

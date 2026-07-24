@@ -38,12 +38,12 @@ from reportlab.platypus import (
 
 logger = logging.getLogger(__name__)
 
-# The Dashboard's status vocabulary, verbatim.
+# The Dashboard's status vocabulary. Ids 1-3 are the obsolete pre-change set
+# (#75): kept in the label map so ESes written before the change still
+# display, but no longer offered as options — new assignments are Unknown (0)
+# or the 100+ values (Shipping Procedure Appendix B).
 STATUS_OPTIONS = [
     {"value": 0, "label": "Unknown"},
-    {"value": 1, "label": "(obsolete) Available"},
-    {"value": 2, "label": "(obsolete) Temporarily Unavailable"},
-    {"value": 3, "label": "(obsolete) Permanently Unavailable"},
     {"value": 100, "label": "In Fabrication"},
     {"value": 110, "label": "Waiting on QA/QC Tests"},
     {"value": 120, "label": "QA/QC Tests - Passed All"},
@@ -54,7 +54,13 @@ STATUS_OPTIONS = [
     {"value": 170, "label": "Permanently Unavailable"},
     {"value": 180, "label": "Broken or Needs Repair"},
 ]
-STATUS_LABEL_BY_ID = {o["value"]: o["label"] for o in STATUS_OPTIONS}
+_OBSOLETE_STATUS_LABELS = {
+    1: "(obsolete) Available",
+    2: "(obsolete) Temporarily Unavailable",
+    3: "(obsolete) Permanently Unavailable",
+}
+STATUS_LABEL_BY_ID = {**_OBSOLETE_STATUS_LABELS,
+                      **{o["value"]: o["label"] for o in STATUS_OPTIONS}}
 STATUS_ID_BY_LABEL = {o["label"]: o["value"] for o in STATUS_OPTIONS}
 
 TIMESTAMP_FMT = "%Y-%m-%d %H:%M"      # signature timestamps (Dashboard format)

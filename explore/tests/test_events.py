@@ -100,7 +100,7 @@ class SyncTestEventsTest(TestCase):
                 return {"data": [{"part_id": "P1"}], "pagination": {"pages": 1}}
             return {"data": {"created": "2025-02-01T00:00:00+00:00",
                              "updated": "2025-03-15T00:00:00+00:00",
-                             "status": {"id": 3, "name": "QA/QC Passed"},
+                             "status": {"id": 120, "name": "QA/QC Passed"},
                              "manufacturer": {"id": 5, "name": "BNL"},
                              "institution": "Yale"}}
         client._make_request.side_effect = _make_request
@@ -111,6 +111,24 @@ class SyncTestEventsTest(TestCase):
         self.assertEqual(row.status, "QA/QC Passed")   # nested ref → name
         self.assertEqual(row.manufacturer, "BNL")
         self.assertEqual(row.institution, "Yale")      # plain scalar
+
+    def test_obsolete_available_status_mirrors_as_unknown(self):
+        # HWDB's REST API still serves the obsolete pre-vocabulary default
+        # "Available" for parts whose status was never set — the mirror
+        # records the current vocabulary's initial value instead (#75).
+        client = mock.MagicMock()
+
+        def _make_request(method, endpoint, data=None, params=None):
+            if endpoint.startswith("component-types/"):
+                return {"data": [{"part_id": "P1"}], "pagination": {"pages": 1}}
+            return {"data": {"created": "2025-02-01T00:00:00+00:00",
+                             "status": {"id": 1, "name": "Available"}}}
+        client._make_request.side_effect = _make_request
+        client.get_tests.side_effect = lambda pid: {"data": []}
+        with mock.patch("explore.events.FnalDbApiClient", return_value=client):
+            list(events.sync_test_events("https://x", "bearer", "D05700200001", mode="full"))
+        row = HwdbComponentEvent.objects.get(part_type_id="D05700200001", part_id="P1")
+        self.assertEqual(row.status, "Unknown")
 
     def test_mirrors_qc_flags(self):
         # The binary QC flags are top-level booleans on the detail record (#51),

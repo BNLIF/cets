@@ -25,6 +25,7 @@ from django.utils import timezone
 
 from hwdb.api_client import FnalDbApiClient
 
+from . import parts
 from .models import HierarchyNode, HwdbComponentEvent, HwdbTestEvent
 
 logger = logging.getLogger(__name__)
@@ -234,7 +235,7 @@ def _fetch_component(api, part_id: str, date_spec: dict | None,
         updated = _parse_created(d.get("updated"))
         serial = d.get("serial_number") or ""
         created_by = _ref_name(d.get("creator"))
-        status = _ref_name(d.get("status"))
+        status = parts.normalize_status(d.get("status")) or ""
         manufacturer = _ref_name(d.get("manufacturer"))
         institution = _ref_name(d.get("institution"))
         # Binary QC flags — top-level booleans on the detail record (#51);

@@ -99,6 +99,26 @@ def _named(v):
     return v.get("name") if isinstance(v, dict) else v
 
 
+# HWDB's pre-vocabulary-change statuses (ids 1-3) are all obsolete: the
+# current vocabulary is Unknown (0) plus the 100+ values, with Unknown the
+# initial default (Shipping Procedure Appendix B, #75) — yet the REST API
+# still serves the old ids on parts whose status predates the change (boxes
+# minted 2026-07 carry id 1 "Available"). By bare name (the mirror stores
+# names only) the mapping covers the unambiguous legacy names;
+# "Permanently Unavailable" doubles as modern id 170, so it passes through
+# and the id-aware sync corrects obsolete rows on their next walk.
+_OBSOLETE_STATUS_IDS = {1, 2, 3}
+_OBSOLETE_STATUS_NAMES = {"Available", "Temporarily Unavailable"}
+
+
+def normalize_status(value):
+    """Raw HWDB status ({id, name} ref, bare name, or None) → display name,
+    with the obsolete ids 1-3 shown as Unknown."""
+    if isinstance(value, dict):
+        return "Unknown" if value.get("id") in _OBSOLETE_STATUS_IDS else value.get("name")
+    return "Unknown" if value in _OBSOLETE_STATUS_NAMES else value
+
+
 # Above this many direct children we skip the per-child status fetch so the page
 # render stays fast; the children still list, just without a status until
 # expanded (ADR-0015).
@@ -118,7 +138,8 @@ def assembly_children(api, parent_pid: str) -> list[dict]:
         status = None
         if k.get("part_id") and i < _STATUS_FETCH_CAP:
             try:
-                status = _named((api.get_component(k["part_id"]).get("data") or {}).get("status"))
+                status = normalize_status(
+                    (api.get_component(k["part_id"]).get("data") or {}).get("status"))
             except Exception as e:
                 logger.warning("assembly: status for %s failed: %s", k["part_id"], e)
         k["status"] = status
@@ -174,7 +195,7 @@ def subtree_rows(api, root_pid: str, *, max_nodes: int = _SUBTREE_NODE_CAP
         status = uploaded = certified = None
         try:
             comp = api.get_component(row["part_id"]).get("data") or {}
-            status = _named(comp.get("status"))
+            status = normalize_status(comp.get("status"))
             uploaded = comp.get("qaqc_uploaded")
             certified = comp.get("certified_qaqc")
         except Exception as e:
@@ -199,7 +220,7 @@ def part_facts(comp: dict) -> list[dict]:
         ("Serial number", comp.get("serial_number")),
         ("Type", _named(ct) or comp.get("type_name")),
         ("Category", comp.get("category")),  # "cable" / "generic" / … (#72)
-        ("Status", _named(comp.get("status"))),
+        ("Status", normalize_status(comp.get("status"))),
         # Binary QC flags off the same record (#51).
         ("Installed", _yesno(comp.get("is_installed"))),
         ("QA/QC Uploaded", _yesno(comp.get("qaqc_uploaded"))),
@@ -381,7 +402,7 @@ def part_detail(api, part_id: str, is_shipping: bool) -> dict:
         "is_cable": is_cable,
         "cable_ends": ends,
         "used_connectors": used,
-        "status": _named(comp.get("status")),
+        "status": normalize_status(comp.get("status")),
         "facts": part_facts(comp),
         "tests": tests,
         "manifest": manifest,
