@@ -51,10 +51,13 @@ def latest_location(locations: list[dict]) -> dict | None:
 def shipped_received(locations: list[dict]) -> tuple[datetime | None, datetime | None]:
     """Derive (shipped, received) from a box's full location timeline (#45).
 
-    shipped = the earliest time it entered transit (``location.id == 0``);
-    received = the arrival time of the latest event *iff* that event is a real
-    location (not in transit) — i.e. null while still moving. Guards against a
-    received earlier than shipped (treated as no valid receipt yet).
+    shipped = the LATEST time it entered transit (``location.id == 0``) —
+    each ship action posts one In-Transit event, so the latest one starts the
+    box's current/most recent trip (#73: a re-shipped box must not show its
+    first-ever ship date); received = the arrival time of the latest event
+    *iff* that event is a real location (not in transit) — i.e. null while
+    still moving. Guards against a received earlier than shipped (treated as
+    no valid receipt yet).
     """
     events = [
         (_parse_dt(e.get("arrived")), (e.get("location") or {}).get("id"))
@@ -63,7 +66,7 @@ def shipped_received(locations: list[dict]) -> tuple[datetime | None, datetime |
     events = sorted((e for e in events if e[0] is not None), key=lambda e: e[0])
     if not events:
         return None, None
-    shipped = next((dt for dt, lid in events if lid == 0), None)
+    shipped = next((dt for dt, lid in reversed(events) if lid == 0), None)
     last_dt, last_lid = events[-1]
     received = last_dt if last_lid not in (0, None) else None
     if shipped and received and received < shipped:
@@ -124,6 +127,32 @@ def _spec_data(component_body: dict | None) -> dict | None:
     """The ``specifications[0].DATA`` blob off a full item record, or None."""
     specs = ((component_body or {}).get("data") or {}).get("specifications") or []
     return (specs[0] or {}).get("DATA") if specs else None
+
+
+def has_shipping_checklist(data_blob: dict | None) -> bool:
+    """Whether the box's spec DATA carries a substantive Shipping Checklist —
+    at least one field or attachment (a bare ``[{}]`` renders as "Not recorded
+    yet", so it doesn't count)."""
+    entries = (data_blob or {}).get("Shipping Checklist")
+    fields, attachments = fold_entries(entries if isinstance(entries, list) else [])
+    return bool(fields or attachments)
+
+
+def _gate_shipped(client, part_id: str, shipped: datetime | None) -> datetime | None:
+    """Drop a timeline-derived SHIPPED date when the box's CURRENT specs no
+    longer record a Shipping Checklist (#73): the checklist is append-only in
+    principle, so its absence means the shipping info was wiped and the
+    lingering In-Transit event shouldn't read as "shipped". Costs one item
+    fetch, only for boxes that ever entered transit; a failed fetch keeps the
+    timeline date (best-effort — don't blank data over a transient error)."""
+    if shipped is None:
+        return None
+    try:
+        blob = _spec_data(client.get_component(part_id))
+    except Exception as e:
+        logger.warning("shipped gate: %s spec fetch failed: %s", part_id, e)
+        return shipped
+    return shipped if has_shipping_checklist(blob) else None
 
 
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
@@ -205,6 +234,7 @@ def refresh_box(api, instance: str, part_type_id: str, part_id: str) -> None:
     latest = latest_location(locs)
     loc = (latest or {}).get("location") or {}
     shipped, received = shipped_received(locs)
+    shipped = _gate_shipped(api, part_id, shipped)
     ShipmentItem.for_instance(instance).filter(part_id=part_id).delete()
     ShipmentItem.objects.create(
         instance=instance, part_type_id=part_type_id, part_id=part_id,
@@ -273,7 +303,9 @@ def sync_shipments(api_base_url: str, bearer: str, part_type_id: str,
     def _fetch(pid):
         locs = tls.client.get_locations(pid).get("data") or []
         manifest = current_manifest(tls.client.get_subcomponents(pid).get("data"))
-        return pid, locs, manifest
+        shipped, received = shipped_received(locs)
+        shipped = _gate_shipped(tls.client, pid, shipped)
+        return pid, locs, manifest, shipped, received
 
     results, done = [], 0
     if fetch:
@@ -289,10 +321,9 @@ def sync_shipments(api_base_url: str, bearer: str, part_type_id: str,
                     yield f"  fetched {done}/{len(fetch)}\n"
 
     ship_rows = []
-    for pid, locs, manifest in results:
+    for pid, locs, manifest, shipped, received in results:
         latest = latest_location(locs)
         loc = (latest or {}).get("location") or {}
-        shipped, received = shipped_received(locs)
         ship_rows.append(ShipmentItem(
             instance=instance, part_type_id=part_type_id, part_id=pid,
             location_name=loc.get("name") or "", location_id=loc.get("id"),
@@ -314,7 +345,7 @@ def sync_shipments(api_base_url: str, bearer: str, part_type_id: str,
     if ship_rows:
         ShipmentItem.objects.bulk_create(ship_rows, batch_size=1000)
     # The same manifest fetch also keeps items' parent_part_id honest (#63).
-    for pid, _locs, manifest in results:
+    for pid, _locs, manifest, _shipped, _received in results:
         _mirror_box_parent(instance, pid, manifest)
 
     # Mark the leaf synced even when 0 boxes — so the page stops

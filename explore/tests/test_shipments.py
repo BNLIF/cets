@@ -56,14 +56,23 @@ def _sub(pos="Slot 1"):
             "functional_position": pos, "operation": "mount"}
 
 
-def _fake_client(items, locs_by_pid, subs_by_pid=None):
+# Default spec DATA for fake boxes: a recorded Shipping Checklist, so
+# timeline-derived SHIPPED dates survive the #73 gate unless a test says
+# otherwise via comp_by_pid.
+_SHIPPED_SPECS = {"Shipping Checklist": [{"Carrier": "FedEx"}]}
+
+
+def _fake_client(items, locs_by_pid, subs_by_pid=None, comp_by_pid=None):
     subs_by_pid = subs_by_pid or {}
+    comp_by_pid = comp_by_pid if comp_by_pid is not None else {}
     client = mock.MagicMock()
     # sync lists items via _make_request (paginated); return a single page.
     client._make_request.side_effect = lambda method, endpoint, data=None, params=None: {
         "data": items, "pagination": {"pages": 1}}
     client.get_locations.side_effect = lambda pid: {"data": locs_by_pid.get(pid, [])}
     client.get_subcomponents.side_effect = lambda pid: {"data": subs_by_pid.get(pid, [])}
+    client.get_component.side_effect = lambda pid: {
+        "data": {"specifications": [{"DATA": comp_by_pid.get(pid, _SHIPPED_SPECS)}]}}
     return client
 
 
@@ -104,15 +113,28 @@ class ShippedReceivedTest(TestCase):
         self.assertEqual(shipped.date().isoformat(), "2026-05-02")
         self.assertEqual(received.date().isoformat(), "2026-05-10")
 
+    def test_reshipped_box_shows_latest_trip_not_first(self):
+        # #73, D00599800007-00121: shipped once 2025-12-15 (checklist later
+        # wiped), re-shipped 2026-07-23 and received at UMN — the card must
+        # describe the current trip, not the first In-Transit ever.
+        locs = [_loc("BNL", 128, "2025-12-01T00:00:00-05:00"),
+                _loc("In Transit", 0, "2025-12-15T00:00:00-05:00"),
+                _loc("In Transit", 0, "2026-07-23T14:36:00-04:00"),
+                _loc("U. Minnesota", 186, "2026-07-23T14:42:00-04:00")]
+        shipped, received = shipments.shipped_received(locs)
+        self.assertEqual(shipped.date().isoformat(), "2026-07-23")
+        self.assertEqual(received.date().isoformat(), "2026-07-23")
+
     def test_empty_timeline(self):
         self.assertEqual(shipments.shipped_received([]), (None, None))
 
 
 class SyncShipmentsTest(TestCase):
-    def _run(self, items, locs_by_pid, subs_by_pid=None):
-        client = _fake_client(items, locs_by_pid, subs_by_pid)
+    def _run(self, items, locs_by_pid, subs_by_pid=None, comp_by_pid=None):
+        client = _fake_client(items, locs_by_pid, subs_by_pid, comp_by_pid)
         with mock.patch("explore.shipments.FnalDbApiClient", return_value=client):
             list(shipments.sync_shipments("http://api", "bearer", SHIP_PTID))
+        return client
 
     def test_mirrors_latest_location_and_status(self):
         self._run(
@@ -196,6 +218,56 @@ class SyncShipmentsTest(TestCase):
         self.assertIsNotNone(b1.shipped_date)
         self.assertIsNone(b1.received_date)  # still in transit
 
+    def test_shipped_dropped_when_specs_lack_shipping_checklist(self):
+        # #73 (D00599800007-00121): the timeline still has the In-Transit
+        # event, but the Shipping Checklist was wiped from the specs — no
+        # SHIPPED date. Received (a real location fact) is untouched.
+        self._run(
+            items=[{"part_id": "B1"}],
+            locs_by_pid={"B1": [_loc("FNAL", 1, "2025-12-01T00:00:00-05:00"),
+                                _loc("In Transit", 0, "2025-12-15T00:00:00-05:00"),
+                                _loc("CERN", 200, "2025-12-20T00:00:00-05:00")]},
+            subs_by_pid={"B1": [_sub()]},
+            comp_by_pid={"B1": {"Pre-Shipping Checklist": [{"Origin": "BNL"}]}},
+        )
+        b1 = ShipmentItem.objects.get(part_id="B1")
+        self.assertIsNone(b1.shipped_date)
+        self.assertEqual(b1.received_date.date().isoformat(), "2025-12-20")
+
+    def test_contentless_checklist_counts_as_absent(self):
+        # A bare [{}] renders as "Not recorded yet" on the box page — the
+        # SHIPPED column must agree with it.
+        self._run(
+            items=[{"part_id": "B1"}],
+            locs_by_pid={"B1": [_loc("In Transit", 0, "2025-12-15T00:00:00-05:00")]},
+            subs_by_pid={"B1": [_sub()]},
+            comp_by_pid={"B1": {"Shipping Checklist": [{}]}},
+        )
+        self.assertIsNone(ShipmentItem.objects.get(part_id="B1").shipped_date)
+
+    def test_never_shipped_box_skips_the_spec_fetch(self):
+        # The gate costs one item fetch — only for boxes that entered transit.
+        client = self._run(
+            items=[{"part_id": "B1"}, {"part_id": "B2"}],
+            locs_by_pid={"B1": [_loc("FNAL", 1, "2026-05-21T00:00:00-05:00")],
+                         "B2": [_loc("In Transit", 0, "2026-05-22T00:00:00-05:00")]},
+            subs_by_pid={"B1": [_sub()], "B2": [_sub()]},
+        )
+        fetched = {c.args[0] for c in client.get_component.call_args_list}
+        self.assertEqual(fetched, {"B2"})
+        self.assertIsNotNone(ShipmentItem.objects.get(part_id="B2").shipped_date)
+
+    def test_failed_spec_fetch_keeps_timeline_date(self):
+        # Best-effort: a transient item-fetch error must not blank the date.
+        client = _fake_client(
+            items=[{"part_id": "B1"}],
+            locs_by_pid={"B1": [_loc("In Transit", 0, "2025-12-15T00:00:00-05:00")]},
+            subs_by_pid={"B1": [_sub()]})
+        client.get_component.side_effect = RuntimeError("boom")
+        with mock.patch("explore.shipments.FnalDbApiClient", return_value=client):
+            list(shipments.sync_shipments("http://api", "bearer", SHIP_PTID))
+        self.assertIsNotNone(ShipmentItem.objects.get(part_id="B1").shipped_date)
+
     def test_paginates_all_pages(self):
         client = mock.MagicMock()
         pages = {1: {"data": [{"part_id": "B1"}], "pagination": {"pages": 2}},
@@ -238,6 +310,29 @@ class SyncShipmentsTest(TestCase):
         self._run(items, locs, subs)
         self._run(items, locs, subs)  # second sync
         self.assertEqual(ShipmentItem.objects.filter(part_type_id=SHIP_PTID).count(), 1)
+
+
+class RefreshBoxGateTest(TestCase):
+    """The single-box re-mirror (#61) applies the same #73 gate."""
+
+    def test_refresh_box_drops_shipped_without_checklist(self):
+        api = mock.MagicMock()
+        api.get_locations.return_value = {
+            "data": [_loc("In Transit", 0, "2025-12-15T00:00:00-05:00")]}
+        api.get_subcomponents.return_value = {"data": [_sub()]}
+        api.get_component.return_value = {"data": {"specifications": [{"DATA": {}}]}}
+        shipments.refresh_box(api, "prod", SHIP_PTID, "B1")
+        self.assertIsNone(ShipmentItem.objects.get(part_id="B1").shipped_date)
+
+    def test_refresh_box_keeps_shipped_with_checklist(self):
+        api = mock.MagicMock()
+        api.get_locations.return_value = {
+            "data": [_loc("In Transit", 0, "2025-12-15T00:00:00-05:00")]}
+        api.get_subcomponents.return_value = {"data": [_sub()]}
+        api.get_component.return_value = {
+            "data": {"specifications": [{"DATA": _SHIPPED_SPECS}]}}
+        shipments.refresh_box(api, "prod", SHIP_PTID, "B1")
+        self.assertIsNotNone(ShipmentItem.objects.get(part_id="B1").shipped_date)
 
 
 class ShipmentPanelViewTest(TestCase):
