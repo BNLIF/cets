@@ -2163,6 +2163,9 @@ def explore_preship_view(request, part_id):
             ctx["email_html"] = checklists.email_html(
                 cl, filename, who.get("full_name") or who.get("username") or "",
                 who.get("email") or "")
+            ctx["mailto"] = checklists.logistics_mailto(
+                cl, filename, who.get("full_name") or who.get("username") or "",
+                who.get("email") or "")
         if scene == checklists.N_SCENES:
             ctx["review"] = [(checklists.scene_title(i),
                               cl.state.get(checklists.scene_key(i), {}))
@@ -2358,6 +2361,10 @@ def explore_shipping_view(request, part_id):
                 part_id, poc_name, poc_email,
                 who.get("full_name") or who.get("username") or "",
                 who.get("email") or "")
+            ctx["mailto"] = checklists.shipping_mailto(
+                cl, poc_name, poc_email,
+                who.get("full_name") or who.get("username") or "",
+                who.get("email") or "")
     return render(request, "explore/shipping.html", ctx)
 
 
@@ -2508,6 +2515,12 @@ def explore_receiving_view(request, part_id):
                 who = {}
             r2 = cl.state.get("Receiving2", {})
             ctx["email_html"] = checklists.receiving_email_html(
+                part_id, poc_name, poc_email,
+                who.get("full_name") or who.get("username") or "",
+                who.get("email") or "",
+                (r2.get("location") or {}).get("institution_name", ""),
+                r2.get("arrived") or "")
+            ctx["mailto"] = checklists.receiving_mailto(
                 part_id, poc_name, poc_email,
                 who.get("full_name") or who.get("username") or "",
                 who.get("email") or "",

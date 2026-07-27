@@ -123,6 +123,19 @@ class ReceivingEngineTest(TestCase):
         self.assertIn("has arrived at <b>Brookhaven National Laboratory</b>", html)
         self.assertIn("<b>July 14, 2026</b> at <b>09:30 AM</b> (Central Time)", html)
 
+    def test_arrival_mailto_goes_to_poc(self):
+        # #78: same wording as the preview, opened in the user's mail client.
+        from urllib.parse import unquote
+        url = checklists.receiving_mailto(
+            BOX, "POC Person", "poc@x.org", "Chao Zhang", "chao@bnl.gov",
+            "Brookhaven National Laboratory", "2026-07-14 09:30")
+        self.assertTrue(url.startswith("mailto:poc@x.org?"))
+        self.assertIn(f"Final%20Reciving%20checklist%20for%20shipment%20{BOX}", url)
+        body = unquote(url.split("&body=")[1])
+        self.assertIn("has arrived at Brookhaven National Laboratory at "
+                      "July 14, 2026 at 09:30 AM (Central Time)", body)
+        self.assertNotIn("[Attach", body)
+
 
 class ReceivingFlowTest(TestCase):
     def setUp(self):

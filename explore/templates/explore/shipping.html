@@ -124,7 +124,10 @@
 
     {% elif scene == 3 %}
       <p style="font-size:13px; color:var(--ink); margin:0 0 10px;">Send the final-approval request to the
-        FD Logistics team:</p>
+        FD Logistics team (attach the BoL, plus the Proforma Invoice for international shipments):</p>
+      <div class="ps-actions" style="margin: 0 0 12px;">
+        <a class="ps-btn quiet" href="{{ mailto }}">Open email client</a>
+      </div>
       <div class="ps-email">{{ email_html|safe }}</div>
       {% if cl.is_surf %}
       <label class="inline" style="margin-top:12px;"><input type="checkbox" name="confirm_email_contents" required>

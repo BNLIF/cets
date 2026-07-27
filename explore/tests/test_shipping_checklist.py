@@ -98,6 +98,34 @@ class ShippingEngineTest(TestCase):
         self.assertEqual(d["POC Email"], ["poc@x.org"])
         self.assertTrue(d["This shipment has been adequately insured for transit"])
 
+    def test_final_approval_mailto_names_uploaded_documents(self):
+        # #78: the draft's attach reminder names the actual scene-2 uploads.
+        from urllib.parse import quote, unquote
+        cl = BoxChecklist(instance="dev", part_id=BOX, workflow="shipping",
+                          route="confirm_surf", state={
+                              "Shipping2": {
+                                  "bol_info": {"image_id": "b1", "filename": "bol.pdf"},
+                                  "proforma_info": {"image_id": "p1", "filename": "pi.pdf"}}})
+        url = checklists.shipping_mailto(cl, "POC Person", "poc@x.org",
+                                         "Chao Zhang", "chao@bnl.gov")
+        self.assertTrue(url.startswith("mailto:sdshipments@fnal.gov?"))
+        self.assertIn(
+            "subject=" + quote(f"Request for the final approval for shipment PID = {BOX}"),
+            url)
+        body = unquote(url.split("&body=")[1])
+        self.assertIn("- POC Person <poc@x.org>", body)
+        self.assertIn("[Attach bol.pdf and pi.pdf before sending", body)
+
+    def test_domestic_mailto_reminds_bol_only(self):
+        from urllib.parse import unquote
+        cl = BoxChecklist(instance="dev", part_id=BOX, workflow="shipping",
+                          route="confirm_surf",
+                          state={"Shipping2": {"bol_info": {"image_id": "b1"}}})
+        url = checklists.shipping_mailto(cl, "P", "p@x.org", "S", "s@x.org")
+        body = unquote(url.split("&body=")[1])
+        self.assertIn("[Attach the Bill of Lading before sending", body)
+        self.assertNotIn("Proforma", body)
+
 
 class SceneCleanTest(TestCase):
     """#76: datetime normalization is per-field — a blanket T→space used to

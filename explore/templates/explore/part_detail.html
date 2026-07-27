@@ -276,23 +276,6 @@
       </div>
       {% endif %}
 
-      {% if packing %}
-      <div class="sd-card">
-        <h2>Workflows</h2>
-        <table class="sd-kv">
-          <tr><td class="k">Pre-shipping checklist</td>
-            <td>{% with c=checklists.preshipping %}{% if c and c.completed_at %}<span style="color:var(--good); font-weight:600;">completed {{ c.completed_at|date:"Y-m-d" }}</span>{% elif c %}step {{ c.current_scene }} of 8 · {{ c.route_label }}{% else %}not started{% endif %}{% endwith %}
-              · <a style="color:var(--accent-ink); text-decoration:none;" href="{% url 'explore:preship' part_id=part_id %}">open ›</a></td></tr>
-          <tr><td class="k">Shipping checklist</td>
-            <td>{% with c=checklists.shipping %}{% if c and c.completed_at %}<span style="color:var(--good); font-weight:600;">completed {{ c.completed_at|date:"Y-m-d" }}</span>{% elif c %}step {{ c.current_scene }} of 6 · {{ c.route_label }}{% else %}not started{% endif %}{% endwith %}
-              · <a style="color:var(--accent-ink); text-decoration:none;" href="{% url 'explore:shipping' part_id=part_id %}">open ›</a></td></tr>
-          <tr><td class="k">Receiving checklist</td>
-            <td>{% with c=checklists.receiving %}{% if c and c.completed_at %}<span style="color:var(--good); font-weight:600;">completed {{ c.completed_at|date:"Y-m-d" }}</span>{% elif c %}step {{ c.current_scene }} of 3 · {{ c.route_label }}{% else %}not started{% endif %}{% endwith %}
-              · <a style="color:var(--accent-ink); text-decoration:none;" href="{% url 'explore:receiving' part_id=part_id %}">open ›</a></td></tr>
-        </table>
-      </div>
-      {% endif %}
-
       {% if detail.has_location or can_update_location %}
       <div class="sd-card">
         <h2>Location timeline</h2>
@@ -344,6 +327,23 @@
     </div>
 
     <div>
+      {% if packing %}
+      <div class="sd-card">
+        <h2>Shipping Workflows</h2>
+        <table class="sd-kv">
+          <tr><td class="k">Pre-shipping checklist</td>
+            <td>{% with c=checklists.preshipping %}{% if c and c.completed_at %}<span style="color:var(--good); font-weight:600;">completed {{ c.completed_at|date:"Y-m-d" }}</span>{% elif c %}step {{ c.current_scene }} of 8 · {{ c.route_label }}{% else %}not started{% endif %}{% endwith %}
+              · <a style="color:var(--accent-ink); text-decoration:none;" href="{% url 'explore:preship' part_id=part_id %}">open ›</a></td></tr>
+          <tr><td class="k">Shipping checklist</td>
+            <td>{% with c=checklists.shipping %}{% if c and c.completed_at %}<span style="color:var(--good); font-weight:600;">completed {{ c.completed_at|date:"Y-m-d" }}</span>{% elif c %}step {{ c.current_scene }} of 6 · {{ c.route_label }}{% else %}not started{% endif %}{% endwith %}
+              · <a style="color:var(--accent-ink); text-decoration:none;" href="{% url 'explore:shipping' part_id=part_id %}">open ›</a></td></tr>
+          <tr><td class="k">Receiving checklist</td>
+            <td>{% with c=checklists.receiving %}{% if c and c.completed_at %}<span style="color:var(--good); font-weight:600;">completed {{ c.completed_at|date:"Y-m-d" }}</span>{% elif c %}step {{ c.current_scene }} of 3 · {{ c.route_label }}{% else %}not started{% endif %}{% endwith %}
+              · <a style="color:var(--accent-ink); text-decoration:none;" href="{% url 'explore:receiving' part_id=part_id %}">open ›</a></td></tr>
+        </table>
+      </div>
+      {% endif %}
+
       {% for sec in detail.sections %}
       <div class="sd-card">
         <h2>{{ sec.title }}</h2>

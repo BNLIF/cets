@@ -317,6 +317,32 @@ class PatchBuildTest(TestCase):
         self.assertGreater(text.count("Sub-component PID"), 1)  # header repeated
 
 
+class MailtoTest(TestCase):
+    """#78: checklist emails open the user's own mail client via mailto:
+    drafts — the dashboard never sends email server-side."""
+
+    def test_mailto_url_encodes_and_normalizes_recipients(self):
+        url = checklists.mailto_url("a@x.org, b@y.org", "Sub & ject", "l1\nl2")
+        self.assertTrue(url.startswith("mailto:a@x.org,b@y.org?subject="))
+        self.assertIn("subject=Sub%20%26%20ject", url)
+        self.assertIn("body=l1%0Al2", url)
+
+    def test_logistics_draft_mirrors_preview_and_reminds_csv(self):
+        from urllib.parse import quote, unquote
+        cl = BoxChecklist(instance="dev", part_id=BOX, workflow="preshipping",
+                          route="confirm_surf",
+                          state={"PreShipping2": SCENE_DATA[2],
+                                 "PreShipping3": SCENE_DATA[3]})
+        url = checklists.logistics_mailto(cl, "box.csv", "Chao Zhang", "chao@bnl.gov")
+        self.assertTrue(url.startswith("mailto:sdshipments@fnal.gov?"))
+        self.assertIn(
+            "subject=" + quote("Request an acknowledgement for a new shipment"), url)
+        body = unquote(url.split("&body=")[1])
+        self.assertIn("Consortium QA Representative, QA Rep (qa@x.org, qa2@x.org)", body)
+        self.assertIn("- POC <poc@x.org>", body)
+        self.assertIn("[Attach the downloaded box.csv before sending", body)
+
+
 class ChecklistFlowTest(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user("w", "w@w.io", "pw")

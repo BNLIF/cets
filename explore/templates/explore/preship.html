@@ -169,10 +169,11 @@
       </div>
 
     {% elif scene == 6 %}
-      <p style="font-size:13px; color:var(--ink); margin:0 0 10px;">Download the logistics CSV and send the
-        email below (attach the CSV) to the FD Logistics team.</p>
+      <p style="font-size:13px; color:var(--ink); margin:0 0 10px;">Download the logistics CSV, then open the
+        email draft in your mail client and attach the CSV before sending.</p>
       <div class="ps-actions" style="margin: 0 0 12px;">
         <a class="ps-btn quiet" href="?csv=1">Download {{ csv_filename }}</a>
+        <a class="ps-btn quiet" href="{{ mailto }}">Open email client</a>
       </div>
       <div class="ps-email">{{ email_html|safe }}</div>
       {% if cl.is_surf %}

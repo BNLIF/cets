@@ -15,6 +15,8 @@ import io
 import logging
 from datetime import datetime
 
+from urllib.parse import quote
+
 import PIL.Image
 from reportlab.graphics.barcode import code128
 from reportlab.lib import units
@@ -291,6 +293,15 @@ def poc_from(preship_state: dict | None, spec_data: dict | None) -> tuple[str, s
     return name, email
 
 
+def mailto_url(to: str, subject: str, body: str) -> str:
+    """A ``mailto:`` draft that opens the user's own mail client (#78) —
+    the dashboard never sends email itself. ``mailto:`` can't attach
+    files, so bodies carry an [Attach …] reminder where one is needed."""
+    to = ",".join(a.strip() for a in to.split(",") if a.strip())
+    return (f"mailto:{quote(to, safe='@,')}"
+            f"?subject={quote(subject)}&body={quote(body)}")
+
+
 def shipping_email_html(part_id: str, poc_name: str, poc_email: str,
                         sender_name: str, sender_email: str) -> str:
     """The Dashboard's final-approval request email, verbatim."""
@@ -310,6 +321,31 @@ def shipping_email_html(part_id: str, poc_name: str, poc_email: str,
         f"{sender_name}<br/>{sender_email}<br/>"
         "</td></tr></table>"
     )
+
+
+def shipping_mailto(checklist, poc_name: str, poc_email: str,
+                    sender_name: str, sender_email: str) -> str:
+    """The final-approval request as a mailto: draft — plain-text twin of
+    shipping_email_html, plus the attach reminder (BoL, and the Proforma
+    Invoice when one was uploaded in scene 2)."""
+    s2 = checklist.state.get("Shipping2", {})
+    attach = [(s2.get("bol_info") or {}).get("filename") or "the Bill of Lading"]
+    if (s2.get("proforma_info") or {}).get("image_id"):
+        attach.append(s2["proforma_info"].get("filename") or "the Proforma Invoice")
+    body = (
+        "Dear FD Logistics team,\n\n"
+        "I would like to request a new shipment.\n\n"
+        "Should there be any issue with this shipment, email to:\n"
+        f"  - {poc_name} <{poc_email}>\n\n"
+        "Sincerely,\n\n"
+        f"{sender_name}\n{sender_email}\n\n"
+        f"[Attach {' and '.join(attach)} before sending — "
+        "this draft cannot include files automatically.]"
+    )
+    return mailto_url(
+        "sdshipments@fnal.gov",
+        f"Request for the final approval for shipment PID = {checklist.part_id}",
+        body)
 
 
 def build_shipping_checklist_dict(checklist, info: dict,
@@ -420,6 +456,28 @@ def receiving_email_html(part_id: str, poc_name: str, poc_email: str,
         f"{sender_name}<br/>{sender_email}<br/>"
         "</td></tr></table>"
     )
+
+
+def receiving_mailto(part_id: str, poc_name: str, poc_email: str,
+                     sender_name: str, sender_email: str,
+                     location_name: str, arrived: str) -> str:
+    """The arrival note to the POC as a mailto: draft — plain-text twin of
+    receiving_email_html (same "Reciving" subject so draft and preview
+    match). No attachment, so no reminder line."""
+    try:
+        formatted = datetime.fromisoformat(arrived).strftime(
+            "%B %d, %Y at %I:%M %p (Central Time)")
+    except ValueError:
+        formatted = arrived
+    body = (
+        f"Dear {poc_name},\n\n"
+        f"Your shipment, {part_id}, has arrived at {location_name} at "
+        f"{formatted}.\n\n"
+        "Sincerely,\n\n"
+        f"{sender_name}\n{sender_email}\n"
+    )
+    return mailto_url(poc_email,
+                      f"Final Reciving checklist for shipment {part_id}", body)
 
 
 def receive_box(api, checklist, manifest: list[dict]) -> str | None:
@@ -546,6 +604,34 @@ def email_html(checklist, csv_filename: str, sender_name: str, sender_email: str
         f"Attachment: {csv_filename}"
         "</td></tr></table>"
     )
+
+
+def logistics_mailto(checklist, csv_filename: str,
+                     sender_name: str, sender_email: str) -> str:
+    """The logistics notification as a mailto: draft — plain-text twin of
+    email_html, plus the attach reminder naming the downloaded CSV."""
+    ws = checklist.state
+    qarep_name = ws.get("PreShipping2", {}).get("qa_rep_name", "")
+    qarep_email = ws.get("PreShipping2", {}).get("qa_rep_email", "")
+    poc_name = ws.get("PreShipping3", {}).get("approver_name", "")
+    poc_email = ws.get("PreShipping3", {}).get("approver_email", "")
+    body = (
+        "Dear FD Logistics team,\n\n"
+        "I would like to request a new shipment.\n"
+        "This shipment has been approved by the Consortium QA Representative, "
+        f"{qarep_name} ({qarep_email}).\n\n"
+        f"Please find the attached csv file, {csv_filename}, that contains "
+        "the required information for this shipment.\n\n"
+        "Should there be any issue with this shipment, email to:\n"
+        f"  - {poc_name} <{poc_email}>\n\n"
+        "Sincerely,\n\n"
+        f"{sender_name}\n\n"
+        f"Attachment: {csv_filename}\n"
+        f"[Attach the downloaded {csv_filename} before sending — "
+        "this draft cannot include files automatically.]"
+    )
+    return mailto_url("sdshipments@fnal.gov",
+                      "Request an acknowledgement for a new shipment", body)
 
 
 # ---- Shipping label (scene 8's "shipping sheet" PDF) ------------------------
