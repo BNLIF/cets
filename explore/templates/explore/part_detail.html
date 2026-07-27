@@ -51,6 +51,7 @@
   .sd-kv td { padding: 5px 8px; border-top: 1px solid var(--rule); vertical-align: top; }
   .sd-kv tr:first-child td { border-top: none; }
   .sd-kv .k { color: var(--faint); width: 46%; }
+  .sd-wf .k { color: var(--ink); font-weight: 600; }
   .sd-atts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   .sd-dl { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500;
     color: var(--good); text-decoration: none; border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule));
@@ -330,7 +331,7 @@
       {% if packing %}
       <div class="sd-card">
         <h2>Shipping Workflows</h2>
-        <table class="sd-kv">
+        <table class="sd-kv sd-wf">
           <tr><td class="k">Pre-shipping checklist</td>
             <td>{% with c=checklists.preshipping %}{% if c and c.completed_at %}<span style="color:var(--good); font-weight:600;">completed {{ c.completed_at|date:"Y-m-d" }}</span>{% elif c %}step {{ c.current_scene }} of 8 · {{ c.route_label }}{% else %}not started{% endif %}{% endwith %}
               · <a style="color:var(--accent-ink); text-decoration:none;" href="{% url 'explore:preship' part_id=part_id %}">open ›</a></td></tr>
@@ -341,6 +342,11 @@
             <td>{% with c=checklists.receiving %}{% if c and c.completed_at %}<span style="color:var(--good); font-weight:600;">completed {{ c.completed_at|date:"Y-m-d" }}</span>{% elif c %}step {{ c.current_scene }} of 3 · {{ c.route_label }}{% else %}not started{% endif %}{% endwith %}
               · <a style="color:var(--accent-ink); text-decoration:none;" href="{% url 'explore:receiving' part_id=part_id %}">open ›</a></td></tr>
         </table>
+        {# Workflow documents live up here so nobody scrolls for them. #}
+        {% if shipping_sheets %}{% include "explore/_sheet_selector.html" %}{% endif %}
+        {% for sec in detail.sections %}{% if sec.attachments %}
+        {% include "explore/_att_chips.html" with atts=sec.attachments %}
+        {% endif %}{% endfor %}
       </div>
       {% endif %}
 
@@ -352,35 +358,12 @@
           {% for f in sec.fields %}<tr><td class="k">{{ f.label }}</td><td>{{ f.value }}</td></tr>{% endfor %}
         </table>
         {% endif %}
-        {% if sec.attachments %}
-        <div class="sd-atts">
-          {% for a in sec.attachments %}
-            {% if a.is_image %}
-            <a class="sd-thumb" href="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.filename|urlencode }}&amp;inline=1" target="_blank" rel="noopener" title="{{ a.filename }}"><img src="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.filename|urlencode }}" alt="{{ a.label }}" loading="lazy"><span class="sd-thumb-l">{{ a.label }}</span></a>
-            {% else %}
-            <a class="sd-dl" href="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.filename|urlencode }}" title="{{ a.filename }}"><span aria-hidden="true">&#x2913;</span> {{ a.label }}</a>
-            {% endif %}
-          {% endfor %}
-        </div>
+        {# Documents move to the Shipping Workflows pane when it renders. #}
+        {% if sec.attachments and not packing %}
+        {% include "explore/_att_chips.html" with atts=sec.attachments %}
         {% endif %}
-        {% if sec.title == "Pre-shipping" and shipping_sheets %}
-        {# All sheets ever uploaded (append-only, one per run), newest first (#77). #}
-        <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; margin: 8px 0 2px;">
-          <label style="font-size:12px; color:var(--faint); display:flex; flex-direction:column; gap:3px;">
-            Shipping sheets ({{ shipping_sheets|length }})
-            <select id="pd-sheets" title="{{ shipping_sheets.0.image_name }}" style="font:inherit; font-size:13px; color:var(--ink); background:var(--surface);
-                    border:1px solid var(--rule); border-radius:var(--r-sm); padding:6px 8px; max-width:320px;">
-              {% for a in shipping_sheets %}<option value="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.image_name|urlencode }}&amp;inline=1" title="{{ a.image_name }}">{{ a.label }}{% if forloop.first %} — latest{% endif %}</option>{% endfor %}
-            </select></label>
-          <button type="button" id="pd-sheets-open" style="font:inherit; font-size:13px; font-weight:600; color:var(--dim);
-                  background:var(--surface); border:1px solid var(--rule); border-radius:var(--r-sm);
-                  padding:6px 15px; cursor:pointer;">Open</button>
-        </div>
-        <script>
-        document.getElementById("pd-sheets-open").addEventListener("click", function () {
-          window.open(document.getElementById("pd-sheets").value, "_blank");
-        });
-        </script>
+        {% if sec.title == "Pre-shipping" and shipping_sheets and not packing %}
+        {% include "explore/_sheet_selector.html" %}
         {% endif %}
         {% if not sec.fields and not sec.attachments %}
         <div class="sd-empty">Not recorded yet.</div>
