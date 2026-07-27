@@ -26,7 +26,8 @@ from hwdb.fnal import flow
 from hwdb.fnal import session as fnal_session
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
 
-from . import charts, checklists, curation, execsummary, navigation, scanning
+from . import (charts, checklists, curation, events, execsummary, navigation,
+               parts, scanning)
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, sync_test_events
 from .hierarchy import sync_hierarchy, sync_system
@@ -990,9 +991,11 @@ def _pack_groups(instance, connectors, manifest) -> list[dict]:
     """The packing page's pickable candidates: one group per child type that
     still has free slots — mirror rows of that type, with status + QC flags
     so un-shippable items are visible up front. Rows with a known parent
-    (HWDB rejects those with "already in use") or known-unapproved
-    (``enabled=False``) are hidden; unknowns pass and HWDB stays the arbiter
-    (a refused add reports that item's live HWDB status flags)."""
+    (HWDB rejects those with "already in use"), an obsolete status id
+    (HWDB rejects 1-3 with "not yet available" — probed 2026-07-27), or
+    known-unapproved (``enabled=False``) are hidden; unknowns pass and HWDB
+    stays the arbiter (a refused add reports that item's live HWDB status
+    flags)."""
     occupied = {m["functional_position"] for m in manifest}
     in_box = {m["part_id"] for m in manifest if m["part_id"]}
     free_by_type: dict[str, list[str]] = {}
@@ -1005,6 +1008,10 @@ def _pack_groups(instance, connectors, manifest) -> list[dict]:
                 .filter(part_type_id=ctid, parent_part_id="")
                 .exclude(part_id__in=in_box)
                 .exclude(enabled=False)
+                # NULL status_id (not yet captured) must keep passing —
+                # a bare .exclude(__in=…) would drop those rows too.
+                .filter(Q(status_id__isnull=True)
+                        | ~Q(status_id__in=sorted(parts.OBSOLETE_STATUS_IDS)))
                 .order_by("part_id"))
         leaf = HierarchyNode.for_instance(instance).filter(
             level=HierarchyNode.LEVEL_TYPE, part_type_id=ctid).first()
@@ -1086,6 +1093,13 @@ def explore_box_pack_view(request, part_id):
         return redirect(part_url)
 
     if request.method != "POST":
+        # Live availability check: two listing calls per child type stamp the
+        # mirror's parent links + enabled flags, so a stale mirror doesn't
+        # offer items HWDB would refuse at write time ("already in use" /
+        # "not yet available").
+        for ctid in sorted({c for c in connectors.values() if c}):
+            events.sweep_parents(api, inst, ctid)
+            events.sweep_enabled(api, inst, ctid)
         # Phone-as-scanner hookup (issue #68): the picker polls the scan feed
         # for PIDs this user scans on their phone, starting AFTER the newest
         # row at page load so stale scans don't flood in.

@@ -45,6 +45,9 @@ def _api():
     api.get_institutions.return_value = {"data": [
         {"id": 128, "name": "BNL", "country": {"code": "US"}}]}
     api.patch_subcomponents.return_value = {"status": "OK", "data": "Updated"}
+    # The picker GET's enabled sweep pages the raw listing; unless a test
+    # overrides this, it fails → a no-op (mirror flags untouched).
+    api._make_request.side_effect = RuntimeError("no listing in tests")
     return api
 
 
@@ -189,6 +192,74 @@ class PackPageTest(TestCase):
             html = self.client.get(PACK).content.decode()
         self.assertNotIn(f'value="{GOOD}"', html)   # unapproved → hidden
         self.assertIn(f'value="{BAD_QC}"', html)    # enabled unknown → offered
+
+    def test_get_sweeps_enabled_flags_live(self):
+        # A stale mirror offered items HWDB refuses at write time ("not yet
+        # available"). The picker GET now runs one enabled=false listing per
+        # child type and stamps the mirror's flags before rendering.
+        api = _api()
+        api._make_request.side_effect = None
+        api._make_request.return_value = {
+            "data": [{"part_id": BAD_QC}], "pagination": {"pages": 1}}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PACK).content.decode()
+        self.assertNotIn(f'value="{BAD_QC}"', html)  # disabled upstream → hidden
+        self.assertIn(f'value="{GOOD}"', html)
+        flags = dict(HwdbComponentEvent.objects.filter(
+            part_type_id=CHILD_TYPE).values_list("part_id", "enabled"))
+        self.assertEqual(flags, {IN_BOX: True, GOOD: True, BAD_QC: False})
+
+    def test_get_sweeps_parents_live(self):
+        # HWDB refused D00599800003-00012 ("already in use — inside another
+        # box") because the mirror's parent link was stale: the picker GET
+        # re-stamps parent_part_id from the type's full listing rows.
+        api = _api()
+
+        def listing(method, path, params=None):
+            if (params or {}).get("enabled") == "false":
+                return {"data": [], "pagination": {"pages": 1}}
+            return {"data": [
+                {"part_id": GOOD, "parent_part_id": "D00599800001-00010",
+                 "status": {"id": 120, "name": "QA/QC Tests - Passed All"}},
+                {"part_id": BAD_QC}], "pagination": {"pages": 1}}
+        api._make_request.side_effect = listing
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PACK).content.decode()
+        self.assertNotIn(f'value="{GOOD}"', html)   # boxed elsewhere → hidden
+        self.assertIn(f'value="{BAD_QC}"', html)
+        row = HwdbComponentEvent.objects.get(part_id=GOOD)
+        self.assertEqual(row.parent_part_id, "D00599800001-00010")
+        self.assertEqual(row.status, "QA/QC Tests - Passed All")
+        self.assertEqual(row.status_id, 120)
+        # A row with no status in the listing keeps its mirrored one.
+        self.assertEqual(HwdbComponentEvent.objects.get(part_id=IN_BOX).status,
+                         "All passed")
+
+    def test_failed_sweep_keeps_the_mirror_as_is(self):
+        api = _api()  # _make_request raises → the sweep is a no-op
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PACK).content.decode()
+        self.assertIn(f'value="{BAD_QC}"', html)     # unknown still passes
+        self.assertIsNone(
+            HwdbComponentEvent.objects.get(part_id=GOOD).enabled)
+
+    def test_obsolete_status_items_are_hidden(self):
+        # HWDB refuses linking items whose status id is obsolete (1-3) —
+        # "not yet available" — while 0 and 100+ link fine (probed
+        # 2026-07-27 on D00599800008). NULL (not yet captured) still passes.
+        HwdbComponentEvent.objects.filter(part_id=GOOD).update(
+            status="Unknown", status_id=1)
+        HwdbComponentEvent.objects.filter(part_id=BAD_QC).update(
+            status="Unknown", status_id=0)
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PACK).content.decode()
+        self.assertNotIn(f'value="{GOOD}"', html)   # obsolete → refused → hidden
+        self.assertIn(f'value="{BAD_QC}"', html)    # genuine Unknown → linkable
 
     def test_uncertified_items_stay_listed(self):
         # certified_qaqc does NOT gate packing (an uncertified FEB was found

@@ -129,6 +129,9 @@ class SyncTestEventsTest(TestCase):
             list(events.sync_test_events("https://x", "bearer", "D05700200001", mode="full"))
         row = HwdbComponentEvent.objects.get(part_type_id="D05700200001", part_id="P1")
         self.assertEqual(row.status, "Unknown")
+        # …but the raw id is kept: the pack gate must tell obsolete 1-3
+        # (HWDB refuses linking those) apart from the genuine id 0.
+        self.assertEqual(row.status_id, 1)
 
     def test_mirrors_qc_flags(self):
         # The binary QC flags are top-level booleans on the detail record (#51),

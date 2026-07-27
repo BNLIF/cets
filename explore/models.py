@@ -144,6 +144,12 @@ class HwdbComponentEvent(InstanceScoped):
     # Categorical facets off the same detail record, for the component-breakdown
     # bar charts (mirror-only, no extra fetch). Empty when not (yet) synced.
     status = models.CharField(max_length=120, blank=True, default="")
+    # Raw HWDB status id. The display name collapses the obsolete ids 1-3
+    # and the genuine id 0 into "Unknown" (#75), but the pack gate needs
+    # them apart: HWDB refuses linking obsolete-status items ("not yet
+    # available" — probed 2026-07-27) while id 0 links fine. NULL = row
+    # mirrored before this was captured.
+    status_id = models.IntegerField(null=True, blank=True)
     manufacturer = models.CharField(max_length=160, blank=True, default="")
     institution = models.CharField(max_length=160, blank=True, default="")
     # Binary QC flags off the same detail record (#51). NULL = row mirrored
@@ -155,8 +161,8 @@ class HwdbComponentEvent(InstanceScoped):
     # assembly currently holding this item (detail record field; also kept
     # fresh by the shipment sync / the explorer's own pack writes via
     # ``refresh_box``); "" = free or not yet captured. ``enabled`` mirrors
-    # HWDB's approval flag ("not yet available" until enabled); NULL = not
-    # yet captured by an item sync.
+    # HWDB's approval flag (NOT the link gate — a disabled status-0 item
+    # linked fine in the 2026-07-27 probe); NULL = not yet captured.
     parent_part_id = models.CharField(max_length=50, blank=True, default="",
                                       db_index=True)
     enabled = models.BooleanField(null=True, blank=True)

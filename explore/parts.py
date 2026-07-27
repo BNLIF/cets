@@ -107,7 +107,9 @@ def _named(v):
 # names only) the mapping covers the unambiguous legacy names;
 # "Permanently Unavailable" doubles as modern id 170, so it passes through
 # and the id-aware sync corrects obsolete rows on their next walk.
-_OBSOLETE_STATUS_IDS = {1, 2, 3}
+# Public: the pack picker hides these too — HWDB refuses linking an
+# obsolete-status item into an assembly ("not yet available").
+OBSOLETE_STATUS_IDS = {1, 2, 3}
 _OBSOLETE_STATUS_NAMES = {"Available", "Temporarily Unavailable"}
 
 
@@ -115,7 +117,7 @@ def normalize_status(value):
     """Raw HWDB status ({id, name} ref, bare name, or None) → display name,
     with the obsolete ids 1-3 shown as Unknown."""
     if isinstance(value, dict):
-        return "Unknown" if value.get("id") in _OBSOLETE_STATUS_IDS else value.get("name")
+        return "Unknown" if value.get("id") in OBSOLETE_STATUS_IDS else value.get("name")
     return "Unknown" if value in _OBSOLETE_STATUS_NAMES else value
 
 

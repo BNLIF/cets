@@ -158,8 +158,8 @@ def _parse_created(created_s) -> datetime | None:
         return None
 
 
-def _list_part_ids(api, part_type_id: str, extra_params: dict | None = None) -> Iterator[str]:
-    """Paginate the component listing, yielding each component's part_id.
+def _list_rows(api, part_type_id: str, extra_params: dict | None = None) -> Iterator[dict]:
+    """Paginate the component listing, yielding each raw row.
 
     The listing carries ``created`` but NOT ``updated``; the per-component
     detail fetch is what gives us ``updated``.
@@ -172,14 +172,73 @@ def _list_part_ids(api, part_type_id: str, extra_params: dict | None = None) -> 
             params={"page": page, "size": 500, **(extra_params or {})},
         )
         rows = body.get("data") or []
-        for row in rows:
-            pid = row.get("part_id")
-            if pid:
-                yield pid
+        yield from rows
         pages = (body.get("pagination") or {}).get("pages", 1)
         if page >= pages or not rows:
             return
         page += 1
+
+
+def _list_part_ids(api, part_type_id: str, extra_params: dict | None = None) -> Iterator[str]:
+    """Paginate the component listing, yielding each component's part_id."""
+    for row in _list_rows(api, part_type_id, extra_params):
+        pid = row.get("part_id")
+        if pid:
+            yield pid
+
+
+def sweep_parents(api, instance: str, part_type_id: str) -> int | None:
+    """Page the type's full listing once and re-stamp each mirror row's
+    ``parent_part_id`` (+ normalized status) — the listing serializes both
+    live (probed 2026-07-27), so a stale mirror stops offering items that
+    are already inside some other assembly ("already in use" at write
+    time). Returns how many rows changed, or None when the listing failed
+    (rows keep their current values)."""
+    try:
+        live = {r["part_id"]: r for r in _list_rows(api, part_type_id)
+                if r.get("part_id")}
+    except Exception as e:
+        logger.warning("parent sweep for %s failed: %s", part_type_id, e)
+        return None
+    changed = []
+    for row in HwdbComponentEvent.for_instance(instance).filter(
+            part_type_id=part_type_id):
+        r = live.get(row.part_id)
+        if r is None:
+            continue
+        parent = r.get("parent_part_id") or ""
+        # A missing/blank status in the row must not wipe a known one.
+        raw_status = r.get("status")
+        status = parts.normalize_status(raw_status) or row.status or ""
+        status_id = (raw_status.get("id") if isinstance(raw_status, dict)
+                     else row.status_id)
+        if (parent, status, status_id) != (row.parent_part_id, row.status,
+                                           row.status_id):
+            row.parent_part_id, row.status, row.status_id = (
+                parent, status, status_id)
+            changed.append(row)
+    if changed:
+        HwdbComponentEvent.objects.bulk_update(
+            changed, ["parent_part_id", "status", "status_id"], batch_size=500)
+    return len(changed)
+
+
+def sweep_enabled(api, instance: str, part_type_id: str) -> int | None:
+    """One ``enabled=false`` listing sweep for a type, stamped onto the
+    mirror's ``enabled`` flags (issue #63). Returns how many items are
+    disabled, or None when the listing failed — rows then keep their
+    current value (NULL = unknown passes the picker)."""
+    try:
+        disabled = set(_list_part_ids(api, part_type_id,
+                                      extra_params={"enabled": "false"}))
+    except Exception as e:
+        logger.warning("enabled sweep for %s failed: %s", part_type_id, e)
+        return None
+    base = HwdbComponentEvent.for_instance(instance).filter(
+        part_type_id=part_type_id)
+    base.filter(part_id__in=disabled).update(enabled=False)
+    base.exclude(part_id__in=disabled).update(enabled=True)
+    return len(disabled)
 
 
 def _flag(v) -> bool | None:
@@ -227,7 +286,7 @@ def _fetch_component(api, part_id: str, date_spec: dict | None,
 
     created = updated = None
     serial = created_by = status = manufacturer = institution = parent = ""
-    installed = uploaded = certified = None
+    installed = uploaded = certified = status_id = None
     if need_detail:
         detail = api._make_request("GET", f"components/{part_id}")
         d = detail.get("data") if isinstance(detail.get("data"), dict) else {}
@@ -235,7 +294,9 @@ def _fetch_component(api, part_id: str, date_spec: dict | None,
         updated = _parse_created(d.get("updated"))
         serial = d.get("serial_number") or ""
         created_by = _ref_name(d.get("creator"))
-        status = parts.normalize_status(d.get("status")) or ""
+        raw_status = d.get("status")
+        status = parts.normalize_status(raw_status) or ""
+        status_id = raw_status.get("id") if isinstance(raw_status, dict) else None
         manufacturer = _ref_name(d.get("manufacturer"))
         institution = _ref_name(d.get("institution"))
         # Binary QC flags — top-level booleans on the detail record (#51);
@@ -249,6 +310,7 @@ def _fetch_component(api, part_id: str, date_spec: dict | None,
     return {
         "part_id": part_id, "created": created, "updated": updated,
         "serial_number": serial, "created_by": created_by, "status": status,
+        "status_id": status_id,
         "manufacturer": manufacturer, "institution": institution,
         "is_installed": installed, "qaqc_uploaded": uploaded,
         "certified_qaqc": certified, "parent_part_id": parent,
@@ -382,6 +444,7 @@ def sync_test_events(
                     serial_number=r.get("serial_number", ""),
                     created_by=r.get("created_by", ""),
                     status=r.get("status", ""),
+                    status_id=r.get("status_id"),
                     manufacturer=r.get("manufacturer", ""),
                     institution=r.get("institution", ""),
                     is_installed=r.get("is_installed"),
@@ -398,21 +461,10 @@ def sync_test_events(
         # The detail record doesn't carry HWDB's approval flag, but the
         # listing can filter on it: one enabled=false sweep marks the
         # "not yet available" items. Runs in every mode (it's ~1 call per
-        # 500 such items) so known rows stay fresh too; a failing sweep
-        # just leaves ``enabled`` as-is (NULL = unknown passes the picker).
-        try:
-            disabled = set(_list_part_ids(bootstrap, part_type_id,
-                                          extra_params={"enabled": "false"}))
-        except Exception as e:
-            logger.warning("sync tests: enabled sweep for %s failed: %s",
-                           part_type_id, e)
-            disabled = None
-        if disabled is not None:
-            base = HwdbComponentEvent.for_instance(instance).filter(
-                part_type_id=part_type_id)
-            base.filter(part_id__in=disabled).update(enabled=False)
-            base.exclude(part_id__in=disabled).update(enabled=True)
-            yield f"sync tests: {len(disabled)} item(s) not yet enabled\n"
+        # 500 such items) so known rows stay fresh too.
+        n_disabled = sweep_enabled(bootstrap, instance, part_type_id)
+        if n_disabled is not None:
+            yield f"sync tests: {n_disabled} item(s) not yet enabled\n"
 
         n_tests = HwdbTestEvent.for_instance(instance).filter(part_type_id=part_type_id).count()
         node.tests_synced_at = timezone.now()
