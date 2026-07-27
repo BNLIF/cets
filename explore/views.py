@@ -663,10 +663,6 @@ def explore_part_view(request, part_id):
                        "error_detail": f"{type(e).__name__}: {e}" if settings.DEBUG else None,
                        "sidebar": navigation.sidebar_tree(inst, {})})
 
-    # Catch-all attachments minus the ones already shown in a spec section.
-    shown = {a["image_id"] for sec in detail["sections"] for a in sec["attachments"]}
-    other_attachments = [a for a in detail["attachments"] if a["image_id"] not in shown]
-
     leaf = HierarchyNode.for_instance(inst).filter(
         level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
     # Open + highlight this part's component type in the sidebar tree.
@@ -693,6 +689,40 @@ def explore_part_view(request, part_id):
         key=lambda a: a["image_name"] or "", reverse=True)
     for a in exec_summaries:
         a["label"] = _summary_label(a["image_name"])
+    packing = (_packing_context(api, inst, ptid, detail["manifest"])
+               if can_update_location else None)
+
+    # Every shipping sheet on the box (each checklist run appends one, both
+    # naming eras) — the Pre-shipping card lists them in a newest-first
+    # selector instead of a single chip (#77).
+    def _is_sheet(name):
+        n = (name or "").lower()
+        return n.startswith("shippingsheet_") or n.endswith("-shipping-label.pdf")
+    shipping_sheets = sorted(
+        (a for a in detail["attachments"] if _is_sheet(a["image_name"])),
+        key=lambda a: a.get("created") or "", reverse=True) if is_shipping else []
+    for a in shipping_sheets:
+        # Short label like the ES pane: the filename's embedded timestamp,
+        # or the upload time for legacy names (which carry no timestamp).
+        lbl = _summary_label(a["image_name"])
+        if lbl == (a["image_name"] or ""):
+            lbl = (a.get("created") or "").replace("T", " ")[:16] or a["image_name"]
+        a["label"] = lbl
+    sheet_ids = {a["image_id"] for a in shipping_sheets}
+    if shipping_sheets:
+        for sec in detail["sections"]:
+            sec["attachments"] = [x for x in sec["attachments"]
+                                  if x["image_id"] not in sheet_ids]
+
+    # Catch-all attachments minus the ones shown elsewhere: spec-section
+    # chips, the shipping-sheet selector, and the Executive-summary card
+    # (only when that card actually renders — same condition as the template).
+    shown = {a["image_id"] for sec in detail["sections"] for a in sec["attachments"]}
+    shown |= sheet_ids
+    if packing or es_cfg:
+        shown |= {a["image_id"] for a in exec_summaries}
+    other_attachments = [a for a in detail["attachments"] if a["image_id"] not in shown]
+
     return render(request, "explore/part_detail.html", {
         # A box belongs to the Shipments tab; everything else to Hardware.
         "active_nav": "shipments" if is_shipping else "hardware",
@@ -713,8 +743,8 @@ def explore_part_view(request, part_id):
         # Packing card (issue #63): the box's slot schema + occupants; the
         # item picker is its own page. None when writes are off or the
         # connectors fetch fails (the card just doesn't render).
-        "packing": (_packing_context(api, inst, ptid, detail["manifest"])
-                    if can_update_location else None),
+        "packing": packing,
+        "shipping_sheets": shipping_sheets,
         # Executive summaries already on this item (issue #53): attachments
         # matching the Dashboard's gate convention, newest first (the gate
         # filename embeds the timestamp, so name order is chronological).
@@ -2050,11 +2080,20 @@ def explore_preship_view(request, part_id):
                 qr = api.get_qrcode_response(part_id).content
             except Exception as e:
                 logger.warning("preship: QR fetch failed: %s", e)
+            poc = cl.state.get("PreShipping3", {})
             label = checklists.build_label_pdf(
-                part_id, info["part_type_name"],
-                "Development HWDB" if inst == "dev" else "Production HWDB", qr)
+                part_id, info,
+                "Development HWDB" if inst == "dev" else "Production HWDB", qr,
+                poc_name=poc.get("approver_name", ""),
+                poc_email=poc.get("approver_email", ""))
             try:
-                image_id, err = checklists.execute_final_patch(api, cl, info, label)
+                who = api.whoami().get("data") or {}
+            except Exception:
+                who = {}
+            username = who.get("username") or request.user.get_username()
+            try:
+                image_id, err = checklists.execute_final_patch(
+                    api, cl, info, label, username=username)
             except requests.RequestException as e:
                 messages.error(request, f"HWDB rejected the update — {_hwdb_error_detail(e)}")
                 return redirect(page_url)

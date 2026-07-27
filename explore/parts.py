@@ -366,6 +366,7 @@ def part_detail(api, part_id: str, is_shipping: bool) -> dict:
             a["filename"] = name_by_id.get(a["image_id"]) or a["label"]
             a["is_image"] = _is_image(a["filename"])
     attachments = [{"image_id": str(i["image_id"]), "image_name": i.get("image_name"),
+                    "created": i.get("created"),
                     "is_image": _is_image(i.get("image_name"))}
                    for i in images]
 

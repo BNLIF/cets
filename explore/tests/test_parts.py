@@ -622,6 +622,10 @@ class PartViewTest(TestCase):
         # card when its type carries an ES_{ptid}_*.json config in HWDB (the
         # interim "requires ES" mark until the hierarchy-chart one exists).
         api = self._api()
+        api.get_images.return_value = {"data": [
+            {"image_id": "i9", "image_name": "photo.jpg"},
+            {"image_id": "es9", "image_name":
+             "ExecutiveSummary_D05700200099-00007_20260701_000000.pdf"}]}
         api.get_component_type_images.return_value = {"data": [
             {"image_id": "c1", "image_name": "ES_D05700200099_test_v8.json",
              "created": "2026-07-01T00:00:00"}]}
@@ -630,7 +634,14 @@ class PartViewTest(TestCase):
             "test_description": "Check the chip"}).encode())
         with mock.patch("explore.views.mint_for", return_value="bearer"), \
              mock.patch("explore.views.FnalDbApiClient", return_value=api):
-            html = self.client.get("/hw/dev/part/D05700200099-00007/").content.decode()
+            resp = self.client.get("/hw/dev/part/D05700200099-00007/")
+        html = resp.content.decode()
+        # The summary lives in the ES card's selector; the catch-all
+        # Attachments pane must not list it again (#77 follow-up).
+        self.assertEqual([a["image_id"] for a in resp.context["exec_summaries"]],
+                         ["es9"])
+        self.assertEqual([a["image_id"] for a in resp.context["other_attachments"]],
+                         ["i9"])
         self.assertIn("Executive summary", html)
         # Dashboard-style header lines, from the config JSON
         self.assertIn("Consortium:", html)

@@ -596,6 +596,41 @@ class ShipmentDetailPageTest(TestCase):
         self.assertIn("label.pdf", body)                   # real filename in ?name=
         self.assertIn(navigation.leaf_path_for("prod", SHIP_PTID), body)  # breadcrumb back to leaf
 
+    def test_sheet_history_selector_and_deduped_attachments(self):
+        # Sheets are append-only (one per checklist run): the Pre-shipping
+        # card lists them all in a newest-first selector (old and new naming
+        # eras), the single chip goes away, and neither sheet leaks into the
+        # catch-all Attachments pane (#77).
+        api = self._api()
+        api.get_component.return_value = {"data": {"specifications": [
+            {"DATA": {"Pre-Shipping Checklist": [
+                {"Image ID for this Shipping Sheet": "s-new"}]}}]}}
+        api.get_images.return_value = {"data": [
+            {"image_id": "s-old", "image_name": f"{self.part_id}-shipping-label.pdf",
+             "created": "2026-07-24T10:00:00"},
+            {"image_id": "s-new", "image_name": "ShippingSheet_w_20260727_130400.pdf",
+             "created": "2026-07-27T13:04:00"},
+            {"image_id": "other", "image_name": "photo.pdf",
+             "created": "2026-07-01T00:00:00"},
+        ]}
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            resp = self.client.get(self.url)
+        html = resp.content.decode()
+        self.assertIn('id="pd-sheets"', html)
+        # Short labels like the ES pane: the filename's timestamp for the
+        # new naming era, the upload time for the legacy fixed name.
+        self.assertIn("2026-07-27 13:04 — latest", html)
+        self.assertIn("2026-07-24 10:00", html)
+        self.assertIn('title="ShippingSheet_w_20260727_130400.pdf"', html)
+        self.assertEqual([a["image_id"] for a in resp.context["shipping_sheets"]],
+                         ["s-new", "s-old"])                      # newest first
+        self.assertEqual([a["image_id"] for a in resp.context["other_attachments"]],
+                         ["other"])                               # sheets deduped
+        pre = next(s for s in resp.context["detail"]["sections"]
+                   if s["title"] == "Pre-shipping")
+        self.assertEqual(pre["attachments"], [])                  # chip replaced
+
     def test_fnal_link_required_redirects(self):
         with mock.patch("explore.views.mint_for", side_effect=FnalLinkRequired()):
             resp = self.client.get(self.url)

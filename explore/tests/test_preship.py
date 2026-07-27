@@ -7,6 +7,9 @@ DB-backed resumable flow. HWDB is mocked.
 
 from __future__ import annotations
 
+import base64
+import re
+import zlib
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -19,6 +22,22 @@ from explore.models import HierarchyNode as H
 
 BOX = "D00599800007-00128"
 PAGE = f"/hw/dev/part/{BOX}/preship/"
+
+
+def _pdf_text(pdf: bytes) -> str:
+    """Decode a PDF's content streams so text drawn on the page is
+    assertable (reportlab emits ASCII85 + Flate by default)."""
+    out = []
+    for m in re.finditer(rb"stream\r?\n(.*?)endstream", pdf, re.S):
+        raw = m.group(1).strip(b"\r\n")
+        for decode in (lambda b: zlib.decompress(base64.a85decode(b, adobe=True)),
+                       zlib.decompress):
+            try:
+                out.append(decode(raw).decode("latin-1"))
+                break
+            except Exception:
+                continue
+    return "".join(out)
 
 
 class _Post(dict):
@@ -256,8 +275,46 @@ class PatchBuildTest(TestCase):
         self.assertIn("Freight Forwarder name,FF Inc", text)
         self.assertIn("DUNE PID," + BOX, text)
         self.assertIn("P-1,FEB,FEB1", text)
-        pdf = checklists.build_label_pdf(BOX, "Test Type 007", "Development HWDB", None)
+        pdf = checklists.build_label_pdf(BOX, info, "Development HWDB", None,
+                                         poc_name="POC Person",
+                                         poc_email="poc@x.org")
         self.assertTrue(pdf.startswith(b"%PDF"))
+        text = _pdf_text(pdf)
+        self.assertIn("DUNE Shipping Sheet", text)
+        # Spec p.10 (#77): POC + System/Subsystem block…
+        self.assertIn("POC: POC Person <poc@x.org>", text)
+        self.assertIn("System:", text)
+        self.assertIn("Subsystem:", text)
+        # …and the 3-column sub-component table.
+        self.assertIn("Sub-component PID", text)
+        self.assertIn("Func. Pos. Name", text)
+        self.assertIn("P-1", text)
+        self.assertIn("FEB1", text)
+
+    def test_label_crops_hwdb_qr_caption(self):
+        # HWDB's QR PNG (~450×470) bakes a pixel-font PID caption below the
+        # code — the label crops it off like the Dashboard does. A small
+        # (already-clean) image is drawn as-is.
+        import io as _io
+
+        import PIL.Image as _img
+        for size in ((450, 470), (200, 200)):
+            raw = _io.BytesIO()
+            _img.new("RGB", size, "white").save(raw, "PNG")
+            info = checklists.part_info(None, BOX, [])
+            pdf = checklists.build_label_pdf(BOX, info, "Dev", raw.getvalue())
+            self.assertTrue(pdf.startswith(b"%PDF"))
+
+    def test_label_paginates_a_full_box(self):
+        # A box with many items must not run the table off the page —
+        # the header repeats on the next page instead.
+        info = checklists.part_info(None, BOX, [
+            {"part_id": f"P-{i:03d}", "type_name": "FEB",
+             "functional_position": f"Slot {i}"} for i in range(80)])
+        pdf = checklists.build_label_pdf(BOX, info, "Development HWDB", None)
+        text = _pdf_text(pdf)
+        self.assertIn("P-079", text)                          # last row present
+        self.assertGreater(text.count("Sub-component PID"), 1)  # header repeated
 
 
 class ChecklistFlowTest(TestCase):
@@ -279,9 +336,10 @@ class ChecklistFlowTest(TestCase):
                 self._advance(SCENE_DATA[scene])
             resp = self._advance({"confirm_patch_hwdb": "on"})          # 8 write
 
-        # Shipping sheet uploaded with the Dashboard's comment string.
+        # Shipping sheet uploaded with the Dashboard's comment string, named
+        # per the spec: ShippingSheet_<username>_<time stamp>.pdf (#77).
         (pid, fileobj, name), kwargs = api.post_component_image.call_args
-        self.assertEqual(name, f"{BOX}-shipping-label.pdf")
+        self.assertRegex(name, r"^ShippingSheet_w_\d{8}_\d{6}\.pdf$")
         self.assertEqual(kwargs["comments"], "shipping sheet")
         self.assertTrue(fileobj.read().startswith(b"%PDF"))
         # The PATCH folds the checklist into the item's latest specs block.

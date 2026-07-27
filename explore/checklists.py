@@ -550,25 +550,33 @@ def email_html(checklist, csv_filename: str, sender_name: str, sender_email: str
 
 # ---- Shipping label (scene 8's "shipping sheet" PDF) ------------------------
 
-def build_label_pdf(part_id: str, type_name: str, instance_label: str,
-                    qr_png: bytes | None) -> bytes:
-    """The Dashboard's shipping label, approximated: title, the item's HWDB
-    QR code (left) + a Code128 barcode of the PID (right), centered
-    instance / type / PID lines."""
+def build_label_pdf(part_id: str, info: dict, instance_label: str,
+                    qr_png: bytes | None, poc_name: str = "",
+                    poc_email: str = "") -> bytes:
+    """The DUNE Shipping Sheet (procedure p.10): title, the item's HWDB QR
+    code (left) + a Code128 barcode of the PID (right), centered instance /
+    type / PID lines, the POC + System/Subsystem block, and the 3-column
+    sub-component table (PID, Type Name, Func. Pos.), paginating with a
+    repeated header when a box holds many items (#77)."""
     buf = io.BytesIO()
     cvs = rl_canvas.Canvas(buf, pagesize=letter)
     width, height = letter
+    x_left = 0.9 * units.inch
     top = height - 0.75 * units.inch
     cvs.setFont("Helvetica-Bold", 24)
     cvs.drawCentredString(width / 2, top, "DUNE Shipping Sheet")
     top -= 0.6 * units.inch
 
     qr_size = 2.4 * units.inch
-    x_left = 0.9 * units.inch
     if qr_png:
         try:
-            img = PIL.Image.open(io.BytesIO(qr_png)).resize(
-                (int(qr_size), int(qr_size)), PIL.Image.NEAREST)
+            img = PIL.Image.open(io.BytesIO(qr_png))
+            # HWDB's PNG bakes margins + a pixel-font PID caption below the
+            # code; the Dashboard's label crops both off (the PID prints
+            # cleanly underneath anyway) — same crop box here.
+            if img.width >= 410 and img.height >= 410:
+                img = img.crop((40, 40, 410, 410))
+            img = img.resize((int(qr_size), int(qr_size)), PIL.Image.NEAREST)
             cvs.drawImage(ImageReader(img), x_left, top - qr_size, qr_size, qr_size)
         except Exception as e:
             logger.warning("label: QR draw failed: %s", e)
@@ -578,10 +586,49 @@ def build_label_pdf(part_id: str, type_name: str, instance_label: str,
 
     y = top - qr_size - 30
     cvs.setFont("Helvetica-Bold", 14)
-    for line in (instance_label, type_name, part_id):
+    for line in (instance_label, info.get("part_type_name"), part_id):
         if line:
             cvs.drawCentredString(width / 2, y, str(line))
             y -= 14
+
+    # POC + hierarchy block (spec p.10: POC info and the corresponding
+    # System and Subsystem names).
+    y -= 12
+    cvs.setFont("Helvetica", 11)
+    poc = f"{poc_name} <{poc_email}>" if poc_email else poc_name
+    for line in (
+        f"POC: {poc}" if poc else None,
+        f"System: {info.get('system_name', '')} ({info.get('system_id', '')})",
+        f"Subsystem: {info.get('subsystem_name', '')} ({info.get('subsystem_id', '')})",
+    ):
+        if line:
+            cvs.drawCentredString(width / 2, y, line)
+            y -= 14
+
+    # Sub-component table.
+    c1, c2, c3 = x_left, x_left + 2.6 * units.inch, x_left + 5.0 * units.inch
+
+    def table_header(y):
+        cvs.setFont("Helvetica-Bold", 10)
+        cvs.drawString(c1, y, "Sub-component PID")
+        cvs.drawString(c2, y, "Component Type Name")
+        cvs.drawString(c3, y, "Func. Pos. Name")
+        cvs.line(c1, y - 4, width - x_left, y - 4)
+        cvs.setFont("Helvetica", 9.5)
+        return y - 16
+
+    y = table_header(y - 14)
+    subs = list(info.get("subcomponents", {}).values())
+    if not subs:
+        cvs.drawString(c1, y, "(no sub-components linked)")
+    for sc in subs:
+        if y < 0.8 * units.inch:
+            cvs.showPage()
+            y = table_header(height - 0.75 * units.inch)
+        cvs.drawString(c1, y, str(sc.get("Sub-component PID", ""))[:44])
+        cvs.drawString(c2, y, str(sc.get("Component Type Name", ""))[:42])
+        cvs.drawString(c3, y, str(sc.get("Functional Position Name", ""))[:30])
+        y -= 13
     cvs.showPage()
     cvs.save()
     return buf.getvalue()
@@ -650,12 +697,16 @@ def sub_pids(info: dict) -> list[dict]:
             for v in info.get("subcomponents", {}).values()]
 
 
-def execute_final_patch(api, checklist, info: dict, label_pdf: bytes) -> tuple[str | None, str | None]:
+def execute_final_patch(api, checklist, info: dict, label_pdf: bytes,
+                        username: str = "") -> tuple[str | None, str | None]:
     """Scene 8's writes, in the Dashboard's order: upload the shipping sheet
     (comment "shipping sheet"), then PATCH the item with the checklist +
     SubPIDs folded into its latest specifications block. Returns
     ``(image_id, error)``."""
-    filename = f"{checklist.part_id}-shipping-label.pdf"
+    # The spec's file-name convention (procedure p.10):
+    # ShippingSheet_<username>_<time stamp>.pdf (#77).
+    filename = (f"ShippingSheet_{username or 'user'}_"
+                f"{datetime.now():%Y%m%d_%H%M%S}.pdf")
     body = api.post_component_image(checklist.part_id, io.BytesIO(label_pdf),
                                     filename, comments="shipping sheet")
     if body.get("status") != "OK":
