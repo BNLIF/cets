@@ -246,20 +246,20 @@ class PackPageTest(TestCase):
         self.assertIsNone(
             HwdbComponentEvent.objects.get(part_id=GOOD).enabled)
 
-    def test_obsolete_status_items_are_hidden(self):
-        # HWDB refuses linking items whose status id is obsolete (1-3) —
-        # "not yet available" — while 0 and 100+ link fine (probed
-        # 2026-07-27 on D00599800008). NULL (not yet captured) still passes.
+    def test_unlinkable_status_items_are_hidden(self):
+        # HWDB refuses linking items whose status is 2/3 "Unavailable" —
+        # "not yet available" — while 0, 1 "Available" and 100+ link fine
+        # (probed 2026-07-27). NULL (not yet captured) still passes.
         HwdbComponentEvent.objects.filter(part_id=GOOD).update(
-            status="Unknown", status_id=1)
+            status="Unknown", status_id=2)
         HwdbComponentEvent.objects.filter(part_id=BAD_QC).update(
-            status="Unknown", status_id=0)
+            status="Unknown", status_id=1)
         api = _api()
         m1, m2 = _mocked(api)
         with m1, m2:
             html = self.client.get(PACK).content.decode()
-        self.assertNotIn(f'value="{GOOD}"', html)   # obsolete → refused → hidden
-        self.assertIn(f'value="{BAD_QC}"', html)    # genuine Unknown → linkable
+        self.assertNotIn(f'value="{GOOD}"', html)   # Unavailable → hidden
+        self.assertIn(f'value="{BAD_QC}"', html)    # old "Available" → linkable
 
     def test_uncertified_items_stay_listed(self):
         # certified_qaqc does NOT gate packing (an uncertified FEB was found

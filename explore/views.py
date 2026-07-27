@@ -991,11 +991,11 @@ def _pack_groups(instance, connectors, manifest) -> list[dict]:
     """The packing page's pickable candidates: one group per child type that
     still has free slots — mirror rows of that type, with status + QC flags
     so un-shippable items are visible up front. Rows with a known parent
-    (HWDB rejects those with "already in use"), an obsolete status id
-    (HWDB rejects 1-3 with "not yet available" — probed 2026-07-27), or
-    known-unapproved (``enabled=False``) are hidden; unknowns pass and HWDB
-    stays the arbiter (a refused add reports that item's live HWDB status
-    flags)."""
+    (HWDB rejects those with "already in use"), an unlinkable status id
+    (HWDB rejects 2/3 "Unavailable" with "not yet available" — probed
+    2026-07-27; id 1 "Available" links fine), or known-unapproved
+    (``enabled=False``) are hidden; unknowns pass and HWDB stays the
+    arbiter (a refused add reports that item's live HWDB status flags)."""
     occupied = {m["functional_position"] for m in manifest}
     in_box = {m["part_id"] for m in manifest if m["part_id"]}
     free_by_type: dict[str, list[str]] = {}
@@ -1011,7 +1011,7 @@ def _pack_groups(instance, connectors, manifest) -> list[dict]:
                 # NULL status_id (not yet captured) must keep passing —
                 # a bare .exclude(__in=…) would drop those rows too.
                 .filter(Q(status_id__isnull=True)
-                        | ~Q(status_id__in=sorted(parts.OBSOLETE_STATUS_IDS)))
+                        | ~Q(status_id__in=sorted(parts.UNLINKABLE_STATUS_IDS)))
                 .order_by("part_id"))
         leaf = HierarchyNode.for_instance(instance).filter(
             level=HierarchyNode.LEVEL_TYPE, part_type_id=ctid).first()

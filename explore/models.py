@@ -146,8 +146,8 @@ class HwdbComponentEvent(InstanceScoped):
     status = models.CharField(max_length=120, blank=True, default="")
     # Raw HWDB status id. The display name collapses the obsolete ids 1-3
     # and the genuine id 0 into "Unknown" (#75), but the pack gate needs
-    # them apart: HWDB refuses linking obsolete-status items ("not yet
-    # available" — probed 2026-07-27) while id 0 links fine. NULL = row
+    # them apart: HWDB refuses linking ids 2/3 "Unavailable" ("not yet
+    # available" — probed 2026-07-27) while 0 and 1 link fine. NULL = row
     # mirrored before this was captured.
     status_id = models.IntegerField(null=True, blank=True)
     manufacturer = models.CharField(max_length=160, blank=True, default="")

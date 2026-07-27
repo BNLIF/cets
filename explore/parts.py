@@ -107,10 +107,13 @@ def _named(v):
 # names only) the mapping covers the unambiguous legacy names;
 # "Permanently Unavailable" doubles as modern id 170, so it passes through
 # and the id-aware sync corrects obsolete rows on their next walk.
-# Public: the pack picker hides these too — HWDB refuses linking an
-# obsolete-status item into an assembly ("not yet available").
 OBSOLETE_STATUS_IDS = {1, 2, 3}
 _OBSOLETE_STATUS_NAMES = {"Available", "Temporarily Unavailable"}
+# The subset HWDB refuses to link into an assembly ("not yet available").
+# Probed 2026-07-27: the old vocabulary is literal — id 1 "Available" links
+# fine, 2/3 "Unavailable" don't. (One status-1 item with specs_version null
+# was also refused; the listing can't spot those, so HWDB arbitrates.)
+UNLINKABLE_STATUS_IDS = {2, 3}
 
 
 def normalize_status(value):
