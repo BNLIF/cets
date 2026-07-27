@@ -99,6 +99,35 @@ class ShippingEngineTest(TestCase):
         self.assertTrue(d["This shipment has been adequately insured for transit"])
 
 
+class SceneCleanTest(TestCase):
+    """#76: datetime normalization is per-field — a blanket T→space used to
+    eat every capital T in names and comments."""
+
+    def test_text_fields_keep_capital_t(self):
+        d, err = checklists.clean_shipping_scene(
+            5, False, "Domestic",
+            {"shipment_time": "2026-07-13T08:00", "comments": "The Truck left",
+             "affirm_shipment": "on"}, {})
+        self.assertIsNone(err)
+        self.assertEqual(d["shipment_time"], "2026-07-13 08:00")
+        self.assertEqual(d["comments"], "The Truck left")
+
+    def test_approver_name_keeps_capital_t(self):
+        d, _err = checklists.clean_shipping_scene(
+            4, False, "Domestic",
+            {"approved_by": "Tom T.", "approved_time": "2026-07-12T09:00"}, {})
+        self.assertEqual(d["approved_by"], "Tom T.")
+        self.assertEqual(d["approved_time"], "2026-07-12 09:00")
+
+    def test_receiving_arrived_normalized_comments_untouched(self):
+        d, err = checklists.clean_receiving_scene(
+            2, {"location_id": "186", "arrived": "2026-07-23T14:42",
+                "comments": "To BNL", "affirm_update": "on"})
+        self.assertIsNone(err)
+        self.assertEqual(d["arrived"], "2026-07-23 14:42")
+        self.assertEqual(d["comments"], "To BNL")
+
+
 class ShippingFlowTest(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user("w", "w@w.io", "pw")

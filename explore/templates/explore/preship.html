@@ -25,8 +25,10 @@
   .ps-hint { font-size: 11.5px; color: var(--faint); }
   .ps-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
   .ps-page label { font-size: 12px; color: var(--faint); display: flex; flex-direction: column; gap: 3px; }
+  .ps-page label[hidden] { display: none; }   /* flex above would beat the hidden attr (#76) */
   .ps-page label.inline { flex-direction: row; align-items: center; gap: 7px; font-size: 13px; color: var(--ink); }
-  .ps-page input[type=text], .ps-page select, .ps-page textarea { font: inherit; font-size: 13px;
+  .ps-page input[type=text], .ps-page input[type=date], .ps-page input[type=datetime-local],
+  .ps-page select, .ps-page textarea { font: inherit; font-size: 13px;
     color: var(--ink); background: var(--surface); border: 1px solid var(--rule);
     border-radius: var(--r-sm); padding: 6px 8px; }
   .ps-actions { display: flex; gap: 10px; align-items: center; margin-top: 16px; }
@@ -85,6 +87,18 @@
     </form>
   </div>
 
+  {% elif scene == 0 %}
+  {# "Step 0" — re-pick the route mid-run; filled steps are kept (#76). #}
+  <p class="ps-sub">Change the shipping route — progress in later steps is kept.</p>
+  <form method="post" class="ps-card">
+    {% csrf_token %}<input type="hidden" name="action" value="set_route">
+    <h2>Select shipping route</h2>
+    {% for value, label in routes %}
+    <label class="inline"><input type="radio" name="route" value="{{ value }}" {% if value == cl.route %}checked{% endif %}> {{ label }}</label>
+    {% endfor %}
+    <div class="ps-actions"><button class="ps-btn">Continue ›</button></div>
+  </form>
+
   {% else %}
   <p class="ps-sub">{{ cl.route_label }} · started by {{ cl.created_by|default:"—" }} · progress saved
     automatically, resume anytime.</p>
@@ -128,19 +142,30 @@
             <option {% if saved.shipping_service_type == 'Domestic' or not saved.shipping_service_type %}selected{% endif %}>Domestic</option>
             <option {% if saved.shipping_service_type == 'International' %}selected{% endif %}>International</option>
           </select></label>
-        <label>HTS code (International) <input type="text" name="hts_code" value="{{ saved.hts_code|default:'' }}"></label>
+        {# HTS codes are only required (or asked) for International shipments (#76). #}
+        <label id="ps-hts-field" {% if saved.shipping_service_type != 'International' %}hidden{% endif %}>HTS code (International) <input type="text" name="hts_code" value="{{ saved.hts_code|default:'' }}"></label>
         <label>Origin <input type="text" name="shipment_origin" value="{{ saved.shipment_origin|default:'' }}"></label>
-        <label>Destination <input type="text" name="shipment_destination" value="{{ saved.shipment_destination|default:'' }}"></label>
+        <label>Destination <input type="text" name="shipment_destination" value="{{ saved.shipment_destination|default:dest_default }}"></label>
         <label>Dimension{% if cl.is_surf %} (required){% endif %} <input type="text" name="dimension" value="{{ saved.dimension|default:'' }}" placeholder="L × W × H"></label>
         <label>Weight{% if cl.is_surf %} (required){% endif %} <input type="text" name="weight" value="{{ saved.weight|default:'' }}"></label>
       </div>
+      <script>
+      (function () {
+        var sel = document.querySelector("select[name=shipping_service_type]");
+        var hts = document.getElementById("ps-hts-field");
+        if (!sel || !hts) return;
+        sel.addEventListener("change", function () {
+          hts.hidden = sel.value !== "International";
+        });
+      })();
+      </script>
 
     {% elif scene == 5 %}
       {% if not cl.is_surf %}<p class="ps-hint" style="margin-bottom:10px;">Optional for non-SURF routes — fill what you know.</p>{% endif %}
       <div class="ps-grid">
         <label>Freight forwarder <input type="text" name="freight_forwarder" value="{{ saved.freight_forwarder|default:'' }}"></label>
         <label>Mode of transportation <input type="text" name="mode_of_transportation" value="{{ saved.mode_of_transportation|default:'' }}" placeholder="air / ground / sea…"></label>
-        <label>Expected arrival (CT) <input type="text" name="expected_arrival_time" value="{{ saved.expected_arrival_time|default:'' }}" placeholder="YYYY-MM-DD"></label>
+        <label>Expected arrival (CT) <input type="date" name="expected_arrival_time" value="{{ saved.expected_arrival_time|default:'' }}"></label>
       </div>
 
     {% elif scene == 6 %}
@@ -160,7 +185,7 @@
         FD Logistics acknowledged the shipment{% if cl.is_surf %} (required for SURF){% endif %}</label>
       <div class="ps-grid" style="margin-top:10px;">
         <label>Acknowledged by <input type="text" name="acknowledged_by" value="{{ saved.acknowledged_by|default:'' }}"></label>
-        <label>Acknowledged time (CT) <input type="text" name="acknowledged_time" value="{{ saved.acknowledged_time|default:'' }}" placeholder="YYYY-MM-DD HH:MM"></label>
+        <label>Acknowledged time (CT) <input type="datetime-local" name="acknowledged_time" value="{{ saved.acknowledged_time|default:'' }}"></label>
       </div>
       <div style="margin-top:12px;">
         <label class="inline"><input type="radio" name="damage_status" value="no damage" {% if saved.damage_status != 'damage' %}checked{% endif %}> Visual inspection: no damage</label>
@@ -185,7 +210,7 @@
     {% endif %}
 
     <div class="ps-actions">
-      {% if scene > 1 %}<button class="ps-btn quiet" name="action" value="back" formnovalidate>‹ Back</button>{% endif %}
+      <button class="ps-btn quiet" name="action" value="back" formnovalidate>{% if scene == 1 %}‹ Change route{% else %}‹ Back{% endif %}</button>
       <button class="ps-btn" name="action" value="advance">{% if scene == n_scenes %}Write to HWDB{% else %}Continue ›{% endif %}</button>
       <span class="ps-hint">{{ cl.route_label }}</span>
     </div>

@@ -83,6 +83,18 @@
     </form>
   </div>
 
+  {% elif scene == 0 %}
+  {# "Step 0" — re-pick the route mid-run; filled steps are kept (#76). #}
+  <p class="ps-sub">Change the receiving route — progress in later steps is kept.</p>
+  <form method="post" class="ps-card">
+    {% csrf_token %}<input type="hidden" name="action" value="set_route">
+    <h2>Select receiving route</h2>
+    {% for value, label in routes %}
+    <label class="inline"><input type="radio" name="route" value="{{ value }}" {% if value == cl.route %}checked{% endif %}> {{ label }}</label>
+    {% endfor %}
+    <div class="ps-actions"><button class="ps-btn">Continue ›</button></div>
+  </form>
+
   {% else %}
   <p class="ps-sub">{{ cl.route_label }} · started by {{ cl.created_by|default:"—" }} · progress saved
     automatically.</p>
@@ -135,7 +147,7 @@
     {% endif %}
 
     <div class="ps-actions">
-      {% if scene > 1 %}<button class="ps-btn quiet" name="action" value="back" formnovalidate>‹ Back</button>{% endif %}
+      <button class="ps-btn quiet" name="action" value="back" formnovalidate>{% if scene == 1 %}‹ Change route{% else %}‹ Back{% endif %}</button>
       <button class="ps-btn" name="action" value="advance">{% if scene == n_scenes %}Finish{% else %}Continue ›{% endif %}</button>
       <span class="ps-hint">{{ cl.route_label }}</span>
     </div>

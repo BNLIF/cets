@@ -1897,6 +1897,18 @@ def _safe_get_data(fn, *args) -> list:
         return []
 
 
+def _form_saved(saved: dict) -> dict:
+    """A scene's saved state, with datetime values in the input's T-form:
+    checklists store the Dashboard's "YYYY-MM-DD HH:MM" (and older runs
+    were typed free-text that way), but a datetime-local input only renders
+    "YYYY-MM-DDTHH:MM" (#76). Save re-normalizes back to the space form."""
+    out = dict(saved)
+    for k in ("acknowledged_time", "approved_time"):
+        if out.get(k):
+            out[k] = str(out[k]).strip().replace(" ", "T")
+    return out
+
+
 def _upload_summary_pdf(api, part_id, fileobj, name) -> str | None:
     """Upload a summary PDF under the gate convention; error string or None."""
     ts = timezone.localtime().strftime(execsummary.TIMESTAMP_FMT)
@@ -1991,13 +2003,30 @@ def explore_preship_view(request, part_id):
             messages.error(request, "Start the checklist first.")
             return redirect(page_url)
         if action == "back":
-            cl.current_scene = max(1, cl.current_scene - 1)
+            # Back from step 1 reaches "step 0" — the route re-pick (#76).
+            cl.current_scene = max(0, cl.current_scene - 1)
             cl.save(update_fields=["current_scene", "updated_at"])
+            return redirect(page_url)
+        if action == "set_route":
+            # Re-pick the route mid-run; filled scenes are kept (unlike
+            # "start", which wipes the checklist for a fresh run).
+            route = request.POST.get("route")
+            if route in dict(BoxChecklist.ROUTES):
+                cl.route = route
+            cl.current_scene = 1
+            cl.save(update_fields=["route", "current_scene", "updated_at"])
             return redirect(page_url)
 
         scene = cl.current_scene
         cleaned, err = checklists.clean_scene(scene, cl.is_surf, request.POST)
         if err:
+            # Keep the submitted fields (like the shipping flow does) so the
+            # re-render doesn't revert the form to its last-saved values —
+            # e.g. flipping Domestic → International with no HTS code yet
+            # must not snap the select back to Domestic (#76).
+            cl.state[checklists.scene_key(scene)] = {
+                **cl.state.get(checklists.scene_key(scene), {}), **cleaned}
+            cl.save(update_fields=["state", "updated_at"])
             messages.error(request, err)
             return redirect(page_url)
         if scene == 1:  # server-side gate re-check, like the Dashboard
@@ -2067,10 +2096,16 @@ def explore_preship_view(request, part_id):
     }
     if cl and not cl.completed_at:
         scene = cl.current_scene
+        if scene == 0:                      # the route re-pick screen (#76)
+            ctx["scene"] = 0
+            return render(request, "explore/preship.html", ctx)
         ctx.update({"scene": scene, "scene_title": checklists.scene_title(scene),
-                    "saved": cl.state.get(checklists.scene_key(scene), {})})
+                    "saved": _form_saved(cl.state.get(checklists.scene_key(scene), {}))})
         if scene == 1:
             ctx["gate"] = _preship_gate(api, part_id)
+        if scene == 4:
+            # The procedure's stated default destination for the SURF route.
+            ctx["dest_default"] = "SD Warehouse/SURF" if cl.is_surf else ""
         if scene == 2:
             # Prefill the QA rep from the summary's uploader, like the Dashboard.
             ctx["qa_rep_default"] = (ctx.get("saved", {}).get("qa_rep_name")
@@ -2157,8 +2192,16 @@ def explore_shipping_view(request, part_id):
             messages.error(request, "Start the checklist first.")
             return redirect(page_url)
         if action == "back":
-            cl.current_scene = max(1, cl.current_scene - 1)
+            # Back from step 1 reaches "step 0" — the route re-pick (#76).
+            cl.current_scene = max(0, cl.current_scene - 1)
             cl.save(update_fields=["current_scene", "updated_at"])
+            return redirect(page_url)
+        if action == "set_route":
+            route = request.POST.get("route")
+            if route in dict(BoxChecklist.ROUTES):
+                cl.route = route
+            cl.current_scene = 1
+            cl.save(update_fields=["route", "current_scene", "updated_at"])
             return redirect(page_url)
 
         scene = cl.current_scene
@@ -2253,9 +2296,13 @@ def explore_shipping_view(request, part_id):
     }
     if cl and not cl.completed_at:
         scene = cl.current_scene
+        if scene == 0:                      # the route re-pick screen (#76)
+            ctx["scene"] = 0
+            return render(request, "explore/shipping.html", ctx)
         ctx.update({"scene": scene,
                     "scene_title": checklists.shipping_scene_title(scene),
-                    "saved": cl.state.get(checklists.shipping_scene_key(scene), {})})
+                    "saved": _form_saved(
+                        cl.state.get(checklists.shipping_scene_key(scene), {}))})
         if scene == 2:
             try:
                 spec = _spec_data(api.get_component(part_id))
@@ -2330,8 +2377,16 @@ def explore_receiving_view(request, part_id):
             messages.error(request, "Start the checklist first.")
             return redirect(page_url)
         if action == "back":
-            cl.current_scene = max(1, cl.current_scene - 1)
+            # Back from step 1 reaches "step 0" — the route re-pick (#76).
+            cl.current_scene = max(0, cl.current_scene - 1)
             cl.save(update_fields=["current_scene", "updated_at"])
+            return redirect(page_url)
+        if action == "set_route":
+            route = request.POST.get("route")
+            if route in dict(BoxChecklist.ROUTES):
+                cl.route = route
+            cl.current_scene = 1
+            cl.save(update_fields=["route", "current_scene", "updated_at"])
             return redirect(page_url)
 
         scene = cl.current_scene
@@ -2390,6 +2445,9 @@ def explore_receiving_view(request, part_id):
     }
     if cl and not cl.completed_at:
         scene = cl.current_scene
+        if scene == 0:                      # the route re-pick screen (#76)
+            ctx["scene"] = 0
+            return render(request, "explore/receiving.html", ctx)
         ctx.update({"scene": scene,
                     "scene_title": checklists.receiving_scene_title(scene),
                     "saved": cl.state.get(checklists.receiving_scene_key(scene), {})})

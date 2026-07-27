@@ -80,6 +80,18 @@
     </form>
   </div>
 
+  {% elif scene == 0 %}
+  {# "Step 0" — re-pick the route mid-run; filled steps are kept (#76). #}
+  <p class="ps-sub">Change the shipping route — progress in later steps is kept.</p>
+  <form method="post" class="ps-card">
+    {% csrf_token %}<input type="hidden" name="action" value="set_route">
+    <h2>Select shipping route</h2>
+    {% for value, label in routes %}
+    <label class="inline"><input type="radio" name="route" value="{{ value }}" {% if value == cl.route %}checked{% endif %}> {{ label }}</label>
+    {% endfor %}
+    <div class="ps-actions"><button class="ps-btn">Continue ›</button></div>
+  </form>
+
   {% else %}
   <p class="ps-sub">{{ cl.route_label }} · started by {{ cl.created_by|default:"—" }} · progress saved
     automatically.</p>
@@ -124,7 +136,7 @@
         FD Logistics sent the final approval{% if cl.is_surf %} (required for SURF){% endif %}</label>
       <div class="ps-grid" style="margin-top:10px;">
         <label>Approved by <input type="text" name="approved_by" value="{{ saved.approved_by|default:'' }}"></label>
-        <label>Approval time (CT) <input type="text" name="approved_time" value="{{ saved.approved_time|default:'' }}" placeholder="YYYY-MM-DD HH:MM"></label>
+        <label>Approval time (CT) <input type="datetime-local" name="approved_time" value="{{ saved.approved_time|default:'' }}"></label>
         <label>Approval message (image/PDF)
           <input type="file" name="approval_file" accept=".pdf,image/*">
           {% if saved.approval_info %}<span class="ps-doc">✓ {{ saved.approval_info.filename }}</span>{% endif %}</label>
@@ -151,7 +163,7 @@
     {% endif %}
 
     <div class="ps-actions">
-      {% if scene > 1 %}<button class="ps-btn quiet" name="action" value="back" formnovalidate>‹ Back</button>{% endif %}
+      <button class="ps-btn quiet" name="action" value="back" formnovalidate>{% if scene == 1 %}‹ Change route{% else %}‹ Back{% endif %}</button>
       <button class="ps-btn" name="action" value="advance">{% if scene == n_scenes %}Finish{% else %}Continue ›{% endif %}</button>
       <span class="ps-hint">{{ cl.route_label }}</span>
     </div>

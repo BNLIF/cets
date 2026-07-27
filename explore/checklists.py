@@ -122,6 +122,10 @@ def clean_scene(scene: int, is_surf: bool, post) -> tuple[dict, str | None]:
             return d, "Dimension and weight are required for SURF shipments."
         if d["shipping_service_type"] == "International" and not d["hts_code"]:
             return d, "International shipments need an HTS code."
+        if d["shipping_service_type"] != "International":
+            # The field is hidden on Domestic (#76); a lingering code would
+            # make shipping_type_of() read the box as International later.
+            d["hts_code"] = ""
         return d, None
 
     if scene == 5:
@@ -139,6 +143,9 @@ def clean_scene(scene: int, is_surf: bool, post) -> tuple[dict, str | None]:
     if scene == 7:
         d = {k: g(k) for k in ("acknowledged_by", "acknowledged_time",
                                "damage_status", "damage_description")}
+        # datetime-local submits 2026-07-23T18:40 — store the Dashboard's
+        # "YYYY-MM-DD HH:MM" so the CSV / HWDB spec strings match its docs.
+        d["acknowledged_time"] = d["acknowledged_time"].replace("T", " ")
         d["received_acknowledgement"] = bool(post.get("received_acknowledgement"))
         if is_surf and not (d["received_acknowledgement"] and d["acknowledged_by"]
                             and d["acknowledged_time"]):
@@ -161,7 +168,7 @@ def clean_shipping_scene(scene: int, is_surf: bool, shipping_type: str,
     scene's state AFTER this request's uploads/fields were folded in — file
     requirements check it, since documents may have arrived on an earlier
     submit."""
-    g = lambda k: (post.get(k) or "").strip().replace("T", " ")
+    g = lambda k: (post.get(k) or "").strip()
 
     if scene == 1:
         if not post.get("confirm_list"):
@@ -186,7 +193,8 @@ def clean_shipping_scene(scene: int, is_surf: bool, shipping_type: str,
         d = {
             "received_approval": bool(post.get("received_approval")),
             "approved_by": g("approved_by"),
-            "approved_time": g("approved_time"),
+            # datetime-local's T-form → the Dashboard's "YYYY-MM-DD HH:MM".
+            "approved_time": g("approved_time").replace("T", " "),
             "confirm_attached_sheet": bool(post.get("confirm_attached_sheet")),
             "confirm_insured": bool(post.get("confirm_insured")),
         }
@@ -202,7 +210,11 @@ def clean_shipping_scene(scene: int, is_surf: bool, shipping_type: str,
         return d, None
 
     if scene == 5:
-        d = {"shipment_time": g("shipment_time"), "comments": g("comments"),
+        # datetime-local's T-form → the Dashboard's "YYYY-MM-DD HH:MM" (the
+        # normalization is per-field: a blanket one would eat every capital T
+        # in names/comments).
+        d = {"shipment_time": g("shipment_time").replace("T", " "),
+             "comments": g("comments"),
              "affirm_shipment": bool(post.get("affirm_shipment"))}
         if not d["shipment_time"]:
             return d, "Please provide the shipment date/time before continuing."
@@ -219,7 +231,7 @@ def clean_shipping_scene(scene: int, is_surf: bool, shipping_type: str,
 def clean_receiving_scene(scene: int, post) -> tuple[dict, str | None]:
     """Validate one receiving scene (the Dashboard's rules: everything on
     scene 2 must be present before the writes fire)."""
-    g = lambda k: (post.get(k) or "").strip().replace("T", " ")
+    g = lambda k: (post.get(k) or "").strip()
 
     if scene == 1:
         if not post.get("confirm_list"):
@@ -227,7 +239,8 @@ def clean_receiving_scene(scene: int, post) -> tuple[dict, str | None]:
         return {"confirm_list": True}, None
 
     if scene == 2:
-        d = {"location_id": g("location_id"), "arrived": g("arrived"),
+        d = {"location_id": g("location_id"),
+             "arrived": g("arrived").replace("T", " "),
              "comments": g("comments"),
              "affirm_update": bool(post.get("affirm_update"))}
         if not d["location_id"]:

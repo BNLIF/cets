@@ -119,6 +119,104 @@ class SceneValidationTest(TestCase):
         self.assertIn("required for SURF", err)
 
 
+class FormUxTest(TestCase):
+    """#76: HTS hidden/cleared on Domestic, SURF destination default, and
+    native date/time pickers with Dashboard-format storage."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("u", "u@u.io", "pw")
+        self.client.force_login(self.user)
+        _leaf()
+
+    def test_domestic_clears_hts_code(self):
+        # The field is hidden on Domestic — a lingering value would make
+        # shipping_type_of() read the box as International later.
+        post = _Post({**SCENE_DATA[4], "shipping_service_type": "Domestic"})
+        d, err = checklists.clean_scene(4, False, post)
+        self.assertIsNone(err)
+        self.assertEqual(d["hts_code"], "")
+
+    def test_acknowledged_time_stored_in_dashboard_format(self):
+        post = _Post({**SCENE_DATA[7], "acknowledged_time": "2026-07-12T09:00"})
+        d, err = checklists.clean_scene(7, True, post)
+        self.assertIsNone(err)
+        self.assertEqual(d["acknowledged_time"], "2026-07-12 09:00")
+
+    def test_scene4_hides_hts_and_prefills_surf_destination(self):
+        _cl(scene=4)                     # SURF route, nothing saved yet
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('id="ps-hts-field" hidden', html)     # default = Domestic
+        self.assertIn('value="SD Warehouse/SURF"', html)    # procedure default
+
+    def test_scene4_saved_values_beat_the_defaults(self):
+        _cl(scene=4, state={checklists.scene_key(4): SCENE_DATA[4]})
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('id="ps-hts-field" >', html)          # International → shown
+        self.assertIn('value="SURF"', html)                 # saved destination kept
+        self.assertNotIn("SD Warehouse/SURF", html)
+
+    def test_back_from_step_1_reaches_route_repick(self):
+        # "Step 0" (#76): Back from step 1 lands on the route picker; picking
+        # another route keeps the filled scenes and returns to step 1.
+        _cl(scene=1, state={checklists.scene_key(2): SCENE_DATA[2]})
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+            self.assertIn("Change route", html)             # step-1 back label
+            self.client.post(PAGE, {"action": "back"})
+            html = self.client.get(PAGE).content.decode()
+            self.assertIn("Select shipping route", html)
+            self.assertIn('value="confirm_surf" checked', html)   # current route
+            self.client.post(PAGE, {"action": "set_route",
+                                    "route": "confirm_non_surf"})
+        cl = BoxChecklist.for_instance("dev").get(part_id=BOX)
+        self.assertEqual(cl.route, "confirm_non_surf")
+        self.assertEqual(cl.current_scene, 1)
+        self.assertEqual(cl.state[checklists.scene_key(2)], SCENE_DATA[2])  # kept
+
+    def test_failed_advance_keeps_submitted_values(self):
+        # Flipping Domestic → International without an HTS code fails
+        # validation — but the re-render must show International (with the
+        # HTS field now visible), not snap back to the saved Domestic (#76).
+        _cl(scene=4, state={checklists.scene_key(4): {
+            **SCENE_DATA[4], "shipping_service_type": "Domestic", "hts_code": ""}})
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"action": "advance", **SCENE_DATA[4],
+                                    "shipping_service_type": "International",
+                                    "hts_code": ""})
+            html = self.client.get(PAGE).content.decode()
+        cl = BoxChecklist.for_instance("dev").get(part_id=BOX)
+        self.assertEqual(cl.current_scene, 4)              # advance blocked
+        self.assertEqual(cl.state[checklists.scene_key(4)]["shipping_service_type"],
+                         "International")                  # pick survived
+        self.assertIn("selected>International", html)
+        self.assertIn('id="ps-hts-field" >', html)         # HTS now shown
+
+    def test_date_fields_render_native_pickers(self):
+        cl = _cl(scene=5, state={checklists.scene_key(7): {
+            "acknowledged_time": "2026-07-12 09:00"}})
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+            self.assertIn('type="date" name="expected_arrival_time"', html)
+            cl.current_scene = 7
+            cl.save()
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('type="datetime-local" name="acknowledged_time"', html)
+        # Dashboard-format saved values round-trip into the input's T-form.
+        self.assertIn('value="2026-07-12T09:00"', html)
+
+
 class PatchBuildTest(TestCase):
     def _surf_checklist(self):
         state = {f"PreShipping{k}": v for k, v in
