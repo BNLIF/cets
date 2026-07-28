@@ -24,7 +24,16 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas as rl_canvas
 
+from .auth import FNAL_USERNAME_PREFIX
+
 logger = logging.getLogger(__name__)
+
+
+def _doc_username(username: str) -> str:
+    """The username stamped into document filenames: FNAL-provisioned
+    Django accounts are ``fnal:<credkey>`` (ADR-0011) — the procedure's
+    conventions want the bare FNAL username."""
+    return (username or "").removeprefix(FNAL_USERNAME_PREFIX) or "user"
 
 # (scene number, state key, title) — the Dashboard's pre-shipping sequence.
 PRESHIPPING_SCENES = [
@@ -88,7 +97,7 @@ def artifact_filename(stem: str, username: str, original: str) -> str:
     ``<stem>_<username>_<YYYYmmdd_HHMMSS><ext>`` — the ShippingSheet_
     convention. The extension follows the uploaded file's."""
     ext = ("." + original.rsplit(".", 1)[-1]) if "." in original else ""
-    return f"{stem}_{username or 'user'}_{datetime.now():%Y%m%d_%H%M%S}{ext}"
+    return f"{stem}_{_doc_username(username)}_{datetime.now():%Y%m%d_%H%M%S}{ext}"
 
 
 # ---- Per-scene validation (the Dashboard's routes.py rules) ---------------
@@ -405,7 +414,7 @@ def build_shipping_csv(checklist, info: dict, poc_name: str, poc_email: str,
     (including its one-cell SubPID rows), named per the procedure (#81):
     ``ShippingChecklist_<PID>_<username>_<timestamp>.csv``."""
     ws = checklist.state
-    filename = (f"ShippingChecklist_{checklist.part_id}_{username or 'user'}_"
+    filename = (f"ShippingChecklist_{checklist.part_id}_{_doc_username(username)}_"
                 f"{datetime.now():%Y-%m-%d-%H-%M}.csv")
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=",")
@@ -574,7 +583,7 @@ def build_csv(checklist, info: dict, username: str = "") -> tuple[str, str]:
     ``Notification_<PID>_<username>_<timestamp>.csv``."""
     ws = checklist.state
     now = datetime.now().strftime("%Y-%m-%d-%H-%M")
-    filename = f"Notification_{checklist.part_id}_{username or 'user'}_{now}.csv"
+    filename = f"Notification_{checklist.part_id}_{_doc_username(username)}_{now}.csv"
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=",")
     p4a, p4b = ws.get("PreShipping4a", {}), ws.get("PreShipping4b", {})
@@ -830,7 +839,7 @@ def execute_final_patch(api, checklist, info: dict, label_pdf: bytes,
     ``(image_id, error)``."""
     # The spec's file-name convention (procedure p.10):
     # ShippingSheet_<username>_<time stamp>.pdf (#77).
-    filename = (f"ShippingSheet_{username or 'user'}_"
+    filename = (f"ShippingSheet_{_doc_username(username)}_"
                 f"{datetime.now():%Y%m%d_%H%M%S}.pdf")
     body = api.post_component_image(checklist.part_id, io.BytesIO(label_pdf),
                                     filename, comments="shipping sheet")

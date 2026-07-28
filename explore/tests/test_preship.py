@@ -278,6 +278,15 @@ class PatchBuildTest(TestCase):
         d = checklists.build_checklist_dict(cl, {"subcomponents": {}}, "i")
         self.assertIsNone(d["HTS code"])
 
+    def test_fnal_usernames_lose_their_prefix_in_filenames(self):
+        # FNAL-provisioned accounts are "fnal:<credkey>" (ADR-0011) — the
+        # procedure's filenames carry the bare FNAL username.
+        name = checklists.artifact_filename("BoL", "fnal:chaoz", "x.pdf")
+        self.assertRegex(name, r"^BoL_chaoz_\d{8}_\d{6}\.pdf$")
+        filename, _text = checklists.build_csv(
+            self._surf_checklist(), {"subcomponents": {}}, "fnal:chaoz")
+        self.assertTrue(filename.startswith(f"Notification_{BOX}_chaoz_"))
+
     def test_csv_and_label(self):
         cl = self._surf_checklist()
         info = checklists.part_info(None, BOX, [
