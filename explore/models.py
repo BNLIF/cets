@@ -268,10 +268,18 @@ class PackScan(InstanceScoped):
     """One PID scanned on a phone, queued for the same user's open packing
     page (issue #68). The phone's ``/scan/`` page appends rows; the packing
     picker polls for rows newer than the id it loaded with. Rows are
-    disposable — a user's stale rows are swept on each new scan."""
+    disposable — a user's stale rows are swept on each new scan.
+
+    Scan-to-cart: when the scan page is opened from a box's pack page its
+    URL carries the box PID, and the submit endpoint links the item into
+    that box immediately — ``ok``/``result`` record the outcome for both
+    screens. ``ok`` NULL = legacy select-only scan (no box context)."""
 
     username = models.CharField(max_length=150, db_index=True)
     part_id = models.CharField(max_length=50)
+    box_part_id = models.CharField(max_length=50, blank=True, default="")
+    ok = models.BooleanField(null=True, blank=True)
+    result = models.CharField(max_length=300, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

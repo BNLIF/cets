@@ -275,6 +275,17 @@ class PackPageTest(TestCase):
             html = self.client.get(PACK).content.decode()
         self.assertIn(f'value="{GOOD}"', html)
 
+    def test_htmx_get_returns_body_partial(self):
+        # The scan poller refreshes the two-column body after a phone scan
+        # lands in the box — a cheap partial, no sweeps.
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PACK, HTTP_HX_REQUEST="true").content.decode()
+        self.assertIn('id="pk-body"', html)
+        self.assertNotIn("<html", html)
+        api._make_request.assert_not_called()  # no listing sweeps
+
     @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_picker_is_forbidden_on_prod(self):
         api = _api()

@@ -91,9 +91,10 @@
         Open <a class="mono" href="{{ scan_url }}">{{ scan_url }}</a> on your phone (scan this QR code with
         the camera app). This page is listening as <strong>{{ user.get_username }}</strong> — the phone must
         be signed in as the same user (the scan page shows who it's scanning as), or its scans won't appear
-        here. Labels you scan there land in this page's selection — matching candidates get checked, others
-        go into the add-by-PID box.
+        here. Each label you scan is <strong>added to this box immediately</strong>; anything that can't be
+        added is flagged on the phone and in the log below.
         <div id="pk-scan-status" class="pk-hint" style="margin-top:6px;">Listening for scans…</div>
+        <ul id="pk-scan-log" style="list-style:none; margin:4px 0 0; padding:0; font-size:12px; font-family:var(--font-mono);"></ul>
       </div>
     </div>
   </div>
@@ -136,9 +137,11 @@ document.addEventListener("click", function (e) {
 });
 
 // Phone-as-scanner feed (issue #68): poll for PIDs scanned on the user's
-// phone. A PID listed as a candidate gets its checkbox ticked; anything else
-// (e.g. not yet in the mirror) is appended to the add-by-PID input. Elements
-// are looked up per scan, so this keeps working across htmx swaps.
+// phone. Scan-to-cart scans (ok true/false) were already linked — or
+// refused — by the phone's submit; here they're logged, and any success
+// refreshes the two-column body. Legacy scans (ok null, no box context)
+// tick the matching candidate checkbox or land in the add-by-PID input.
+// Elements are looked up per scan, so this keeps working across htmx swaps.
 (function () {
   var since = {{ scan_since }};
   var received = 0;
@@ -163,6 +166,16 @@ document.addEventListener("click", function (e) {
     }
   }
 
+  function logScan(s) {
+    var log = document.getElementById("pk-scan-log");
+    if (!log) return;
+    var li = document.createElement("li");
+    li.textContent = (s.ok ? "✓ " : "✗ ") + s.pid + " — " + (s.message || "");
+    li.style.color = s.ok ? "var(--good)" : "var(--bad, #c0392b)";
+    log.insertBefore(li, log.firstChild);
+    while (log.children.length > 8) log.removeChild(log.lastChild);
+  }
+
   async function poll() {
     var statusEl = document.getElementById("pk-scan-status");
     if (!statusEl) return;
@@ -172,10 +185,19 @@ document.addEventListener("click", function (e) {
       j = await r.json();
     } catch (e) { return; }
     if (!r.ok || !j.scans) return;
-    j.scans.forEach(function (s) { take(s.pid); received++; });
+    var anyAdded = false;
+    j.scans.forEach(function (s) {
+      if (s.ok === null) { take(s.pid); }
+      else { logScan(s); if (s.ok) anyAdded = true; }
+      received++;
+    });
     since = j.last;
     if (received) {
       statusEl.textContent = received + " scan(s) received from your phone.";
+    }
+    if (anyAdded && window.htmx) {
+      htmx.ajax("GET", window.location.pathname,
+                { target: "#pk-body", swap: "outerHTML" });
     }
   }
   setInterval(poll, 2000);

@@ -30,9 +30,15 @@
 </head>
 <body>
   <div class="top">
+    {% if box %}
+    <h1>Scan items into <span style="font-family:ui-monospace,monospace;">{{ box }}</span></h1>
+    <p>Scanning as <strong>{{ user.get_username }}</strong> — each scanned item is added to the box
+      immediately; you’ll see a warning here if one can’t be.</p>
+    {% else %}
     <h1>Scan items into your packing page</h1>
     <p>Scanning as <strong>{{ user.get_username }}</strong> — PIDs appear on the “Add items” page
       you have open on your computer, if it is signed in as the same user.</p>
+    {% endif %}
   </div>
 
   <div id="reader"></div>
@@ -57,6 +63,7 @@
   <script>
   (function () {
     var SUBMIT_URL = "{{ submit_url }}";
+    var BOX = "{{ box }}";
     var csrf = document.querySelector("#csrf input[name=csrfmiddlewaretoken]").value;
     var statusEl = document.getElementById("status");
     var sentList = document.getElementById("sent");
@@ -71,14 +78,28 @@
       var fd = new FormData();
       fd.append("csrfmiddlewaretoken", csrf);
       fd.append("text", text);
+      if (BOX) fd.append("box", BOX);
       var r, j;
       try { r = await fetch(SUBMIT_URL, { method: "POST", body: fd }); j = await r.json(); }
       catch (e) { setStatus("✗ Send failed: " + e, "bad"); return; }
       if (!r.ok) { setStatus("✗ " + (j.error || "rejected") + " — “" + text + "”", "bad"); return; }
-      setStatus("✓ Sent " + j.pid + " — keep scanning.", "ok");
-      if (navigator.vibrate) navigator.vibrate(80);
+      var okAdd = (j.ok !== false);  // null = legacy select mode, true = added
+      if (j.ok === true) {
+        setStatus("✓ " + j.pid + " " + j.message + " — keep scanning.", "ok");
+        if (navigator.vibrate) navigator.vibrate(80);
+      } else if (j.ok === false) {
+        setStatus("✗ " + j.pid + " " + j.message, "bad");
+        if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
+      } else {
+        setStatus("✓ Sent " + j.pid + " — keep scanning.", "ok");
+        if (navigator.vibrate) navigator.vibrate(80);
+      }
       var li = document.createElement("li");
-      li.textContent = j.pid;
+      li.textContent = (j.ok === null || j.ok === undefined ? "" : (okAdd ? "✓ " : "✗ ")) + j.pid;
+      if (j.message) {
+        li.style.color = okAdd ? "#8fce8f" : "#e08a8a";
+        li.textContent += " — " + j.message;
+      }
       var t = document.createElement("span");
       t.className = "t"; t.textContent = new Date().toLocaleTimeString();
       li.appendChild(t);

@@ -1051,6 +1051,63 @@ def _pack_body_context(instance, part_id, ptid, connectors, current):
     }
 
 
+def _refusal_detail(api, pid, detail) -> str:
+    """Enrich an HWDB link refusal with where the item actually is, or its
+    live status flags — the mirror can't always see why."""
+    try:
+        parent = current_container(api.get_container(pid).get("data") or [])
+    except Exception:
+        parent = None
+    if parent:
+        return f"{detail} (it is inside {parent['part_id']})"
+    try:
+        flags = api.get_component_status(pid).get("data") or {}
+        shown = ", ".join(
+            f"{k}={v.get('name') if isinstance(v, dict) else v}"
+            for k, v in flags.items())
+        if shown:
+            return f"{detail} (HWDB status: {shown})"
+    except Exception:
+        pass
+    return str(detail)
+
+
+def _scan_link(api, inst, box_pid, pid) -> tuple[bool, str]:
+    """Scan-to-cart: link ONE scanned item into the box right away — the
+    shopping-cart behavior. Returns (ok, message); the message shows on the
+    phone and in the pack page's scan log. Same auto-assign + full-dict
+    PATCH + refusal enrichment as the picker's add flow."""
+    ptid = box_pid.rsplit("-", 1)[0]
+    connectors = _box_connectors(api, ptid)
+    manifest = current_manifest(api.get_subcomponents(box_pid).get("data"))
+    current = {pos: None for pos in connectors}
+    for m in manifest:
+        if m["functional_position"] in current:
+            current[m["functional_position"]] = m["part_id"]
+    if pid in current.values():
+        return False, f"{pid} is already in this box."
+    ctid = pid.rsplit("-", 1)[0]
+    if ctid not in set(connectors.values()):
+        return False, f"this box has no positions for {ctid} items."
+    free = [pos for pos in sorted(current, key=str)
+            if current[pos] is None and connectors.get(pos) == ctid]
+    if not free:
+        return False, f"no free position left for {ctid} items."
+    pos = free[0]
+    payload = {"component": {"part_id": box_pid},
+               "subcomponents": {**current, pos: pid}}
+    try:
+        body = api.patch_subcomponents(box_pid, payload)
+        ok, detail = body.get("status") == "OK", body.get("data")
+    except requests.RequestException as e:
+        logger.warning("scan-add: patch %s into %s failed: %s", pid, box_pid, e)
+        ok, detail = False, _hwdb_error_detail(e)
+    if not ok:
+        return False, f"not added — {_refusal_detail(api, pid, detail)}"
+    _refresh_box_quietly(api, inst, ptid, box_pid)
+    return True, f"added to “{pos}”"
+
+
 @login_not_required
 @fnal_login_required
 def explore_box_pack_view(request, part_id):
@@ -1096,6 +1153,12 @@ def explore_box_pack_view(request, part_id):
         return redirect(part_url)
 
     if request.method != "POST":
+        # htmx GET = the scan poller refreshing the two-column body after a
+        # phone scan landed in the box — just re-render, skip the sweeps.
+        if getattr(request, "htmx", False):
+            return render(request, "explore/_pack_body.html",
+                          _pack_body_context(inst, part_id, ptid, connectors,
+                                             current))
         # Live availability check: two listing calls per child type stamp the
         # mirror's parent links + enabled flags, so a stale mirror doesn't
         # offer items HWDB would refuse at write time ("already in use" /
@@ -1105,8 +1168,9 @@ def explore_box_pack_view(request, part_id):
             events.sweep_enabled(api, inst, ctid)
         # Phone-as-scanner hookup (issue #68): the picker polls the scan feed
         # for PIDs this user scans on their phone, starting AFTER the newest
-        # row at page load so stale scans don't flood in.
-        scan_path = _rev(request, "explore:scan")
+        # row at page load so stale scans don't flood in. The scan URL (and
+        # its QR) carries THIS box so scans link straight into it.
+        scan_path = _rev(request, "explore:scan") + f"?box={part_id}"
         scan_url = (settings.PUBLIC_ORIGIN + scan_path if settings.PUBLIC_ORIGIN
                     else request.build_absolute_uri(scan_path))
         scan_since = (PackScan.for_instance(inst)
@@ -1207,23 +1271,7 @@ def explore_box_pack_view(request, part_id):
             state[pos] = pid
             added.append(pid)
         else:
-            try:  # tell the user where the refused item actually is
-                parent = current_container(api.get_container(pid).get("data") or [])
-            except Exception:
-                parent = None
-            if parent:
-                detail = f"{detail} (it is inside {parent['part_id']})"
-            else:
-                try:  # …or HWDB's own status flags on why it's unavailable
-                    flags = api.get_component_status(pid).get("data") or {}
-                    shown = ", ".join(
-                        f"{k}={v.get('name') if isinstance(v, dict) else v}"
-                        for k, v in flags.items())
-                    if shown:
-                        detail = f"{detail} (HWDB status: {shown})"
-                except Exception:
-                    pass
-            failed.append((pid, detail))
+            failed.append((pid, _refusal_detail(api, pid, detail)))
 
     if added:
         _refresh_box_quietly(api, inst, ptid, part_id)
@@ -1241,13 +1289,20 @@ def explore_scan_view(request):
     """The phone scanner page (issue #68): camera decoding in the browser
     (vendored html5-qrcode, same as the Dashboard's scanner), each hit POSTed
     to the submit endpoint below. No pairing tokens or scanner-specific auth
-    — the phone signs in with the same FNAL session login as any browser,
-    and scans queue for the SAME username's open packing page."""
+    — the phone signs in with the same FNAL session login as any browser.
+
+    Opened from a pack page, the URL carries ``?box=<PID>`` and each scan is
+    linked into that box immediately (scan-to-cart); without a box, scans
+    just queue for the same username's open packing page (select mode)."""
     inst = instance_of(request)
     if inst not in settings.HWDB_WRITE_INSTANCES:
         return HttpResponseForbidden("Scanning is not enabled here.")
+    box = (request.GET.get("box") or "").strip()
+    if not re.fullmatch(r"[A-Z]\d{11}-\d{5}", box):
+        box = ""
     return render(request, "explore/scan.html", {
         "submit_url": _rev(request, "explore:scan_submit"),
+        "box": box,
     })
 
 
@@ -1255,9 +1310,14 @@ def explore_scan_view(request):
 @fnal_login_required
 @require_POST
 def explore_scan_submit_view(request):
-    """One scanned (or typed) text → a queued PackScan row. PID extraction
-    handles bare PIDs, label suffixes and HWDB URLs (the Dashboard's
-    regexes). The user's day-old rows are swept opportunistically."""
+    """One scanned (or typed) text → a PackScan row. PID extraction handles
+    bare PIDs, label suffixes and HWDB URLs (the Dashboard's regexes). The
+    user's day-old rows are swept opportunistically.
+
+    With a ``box`` field the item is linked into that box right away
+    (scan-to-cart) and the outcome rides on the row + the JSON response —
+    the phone shows it and the pack page's poller logs it. Without a box,
+    the row just queues for the desktop's selection (ok = NULL)."""
     inst = instance_of(request)
     if inst not in settings.HWDB_WRITE_INSTANCES:
         return JsonResponse({"error": "writes disabled"}, status=403)
@@ -1267,8 +1327,28 @@ def explore_scan_submit_view(request):
     user = request.user.get_username()
     PackScan.objects.filter(
         username=user, created_at__lt=timezone.now() - timedelta(days=1)).delete()
-    row = PackScan.objects.create(instance=inst, username=user, part_id=pid)
-    return JsonResponse({"pid": pid, "id": row.id})
+
+    box = (request.POST.get("box") or "").strip()
+    ok, result = None, ""
+    if box:
+        if (not re.fullmatch(r"[A-Z]\d{11}-\d{5}", box)
+                or not curation.is_shipping_type(inst, box.rsplit("-", 1)[0])):
+            return JsonResponse({"error": "not a packable box"}, status=422)
+        try:
+            bearer = mint_for(request)
+        except (FnalLinkRequired, FnalUnavailable):
+            return JsonResponse(
+                {"error": "FNAL sign-in expired — reload the scan page"},
+                status=403)
+        api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+        try:
+            ok, result = _scan_link(api, inst, box, pid)
+        except requests.RequestException as e:
+            logger.warning("scan-add: state fetch for %s failed: %s", box, e)
+            ok, result = False, f"couldn’t read the box’s state — {_hwdb_error_detail(e)}"
+    row = PackScan.objects.create(instance=inst, username=user, part_id=pid,
+                                  box_part_id=box, ok=ok, result=result)
+    return JsonResponse({"pid": pid, "id": row.id, "ok": ok, "message": result})
 
 
 @login_not_required
@@ -1286,7 +1366,8 @@ def explore_scan_feed_view(request):
     rows = (PackScan.for_instance(inst)
             .filter(username=request.user.get_username(), id__gt=since)
             .order_by("id")[:100])
-    scans = [{"id": r.id, "pid": r.part_id} for r in rows]
+    scans = [{"id": r.id, "pid": r.part_id, "ok": r.ok, "message": r.result,
+              "box": r.box_part_id} for r in rows]
     return JsonResponse({"scans": scans,
                          "last": scans[-1]["id"] if scans else since})
 

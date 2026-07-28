@@ -18,6 +18,24 @@ from explore.models import PackScan
 SUBMIT = "/hw/dev/scan/submit/"
 FEED = "/hw/dev/scan/feed/"
 PID = "D05700300001-00012"
+BOX = "D00599800007-00128"       # dev-curated shipping type
+
+
+def _cart_api():
+    """HWDB mock for scan-to-cart: a two-FEB box with FEB1 free."""
+    api = mock.MagicMock()
+    api.get_component_type.return_value = {"status": "OK", "data": {
+        "connectors": {"FEB1": "D05700300001", "FEB2": "D05700300001"}}}
+    api.get_subcomponents.return_value = {"data": [
+        {"part_id": "D05700300001-00099", "type_name": "FEB",
+         "functional_position": "FEB2", "operation": "mount"}]}
+    api.patch_subcomponents.return_value = {"status": "OK", "data": "Updated"}
+    return api
+
+
+def _mocked(api):
+    return (mock.patch("explore.views.mint_for", return_value="bearer"),
+            mock.patch("explore.views.FnalDbApiClient", return_value=api))
 
 
 class ExtractPidTest(TestCase):
@@ -75,6 +93,66 @@ class ScanEndpointsTest(TestCase):
         body = json.loads(self.client.get(f"{FEED}?since={mine1.id}").content)
         self.assertEqual([s["pid"] for s in body["scans"]], ["D05700300001-00013"])
 
+    def test_submit_with_box_links_immediately(self):
+        # Scan-to-cart: the phone's submit performs the link itself and
+        # reports the outcome to both screens.
+        api = _cart_api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.post(SUBMIT, {"text": PID, "box": BOX})
+        body = json.loads(resp.content)
+        self.assertTrue(body["ok"])
+        self.assertIn("FEB1", body["message"])
+        api.patch_subcomponents.assert_called_once_with(BOX, {
+            "component": {"part_id": BOX},
+            "subcomponents": {"FEB1": PID, "FEB2": "D05700300001-00099"}})
+        row = PackScan.objects.get()
+        self.assertEqual((row.box_part_id, row.ok), (BOX, True))
+        self.assertIn("FEB1", row.result)
+
+    def test_submit_with_box_reports_hwdb_refusal(self):
+        api = _cart_api()
+        api.patch_subcomponents.return_value = {
+            "status": "ERROR", "data": f"Component '{PID}' is not yet available"}
+        api.get_container.return_value = {"data": []}
+        api.get_component_status.return_value = {
+            "data": {"status": {"id": 1, "name": "Available"}}}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            body = json.loads(self.client.post(
+                SUBMIT, {"text": PID, "box": BOX}).content)
+        self.assertFalse(body["ok"])
+        self.assertIn("not yet available", body["message"])
+        self.assertIn("status=Available", body["message"])
+        self.assertFalse(PackScan.objects.get().ok)
+
+    def test_submit_with_box_full_position_warns(self):
+        api = _cart_api()
+        api.get_subcomponents.return_value = {"data": [
+            {"part_id": "D05700300001-00098", "functional_position": "FEB1",
+             "operation": "mount"},
+            {"part_id": "D05700300001-00099", "functional_position": "FEB2",
+             "operation": "mount"}]}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            body = json.loads(self.client.post(
+                SUBMIT, {"text": PID, "box": BOX}).content)
+        self.assertFalse(body["ok"])
+        self.assertIn("no free position", body["message"])
+        api.patch_subcomponents.assert_not_called()
+
+    def test_submit_with_unpackable_box_is_rejected(self):
+        resp = self.client.post(SUBMIT, {"text": PID, "box": "D08100100004-00001"})
+        self.assertEqual(resp.status_code, 422)
+        self.assertEqual(PackScan.objects.count(), 0)
+
+    def test_feed_carries_scan_to_cart_outcome(self):
+        PackScan.objects.create(instance="dev", username="w", part_id=PID,
+                                box_part_id=BOX, ok=True, result="added to “FEB1”")
+        s = json.loads(self.client.get(FEED).content)["scans"][0]
+        self.assertEqual((s["ok"], s["box"]), (True, BOX))
+        self.assertIn("FEB1", s["message"])
+
     @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_prod_is_forbidden(self):
         self.assertEqual(self.client.get("/hw/scan/").status_code, 403)
@@ -89,6 +167,16 @@ class ScanEndpointsTest(TestCase):
         # The scan queue pairs phone and desktop by username — show who this
         # session scans as, so a mixed sign-in is spottable at a glance.
         self.assertIn("Scanning as <strong>w</strong>", html)
+
+    def test_scan_page_with_box_shows_cart_mode(self):
+        html = self.client.get(f"/hw/dev/scan/?box={BOX}").content.decode()
+        self.assertIn(f"Scan items into", html)
+        self.assertIn(BOX, html)
+        self.assertIn("added to the box\n      immediately", html)
+        self.assertIn(f'var BOX = "{BOX}";', html)
+        # A malformed box param falls back to the select-only page.
+        html = self.client.get("/hw/dev/scan/?box=junk").content.decode()
+        self.assertIn('var BOX = "";', html)
 
 
 class PackPageHookupTest(TestCase):
@@ -107,7 +195,8 @@ class PackPageHookupTest(TestCase):
             resp = self.client.get("/hw/dev/part/D00599800007-00128/pack/")
         html = resp.content.decode()
         self.assertIn("Scan with your phone", html)
-        self.assertIn("/hw/dev/scan/", html)
+        # The scan link (and its QR) carries the box, so scans add directly.
+        self.assertIn("/hw/dev/scan/?box=D00599800007-00128", html)
         self.assertIn("<svg", html)  # the pairing QR
         self.assertIn(f"var since = {old.id};", html)  # stale scans skipped
         self.assertIn("listening as <strong>w</strong>", html)  # identity shown
