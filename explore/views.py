@@ -2246,7 +2246,8 @@ def explore_preship_view(request, part_id):
             level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
         manifest = current_manifest(_safe_get_data(api.get_subcomponents, part_id))
         filename, text = checklists.build_csv(
-            cl, checklists.part_info(leaf, part_id, manifest))
+            cl, checklists.part_info(leaf, part_id, manifest),
+            request.user.get_username())
         resp = HttpResponse(text, content_type="text/csv")
         resp["Content-Disposition"] = f'attachment; filename="{filename}"'
         return resp
@@ -2280,7 +2281,8 @@ def explore_preship_view(request, part_id):
                 level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
             manifest = current_manifest(_safe_get_data(api.get_subcomponents, part_id))
             filename, _text = checklists.build_csv(
-                cl, checklists.part_info(leaf, part_id, manifest))
+                cl, checklists.part_info(leaf, part_id, manifest),
+                request.user.get_username())
             try:
                 who = api.whoami().get("data") or {}
             except Exception:
@@ -2378,15 +2380,17 @@ def explore_shipping_view(request, part_id):
         # Uploaded documents post straight onto the box (the Dashboard holds
         # them locally until scene 4; we have no local disk, and images are
         # append-only either way). Image ids land in the scene state.
-        uploads = {2: [("bol_file", "shipping-bol", "shipping_bol", "bol_info"),
-                       ("proforma_file", "shipping-proforma", "shipping_proforma", "proforma_info")],
-                   4: [("approval_file", "shipping-final-approval",
+        # Stems follow the procedure's file-name conventions (pp.14-18, #81).
+        uploads = {2: [("bol_file", "BoL", "shipping_bol", "bol_info"),
+                       ("proforma_file", "ProformaInvoice", "shipping_proforma", "proforma_info")],
+                   4: [("approval_file", "LogisticsFinalApprovalEmail",
                         "shipping_final_approval", "approval_info")]}
         for field, stem, comment, state_key in uploads.get(scene, []):
             f = request.FILES.get(field)
             if f is None:
                 continue
-            name = checklists.artifact_filename(part_id, stem, f.name)
+            name = checklists.artifact_filename(
+                stem, request.user.get_username(), f.name)
             try:
                 body = api.post_component_image(part_id, f, name, comments=comment)
             except requests.RequestException as e:
@@ -2448,7 +2452,8 @@ def explore_shipping_view(request, part_id):
     # ---- GET ----
     if cl and request.GET.get("csv"):
         poc_name, poc_email = _poc()
-        filename, text = checklists.build_shipping_csv(cl, _info(), poc_name, poc_email)
+        filename, text = checklists.build_shipping_csv(
+            cl, _info(), poc_name, poc_email, request.user.get_username())
         resp = HttpResponse(text, content_type="text/csv")
         resp["Content-Disposition"] = f'attachment; filename="{filename}"'
         return resp

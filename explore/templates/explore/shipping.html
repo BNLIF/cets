@@ -113,6 +113,14 @@
       <p style="font-size:13px; color:var(--ink); margin:0 0 10px;">Attach the shipping documents
         ({{ ship_type }} shipment{% if ship_type == 'International' %} — Proforma Invoice required{% endif %}).
         They are posted onto the box in HWDB immediately.</p>
+      {# The procedure's carrier instructions (pp.14-16, #81). #}
+      <ul class="ps-hint" style="margin:0 0 10px; padding-left:18px;">
+        <li>Request your carrier to employ a BoL type, either “Through Seaway BoL” or
+          “Through BoL with an express release”.</li>
+        <li>Request your carrier to include the shipment PID ({{ part_id }}) and its
+          Component Type Name on the BoL{% if ship_type == 'International' %} and the Proforma Invoice{% endif %}.</li>
+        <li>Request the finalized document(s) electronically (or take a photo).</li>
+      </ul>
       <div class="ps-grid">
         <label>Bill of Lading (image/PDF){% if cl.is_surf %} — required{% endif %}
           <input type="file" name="bol_file" accept=".pdf,image/*">
@@ -152,6 +160,10 @@
         into HWDB.</p>
 
     {% elif scene == 5 %}
+      {# The procedure's recipient address for the ship step (p.18, #81). #}
+      <p class="ps-hint" style="margin:0 0 10px;">The recipient address should be:
+        Fermilab LBNF/DUNE · Dakota Warehouse · 1313 E. Saint Patrick St. ·
+        Rapid City, South Dakota 57701 · USA.</p>
       <div class="ps-grid">
         <label>Shipment date/time <input type="datetime-local" name="shipment_time" value="{{ saved.shipment_time|default:'' }}"></label>
         <label>Comments <input type="text" name="comments" value="{{ saved.comments|default:'' }}" placeholder="optional"></label>

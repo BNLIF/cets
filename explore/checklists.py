@@ -83,11 +83,12 @@ def receiving_scene_title(scene: int) -> str:
     return RECEIVING_SCENES[scene - 1][2]
 
 
-def artifact_filename(part_id: str, stem: str, original: str) -> str:
-    """The Dashboard's shipping-artifact naming:
-    ``{pid}-{stem}-{YYYY-MM-DD-HH-MM}{ext}``."""
+def artifact_filename(stem: str, username: str, original: str) -> str:
+    """The procedure's document-upload naming (pp.14-18, #81):
+    ``<stem>_<username>_<YYYYmmdd_HHMMSS><ext>`` — the ShippingSheet_
+    convention. The extension follows the uploaded file's."""
     ext = ("." + original.rsplit(".", 1)[-1]) if "." in original else ""
-    return f"{part_id}-{stem}-{datetime.now():%Y-%m-%d-%H-%M}{ext}"
+    return f"{stem}_{username or 'user'}_{datetime.now():%Y%m%d_%H%M%S}{ext}"
 
 
 # ---- Per-scene validation (the Dashboard's routes.py rules) ---------------
@@ -398,11 +399,14 @@ def build_shipping_checklist_dict(checklist, info: dict,
     return d
 
 
-def build_shipping_csv(checklist, info: dict, poc_name: str, poc_email: str) -> tuple[str, str]:
+def build_shipping_csv(checklist, info: dict, poc_name: str, poc_email: str,
+                       username: str = "") -> tuple[str, str]:
     """(filename, csv text) — the Dashboard's shipping wrap-up CSV, verbatim
-    (including its one-cell SubPID rows)."""
+    (including its one-cell SubPID rows), named per the procedure (#81):
+    ``ShippingChecklist_<PID>_<username>_<timestamp>.csv``."""
     ws = checklist.state
-    filename = f"{checklist.part_id}-shipping-{datetime.now():%Y-%m-%d-%H-%M}.csv"
+    filename = (f"ShippingChecklist_{checklist.part_id}_{username or 'user'}_"
+                f"{datetime.now():%Y-%m-%d-%H-%M}.csv")
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=",")
     rows = [
@@ -563,13 +567,14 @@ def part_info(leaf, part_id: str, manifest) -> dict:
 
 # ---- Logistics CSV + email (scene 6) ---------------------------------------
 
-def build_csv(checklist, info: dict) -> tuple[str, str]:
+def build_csv(checklist, info: dict, username: str = "") -> tuple[str, str]:
     """(filename, csv text) — the Dashboard's preshipping CSV, plus the
     QA/QC-info row the procedure's example shows but the Dashboard omits
-    (#80)."""
+    (#80). Named per the procedure's example (p.8, #81):
+    ``Notification_<PID>_<username>_<timestamp>.csv``."""
     ws = checklist.state
     now = datetime.now().strftime("%Y-%m-%d-%H-%M")
-    filename = f"{checklist.part_id}-preshipping-{now}.csv"
+    filename = f"Notification_{checklist.part_id}_{username or 'user'}_{now}.csv"
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=",")
     p4a, p4b = ws.get("PreShipping4a", {}), ws.get("PreShipping4b", {})
@@ -607,8 +612,9 @@ def build_csv(checklist, info: dict) -> tuple[str, str]:
 
 
 def email_html(checklist, csv_filename: str, sender_name: str, sender_email: str) -> str:
-    """The Dashboard's logistics-email preview, verbatim (recipient
-    included: FD Logistics <sdshipments@fnal.gov>)."""
+    """The Dashboard's logistics-email preview (recipient included:
+    FD Logistics <sdshipments@fnal.gov>), with the procedure's inline
+    sender name ("I, <user name>, …", p.8) the Dashboard omits (#81)."""
     ws = checklist.state
     qarep_name = ws.get("PreShipping2", {}).get("qa_rep_name", "")
     qarep_email = ws.get("PreShipping2", {}).get("qa_rep_email", "")
@@ -623,7 +629,7 @@ def email_html(checklist, csv_filename: str, sender_name: str, sender_email: str
         "<tr><td colspan='2'>&nbsp;</td></tr>"
         "<tr><td colspan='2'>"
         "Dear FD Logistics team,<br/><br/>"
-        "I would like to request a new shipment.<br/>"
+        f"I, {sender_name}, would like to request a new shipment.<br/>"
         f"This shipment has been approved by the Consortium QA Representative, {qarep_name} ({qarep_email}).<br/><br/>"
         f"Please find the attached csv file, {csv_filename}, that contains the required information for this shipment.<br/><br/>"
         "Should there be any issue with this shipment, email to:"
@@ -646,7 +652,7 @@ def logistics_mailto(checklist, csv_filename: str,
     poc_email = ws.get("PreShipping3", {}).get("approver_email", "")
     body = (
         "Dear FD Logistics team,\n\n"
-        "I would like to request a new shipment.\n"
+        f"I, {sender_name}, would like to request a new shipment.\n"
         "This shipment has been approved by the Consortium QA Representative, "
         f"{qarep_name} ({qarep_email}).\n\n"
         f"Please find the attached csv file, {csv_filename}, that contains "

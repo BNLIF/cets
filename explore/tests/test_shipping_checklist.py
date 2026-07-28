@@ -98,6 +98,16 @@ class ShippingEngineTest(TestCase):
         self.assertEqual(d["POC Email"], ["poc@x.org"])
         self.assertTrue(d["This shipment has been adequately insured for transit"])
 
+    def test_wrapup_csv_named_per_procedure(self):
+        # #81: ShippingChecklist_<PID>_<username>_<timestamp>.csv
+        cl = BoxChecklist(instance="dev", part_id=BOX, workflow="shipping",
+                          route="confirm_surf", state={})
+        filename, _text = checklists.build_shipping_csv(
+            cl, {"subcomponents": {}}, "P", "p@x.org", "hajime")
+        self.assertRegex(
+            filename,
+            rf"^ShippingChecklist_{BOX}_hajime_\d{{4}}-\d{{2}}-\d{{2}}-\d{{2}}-\d{{2}}\.csv$")
+
     def test_final_approval_mailto_names_uploaded_documents(self):
         # #78: the draft's attach reminder names the actual scene-2 uploads.
         from urllib.parse import quote, unquote
@@ -197,10 +207,30 @@ class ShippingFlowTest(TestCase):
             self._run_to_scene(api, 3)
         comments = [c.kwargs["comments"] for c in api.post_component_image.call_args_list]
         self.assertEqual(comments, ["shipping_bol", "shipping_proforma"])
+        # #81: the procedure's upload naming, <stem>_<username>_<ts>.
         names = [c.args[2] for c in api.post_component_image.call_args_list]
-        self.assertRegex(names[0], rf"^{BOX}-shipping-bol-.*\.pdf$")
+        self.assertRegex(names[0], r"^BoL_w_\d{8}_\d{6}\.pdf$")
+        self.assertRegex(names[1], r"^ProformaInvoice_w_\d{8}_\d{6}\.pdf$")
         cl = BoxChecklist.for_instance("dev").get(part_id=BOX)
         self.assertEqual(cl.state["Shipping2"]["bol_info"]["image_id"], "doc1")
+
+    def test_procedure_guidance_rendered(self):
+        # #81: the carrier instructions on scene 2 and the recipient
+        # address on the ship step.
+        api = _api()
+        m1, m2 = _mocked(api)
+        cl = BoxChecklist.objects.create(
+            instance="dev", part_id=BOX, workflow="shipping",
+            route="confirm_surf", current_scene=2)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+            self.assertIn("Through Seaway BoL", html)
+            self.assertIn("Through BoL with an express release", html)
+            cl.current_scene = 5
+            cl.save()
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("Dakota Warehouse", html)
+        self.assertIn("1313 E. Saint Patrick St.", html)
 
     def test_missing_bol_blocks_surf_scene2(self):
         api = _api()
@@ -221,6 +251,9 @@ class ShippingFlowTest(TestCase):
                 "approved_by": "FD Log", "approved_time": "2026-07-12T09:00",
                 "confirm_attached_sheet": "on", "confirm_insured": "on",
                 "approval_file": _pdf("appr.pdf")})
+        # #81: the approval upload follows the procedure's naming (p.18).
+        self.assertRegex(api.post_component_image.call_args.args[2],
+                         r"^LogisticsFinalApprovalEmail_w_\d{8}_\d{6}\.pdf$")
         payload = api.patch_component.call_args.args[1]
         data = payload["specifications"]["DATA"]
         self.assertEqual(data["Existing"], "kept")

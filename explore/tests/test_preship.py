@@ -176,6 +176,7 @@ class FormUxTest(TestCase):
             html = self.client.get(PAGE).content.decode()
         self.assertIn('id="ps-hts-field" hidden', html)     # default = Domestic
         self.assertIn('value="SD Warehouse/SURF"', html)    # procedure default
+        self.assertIn("8543.90.8845", html)                 # HTS fallback hint (#81)
 
     def test_scene4_saved_values_beat_the_defaults(self):
         _cl(scene=4, state={checklists.scene_key(4): SCENE_DATA[4]})
@@ -281,8 +282,10 @@ class PatchBuildTest(TestCase):
         cl = self._surf_checklist()
         info = checklists.part_info(None, BOX, [
             {"part_id": "P-1", "type_name": "FEB", "functional_position": "FEB1"}])
-        filename, text = checklists.build_csv(cl, info)
-        self.assertRegex(filename, rf"^{BOX}-preshipping-.*\.csv$")
+        filename, text = checklists.build_csv(cl, info, "hajime")
+        # #81: the procedure's naming (p.8 example).
+        self.assertRegex(filename,
+                         rf"^Notification_{BOX}_hajime_\d{{4}}-\d{{2}}-\d{{2}}-\d{{2}}-\d{{2}}\.csv$")
         self.assertIn("Freight Forwarder name,FF Inc", text)
         self.assertIn("QA/QC related information for this shipment can be "
                       "found here,RoomT QC", text)  # #80
@@ -351,6 +354,8 @@ class MailtoTest(TestCase):
         self.assertIn(
             "subject=" + quote("Request an acknowledgement for a new shipment"), url)
         body = unquote(url.split("&body=")[1])
+        # #81: the procedure's inline sender name (p.8).
+        self.assertIn("I, Chao Zhang, would like to request a new shipment.", body)
         self.assertIn("Consortium QA Representative, QA Rep (qa@x.org, qa2@x.org)", body)
         self.assertIn("- POC <poc@x.org>", body)
         self.assertIn("[Attach the downloaded box.csv before sending", body)

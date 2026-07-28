@@ -143,7 +143,11 @@
             <option {% if saved.shipping_service_type == 'International' %}selected{% endif %}>International</option>
           </select></label>
         {# HTS codes are only required (or asked) for International shipments (#76). #}
-        <label id="ps-hts-field" {% if saved.shipping_service_type != 'International' %}hidden{% endif %}>HTS code (International) <input type="text" name="hts_code" value="{{ saved.hts_code|default:'' }}"></label>
+        <label id="ps-hts-field" {% if saved.shipping_service_type != 'International' %}hidden{% endif %}>HTS code (International) <input type="text" name="hts_code" value="{{ saved.hts_code|default:'' }}">
+          {# The procedure's HTS guidance (p.7, #81). #}
+          <span class="ps-hint">Use the HTS code your institution or lab used successfully in the past —
+            else, for Equipment and Materials for the LBNF &amp; DUNE Scientific Projects, use
+            8543.90.8845 (parts of particle accelerators).</span></label>
         <label>Origin <input type="text" name="shipment_origin" value="{{ saved.shipment_origin|default:'' }}"></label>
         <label>Destination <input type="text" name="shipment_destination" value="{{ saved.shipment_destination|default:dest_default }}"></label>
         <label>Dimension{% if cl.is_surf %} (required){% endif %} <input type="text" name="dimension" value="{{ saved.dimension|default:'' }}" placeholder="L × W × H"></label>
