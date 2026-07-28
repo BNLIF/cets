@@ -57,16 +57,19 @@ def _mocked(api):
 
 
 def _mirror_items():
+    # Procedure-linkable statuses (120/110) — the picker's default filter
+    # only offers those four (#79); per-test overrides exercise the rest.
     HwdbComponentEvent.objects.create(
         instance="dev", part_type_id=CHILD_TYPE, part_id=IN_BOX,
-        status="All passed", qaqc_uploaded=True, certified_qaqc=True)
+        status="All passed", status_id=120,
+        qaqc_uploaded=True, certified_qaqc=True)
     HwdbComponentEvent.objects.create(
         instance="dev", part_type_id=CHILD_TYPE, part_id=GOOD,
-        status="All passed", institution="BNL",
+        status="All passed", status_id=120, institution="BNL",
         qaqc_uploaded=True, certified_qaqc=True)
     HwdbComponentEvent.objects.create(
         instance="dev", part_type_id=CHILD_TYPE, part_id=BAD_QC,
-        status="", qaqc_uploaded=False, certified_qaqc=None)
+        status="", status_id=110, qaqc_uploaded=False, certified_qaqc=None)
 
 
 class PackingCardRenderTest(TestCase):
@@ -250,20 +253,55 @@ class PackPageTest(TestCase):
         self.assertIsNone(
             HwdbComponentEvent.objects.get(part_id=GOOD).enabled)
 
-    def test_unlinkable_status_items_are_hidden(self):
-        # HWDB refuses linking items whose status is 2/3 "Unavailable" —
-        # "not yet available" — while 0, 1 "Available" and 100+ link fine
-        # (probed 2026-07-27). NULL (not yet captured) still passes.
+    def test_default_lists_only_procedure_linkable_statuses(self):
+        # #79: the Shipping Procedure allows linking only In Fabrication /
+        # Waiting on QA/QC / Passed All / Use As Is (100/110/120/140). Items
+        # with legacy status 1 or an uncaptured (NULL) status hide by
+        # default; the fixture rows (120/110) stay listed.
         HwdbComponentEvent.objects.filter(part_id=GOOD).update(
-            status="Unknown", status_id=2)
-        HwdbComponentEvent.objects.filter(part_id=BAD_QC).update(
             status="Unknown", status_id=1)
+        HwdbComponentEvent.objects.create(
+            instance="dev", part_type_id=CHILD_TYPE,
+            part_id=f"{CHILD_TYPE}-00004", status="")     # status_id NULL
         api = _api()
         m1, m2 = _mocked(api)
         with m1, m2:
             html = self.client.get(PACK).content.decode()
-        self.assertNotIn(f'value="{GOOD}"', html)   # Unavailable → hidden
-        self.assertIn(f'value="{BAD_QC}"', html)    # old "Available" → linkable
+        self.assertNotIn(f'value="{GOOD}"', html)                 # legacy 1
+        self.assertNotIn(f'value="{CHILD_TYPE}-00004"', html)     # NULL
+        self.assertIn(f'value="{BAD_QC}"', html)                  # 110 stays
+        self.assertIn('id="pk-show-unknown"', html)               # the toggle
+        self.assertNotIn('<input type="hidden" name="show_unknown"',
+                         html)                                    # off = no state field
+
+    def test_show_unknown_reveals_legacy_but_never_unavailable(self):
+        # The escape hatch lists 0/1/NULL; HWDB-refused 2/3 stay hidden.
+        HwdbComponentEvent.objects.filter(part_id=GOOD).update(
+            status="Unknown", status_id=1)
+        HwdbComponentEvent.objects.filter(part_id=BAD_QC).update(
+            status="Unknown", status_id=2)
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(f"{PACK}?show_unknown=1").content.decode()
+        self.assertIn(f'value="{GOOD}"', html)      # legacy 1 revealed
+        self.assertNotIn(f'value="{BAD_QC}"', html)  # Unavailable → never
+        # State survives htmx swaps: checkbox re-renders checked, and every
+        # form carries the hidden field so POST re-renders keep the mode.
+        self.assertIn("checked", html)
+        self.assertIn('<input type="hidden" name="show_unknown" value="1">', html)
+
+    def test_add_keeps_show_unknown_mode(self):
+        HwdbComponentEvent.objects.filter(part_id=GOOD).update(
+            status="Unknown", status_id=1)
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.post(
+                PACK, {"pid": [GOOD], "show_unknown": "1"},
+                HTTP_HX_REQUEST="true").content.decode()
+        self.assertIn("Added 1 item(s)", html)
+        self.assertIn('<input type="hidden" name="show_unknown" value="1">', html)
 
     def test_uncertified_items_stay_listed(self):
         # certified_qaqc does NOT gate packing (an uncertified FEB was found

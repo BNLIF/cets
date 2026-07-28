@@ -114,6 +114,11 @@ _OBSOLETE_STATUS_NAMES = {"Available", "Temporarily Unavailable"}
 # fine, 2/3 "Unavailable" don't. (One status-1 item with specs_version null
 # was also refused; the listing can't spot those, so HWDB arbitrates.)
 UNLINKABLE_STATUS_IDS = {2, 3}
+# What the Shipping Procedure (July 2026, Appendix B) ALLOWS to be linked:
+# In Fabrication / Waiting on QA/QC Tests / Passed All / Use As Is. The
+# server is more permissive (it also accepts 0/1); the pack picker defaults
+# to the procedure's rule with a "show Unknown" escape hatch (#79).
+PROCEDURE_LINKABLE_STATUS_IDS = {100, 110, 120, 140}
 
 
 def normalize_status(value):

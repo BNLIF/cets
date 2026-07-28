@@ -987,31 +987,36 @@ def _packing_context(api, instance, part_type_id, manifest) -> dict | None:
     return {"positions": positions, "n_total": len(positions), "n_free": n_free}
 
 
-def _pack_groups(instance, connectors, manifest) -> list[dict]:
+def _pack_groups(instance, connectors, manifest, show_unknown=False) -> list[dict]:
     """The packing page's pickable candidates: one group per child type that
     still has free slots — mirror rows of that type, with status + QC flags
     so un-shippable items are visible up front. Rows with a known parent
-    (HWDB rejects those with "already in use"), an unlinkable status id
-    (HWDB rejects 2/3 "Unavailable" with "not yet available" — probed
-    2026-07-27; id 1 "Available" links fine), or known-unapproved
-    (``enabled=False``) are hidden; unknowns pass and HWDB stays the
-    arbiter (a refused add reports that item's live HWDB status flags)."""
+    (HWDB rejects those with "already in use") or known-unapproved
+    (``enabled=False``) are hidden. Status: the default follows the Shipping
+    Procedure — only the four linkable statuses (100/110/120/140) are
+    offered (#79); ``show_unknown`` also lists unknown/legacy statuses
+    (0/1/NULL — the server accepts those, probed 2026-07-27), while ids 2/3
+    stay hidden always (HWDB refuses them with "not yet available")."""
     occupied = {m["functional_position"] for m in manifest}
     in_box = {m["part_id"] for m in manifest if m["part_id"]}
     free_by_type: dict[str, list[str]] = {}
     for pos, ctid in connectors.items():
         if pos not in occupied and ctid:
             free_by_type.setdefault(ctid, []).append(pos)
+    if show_unknown:
+        # NULL status_id (not yet captured) must keep passing — a bare
+        # .exclude(__in=…) would drop those rows too.
+        status_q = (Q(status_id__isnull=True)
+                    | ~Q(status_id__in=sorted(parts.UNLINKABLE_STATUS_IDS)))
+    else:
+        status_q = Q(status_id__in=sorted(parts.PROCEDURE_LINKABLE_STATUS_IDS))
     groups = []
     for ctid, free_pos in sorted(free_by_type.items()):
         rows = (HwdbComponentEvent.for_instance(instance)
                 .filter(part_type_id=ctid, parent_part_id="")
                 .exclude(part_id__in=in_box)
                 .exclude(enabled=False)
-                # NULL status_id (not yet captured) must keep passing —
-                # a bare .exclude(__in=…) would drop those rows too.
-                .filter(Q(status_id__isnull=True)
-                        | ~Q(status_id__in=sorted(parts.UNLINKABLE_STATUS_IDS)))
+                .filter(status_q)
                 .order_by("part_id"))
         leaf = HierarchyNode.for_instance(instance).filter(
             level=HierarchyNode.LEVEL_TYPE, part_type_id=ctid).first()
@@ -1033,11 +1038,12 @@ def _pack_groups(instance, connectors, manifest) -> list[dict]:
 
 
 def _pack_body_context(instance, part_id, ptid, connectors, current,
-                       just_added=()):
+                       just_added=(), show_unknown=False):
     """Context for the pack page's two-column body (``_pack_body.html``):
     the left column's candidate groups and the right column's contents,
     both derived from ``current`` (position → occupant or None).
-    ``just_added`` pids get highlighted in the contents table."""
+    ``just_added`` pids get highlighted in the contents table;
+    ``show_unknown`` widens the candidate status filter (#79)."""
     manifest = [{"functional_position": pos, "part_id": pid}
                 for pos, pid in current.items() if pid]
     type_names = dict(
@@ -1053,10 +1059,11 @@ def _pack_body_context(instance, part_id, ptid, connectors, current,
     return {
         "part_id": part_id,
         "part_type_id": ptid,
-        "groups": _pack_groups(instance, connectors, manifest),
+        "groups": _pack_groups(instance, connectors, manifest, show_unknown),
         "contents": contents,
         "n_filled": sum(1 for c in contents if c["part_id"]),
         "just_added": list(just_added),
+        "show_unknown": show_unknown,
     }
 
 
@@ -1161,15 +1168,22 @@ def explore_box_pack_view(request, part_id):
         messages.error(request, f"Couldn’t read the box’s current state — {e}")
         return redirect(part_url)
 
+    # The "show Unknown" toggle (#79) rides on every request — the checkbox
+    # sends it on its own GET, the body's forms carry it as a hidden field —
+    # so the state survives htmx swaps.
+    show_unknown = (request.GET.get("show_unknown")
+                    or request.POST.get("show_unknown") or "") == "1"
+
     if request.method != "POST":
         # htmx GET = the scan poller refreshing the two-column body after a
-        # phone scan landed in the box — just re-render (highlighting what
-        # the scans added, via ?added=), skip the sweeps.
+        # phone scan landed in the box (highlighting what the scans added,
+        # via ?added=), or the show-Unknown toggle — re-render, skip sweeps.
         if getattr(request, "htmx", False):
             just = [p for p in (request.GET.get("added") or "").split(",") if p]
             return render(request, "explore/_pack_body.html",
                           _pack_body_context(inst, part_id, ptid, connectors,
-                                             current, just_added=just))
+                                             current, just_added=just,
+                                             show_unknown=show_unknown))
         # Live availability check: two listing calls per child type stamp the
         # mirror's parent links + enabled flags, so a stale mirror doesn't
         # offer items HWDB would refuse at write time ("already in use" /
@@ -1190,7 +1204,8 @@ def explore_box_pack_view(request, part_id):
         return render(request, "explore/pack.html", {
             "active_nav": "shipments",
             "sidebar": navigation.sidebar_tree(inst, {}),
-            **_pack_body_context(inst, part_id, ptid, connectors, current),
+            **_pack_body_context(inst, part_id, ptid, connectors, current,
+                                 show_unknown=show_unknown),
             "scan_url": scan_url,
             "scan_qr_svg": scanning.qr_svg(scan_url),
             "scan_feed_url": _rev(request, "explore:scan_feed"),
@@ -1205,7 +1220,8 @@ def explore_box_pack_view(request, part_id):
     def _body(state_, just_added=()):
         return render(request, "explore/_pack_body.html",
                       _pack_body_context(inst, part_id, ptid, connectors,
-                                         state_, just_added=just_added))
+                                         state_, just_added=just_added,
+                                         show_unknown=show_unknown))
 
     unlink = (request.POST.get("unlink") or "").strip()
     if unlink:
