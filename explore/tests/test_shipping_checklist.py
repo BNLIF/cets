@@ -113,8 +113,23 @@ class ShippingEngineTest(TestCase):
             "subject=" + quote(f"Request for the final approval for shipment PID = {BOX}"),
             url)
         body = unquote(url.split("&body=")[1])
+        # #80: the doc's template (p.17), not the Dashboard's "request a
+        # new shipment" body.
+        self.assertIn("I, Chao Zhang, would like to request your final "
+                      "approval for this shipment.", body)
+        self.assertIn(f"The DUNE PID for this shipment is {BOX}.", body)
+        self.assertIn("Please find the two attached files;", body)
+        self.assertIn("- bol.pdf", body)
+        self.assertIn("- pi.pdf", body)
         self.assertIn("- POC Person <poc@x.org>", body)
         self.assertIn("[Attach bol.pdf and pi.pdf before sending", body)
+        # The preview shows the same wording.
+        html = checklists.shipping_email_html(cl, "POC Person", "poc@x.org",
+                                              "Chao Zhang", "chao@bnl.gov")
+        self.assertIn("I, Chao Zhang, would like to request your final "
+                      "approval for this shipment.", html)
+        self.assertIn("Please find the two attached files;", html)
+        self.assertIn("<li>bol.pdf</li>", html)
 
     def test_domestic_mailto_reminds_bol_only(self):
         from urllib.parse import unquote
@@ -123,6 +138,7 @@ class ShippingEngineTest(TestCase):
                           state={"Shipping2": {"bol_info": {"image_id": "b1"}}})
         url = checklists.shipping_mailto(cl, "P", "p@x.org", "S", "s@x.org")
         body = unquote(url.split("&body=")[1])
+        self.assertIn("Please find the attached file;", body)
         self.assertIn("[Attach the Bill of Lading before sending", body)
         self.assertNotIn("Proforma", body)
 

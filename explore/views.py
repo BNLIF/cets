@@ -2059,7 +2059,7 @@ def _form_saved(saved: dict) -> dict:
     were typed free-text that way), but a datetime-local input only renders
     "YYYY-MM-DDTHH:MM" (#76). Save re-normalizes back to the space form."""
     out = dict(saved)
-    for k in ("acknowledged_time", "approved_time"):
+    for k in ("acknowledged_time", "approved_time", "expected_arrival_time"):
         if out.get(k):
             out[k] = str(out[k]).strip().replace(" ", "T")
     return out
@@ -2484,7 +2484,7 @@ def explore_shipping_view(request, part_id):
             except Exception:
                 who = {}
             ctx["email_html"] = checklists.shipping_email_html(
-                part_id, poc_name, poc_email,
+                cl, poc_name, poc_email,
                 who.get("full_name") or who.get("username") or "",
                 who.get("email") or "")
             ctx["mailto"] = checklists.shipping_mailto(

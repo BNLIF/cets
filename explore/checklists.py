@@ -133,6 +133,10 @@ def clean_scene(scene: int, is_surf: bool, post) -> tuple[dict, str | None]:
     if scene == 5:
         d = {k: g(k) for k in ("freight_forwarder", "mode_of_transportation",
                                "expected_arrival_time")}
+        # The procedure (p.7) wants Date/Time in US Central, so the input is
+        # datetime-local — normalize its T-form to the Dashboard's
+        # "YYYY-MM-DD HH:MM" like the other datetime fields (#80).
+        d["expected_arrival_time"] = d["expected_arrival_time"].replace("T", " ")
         if is_surf and not all(d.values()):
             return d, "Forwarder, transport mode and expected arrival are required for SURF."
         return d, None
@@ -302,20 +306,38 @@ def mailto_url(to: str, subject: str, body: str) -> str:
             f"?subject={quote(subject)}&body={quote(body)}")
 
 
-def shipping_email_html(part_id: str, poc_name: str, poc_email: str,
+def _shipping_attach_names(checklist) -> list[str]:
+    """The final-approval email's attachment names — scene 2's uploaded
+    filenames (BoL, plus the Proforma Invoice when one was uploaded)."""
+    s2 = checklist.state.get("Shipping2", {})
+    names = [(s2.get("bol_info") or {}).get("filename") or "the Bill of Lading"]
+    if (s2.get("proforma_info") or {}).get("image_id"):
+        names.append(s2["proforma_info"].get("filename") or "the Proforma Invoice")
+    return names
+
+
+def shipping_email_html(checklist, poc_name: str, poc_email: str,
                         sender_name: str, sender_email: str) -> str:
-    """The Dashboard's final-approval request email, verbatim."""
+    """The procedure's final-approval request email (p.17) — the Dashboard's
+    own body ("I would like to request a new shipment") deviates from the
+    doc, so this follows the doc instead (#80)."""
+    attach = _shipping_attach_names(checklist)
+    files_lead = ("Please find the two attached files;" if len(attach) == 2
+                  else "Please find the attached file;")
     from_html = f"{sender_name} &lt;{sender_email}&gt;" if sender_email else sender_name
     return (
         "<table>"
         f"<tr><td width='100'>From:</td><td>{from_html}</td></tr>"
         "<tr><td>To:</td><td>FD Logistics Team &lt;sdshipments@fnal.gov&gt;</td></tr>"
-        f"<tr><td>Subject:</td><td>Request for the final approval for shipment PID = {part_id}</td></tr>"
+        f"<tr><td>Subject:</td><td>Request for the final approval for shipment PID = {checklist.part_id}</td></tr>"
         "<tr><td colspan='2'>&nbsp;</td></tr>"
         "<tr><td colspan='2'>"
         "Dear FD Logistics team,<br/><br/>"
-        "I would like to request a new shipment.<br/><br/>"
-        "Should there be any issue with this shipment, email to:"
+        f"I, {sender_name}, would like to request your final approval for this shipment.<br/>"
+        f"The DUNE PID for this shipment is {checklist.part_id}.<br/><br/>"
+        f"{files_lead}"
+        f"<ul>{''.join(f'<li>{a}</li>' for a in attach)}</ul>"
+        "Should there be any issue with this shipment, email to;"
         f"<ul><li>{poc_name} &lt;{poc_email}&gt;</li></ul>"
         "Sincerely,<br/><br/>"
         f"{sender_name}<br/>{sender_email}<br/>"
@@ -326,16 +348,17 @@ def shipping_email_html(part_id: str, poc_name: str, poc_email: str,
 def shipping_mailto(checklist, poc_name: str, poc_email: str,
                     sender_name: str, sender_email: str) -> str:
     """The final-approval request as a mailto: draft — plain-text twin of
-    shipping_email_html, plus the attach reminder (BoL, and the Proforma
-    Invoice when one was uploaded in scene 2)."""
-    s2 = checklist.state.get("Shipping2", {})
-    attach = [(s2.get("bol_info") or {}).get("filename") or "the Bill of Lading"]
-    if (s2.get("proforma_info") or {}).get("image_id"):
-        attach.append(s2["proforma_info"].get("filename") or "the Proforma Invoice")
+    shipping_email_html, plus the attach reminder."""
+    attach = _shipping_attach_names(checklist)
+    files_lead = ("Please find the two attached files;" if len(attach) == 2
+                  else "Please find the attached file;")
     body = (
         "Dear FD Logistics team,\n\n"
-        "I would like to request a new shipment.\n\n"
-        "Should there be any issue with this shipment, email to:\n"
+        f"I, {sender_name}, would like to request your final approval for this shipment.\n"
+        f"The DUNE PID for this shipment is {checklist.part_id}.\n\n"
+        f"{files_lead}\n"
+        + "".join(f"  - {a}\n" for a in attach) +
+        "\nShould there be any issue with this shipment, email to;\n"
         f"  - {poc_name} <{poc_email}>\n\n"
         "Sincerely,\n\n"
         f"{sender_name}\n{sender_email}\n\n"
@@ -433,9 +456,9 @@ def patch_shipping(api, checklist, info: dict, poc_name: str, poc_email: str) ->
 def receiving_email_html(part_id: str, poc_name: str, poc_email: str,
                          sender_name: str, sender_email: str,
                          location_name: str, arrived: str) -> str:
-    """The Dashboard's arrival notification to the POC, verbatim — its
-    "Reciving" subject typo included (the pid is interpolated, though: the
-    Dashboard drops it via a missing f-prefix, plainly a bug)."""
+    """The arrival notification to the POC — the Dashboard's body, but the
+    subject spelled "Receiving" like the procedure (p.23) shows it; the
+    Dashboard's "Reciving" typo is not kept (#80)."""
     try:
         formatted = datetime.fromisoformat(arrived).strftime(
             "<b>%B %d, %Y</b> at <b>%I:%M %p</b> (Central Time)")
@@ -446,7 +469,7 @@ def receiving_email_html(part_id: str, poc_name: str, poc_email: str,
         "<table>"
         f"<tr><td width='100'>From:</td><td>{from_html}</td></tr>"
         f"<tr><td>To:</td><td>{poc_name} &lt;{poc_email}&gt;</td></tr>"
-        f"<tr><td>Subject:</td><td>Final Reciving checklist for shipment {part_id}</td></tr>"
+        f"<tr><td>Subject:</td><td>Final Receiving checklist for shipment {part_id}</td></tr>"
         "<tr><td colspan='2'>&nbsp;</td></tr>"
         "<tr><td colspan='2'>"
         f"Dear {poc_name},<br/><br/>"
@@ -462,8 +485,7 @@ def receiving_mailto(part_id: str, poc_name: str, poc_email: str,
                      sender_name: str, sender_email: str,
                      location_name: str, arrived: str) -> str:
     """The arrival note to the POC as a mailto: draft — plain-text twin of
-    receiving_email_html (same "Reciving" subject so draft and preview
-    match). No attachment, so no reminder line."""
+    receiving_email_html. No attachment, so no reminder line."""
     try:
         formatted = datetime.fromisoformat(arrived).strftime(
             "%B %d, %Y at %I:%M %p (Central Time)")
@@ -477,7 +499,7 @@ def receiving_mailto(part_id: str, poc_name: str, poc_email: str,
         f"{sender_name}\n{sender_email}\n"
     )
     return mailto_url(poc_email,
-                      f"Final Reciving checklist for shipment {part_id}", body)
+                      f"Final Receiving checklist for shipment {part_id}", body)
 
 
 def receive_box(api, checklist, manifest: list[dict]) -> str | None:
@@ -542,7 +564,9 @@ def part_info(leaf, part_id: str, manifest) -> dict:
 # ---- Logistics CSV + email (scene 6) ---------------------------------------
 
 def build_csv(checklist, info: dict) -> tuple[str, str]:
-    """(filename, csv text) — the Dashboard's preshipping CSV, verbatim."""
+    """(filename, csv text) — the Dashboard's preshipping CSV, plus the
+    QA/QC-info row the procedure's example shows but the Dashboard omits
+    (#80)."""
     ws = checklist.state
     now = datetime.now().strftime("%Y-%m-%d-%H-%M")
     filename = f"{checklist.part_id}-preshipping-{now}.csv"
@@ -559,6 +583,11 @@ def build_csv(checklist, info: dict) -> tuple[str, str]:
             ["Expected Arrival Date (CT)", p4b.get("expected_arrival_time", "")],
             ["Shipment's origin", p4a.get("shipment_origin", "")],
             ["HTS code", p4a.get("hts_code", "")],
+            [],
+            # Scene 2's test info — in the procedure's CSV example (p.8)
+            # but missing from the Dashboard's CSV (#80).
+            ["QA/QC related information for this shipment can be found here",
+             ws.get("PreShipping2", {}).get("test_info", "")],
             [],
         ])
     rows.extend([
@@ -728,7 +757,8 @@ def _emails(v: str) -> list[str]:
 
 def build_checklist_dict(checklist, info: dict, image_id) -> dict:
     """The ``Pre-Shipping Checklist`` spec dict — the Dashboard's keys
-    byte-for-byte, SURF and non-SURF variants (typos included)."""
+    (typos included), SURF and non-SURF variants, plus the "QA/QC related
+    info Line 1" key the procedure requires but the Dashboard drops (#80)."""
     ws = checklist.state
     p2, p3 = ws.get("PreShipping2", {}), ws.get("PreShipping3", {})
     p4a, p4b = ws.get("PreShipping4a", {}), ws.get("PreShipping4b", {})
@@ -752,6 +782,9 @@ def build_checklist_dict(checklist, info: dict, image_id) -> dict:
             "POC name": p3.get("approver_name"),
             "POC Email": _emails(p3.get("approver_email", "")),
             **common_head,
+            # Scene 2's test info goes into the spec (procedure p.11) —
+            # the Dashboard collects it but never uploads it (#80).
+            "QA/QC related info Line 1": p2.get("test_info"),
             "HTS code": (p4a.get("hts_code")
                          if p4a.get("shipping_service_type") != "Domestic" else None),
             "Origin of this shipment": p4a.get("shipment_origin"),

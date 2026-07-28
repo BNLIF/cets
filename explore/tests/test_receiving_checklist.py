@@ -119,7 +119,9 @@ class ReceivingEngineTest(TestCase):
         html = checklists.receiving_email_html(
             BOX, "POC Person", "poc@x.org", "Chao Zhang", "chao@bnl.gov",
             "Brookhaven National Laboratory", "2026-07-14 09:30")
-        self.assertIn(f"Final Reciving checklist for shipment {BOX}", html)
+        # #80: spelled "Receiving" per the procedure (p.23), not the
+        # Dashboard's "Reciving" typo.
+        self.assertIn(f"Final Receiving checklist for shipment {BOX}", html)
         self.assertIn("has arrived at <b>Brookhaven National Laboratory</b>", html)
         self.assertIn("<b>July 14, 2026</b> at <b>09:30 AM</b> (Central Time)", html)
 
@@ -130,7 +132,7 @@ class ReceivingEngineTest(TestCase):
             BOX, "POC Person", "poc@x.org", "Chao Zhang", "chao@bnl.gov",
             "Brookhaven National Laboratory", "2026-07-14 09:30")
         self.assertTrue(url.startswith("mailto:poc@x.org?"))
-        self.assertIn(f"Final%20Reciving%20checklist%20for%20shipment%20{BOX}", url)
+        self.assertIn(f"Final%20Receiving%20checklist%20for%20shipment%20{BOX}", url)
         body = unquote(url.split("&body=")[1])
         self.assertIn("has arrived at Brookhaven National Laboratory at "
                       "July 14, 2026 at 09:30 AM (Central Time)", body)

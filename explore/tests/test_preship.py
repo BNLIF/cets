@@ -99,7 +99,7 @@ SCENE_DATA = {
         "shipment_origin": "BNL", "shipment_destination": "SURF",
         "dimension": "1x1x1 m", "weight": "40 kg"},
     5: {"freight_forwarder": "FF Inc", "mode_of_transportation": "ground",
-        "expected_arrival_time": "2026-08-01"},
+        "expected_arrival_time": "2026-08-01T15:00"},
     6: {"confirm_email_contents": "on"},
     7: {"received_acknowledgement": "on", "acknowledged_by": "FD Log",
         "acknowledged_time": "2026-07-12 09:00", "damage_status": "no damage",
@@ -154,6 +154,13 @@ class FormUxTest(TestCase):
         d, err = checklists.clean_scene(4, False, post)
         self.assertIsNone(err)
         self.assertEqual(d["hts_code"], "")
+
+    def test_expected_arrival_stored_in_dashboard_format(self):
+        # #80: the procedure wants date + time (US Central) — the input is
+        # datetime-local, stored in the Dashboard's space form.
+        d, err = checklists.clean_scene(5, True, _Post(SCENE_DATA[5]))
+        self.assertIsNone(err)
+        self.assertEqual(d["expected_arrival_time"], "2026-08-01 15:00")
 
     def test_acknowledged_time_stored_in_dashboard_format(self):
         post = _Post({**SCENE_DATA[7], "acknowledged_time": "2026-07-12T09:00"})
@@ -221,13 +228,16 @@ class FormUxTest(TestCase):
         self.assertIn('id="ps-hts-field" >', html)         # HTS now shown
 
     def test_date_fields_render_native_pickers(self):
-        cl = _cl(scene=5, state={checklists.scene_key(7): {
-            "acknowledged_time": "2026-07-12 09:00"}})
+        cl = _cl(scene=5, state={
+            checklists.scene_key(5): {"expected_arrival_time": "2026-08-01 15:00"},
+            checklists.scene_key(7): {"acknowledged_time": "2026-07-12 09:00"}})
         api = _api()
         m1, m2 = _mocked(api)
         with m1, m2:
             html = self.client.get(PAGE).content.decode()
-            self.assertIn('type="date" name="expected_arrival_time"', html)
+            self.assertIn('type="datetime-local" name="expected_arrival_time"', html)
+            # #80: saved Dashboard-form value round-trips into the T-form.
+            self.assertIn('value="2026-08-01T15:00"', html)
             cl.current_scene = 7
             cl.save()
             html = self.client.get(PAGE).content.decode()
@@ -256,6 +266,7 @@ class PatchBuildTest(TestCase):
         self.assertEqual(d["FD Logistics team acknoledgement (name)"], "FD Log")  # typo kept
         self.assertEqual(d["Visual Inspection (YES = no damage)"], "YES")
         self.assertEqual(d["HTS code"], "8543.70")       # International keeps it
+        self.assertEqual(d["QA/QC related info Line 1"], "RoomT QC")  # #80
         self.assertEqual(d["Image ID for this Shipping Sheet"], "img7")
         self.assertEqual(checklists.sub_pids(info), [{"FEB (FEB1)": "P-1"}])
 
@@ -273,6 +284,8 @@ class PatchBuildTest(TestCase):
         filename, text = checklists.build_csv(cl, info)
         self.assertRegex(filename, rf"^{BOX}-preshipping-.*\.csv$")
         self.assertIn("Freight Forwarder name,FF Inc", text)
+        self.assertIn("QA/QC related information for this shipment can be "
+                      "found here,RoomT QC", text)  # #80
         self.assertIn("DUNE PID," + BOX, text)
         self.assertIn("P-1,FEB,FEB1", text)
         pdf = checklists.build_label_pdf(BOX, info, "Development HWDB", None,

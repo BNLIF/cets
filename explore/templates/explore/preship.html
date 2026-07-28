@@ -165,7 +165,7 @@
       <div class="ps-grid">
         <label>Freight forwarder <input type="text" name="freight_forwarder" value="{{ saved.freight_forwarder|default:'' }}"></label>
         <label>Mode of transportation <input type="text" name="mode_of_transportation" value="{{ saved.mode_of_transportation|default:'' }}" placeholder="air / ground / sea…"></label>
-        <label>Expected arrival (CT) <input type="date" name="expected_arrival_time" value="{{ saved.expected_arrival_time|default:'' }}"></label>
+        <label>Expected arrival (CT) <input type="datetime-local" name="expected_arrival_time" value="{{ saved.expected_arrival_time|default:'' }}"></label>
       </div>
 
     {% elif scene == 6 %}
