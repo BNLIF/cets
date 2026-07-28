@@ -1026,20 +1026,28 @@ def _pack_groups(instance, connectors, manifest) -> list[dict]:
             "n_free": len(free_pos), "total": rows.count(),
             "candidates": [
                 {"part_id": r.part_id, "status": r.status or "—",
-                 "qc_ok": bool(r.qaqc_uploaded and r.certified_qaqc),
-                 "institution": r.institution or "—"}
+                 "qc_ok": bool(r.qaqc_uploaded and r.certified_qaqc)}
                 for r in rows[:_PACK_CANDIDATE_CAP]],
         })
     return groups
 
 
-def _pack_body_context(instance, part_id, ptid, connectors, current):
+def _pack_body_context(instance, part_id, ptid, connectors, current,
+                       just_added=()):
     """Context for the pack page's two-column body (``_pack_body.html``):
     the left column's candidate groups and the right column's contents,
-    both derived from ``current`` (position → occupant or None)."""
+    both derived from ``current`` (position → occupant or None).
+    ``just_added`` pids get highlighted in the contents table."""
     manifest = [{"functional_position": pos, "part_id": pid}
                 for pos, pid in current.items() if pid]
+    type_names = dict(
+        HierarchyNode.for_instance(instance)
+        .filter(level=HierarchyNode.LEVEL_TYPE,
+                part_type_id__in={c for c in connectors.values() if c})
+        .values_list("part_type_id", "name"))
     contents = [{"position": pos, "type_id": connectors.get(pos) or "",
+                 "type_name": type_names.get(connectors.get(pos))
+                              or connectors.get(pos) or "",
                  "part_id": current[pos]}
                 for pos in sorted(current, key=str)]
     return {
@@ -1048,6 +1056,7 @@ def _pack_body_context(instance, part_id, ptid, connectors, current):
         "groups": _pack_groups(instance, connectors, manifest),
         "contents": contents,
         "n_filled": sum(1 for c in contents if c["part_id"]),
+        "just_added": list(just_added),
     }
 
 
@@ -1154,11 +1163,13 @@ def explore_box_pack_view(request, part_id):
 
     if request.method != "POST":
         # htmx GET = the scan poller refreshing the two-column body after a
-        # phone scan landed in the box — just re-render, skip the sweeps.
+        # phone scan landed in the box — just re-render (highlighting what
+        # the scans added, via ?added=), skip the sweeps.
         if getattr(request, "htmx", False):
+            just = [p for p in (request.GET.get("added") or "").split(",") if p]
             return render(request, "explore/_pack_body.html",
                           _pack_body_context(inst, part_id, ptid, connectors,
-                                             current))
+                                             current, just_added=just))
         # Live availability check: two listing calls per child type stamp the
         # mirror's parent links + enabled flags, so a stale mirror doesn't
         # offer items HWDB would refuse at write time ("already in use" /
@@ -1191,9 +1202,10 @@ def explore_box_pack_view(request, part_id):
     # the page updates without a reload.
     is_htmx = bool(getattr(request, "htmx", False))
 
-    def _body(state_):
+    def _body(state_, just_added=()):
         return render(request, "explore/_pack_body.html",
-                      _pack_body_context(inst, part_id, ptid, connectors, state_))
+                      _pack_body_context(inst, part_id, ptid, connectors,
+                                         state_, just_added=just_added))
 
     unlink = (request.POST.get("unlink") or "").strip()
     if unlink:
@@ -1279,7 +1291,7 @@ def explore_box_pack_view(request, part_id):
     for pid, detail in failed:
         messages.error(request, f"{pid} was not added — {detail}")
     if is_htmx:
-        return _body(state)
+        return _body(state, just_added=added)
     return redirect(back if failed else part_url)
 
 

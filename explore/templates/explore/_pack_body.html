@@ -24,14 +24,12 @@ without a page reload. {% endcomment %}
           <div class="pk-positions"><span class="pk-pos-label">Free positions:</span>
             {% for p in g.positions %}<span class="pk-pos">{{ p }}</span>{% endfor %}</div>
           <p class="pk-free">{{ g.n_free }} free position(s) for this type
-            · {{ g.total }} free candidate item(s) in the mirror{% if g.total > g.candidates|length %} (first {{ g.candidates|length }} listed — add others by PID below){% endif %}.
-            Items known to sit inside another box/assembly, or known-unapproved in HWDB, are hidden;
-            if HWDB still refuses one, the error reports its live status flags.</p>
+            · {{ g.total }} free candidate item(s) in the mirror{% if g.total > g.candidates|length %} (first {{ g.candidates|length }} listed — add others by PID below){% endif %}.</p>
           <pre class="pk-sync-log"></pre>
           {% if g.candidates %}
           <div class="pk-scroll">
             <table class="pk-table">
-              <thead><tr><th></th><th>Item</th><th>Status</th><th>QC</th><th>Institution</th></tr></thead>
+              <thead><tr><th></th><th>Item</th><th>Status</th><th>QC</th></tr></thead>
               <tbody>
               {% for c in g.candidates %}
                 <tr>
@@ -40,7 +38,6 @@ without a page reload. {% endcomment %}
                     <a class="pk-open" href="{% url 'explore:part' part_id=c.part_id %}" target="_blank" rel="noopener" title="Open {{ c.part_id }} (new tab)">&#x2197;</a></td>
                   <td>{{ c.status }}</td>
                   <td>{% if c.qc_ok %}<span class="pk-qc-ok" title="QA/QC uploaded and certified">✓</span>{% else %}<span class="pk-qc-bad" title="QA/QC not uploaded/certified yet">✗</span>{% endif %}</td>
-                  <td>{{ c.institution }}</td>
                 </tr>
               {% endfor %}
               </tbody>
@@ -87,17 +84,18 @@ without a page reload. {% endcomment %}
       {% csrf_token %}
       <h2>In the box <span class="mono">{{ n_filled }} of {{ contents|length }} positions filled</span></h2>
       <table class="pk-table">
-        <thead><tr><th>Position</th><th>Item</th><th></th></tr></thead>
+        <thead><tr><th>Type</th><th>Position</th><th>Item</th><th></th></tr></thead>
         <tbody>
         {% for c in contents %}
-          <tr>
+          <tr{% if c.part_id and c.part_id in just_added %} class="pk-added"{% endif %}>
+            <td>{{ c.type_name }}</td>
             <td>{{ c.position }}</td>
             {% if c.part_id %}
-            <td class="mono"><a href="{% url 'explore:part' part_id=c.part_id %}">{{ c.part_id }}</a></td>
+            <td class="mono"><a href="{% url 'explore:part' part_id=c.part_id %}" target="_blank" rel="noopener">{{ c.part_id }}</a></td>
             <td><button class="pk-unlink" name="unlink" value="{{ c.position }}"
                         title="Remove {{ c.part_id }} from this box">Unlink</button></td>
             {% else %}
-            <td class="pk-slot-empty">— empty ({{ c.type_id }})</td>
+            <td class="pk-slot-empty">— empty</td>
             <td></td>
             {% endif %}
           </tr>

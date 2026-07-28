@@ -277,13 +277,16 @@ class PackPageTest(TestCase):
 
     def test_htmx_get_returns_body_partial(self):
         # The scan poller refreshes the two-column body after a phone scan
-        # lands in the box — a cheap partial, no sweeps.
+        # lands in the box — a cheap partial, no sweeps. Its ?added= pids
+        # get the highlight class in the contents table.
         api = _api()
         m1, m2 = _mocked(api)
         with m1, m2:
-            html = self.client.get(PACK, HTTP_HX_REQUEST="true").content.decode()
+            html = self.client.get(f"{PACK}?added={IN_BOX}",
+                                   HTTP_HX_REQUEST="true").content.decode()
         self.assertIn('id="pk-body"', html)
         self.assertNotIn("<html", html)
+        self.assertIn('class="pk-added"', html)
         api._make_request.assert_not_called()  # no listing sweeps
 
     @override_settings(HWDB_WRITE_INSTANCES=["dev"])
@@ -466,6 +469,8 @@ class PackPostTest(TestCase):
         self.assertIn("1 of 3 positions filled", html)
         self.assertIn(f">{IN_BOX}</a>", html)             # occupant linked
         self.assertIn("pk-slot-empty", html)              # free slots listed too
+        self.assertIn("<th>Type</th>", html)              # type name column
+        self.assertIn(f"<td>{CHILD_TYPE}</td>", html)     # uncurated → id fallback
 
     def test_htmx_add_rerenders_the_body_in_place(self):
         api = _api()
@@ -478,6 +483,7 @@ class PackPostTest(TestCase):
         self.assertIn("Added 1 item(s)", html)            # flash inline
         self.assertIn("2 of 3 positions filled", html)
         self.assertIn(f">{GOOD}</a>", html)               # now in the box column
+        self.assertIn('class="pk-added"', html)           # …highlighted
         self.assertNotIn(f'value="{GOOD}"', html)         # no longer a candidate
 
     def test_contents_pane_offers_unlink(self):

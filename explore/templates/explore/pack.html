@@ -12,8 +12,10 @@
   .pk-page h1 .mono { font-family: var(--font-mono); }
   .pk-sub { color: var(--dim); font-size: 13.5px; margin: 0 0 18px; }
 
-  .pk-cols { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; align-items: start; }
+  .pk-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
+  .pk-table tr.pk-added td { background: var(--good-bg); }
   .pk-contents { position: sticky; top: 18px; }
+  .pk-group.pk-contents { border: 2px solid var(--good); }
   .pk-contents h2 { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
   .pk-slot-empty { color: var(--faint); font-size: 12px; }
   .pk-unlink { font: inherit; font-size: 12px; font-weight: 600; color: var(--dim);
@@ -53,6 +55,7 @@
     background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm);
     padding: 6px 8px; flex: 1; min-width: 260px; }
   .pk-actions { display: flex; gap: 12px; align-items: center; margin-top: 10px; }
+  .pk-actions .pk-submit { flex-shrink: 0; white-space: nowrap; }
   .pk-submit { font: inherit; font-size: 13px; font-weight: 600; color: var(--accent-ink);
     background: var(--accent-soft); border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--rule));
     border-radius: var(--r-sm); padding: 7px 17px; cursor: pointer; }
@@ -78,7 +81,9 @@
 
   <h1>Add items to <span class="mono">{{ part_id }}</span></h1>
   <p class="pk-sub">Pick items below (or type/scan PIDs) and they’ll be linked into the box’s
-    free positions in the {{ hwdb_instance }} HWDB.</p>
+    free positions in the {{ hwdb_instance }} HWDB. Items known to sit inside another box/assembly,
+    or known-unapproved in HWDB, are hidden; if HWDB still refuses one, the error reports its
+    live status flags.</p>
 
   {% include "explore/_pack_body.html" %}
 
@@ -87,7 +92,7 @@
     <h2>Scan with your phone</h2>
     <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin-top:8px;">
       <div style="flex-shrink:0;">{{ scan_qr_svg|safe }}</div>
-      <div style="font-size:13px; color:var(--dim); max-width:480px;">
+      <div style="font-size:13px; color:var(--dim); flex:1; min-width:260px;">
         Open <a class="mono" href="{{ scan_url }}">{{ scan_url }}</a> on your phone (scan this QR code with
         the camera app). This page is listening as <strong>{{ user.get_username }}</strong> — the phone must
         be signed in as the same user (the scan page shows who it's scanning as), or its scans won't appear
@@ -185,18 +190,18 @@ document.addEventListener("click", function (e) {
       j = await r.json();
     } catch (e) { return; }
     if (!r.ok || !j.scans) return;
-    var anyAdded = false;
+    var addedPids = [];
     j.scans.forEach(function (s) {
       if (s.ok === null) { take(s.pid); }
-      else { logScan(s); if (s.ok) anyAdded = true; }
+      else { logScan(s); if (s.ok) addedPids.push(s.pid); }
       received++;
     });
     since = j.last;
     if (received) {
       statusEl.textContent = received + " scan(s) received from your phone.";
     }
-    if (anyAdded && window.htmx) {
-      htmx.ajax("GET", window.location.pathname,
+    if (addedPids.length && window.htmx) {
+      htmx.ajax("GET", window.location.pathname + "?added=" + addedPids.join(","),
                 { target: "#pk-body", swap: "outerHTML" });
     }
   }
