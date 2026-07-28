@@ -15,7 +15,7 @@ without a page reload. {% endcomment %}
         {% csrf_token %}
         <div class="pk-group">
           <div class="pk-group-head">
-            <h2>{{ g.name }} <span class="mono">{{ g.type_id }}</span></h2>
+            <h2>{{ g.name }} {% if g.type_url %}<a class="mono" href="{{ g.type_url }}" title="Open the {{ g.name }} type page">{{ g.type_id }}</a>{% else %}<span class="mono">{{ g.type_id }}</span>{% endif %}</h2>
             <button type="button" class="pk-sync" data-sync-url="{% url 'explore:node_sync' part_type_id=g.type_id %}"
                     title="Fetch this type’s new items from HWDB into the mirror, then reload">Sync new items</button>
           </div>
@@ -36,7 +36,8 @@ without a page reload. {% endcomment %}
               {% for c in g.candidates %}
                 <tr>
                   <td><input type="checkbox" name="pid" value="{{ c.part_id }}" id="c-{{ c.part_id }}"></td>
-                  <td class="mono"><label for="c-{{ c.part_id }}">{{ c.part_id }}</label></td>
+                  <td class="mono"><label for="c-{{ c.part_id }}">{{ c.part_id }}</label>
+                    <a class="pk-open" href="{% url 'explore:part' part_id=c.part_id %}" target="_blank" rel="noopener" title="Open {{ c.part_id }} (new tab)">&#x2197;</a></td>
                   <td>{{ c.status }}</td>
                   <td>{% if c.qc_ok %}<span class="pk-qc-ok" title="QA/QC uploaded and certified">✓</span>{% else %}<span class="pk-qc-bad" title="QA/QC not uploaded/certified yet">✗</span>{% endif %}</td>
                   <td>{{ c.institution }}</td>

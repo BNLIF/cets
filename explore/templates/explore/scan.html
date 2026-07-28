@@ -31,7 +31,8 @@
 <body>
   <div class="top">
     <h1>Scan items into your packing page</h1>
-    <p>Scanned PIDs appear on the “Add items” page you have open on your computer (same login).</p>
+    <p>Scanning as <strong>{{ user.get_username }}</strong> — PIDs appear on the “Add items” page
+      you have open on your computer, if it is signed in as the same user.</p>
   </div>
 
   <div id="reader"></div>

@@ -32,6 +32,8 @@
     padding: 16px 18px; margin-bottom: 18px; }
   .pk-group h2 { font-size: 13px; color: var(--ink); margin: 0 0 2px; }
   .pk-group h2 .mono { font-family: var(--font-mono); font-weight: 400; color: var(--faint); font-size: 12px; }
+  .pk-group h2 a.mono { color: var(--accent-ink); text-decoration: none; }
+  .pk-table .pk-open { color: var(--accent-ink); text-decoration: none; font-size: 11px; margin-left: 3px; }
   .pk-free { font-size: 12px; color: var(--faint); margin: 0 0 10px; }
   .pk-positions { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin: 4px 0 8px; }
   .pk-pos-label { font-size: 11px; color: var(--faint); }
@@ -87,8 +89,10 @@
       <div style="flex-shrink:0;">{{ scan_qr_svg|safe }}</div>
       <div style="font-size:13px; color:var(--dim); max-width:480px;">
         Open <a class="mono" href="{{ scan_url }}">{{ scan_url }}</a> on your phone (scan this QR code with
-        the camera app) and sign in with the same account. Labels you scan there land in this page's
-        selection — matching candidates get checked, others go into the add-by-PID box.
+        the camera app). This page is listening as <strong>{{ user.get_username }}</strong> — the phone must
+        be signed in as the same user (the scan page shows who it's scanning as), or its scans won't appear
+        here. Labels you scan there land in this page's selection — matching candidates get checked, others
+        go into the add-by-PID box.
         <div id="pk-scan-status" class="pk-hint" style="margin-top:6px;">Listening for scans…</div>
       </div>
     </div>

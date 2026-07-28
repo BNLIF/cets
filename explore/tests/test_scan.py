@@ -84,7 +84,11 @@ class ScanEndpointsTest(TestCase):
     def test_scan_page_renders(self):
         resp = self.client.get("/hw/dev/scan/")
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("html5-qrcode.min.js", resp.content.decode())
+        html = resp.content.decode()
+        self.assertIn("html5-qrcode.min.js", html)
+        # The scan queue pairs phone and desktop by username — show who this
+        # session scans as, so a mixed sign-in is spottable at a glance.
+        self.assertIn("Scanning as <strong>w</strong>", html)
 
 
 class PackPageHookupTest(TestCase):
@@ -106,3 +110,4 @@ class PackPageHookupTest(TestCase):
         self.assertIn("/hw/dev/scan/", html)
         self.assertIn("<svg", html)  # the pairing QR
         self.assertIn(f"var since = {old.id};", html)  # stale scans skipped
+        self.assertIn("listening as <strong>w</strong>", html)  # identity shown

@@ -160,6 +160,10 @@ class PackPageTest(TestCase):
         # per-type sync button targets that type's node sync endpoint
         self.assertIn(f'data-sync-url="/hw/dev/sync-tests/{CHILD_TYPE}/"', html)
         self.assertIn(f'data-sync-url="/hw/dev/sync-tests/{DOC_TYPE}/"', html)
+        # each candidate links to its part page (new tab, next to the label)
+        self.assertIn(f'class="pk-open" href="/hw/dev/part/{GOOD}/"', html)
+        # uncurated type → header falls back to plain text, no dead link
+        self.assertIn(f'<span class="mono">{CHILD_TYPE}</span>', html)
 
     def test_picker_groups_show_free_functional_positions(self):
         # Shippers reference sub-components by Functional Position name (#74):

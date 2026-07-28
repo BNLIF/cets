@@ -1017,6 +1017,9 @@ def _pack_groups(instance, connectors, manifest) -> list[dict]:
             level=HierarchyNode.LEVEL_TYPE, part_type_id=ctid).first()
         groups.append({
             "type_id": ctid, "name": leaf.name if leaf else ctid,
+            # Deep link to the type's leaf page (None when uncurated —
+            # the pane header falls back to plain text).
+            "type_url": navigation.leaf_path_for(instance, ctid),
             # Shippers reference sub-components by Functional Position name
             # (#74) — show the free ones this group's picks will land in.
             "positions": sorted(free_pos, key=str),
