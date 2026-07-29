@@ -13,21 +13,24 @@ after page load (the walk is slow: ~2 HWDB calls per node). Errors render at
 <p class="es-hint">No sub-components.</p>
 {% else %}
 <table class="es-tree">
-  <thead><tr><th>Part</th><th>Type</th><th>Position</th><th>Status</th><th>Uploaded</th><th>Certified</th></tr></thead>
+  <thead><tr><th>Part</th><th>Type</th><th>Position</th><th>Status</th><th>Uploaded</th><th>Certified</th>{% if show_es %}<th>ES</th>{% endif %}</tr></thead>
   <tbody>
   {% for r in rows %}
     <tr>
-      <td class="mono" style="--depth: {{ r.depth }};"><a href="{% url 'explore:part' part_id=r.part_id %}">{{ r.part_id }}</a>{% if r.connection %}<span class="es-conn" title="Cable end · END name : connector #">.{{ r.connection }}</span>{% endif %}</td>
+      <td class="mono" style="--depth: {{ r.depth }};"><a href="{% url 'explore:part' part_id=r.part_id %}" target="_blank" rel="noopener">{{ r.part_id }}</a>{% if r.connection %}<span class="es-conn" title="Cable end · END name : connector #">.{{ r.connection }}</span>{% endif %}</td>
       <td>{{ r.type_name|default:"—" }}</td>
       <td>{{ r.functional_position|default:"—" }}</td>
       <td>{{ r.status|default:"—" }}</td>
       <td>{% if r.uploaded == None %}—{% elif r.uploaded %}<span class="es-yes">Yes</span>{% else %}<span class="es-no">No</span>{% endif %}</td>
       <td>{% if r.certified == None %}—{% elif r.certified %}<span class="es-yes">Yes</span>{% else %}<span class="es-no">No</span>{% endif %}</td>
+      {% if show_es %}<td>{% if r.es %}{% if r.es.has_es %}<input type="checkbox" name="sub_es" value="{{ r.part_id }}"{% if r.es.checked %} checked{% endif %} title="Include this item’s executive summary (with link) in the generated PDF"> <a href="{{ r.es.url }}" target="_blank" rel="noopener" title="Open {{ r.part_id }}’s executive summary (new tab)">&#x2197;</a>{% else %}<span class="es-hint">none yet</span>{% endif %}{% else %}—{% endif %}</td>{% endif %}
     </tr>
   {% endfor %}
   </tbody>
 </table>
 <p class="es-hint">{{ rows|length }} sub-component{{ rows|length|pluralize }} down to the leaves,
   statuses live from HWDB; included in the generated summary PDF.
+  {% if show_es %}Ticked ES boxes list that item’s executive summary (with link) on its own page of
+  the generated PDF; the selection is saved with each signature.{% endif %}
   {% if truncated %}<span class="es-no">&#9888; Tree truncated — too many sub-components to list them all.</span>{% endif %}</p>
 {% endif %}

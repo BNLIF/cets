@@ -200,18 +200,26 @@ def _normalize(cfg: dict) -> dict:
 
 # ---- ES record state ------------------------------------------------------
 
-def fetch_es_state(api, part_id: str) -> tuple[list, dict | None]:
-    """Latest ``(ES list, todos payload)`` off the item's "ES" test record —
-    the Dashboard's source of truth for who has signed."""
+def fetch_es_state(api, part_id: str) -> tuple[list, dict | None, list, list | None]:
+    """Latest ``(ES list, todos payload, comments log, sub-ES selection)``
+    off the item's "ES" test record — the Dashboard's source of truth for
+    who has signed. ``comments_log`` (#82) and ``sub_es`` (#83) are absent
+    on records written before those features; sub_es None means "never
+    chosen" (callers default to everything)."""
     try:
         data = api.get_tests(part_id, test_type_id="ES").get("data") or []
     except Exception as e:
         logger.warning("ES test fetch for %s failed: %s", part_id, e)
-        return [], None
+        return [], None, [], None
     td = (data[0].get("test_data") or {}) if data and isinstance(data[0], dict) else {}
     es = td.get("ES")
     todos = td.get("todos")
-    return (es if isinstance(es, list) else []), (todos if isinstance(todos, dict) else None)
+    log = td.get("comments_log")
+    sub_es = td.get("sub_es")
+    return ((es if isinstance(es, list) else []),
+            (todos if isinstance(todos, dict) else None),
+            (log if isinstance(log, list) else []),
+            (sub_es if isinstance(sub_es, list) else None))
 
 
 def merge_es_entry(es_list, name, signature, rank, timestamp, comments) -> list:
@@ -231,11 +239,29 @@ def merge_es_entry(es_list, name, signature, rank, timestamp, comments) -> list:
     return out
 
 
-def es_test_payload(es_list, todos_payload, comments) -> dict:
+def append_comment_log(log, name, status_label, text, timestamp) -> list:
+    """The append-only signee comments log (#82, Hajime's ES-structure
+    request): each entry keeps who wrote, when, and the Component Status
+    at that time. Empty text appends nothing; existing entries are never
+    edited or removed."""
+    out = [e for e in log or [] if isinstance(e, dict)]
+    text = (text or "").strip()
+    if text:
+        out.append({"name": name, "timestamp": timestamp,
+                    "status": status_label, "text": text})
+    return out
+
+
+def es_test_payload(es_list, todos_payload, comments,
+                    comments_log=None, sub_es=None) -> dict:
     payload = {"comments": comments, "test_type": "ES",
                "test_data": {"ES": es_list}}
     if isinstance(todos_payload, dict):
         payload["test_data"]["todos"] = todos_payload
+    if comments_log:
+        payload["test_data"]["comments_log"] = comments_log
+    if sub_es is not None:
+        payload["test_data"]["sub_es"] = sub_es
     return payload
 
 
@@ -717,6 +743,23 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
                                            styles["Normal"]))
             elif pb.get("error"):
                 story.append(Paragraph(f"⚠ {pb['error']}", styles["Normal"]))
+    # Sub-component ESes on their own page, like the sub-components list
+    # (#83, Hajime's ES-structure request).
+    sub_es = form.get("sub_es") or []
+    if sub_es:
+        story.append(PageBreak())
+        story.append(Paragraph("Executive Summaries of Sub-components", styles["Heading2"]))
+        for e in sub_es:
+            title = escape(e.get("title") or e.get("pid") or "")
+            story.append(Paragraph(
+                f'• <link href="{e.get("url") or ""}" color="blue">{title}</link>'
+                f' — <font face="Courier">{escape(e.get("pid") or "")}</font>',
+                styles["Normal"]))
+            if e.get("url"):
+                story.append(Paragraph(
+                    f'<font color="#777777" size="8">{escape(e["url"])}</font>',
+                    styles["Normal"]))
+            story.append(Spacer(1, 4))
     story.append(PageBreak())
     story.append(Paragraph("Sub-components", styles["Heading2"]))
     story += subtree_flowables(*(form.get("subtree") or ([], False)))

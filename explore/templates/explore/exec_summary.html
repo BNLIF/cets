@@ -46,6 +46,10 @@
   .es-signed { color: var(--good); font-weight: 700; font-size: 12px; }
   .es-waiting { color: var(--faint); font-size: 12px; }
   .es-todo { display: block; font-size: 13px; color: var(--ink); margin: 2px 0; }
+  .es-log { border-top: 1px solid var(--rule); padding: 6px 0; font-size: 13px; color: var(--ink); }
+  .es-log:first-of-type { border-top: none; padding-top: 0; }
+  .es-log-text { white-space: pre-wrap; margin: 2px 0 0 2px; color: var(--ink); }
+  .es-page textarea { width: 100%; resize: vertical; }
   .es-dl { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500;
     color: var(--good); text-decoration: none; border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule));
     background: var(--good-bg); border-radius: 999px; padding: 4px 13px; margin: 2px 6px 2px 0; }
@@ -210,6 +214,16 @@
     {% endif %}
 
     <div class="es-card">
+      <h2>Sub-components</h2>
+      <div hx-get="{% url 'explore:es_subtree' part_id=part_id %}" hx-trigger="load" hx-swap="outerHTML">
+        {# until htmx swaps in the tree (with its ES checkboxes), the saved selection rides along as hidden inputs #}
+        {% for r in sub_es_rows %}{% if r.checked %}<input type="hidden" name="sub_es" value="{{ r.pid }}">{% endif %}{% endfor %}
+        <p class="es-hint">Loading the full sub-component tree from HWDB — this can take a
+          while on deep assemblies… <span class="es-spin"></span></p>
+      </div>
+    </div>
+
+    <div class="es-card">
       <h2>Item status &amp; QA/QC flags</h2>
       <div class="es-row">
         <label>Component status
@@ -225,6 +239,19 @@
       <p class="es-hint">Both flags must be confirmed before signing; patched onto the item with every signature, like the Dashboard.</p>
     </div>
 
+    {% if comments_log %}
+    <div class="es-card">
+      <h2>Comments log</h2>
+      {% for e in comments_log %}
+      <div class="es-log">
+        <span class="mono" style="font-size:12px; color:var(--faint);">{{ e.timestamp }}</span>
+        — <b>{{ e.name }}</b> <span class="es-hint">(status: {{ e.status }})</span>
+        <div class="es-log-text">{{ e.text }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
     <div class="es-card">
       <h2>Sign-off {% if signing.all_signed %}<span class="es-signed">— all signed ✓</span>{% endif %}</h2>
       {% for r in signing.rows %}
@@ -236,14 +263,15 @@
           {% elif not r.role_ok %}<span class="es-waiting">you don’t hold the required role</span>
           {% else %}<span class="es-waiting">waiting for earlier signees</span>{% endif %}
         </div>
-        <div class="es-row" style="margin-top:6px;">
+        <div class="es-row" style="margin-top:6px; align-items:flex-start;">
           <label>Signature
             <input type="text" name="sig:{{ r.name }}" placeholder="Type signature for {{ r.name }}"
                    value="{{ r.entry.signature|default:'' }}" {% if not r.allowed %}disabled{% endif %}></label>
-          <label style="flex:1;">Comments
-            <input type="text" name="com:{{ r.name }}" value="{{ r.entry.comments|default:'' }}"
-                   {% if not r.allowed %}disabled{% endif %}></label>
-          <button class="es-btn" name="sign" value="{{ r.name }}" {% if not r.allowed %}disabled{% endif %}>Sign &amp; post</button>
+          {# #82: starts empty — the text is APPENDED to the log; prefilling would duplicate on re-sign. #}
+          <label style="flex:1;">Comments (appended to the log)
+            <textarea name="com:{{ r.name }}" rows="2"
+                      {% if not r.allowed %}disabled{% endif %}></textarea></label>
+          <button class="es-btn" name="sign" value="{{ r.name }}" style="margin-top:17px;" {% if not r.allowed %}disabled{% endif %}>Sign &amp; post</button>
         </div>
       </div>
       {% endfor %}
@@ -302,6 +330,7 @@
   </form>
   {% endif %}
 
+  {% if not cfg %}
   <div class="es-card">
     <h2>Sub-components</h2>
     <div hx-get="{% url 'explore:es_subtree' part_id=part_id %}" hx-trigger="load" hx-swap="outerHTML">
@@ -309,6 +338,7 @@
         while on deep assemblies… <span class="es-spin"></span></p>
     </div>
   </div>
+  {% endif %}
 
   <div class="es-card">
     <h2>Type config</h2>

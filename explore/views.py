@@ -1664,13 +1664,15 @@ def _ensure_es_test_type(api, ptid) -> str | None:
     return None if body.get("status") == "OK" else str(body.get("data") or body)
 
 
-def _post_es(api, part_id, es_list, todos, comments) -> str | None:
+def _post_es(api, part_id, es_list, todos, comments,
+             comments_log=None, sub_es=None) -> str | None:
     """Post the consolidated ES test record; returns an error string or None."""
     err = _ensure_es_test_type(api, part_id.rsplit("-", 1)[0])
     if err:
         return f"couldn’t create the “ES” test type — {err}"
     try:
-        body = api.post_test(part_id, execsummary.es_test_payload(es_list, todos, comments))
+        body = api.post_test(part_id, execsummary.es_test_payload(
+            es_list, todos, comments, comments_log=comments_log, sub_es=sub_es))
     except requests.RequestException as e:
         return _hwdb_error_detail(e)
     return None if body.get("status") == "OK" else str(body.get("data") or body)
@@ -1738,7 +1740,13 @@ def explore_exec_summary_view(request, part_id):
     plot_blocks = (execsummary.resolve_plots(
         api, cfg, part_id, _children_of(api), images_rows)
         if cfg and cfg["plots"] else [])
-    es_list, saved_todos = execsummary.fetch_es_state(api, part_id)
+    es_list, saved_todos, comments_log, saved_sub_es = execsummary.fetch_es_state(api, part_id)
+    # The sub-ES list (#83): default selection is "every child that has an
+    # ES"; once a signature saved a choice, that choice wins.
+    sub_es_rows = _sub_es_rows(request, api, part_id) if cfg else []
+    for r in sub_es_rows:
+        r["checked"] = (r["pid"] in saved_sub_es if saved_sub_es is not None
+                        else r["has_es"])
     full_name, role_ids, role_names = _whoami_context(api)
     try:
         comp = api.get_component(part_id).get("data") or {}
@@ -1762,6 +1770,8 @@ def explore_exec_summary_view(request, part_id):
         "signing": (execsummary.compute_status(cfg, es_list, role_ids, role_names)
                     if cfg else None),
         "todos_checked": (saved_todos or {}).get("checked") or [],
+        "comments_log": comments_log,
+        "sub_es_rows": sub_es_rows,
         "full_name": full_name,
         "status_options": execsummary.STATUS_OPTIONS,
         "status_current_id": execsummary.STATUS_ID_BY_LABEL.get(status_name),
@@ -1776,6 +1786,36 @@ def explore_exec_summary_view(request, part_id):
 def _children_of(api):
     """Manifest-row lookup for ES plot sub_part_id addressing."""
     return lambda pid: current_manifest(_safe_get_data(api.get_subcomponents, pid))
+
+
+_SUB_ES_CHILD_CAP = 40
+
+
+def _sub_es_rows(request, api, part_id) -> list[dict]:
+    """The container's direct children for the "summary of Executive
+    Summaries" (#83, Hajime's ES-structure request): one row per linked
+    sub-component — title from the child type's ES-config Test Description
+    (type name when unconfigured), plus whether the child has an ES yet.
+    Fetch-capped so a huge box doesn't stall the signing page."""
+    manifest = current_manifest(_safe_get_data(api.get_subcomponents, part_id))
+    rows, titles, seen = [], {}, set()
+    for m in manifest[:_SUB_ES_CHILD_CAP]:
+        pid = m.get("part_id")
+        if not pid or pid in seen:   # a cable lists both ends (#72) — once
+            continue
+        seen.add(pid)
+        ptid = pid.rsplit("-", 1)[0]
+        if ptid not in titles:
+            child_cfg, _msg = execsummary.load_config(api, ptid)
+            titles[ptid] = ((child_cfg or {}).get("test_description")
+                            or m.get("type_name") or ptid)
+        has_es = any((i.get("image_name") or "").lower().startswith(
+                         f"executivesummary_{pid.lower()}_")
+                     for i in _safe_get_data(api.get_images, pid))
+        rows.append({"pid": pid, "title": titles[ptid], "has_es": has_es,
+                     "position": m.get("functional_position") or "",
+                     "url": _rev(request, "explore:exec_summary", args=[pid])})
+    return rows
 
 
 @login_not_required
@@ -1914,7 +1954,7 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
                                   f"the “{plot['title']}” slot.")
         return redirect(page_url)
 
-    es_list, saved_todos = execsummary.fetch_es_state(api, part_id)
+    es_list, saved_todos, comments_log, saved_sub_es = execsummary.fetch_es_state(api, part_id)
     full_name, role_ids, role_names = _whoami_context(api)
     checked = []
     for v in request.POST.getlist("todo"):
@@ -1956,10 +1996,21 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
                                     "still unchecked: " + ", ".join(missing) + ".")
             return redirect(page_url)
         ts = timezone.localtime().strftime(execsummary.TIMESTAMP_FMT)
+        comment_text = request.POST.get(f"com:{name}") or ""
         merged = execsummary.merge_es_entry(
-            es_list, name, signature, row["rank"], ts,
-            request.POST.get(f"com:{name}") or "")
-        err = _post_es(api, part_id, merged, todos, f"ES signature updated: {name}")
+            es_list, name, signature, row["rank"], ts, comment_text)
+        # The append-only comments log (#82): the entry keeps the status the
+        # signee is setting with this signature.
+        new_log = execsummary.append_comment_log(
+            comments_log, name, execsummary.STATUS_LABEL_BY_ID.get(sid, "Unknown"),
+            comment_text, ts)
+        # The sub-ES selection (#83) rides along like the todos; only the
+        # box's actual children count.
+        children = {m.get("part_id") for m in current_manifest(
+            _safe_get_data(api.get_subcomponents, part_id))}
+        sub_es = [p for p in request.POST.getlist("sub_es") if p in children]
+        err = _post_es(api, part_id, merged, todos, f"ES signature updated: {name}",
+                       comments_log=new_log, sub_es=sub_es)
         if err:
             messages.error(request, f"HWDB rejected the signature — {err}")
             return redirect(page_url)
@@ -1975,8 +2026,11 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
         if not status["reset_allowed"]:
             messages.error(request, "RESET needs the final approver’s role.")
             return redirect(page_url)
+        # RESET clears the signatures AND the comments log (the log restarts
+        # with the new signing round); the sub-ES selection is kept.
         err = _post_es(api, part_id, [], saved_todos,
-                       "ES RESET requested (cleared signatures)")
+                       "ES RESET requested (cleared signatures)",
+                       sub_es=saved_sub_es)
         if err:
             messages.error(request, f"HWDB rejected the reset — {err}")
         else:
@@ -2019,6 +2073,18 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
                     b.update(bytes=b["render_bytes"], uploaded=False,
                              upload_name=None, image_id=None)
             execsummary.download_plot_images(api, plot_blocks)
+        # The sub-ES page (#83) lists the saved selection (default: every
+        # child with an ES) with absolute links — PUBLIC_ORIGIN so the PDF's
+        # URLs survive the www proxy, like the scan QR.
+        sub_entries = []
+        for r in _sub_es_rows(request, api, part_id):
+            if (r["pid"] in saved_sub_es if saved_sub_es is not None
+                    else r["has_es"]):
+                sub_entries.append({
+                    "pid": r["pid"], "title": r["title"],
+                    "url": (settings.PUBLIC_ORIGIN + r["url"]
+                            if settings.PUBLIC_ORIGIN
+                            else request.build_absolute_uri(r["url"]))})
         pdf_bytes = execsummary.build_detail_pdf(part_id, {
             "type_name": leaf.name if leaf else "",
             "description": cfg["test_description"],
@@ -2030,6 +2096,7 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             "references": cfg["references"],
             "subtree": subtree_rows(api, part_id),
             "plot_blocks": plot_blocks,
+            "sub_es": sub_entries,
         })
         if supp:
             try:
@@ -2697,7 +2764,8 @@ def explore_es_subtree_view(request, part_id):
     certified, loaded lazily via htmx so the signing page renders fast.
     Read-only; the walk can take a while on deep assemblies. Errors render
     as in-page hints at 200 — htmx 1.x doesn't swap non-2xx responses."""
-    ctx = {"part_id": part_id, "rows": [], "truncated": False, "error": None}
+    ctx = {"part_id": part_id, "rows": [], "truncated": False, "error": None,
+           "show_es": False}
     try:
         bearer = mint_for(request)
     except FnalLinkRequired:
@@ -2711,6 +2779,26 @@ def explore_es_subtree_view(request, part_id):
         except Exception:
             logger.exception("explore_es_subtree_view(%s) crashed", part_id)
             ctx["error"] = "fetch_failed"
+    if ctx["error"] is None:
+        # The ES column (#83): on a config-carrying type, direct children get
+        # their sub-ES checkbox/link merged into the tree rows. Best-effort —
+        # a failure just leaves the tree without the column.
+        try:
+            cfg, _msg = execsummary.load_config(api, part_id.rsplit("-", 1)[0])
+            if cfg:
+                _es, _todos, _log, saved = execsummary.fetch_es_state(api, part_id)
+                info = {}
+                for r in _sub_es_rows(request, api, part_id):
+                    r["checked"] = (r["pid"] in saved if saved is not None
+                                    else r["has_es"])
+                    info[r["pid"]] = r
+                for row in ctx["rows"]:
+                    if row["depth"] == 0 and row["part_id"] in info:
+                        row["es"] = info[row["part_id"]]
+                ctx["show_es"] = bool(info)
+        except Exception:
+            logger.warning("es subtree: sub-ES info for %s failed",
+                           part_id, exc_info=True)
     return render(request, "explore/_es_subtree.html", ctx)
 
 

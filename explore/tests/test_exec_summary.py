@@ -35,7 +35,7 @@ CFG = {
 }
 
 
-def _api(cfg=CFG, es=None, todos=None, roles=(41,)):
+def _api(cfg=CFG, es=None, todos=None, roles=(41,), log=None, sub_es=None):
     api = mock.MagicMock()
     api.get_component_type_images.return_value = {"data": [
         {"image_id": "cfg1", "image_name": f"ES_D00599800007_test.json",
@@ -46,6 +46,10 @@ def _api(cfg=CFG, es=None, todos=None, roles=(41,)):
     td = {"ES": es or []}
     if todos is not None:
         td["todos"] = todos
+    if log is not None:
+        td["comments_log"] = log
+    if sub_es is not None:
+        td["sub_es"] = sub_es
     api.get_tests.return_value = {"data": [{"test_data": td}] if es is not None else []}
     api.whoami.return_value = {"data": {
         "full_name": "Chao Zhang", "roles": [{"id": r, "name": f"role{r}"} for r in roles]}}
@@ -424,6 +428,29 @@ class EngineTest(TestCase):
         self.assertTrue(execsummary.compute_status(cfg, [], {41})["reset_allowed"])
         self.assertFalse(execsummary.compute_status(cfg, [], {7})["reset_allowed"])
 
+    def test_comment_log_appends_and_skips_blank(self):
+        # #82: append-only — entries are never edited; blank text adds nothing.
+        log = execsummary.append_comment_log(
+            [], "Chao Zhang", "In Fabrication", "found a scratch", "2026-07-30 09:00")
+        log = execsummary.append_comment_log(
+            log, "Hajime Muramatsu", "QA/QC Tests - Passed All", "  ", "2026-07-30 10:00")
+        log = execsummary.append_comment_log(
+            log, "Hajime Muramatsu", "QA/QC Tests - Passed All", "ok now", "2026-07-30 11:00")
+        self.assertEqual([e["name"] for e in log], ["Chao Zhang", "Hajime Muramatsu"])
+        self.assertEqual(log[0]["status"], "In Fabrication")
+        self.assertEqual(log[1]["text"], "ok now")
+
+    def test_es_payload_carries_log_and_sub_es(self):
+        p = execsummary.es_test_payload([], None, "c",
+                                        comments_log=[{"name": "A"}],
+                                        sub_es=["D05700300001-00012"])
+        self.assertEqual(p["test_data"]["comments_log"], [{"name": "A"}])
+        self.assertEqual(p["test_data"]["sub_es"], ["D05700300001-00012"])
+        # legacy shape unchanged when neither exists
+        p = execsummary.es_test_payload([], None, "c")
+        self.assertNotIn("comments_log", p["test_data"])
+        self.assertNotIn("sub_es", p["test_data"])
+
     def test_todos_payload_clamps_indices(self):
         cfg = execsummary._normalize(CFG)
         self.assertEqual(execsummary.todos_payload(cfg, [1, 1, 9, -2]),
@@ -448,7 +475,9 @@ class EngineTest(TestCase):
             "todos": {**cfg["todos"], "checked": [0]}, "signee_rows": rows,
             "status_label": "QA/QC Tests - Passed All",
             "certified_flag": True, "uploaded_flag": False,
-            "references": cfg["references"], "subtree": subtree})
+            "references": cfg["references"], "subtree": subtree,
+            "sub_es": [{"pid": "D05700300001-00012", "title": "FEB summary",
+                        "url": "https://example.org/hw/dev/part/D05700300001-00012/exec-summary/"}]})
         default = execsummary.build_default_pdf(BOX, {
             "signature": "Chao", "comments": "", "timestamp": "now",
             "status_label": "Unknown", "certified_flag": False,
@@ -459,11 +488,18 @@ class EngineTest(TestCase):
         # nested (depth-1) node and the status columns
         import io
         from pypdf import PdfReader
-        last = PdfReader(io.BytesIO(detail)).pages[-1].extract_text()
+        pages = [p.extract_text() for p in PdfReader(io.BytesIO(detail)).pages]
+        last = pages[-1]
         self.assertIn("Sub-components", last)
         self.assertIn("D05700300001-00012", last)
         self.assertIn("Z00100300001-07630", last)
         self.assertIn("Certified", last)
+        # #83: the sub-ES list gets its own page, before Sub-components.
+        # (#82's comments log is page-only — the sign-off table already
+        # carries the latest comments in the PDF.)
+        es_page = pages[-2]
+        self.assertIn("Executive Summaries of Sub-components", es_page)
+        self.assertIn("FEB summary", es_page)
         # the default PDF says so when there's nothing inside
         last = PdfReader(io.BytesIO(default)).pages[-1].extract_text()
         self.assertIn("No sub-components.", last)
@@ -529,16 +565,83 @@ class PageTest(TestCase):
         self.assertIn("Default sign-off", html)
         self.assertIn("Chao Zhang", html)                  # whoami prefill
 
+    def test_subtree_gets_es_column_with_default_selection(self):
+        # #83: the sub-ES selection lives as an ES column on the lazy
+        # sub-component tree — children with an ES get a pre-ticked checkbox
+        # + link; children without one show "none yet".
+        api = _api(es=[])
+        api.get_subcomponents.return_value = {"data": [
+            {"part_id": "D05700300001-00012", "type_name": "FEB",
+             "functional_position": "FEB1", "operation": "mount"},
+            {"part_id": "D05700300001-00013", "type_name": "FEB",
+             "functional_position": "FEB2", "operation": "mount"}]}
+        api.get_images.side_effect = lambda pid: {"data": [
+            {"image_id": "es1", "created": "2026-07-01T00:00:00",
+             "image_name": f"ExecutiveSummary_{pid}_20260701_000000.pdf"}]
+            } if pid == "D05700300001-00012" else {"data": []}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(f"/hw/dev/part/{BOX}/es-subtree/").content.decode()
+        self.assertIn("<th>ES</th>", html)
+        self.assertIn('name="sub_es" value="D05700300001-00012" checked', html)
+        self.assertIn("none yet", html)                    # -00013 has none
+        # the ES link opens the child's own ES page
+        self.assertIn('/hw/dev/part/D05700300001-00012/exec-summary/', html)
+
+    def test_saved_sub_es_selection_beats_the_default(self):
+        api = _api(es=[], sub_es=[])                       # user deselected all
+        api.get_images.side_effect = lambda pid: {"data": [
+            {"image_id": "es1", "created": "2026-07-01T00:00:00",
+             "image_name": f"ExecutiveSummary_{pid}_20260701_000000.pdf"}]
+            } if pid != BOX else {"data": []}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(f"/hw/dev/part/{BOX}/es-subtree/").content.decode()
+            page = self.client.get(PAGE).content.decode()
+        self.assertIn('name="sub_es" value="D05700300001-00012"', html)
+        self.assertNotIn('value="D05700300001-00012" checked', html)
+        # deselected-all → no hidden fallback inputs on the page either
+        self.assertNotIn('type="hidden" name="sub_es"', page)
+
+    def test_page_carries_selection_as_hidden_inputs_until_tree_loads(self):
+        # #83: signing before the htmx tree arrives must not wipe the
+        # selection — the placeholder carries it as hidden inputs.
+        api = _api(es=[])
+        api.get_images.side_effect = lambda pid: {"data": [
+            {"image_id": "es1", "created": "2026-07-01T00:00:00",
+             "image_name": f"ExecutiveSummary_{pid}_20260701_000000.pdf"}]
+            } if pid != BOX else {"data": []}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            page = self.client.get(PAGE).content.decode()
+        self.assertIn('<input type="hidden" name="sub_es" value="D05700300001-00012">', page)
+
+    def test_comments_log_card_renders_entries(self):
+        api = _api(es=[], log=[
+            {"name": "Chao Zhang", "timestamp": "2026-07-30 09:00",
+             "status": "In Fabrication", "text": "found a scratch"}])
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("Comments log", html)
+        self.assertIn("found a scratch", html)
+        self.assertIn("(status: In Fabrication)", html)
+        # #82: the per-signee comment box is a fresh textarea, not prefilled
+        self.assertIn("<textarea", html)
+
     def test_subtree_section_lazy_loads_in_both_modes(self):
         # The recursive tree is slow (2 calls/node) — the page ships a
         # placeholder that htmx fills after load, in DETAIL and DEFAULT mode.
+        # The sub-ES card (#83) reads the box's own manifest inline (one
+        # shallow call), but children are never walked on the page GET.
         for api in (_api(), _api(cfg=None)):
             m1, m2 = _mocked(api)
             with m1, m2:
                 html = self.client.get(PAGE).content.decode()
             self.assertIn(f'hx-get="/hw/dev/part/{BOX}/es-subtree/"', html)
             self.assertIn('hx-trigger="load"', html)
-            api.get_subcomponents.assert_not_called()      # nothing walked inline
+            walked = {c.args[0] for c in api.get_subcomponents.call_args_list}
+            self.assertLessEqual(walked, {BOX})            # never the children
 
     @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_prod_is_forbidden(self):
@@ -603,6 +706,12 @@ class SignTest(TestCase):
         self.assertEqual(entry["rank"], 2)
         self.assertEqual(entry["comments"], "looks good")
         self.assertEqual(payload["test_data"]["todos"]["checked"], [0, 1])
+        # #82: the comment is also appended to the log with the status set
+        log = payload["test_data"]["comments_log"]
+        self.assertEqual(len(log), 1)
+        self.assertEqual(log[0]["name"], "Chao Zhang")
+        self.assertEqual(log[0]["status"], "QA/QC Tests - Passed All")
+        self.assertEqual(log[0]["text"], "looks good")
         patch = api.patch_component.call_args.args[1]
         self.assertEqual(patch["status"], {"id": 120})
         self.assertTrue(patch["certified_qaqc"])
@@ -630,6 +739,43 @@ class SignTest(TestCase):
         return {"sign": "Chao Zhang", "sig:Chao Zhang": "Chao Zhang",
                 "todo": ["0", "1"], "status_id": "120",
                 "certified": "on", "uploaded": "on"}
+
+    def test_blank_comment_appends_nothing_and_log_survives(self):
+        # #82: an existing log rides along untouched; empty text adds no entry.
+        old = [{"name": "A", "timestamp": "t0", "status": "In Fabrication",
+                "text": "earlier note"}]
+        api = _api(es=[], log=old)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, self._sign_post())   # no com: field
+        payload = api.post_test.call_args.args[1]
+        self.assertEqual(payload["test_data"]["comments_log"], old)
+
+    def test_sign_saves_sub_es_selection(self):
+        # #83: the ticked sub-ES pids ride along like the todos; only the
+        # box's actual children survive validation.
+        api = _api(es=[])
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {
+                **self._sign_post(),
+                "sub_es": ["D05700300001-00012", "D09999900001-00001"]})
+        payload = api.post_test.call_args.args[1]
+        self.assertEqual(payload["test_data"]["sub_es"], ["D05700300001-00012"])
+
+    def test_reset_clears_log_but_keeps_sub_es(self):
+        # #82/#83: RESET clears signatures AND the comments log (a new
+        # signing round starts clean); the sub-ES selection is kept.
+        old = [{"name": "A", "timestamp": "t0", "status": "Unknown", "text": "x"}]
+        api = _api(es=[_entry("Chao Zhang", 2), _entry("Hajime Muramatsu", 1)],
+                   log=old, sub_es=["D05700300001-00012"])
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"action": "reset"})
+        payload = api.post_test.call_args.args[1]
+        self.assertEqual(payload["test_data"]["ES"], [])
+        self.assertNotIn("comments_log", payload["test_data"])
+        self.assertEqual(payload["test_data"]["sub_es"], ["D05700300001-00012"])
 
     def test_existing_es_test_type_is_not_recreated(self):
         api = _api(es=[])   # fixture: the type already lists "ES"
