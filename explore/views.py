@@ -987,37 +987,31 @@ def _packing_context(api, instance, part_type_id, manifest) -> dict | None:
     return {"positions": positions, "n_total": len(positions), "n_free": n_free}
 
 
-def _pack_groups(instance, connectors, manifest, show_unknown=False) -> list[dict]:
+def _pack_groups(instance, connectors, manifest, show_all=False) -> list[dict]:
     """The packing page's pickable candidates: one group per child type that
     still has free slots — mirror rows of that type, with status + QC flags
     so un-shippable items are visible up front. Rows with a known parent
     (HWDB rejects those with "already in use") or known-unapproved
-    (``enabled=False``) are hidden. Status: the default follows the Shipping
-    Procedure — only the four linkable statuses (100/110/120/140) are
-    offered (#79); ``show_unknown`` also lists unknown/legacy statuses
-    (0/1/NULL — the server accepts those, probed 2026-07-27), while ids 2/3
-    stay hidden always (HWDB refuses them with "not yet available")."""
+    (``enabled=False``) are hidden. Only the Shipping Procedure's four
+    linkable statuses (100/110/120/140) are ever selectable; the default
+    lists just those, and ``show_all`` also lists the rest — including
+    not-yet-captured NULLs — for information only (Hajime 2026-07-29, #84)."""
     occupied = {m["functional_position"] for m in manifest}
     in_box = {m["part_id"] for m in manifest if m["part_id"]}
     free_by_type: dict[str, list[str]] = {}
     for pos, ctid in connectors.items():
         if pos not in occupied and ctid:
             free_by_type.setdefault(ctid, []).append(pos)
-    if show_unknown:
-        # NULL status_id (not yet captured) must keep passing — a bare
-        # .exclude(__in=…) would drop those rows too.
-        status_q = (Q(status_id__isnull=True)
-                    | ~Q(status_id__in=sorted(parts.UNLINKABLE_STATUS_IDS)))
-    else:
-        status_q = Q(status_id__in=sorted(parts.PROCEDURE_LINKABLE_STATUS_IDS))
     groups = []
     for ctid, free_pos in sorted(free_by_type.items()):
         rows = (HwdbComponentEvent.for_instance(instance)
                 .filter(part_type_id=ctid, parent_part_id="")
                 .exclude(part_id__in=in_box)
                 .exclude(enabled=False)
-                .filter(status_q)
                 .order_by("part_id"))
+        if not show_all:
+            rows = rows.filter(
+                status_id__in=sorted(parts.PROCEDURE_LINKABLE_STATUS_IDS))
         leaf = HierarchyNode.for_instance(instance).filter(
             level=HierarchyNode.LEVEL_TYPE, part_type_id=ctid).first()
         groups.append({
@@ -1030,9 +1024,14 @@ def _pack_groups(instance, connectors, manifest, show_unknown=False) -> list[dic
             "positions": sorted(free_pos, key=str),
             "n_free": len(free_pos), "total": rows.count(),
             # The two QC flags shown separately (Hajime 2026-07-28) — a
-            # combined mark hid which one was missing.
+            # combined mark hid which one was missing. Obsolete status ids
+            # 1-3 display as Unknown BY ID — id 3 shares its name with the
+            # modern id 170, so the name-based normalizer can't tell them apart.
             "candidates": [
-                {"part_id": r.part_id, "status": r.status or "—",
+                {"part_id": r.part_id,
+                 "status": ("Unknown" if r.status_id in parts.OBSOLETE_STATUS_IDS
+                            else r.status or "—"),
+                 "linkable": r.status_id in parts.PROCEDURE_LINKABLE_STATUS_IDS,
                  "qc_up": bool(r.qaqc_uploaded),
                  "qc_cert": bool(r.certified_qaqc)}
                 for r in rows[:_PACK_CANDIDATE_CAP]],
@@ -1041,12 +1040,12 @@ def _pack_groups(instance, connectors, manifest, show_unknown=False) -> list[dic
 
 
 def _pack_body_context(instance, part_id, ptid, connectors, current,
-                       just_added=(), show_unknown=False):
+                       just_added=(), show_all=False):
     """Context for the pack page's two-column body (``_pack_body.html``):
     the left column's candidate groups and the right column's contents,
     both derived from ``current`` (position → occupant or None).
-    ``just_added`` pids get highlighted in the contents table;
-    ``show_unknown`` widens the candidate status filter (#79)."""
+    ``just_added`` pids get highlighted in the contents table; ``show_all``
+    also lists display-only candidates (#84)."""
     manifest = [{"functional_position": pos, "part_id": pid}
                 for pos, pid in current.items() if pid]
     type_names = dict(
@@ -1062,12 +1061,29 @@ def _pack_body_context(instance, part_id, ptid, connectors, current,
     return {
         "part_id": part_id,
         "part_type_id": ptid,
-        "groups": _pack_groups(instance, connectors, manifest, show_unknown),
+        "groups": _pack_groups(instance, connectors, manifest, show_all),
         "contents": contents,
         "n_filled": sum(1 for c in contents if c["part_id"]),
         "just_added": list(just_added),
-        "show_unknown": show_unknown,
+        "show_all": show_all,
     }
+
+
+def _procedure_status_block(instance, pid) -> str | None:
+    """Why the Shipping Procedure forbids linking this item, or None if it
+    may proceed. HWDB's REST API doesn't enforce the four-allowed-statuses
+    rule (2026-07-29 probe; Web UI does, fix requested), so the add paths
+    check the mirrored status themselves (#84). Unknown to the mirror
+    (no row / NULL status) passes — HWDB arbitrates those."""
+    sid = (HwdbComponentEvent.for_instance(instance)
+           .filter(part_id=pid).exclude(status_id=None)
+           .values_list("status_id", flat=True).first())
+    if sid is None or sid in parts.PROCEDURE_LINKABLE_STATUS_IDS:
+        return None
+    label = execsummary.STATUS_LABEL_BY_ID.get(sid, f"id {sid}")
+    return (f"its status “{label}” is not one the Shipping Procedure allows "
+            f"to be linked (In Fabrication, Waiting on QA/QC Tests, "
+            f"Passed All, Use As Is)")
 
 
 def _refusal_detail(api, pid, detail) -> str:
@@ -1112,6 +1128,9 @@ def _scan_link(api, inst, box_pid, pid) -> tuple[bool, str]:
             if current[pos] is None and connectors.get(pos) == ctid]
     if not free:
         return False, f"no free position left for {ctid} items."
+    block = _procedure_status_block(inst, pid)
+    if block:
+        return False, f"not added — {block}."
     pos = free[0]
     payload = {"component": {"part_id": box_pid},
                "subcomponents": {**current, pos: pid}}
@@ -1171,22 +1190,22 @@ def explore_box_pack_view(request, part_id):
         messages.error(request, f"Couldn’t read the box’s current state — {e}")
         return redirect(part_url)
 
-    # The "show Unknown" toggle (#79) rides on every request — the checkbox
+    # The "show all items" toggle (#84) rides on every request — the checkbox
     # sends it on its own GET, the body's forms carry it as a hidden field —
     # so the state survives htmx swaps.
-    show_unknown = (request.GET.get("show_unknown")
-                    or request.POST.get("show_unknown") or "") == "1"
+    show_all = (request.GET.get("show_all")
+                or request.POST.get("show_all") or "") == "1"
 
     if request.method != "POST":
         # htmx GET = the scan poller refreshing the two-column body after a
         # phone scan landed in the box (highlighting what the scans added,
-        # via ?added=), or the show-Unknown toggle — re-render, skip sweeps.
+        # via ?added=), or the show-all toggle — re-render, skip sweeps.
         if getattr(request, "htmx", False):
             just = [p for p in (request.GET.get("added") or "").split(",") if p]
             return render(request, "explore/_pack_body.html",
                           _pack_body_context(inst, part_id, ptid, connectors,
                                              current, just_added=just,
-                                             show_unknown=show_unknown))
+                                             show_all=show_all))
         # Live availability check: two listing calls per child type stamp the
         # mirror's parent links + enabled flags, so a stale mirror doesn't
         # offer items HWDB would refuse at write time ("already in use" /
@@ -1208,7 +1227,7 @@ def explore_box_pack_view(request, part_id):
             "active_nav": "shipments",
             "sidebar": navigation.sidebar_tree(inst, {}),
             **_pack_body_context(inst, part_id, ptid, connectors, current,
-                                 show_unknown=show_unknown),
+                                 show_all=show_all),
             "scan_url": scan_url,
             "scan_qr_svg": scanning.qr_svg(scan_url),
             "scan_feed_url": _rev(request, "explore:scan_feed"),
@@ -1224,7 +1243,7 @@ def explore_box_pack_view(request, part_id):
         return render(request, "explore/_pack_body.html",
                       _pack_body_context(inst, part_id, ptid, connectors,
                                          state_, just_added=just_added,
-                                         show_unknown=show_unknown))
+                                         show_all=show_all))
 
     unlink = (request.POST.get("unlink") or "").strip()
     if unlink:
@@ -1290,6 +1309,13 @@ def explore_box_pack_view(request, part_id):
     # must not sink the rest of the batch. State accumulates across successes.
     added, failed, state = [], [], dict(current)
     for pos, pid in changes.items():
+        # The procedure's status rule, enforced here because HWDB's API
+        # doesn't (yet) — also covers typed/scanned PIDs the picker never
+        # displayed (#84).
+        block = _procedure_status_block(inst, pid)
+        if block:
+            failed.append((pid, block))
+            continue
         payload = {"component": {"part_id": part_id},
                    "subcomponents": {**state, pos: pid}}
         try:

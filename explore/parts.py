@@ -109,15 +109,12 @@ def _named(v):
 # and the id-aware sync corrects obsolete rows on their next walk.
 OBSOLETE_STATUS_IDS = {1, 2, 3}
 _OBSOLETE_STATUS_NAMES = {"Available", "Temporarily Unavailable"}
-# The subset HWDB refuses to link into an assembly ("not yet available").
-# Probed 2026-07-27: the old vocabulary is literal — id 1 "Available" links
-# fine, 2/3 "Unavailable" don't. (One status-1 item with specs_version null
-# was also refused; the listing can't spot those, so HWDB arbitrates.)
-UNLINKABLE_STATUS_IDS = {2, 3}
 # What the Shipping Procedure (July 2026, Appendix B) ALLOWS to be linked:
 # In Fabrication / Waiting on QA/QC Tests / Passed All / Use As Is. The
-# server is more permissive (it also accepts 0/1); the pack picker defaults
-# to the procedure's rule with a "show Unknown" escape hatch (#79).
+# REST API accepts ANY status (2026-07-29 full-matrix probe — its only
+# refusal is the per-item "not yet available" enable gate; an HWDB fix is
+# requested), so the pack picker enforces the rule itself: every candidate
+# is listed, but only these four are selectable (#84).
 PROCEDURE_LINKABLE_STATUS_IDS = {100, 110, 120, 140}
 
 

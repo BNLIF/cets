@@ -57,8 +57,8 @@ def _mocked(api):
 
 
 def _mirror_items():
-    # Procedure-linkable statuses (120/110) — the picker's default filter
-    # only offers those four (#79); per-test overrides exercise the rest.
+    # Procedure-linkable statuses (120/110) — only those four are selectable
+    # in the picker (#84); per-test overrides exercise the rest.
     HwdbComponentEvent.objects.create(
         instance="dev", part_type_id=CHILD_TYPE, part_id=IN_BOX,
         status="All passed", status_id=120,
@@ -261,54 +261,62 @@ class PackPageTest(TestCase):
             HwdbComponentEvent.objects.get(part_id=GOOD).enabled)
 
     def test_default_lists_only_procedure_linkable_statuses(self):
-        # #79: the Shipping Procedure allows linking only In Fabrication /
-        # Waiting on QA/QC / Passed All / Use As Is (100/110/120/140). Items
-        # with legacy status 1 or an uncaptured (NULL) status hide by
-        # default; the fixture rows (120/110) stay listed.
+        # #84: the default view keeps the clutter down — just the four
+        # statuses the Shipping Procedure allows to be linked (100/110/120/
+        # 140); legacy and NULL-status rows hide until "show all items".
         HwdbComponentEvent.objects.filter(part_id=GOOD).update(
-            status="Unknown", status_id=1)
+            status="Permanently Unavailable", status_id=3)   # obsolete id
         HwdbComponentEvent.objects.create(
             instance="dev", part_type_id=CHILD_TYPE,
-            part_id=f"{CHILD_TYPE}-00004", status="")     # status_id NULL
+            part_id=f"{CHILD_TYPE}-00004", status="")        # status_id NULL
         api = _api()
         m1, m2 = _mocked(api)
         with m1, m2:
             html = self.client.get(PACK).content.decode()
-        self.assertNotIn(f'value="{GOOD}"', html)                 # legacy 1
-        self.assertNotIn(f'value="{CHILD_TYPE}-00004"', html)     # NULL
-        self.assertIn(f'value="{BAD_QC}"', html)                  # 110 stays
-        self.assertIn('id="pk-show-unknown"', html)               # the toggle
-        self.assertNotIn('<input type="hidden" name="show_unknown"',
-                         html)                                    # off = no state field
+        self.assertNotIn(f'href="/hw/dev/part/{GOOD}/"', html)   # hidden
+        self.assertNotIn(f"{CHILD_TYPE}-00004", html)            # NULL hidden
+        self.assertIn(f'value="{BAD_QC}"', html)                 # 110 stays
+        self.assertIn('id="pk-show-all"', html)                  # the toggle
+        self.assertNotIn('<input type="hidden" name="show_all"',
+                         html)                                   # off = no state field
 
-    def test_show_unknown_reveals_legacy_but_never_unavailable(self):
-        # The escape hatch lists 0/1/NULL; HWDB-refused 2/3 stay hidden.
+    def test_show_all_lists_the_rest_display_only(self):
+        # #84 (Hajime 2026-07-29): with the toggle on, every free item is
+        # shown, but only the procedure's four statuses get a checkbox —
+        # legacy/unknown/NULL rows are display-only.
         HwdbComponentEvent.objects.filter(part_id=GOOD).update(
-            status="Unknown", status_id=1)
-        HwdbComponentEvent.objects.filter(part_id=BAD_QC).update(
-            status="Unknown", status_id=2)
+            status="Permanently Unavailable", status_id=3)   # obsolete id
+        HwdbComponentEvent.objects.create(
+            instance="dev", part_type_id=CHILD_TYPE,
+            part_id=f"{CHILD_TYPE}-00004", status="")        # status_id NULL
         api = _api()
         m1, m2 = _mocked(api)
         with m1, m2:
-            html = self.client.get(f"{PACK}?show_unknown=1").content.decode()
-        self.assertIn(f'value="{GOOD}"', html)      # legacy 1 revealed
-        self.assertNotIn(f'value="{BAD_QC}"', html)  # Unavailable → never
+            html = self.client.get(f"{PACK}?show_all=1").content.decode()
+        self.assertNotIn(f'value="{GOOD}"', html)             # no checkbox…
+        self.assertIn(f'href="/hw/dev/part/{GOOD}/"', html)   # …but listed
+        self.assertNotIn(f'value="{CHILD_TYPE}-00004"', html)  # NULL: display-only
+        self.assertIn(f"{CHILD_TYPE}-00004", html)
+        self.assertIn(f'value="{BAD_QC}"', html)              # 110 pickable
+        self.assertIn('class="pk-noadd"', html)
+        # Obsolete ids display as Unknown BY ID — id 3 shares its name with
+        # the modern id 170, so the raw name must not leak through.
+        self.assertNotIn("Permanently Unavailable", html)
+        self.assertIn("<td>Unknown</td>", html)
         # State survives htmx swaps: checkbox re-renders checked, and every
         # form carries the hidden field so POST re-renders keep the mode.
         self.assertIn("checked", html)
-        self.assertIn('<input type="hidden" name="show_unknown" value="1">', html)
+        self.assertIn('<input type="hidden" name="show_all" value="1">', html)
 
-    def test_add_keeps_show_unknown_mode(self):
-        HwdbComponentEvent.objects.filter(part_id=GOOD).update(
-            status="Unknown", status_id=1)
+    def test_add_keeps_show_all_mode(self):
         api = _api()
         m1, m2 = _mocked(api)
         with m1, m2:
             html = self.client.post(
-                PACK, {"pid": [GOOD], "show_unknown": "1"},
+                PACK, {"pid": [GOOD], "show_all": "1"},
                 HTTP_HX_REQUEST="true").content.decode()
         self.assertIn("Added 1 item(s)", html)
-        self.assertIn('<input type="hidden" name="show_unknown" value="1">', html)
+        self.assertIn('<input type="hidden" name="show_all" value="1">', html)
 
     def test_uncertified_items_stay_listed(self):
         # certified_qaqc does NOT gate packing (an uncertified FEB was found
@@ -425,6 +433,32 @@ class PackPostTest(TestCase):
         second = api.patch_subcomponents.call_args_list[1].args[1]
         self.assertEqual(second["subcomponents"],
                          {"Slot 1": IN_BOX, "Slot 2": None, "Doc": DOC})
+
+    def test_disallowed_status_is_refused_locally(self):
+        # HWDB's REST API doesn't enforce the procedure's four-statuses rule
+        # (2026-07-29 probe; Web UI does, fix requested) — the add path
+        # checks the mirrored status itself (#84), so tampered checkboxes
+        # and typed/scanned PIDs are covered too.
+        HwdbComponentEvent.objects.filter(part_id=GOOD).update(
+            status="QA/QC Tests - Non-conforming", status_id=130)
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            page = self.client.post(PACK, {"pid": [GOOD]}, follow=True)
+        html = page.content.decode()
+        api.patch_subcomponents.assert_not_called()
+        self.assertIn(f"{GOOD} was not added", html)
+        self.assertIn("not one the Shipping Procedure allows", html)
+
+    def test_null_status_add_passes_through_for_hwdb_to_arbitrate(self):
+        # The picker shows NULL-status rows display-only (Re-sync fetches
+        # the status), but an explicit typed/scanned add still goes to HWDB.
+        HwdbComponentEvent.objects.filter(part_id=GOOD).update(status_id=None)
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PACK, {"manual": GOOD})
+        api.patch_subcomponents.assert_called_once()
 
     def test_manual_pids_work_like_picked_ones(self):
         api = _api()

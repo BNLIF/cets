@@ -141,6 +141,22 @@ class ScanEndpointsTest(TestCase):
         self.assertIn("no free position", body["message"])
         api.patch_subcomponents.assert_not_called()
 
+    def test_submit_with_disallowed_status_is_refused_locally(self):
+        # Scan-to-cart shares the procedure's status rule (#84): a mirrored
+        # status outside the four allowed ones never reaches HWDB.
+        from explore.models import HwdbComponentEvent
+        HwdbComponentEvent.objects.create(
+            instance="dev", part_type_id="D05700300001", part_id=PID,
+            status="In Repair", status_id=160)
+        api = _cart_api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            body = json.loads(self.client.post(
+                SUBMIT, {"text": PID, "box": BOX}).content)
+        self.assertFalse(body["ok"])
+        self.assertIn("not one the Shipping Procedure allows", body["message"])
+        api.patch_subcomponents.assert_not_called()
+
     def test_submit_with_unpackable_box_is_rejected(self):
         resp = self.client.post(SUBMIT, {"text": PID, "box": "D08100100004-00001"})
         self.assertEqual(resp.status_code, 422)

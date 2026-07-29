@@ -145,10 +145,11 @@ class HwdbComponentEvent(InstanceScoped):
     # bar charts (mirror-only, no extra fetch). Empty when not (yet) synced.
     status = models.CharField(max_length=120, blank=True, default="")
     # Raw HWDB status id. The display name collapses the obsolete ids 1-3
-    # and the genuine id 0 into "Unknown" (#75), but the pack gate needs
-    # them apart: HWDB refuses linking ids 2/3 "Unavailable" ("not yet
-    # available" — probed 2026-07-27) while 0 and 1 link fine. NULL = row
-    # mirrored before this was captured.
+    # and the genuine id 0 into "Unknown" (#75), but the pack rule needs the
+    # raw id: only the Shipping Procedure's four statuses (100/110/120/140)
+    # may be linked, a rule HWDB's Web UI enforces but its REST API doesn't
+    # (2026-07-29 probe — every id links; fix requested), so the picker
+    # enforces it locally (#84). NULL = row mirrored before this was captured.
     status_id = models.IntegerField(null=True, blank=True)
     manufacturer = models.CharField(max_length=160, blank=True, default="")
     institution = models.CharField(max_length=160, blank=True, default="")

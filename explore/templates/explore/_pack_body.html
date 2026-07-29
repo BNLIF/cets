@@ -8,23 +8,23 @@ without a page reload. {% endcomment %}
   <div class="pk-cols">
     <div class="pk-picker">
       {% if groups %}
-      {% comment %}#79: the procedure allows linking only the four statuses
-      (In Fabrication / Waiting on QA/QC / Passed All / Use As Is) — that's
-      the default; the toggle also lists unknown/legacy-status items.
+      {% comment %}#84: only the procedure's four statuses (In Fabrication /
+      Waiting on QA/QC / Passed All / Use As Is) can ever be picked — the
+      default lists just those; the toggle also lists the rest, display-only.
       {% endcomment %}
-      <label class="pk-toggle" title="Also list items with unknown or legacy status — the Shipping Procedure only allows linking In Fabrication, Waiting on QA/QC Tests, Passed All, and Use As Is.">
-        <input type="checkbox" id="pk-show-unknown" name="show_unknown" value="1"
-               {% if show_unknown %}checked{% endif %}
+      <label class="pk-toggle" title="Also list items whose status the Shipping Procedure doesn’t allow to be linked — shown for information only, they can’t be picked.">
+        <input type="checkbox" id="pk-show-all" name="show_all" value="1"
+               {% if show_all %}checked{% endif %}
                hx-get="{% url 'explore:box_pack' part_id=part_id %}"
                hx-target="#pk-body" hx-swap="outerHTML">
-        show Unknown-status items
+        show all items (including statuses that can’t be linked)
       </label>
       {% for g in groups %}
       <form method="post" action="{% url 'explore:box_pack' part_id=part_id %}"
             hx-post="{% url 'explore:box_pack' part_id=part_id %}"
             hx-target="#pk-body" hx-swap="outerHTML">
         {% csrf_token %}
-        {% if show_unknown %}<input type="hidden" name="show_unknown" value="1">{% endif %}
+        {% if show_all %}<input type="hidden" name="show_all" value="1">{% endif %}
         <div class="pk-group">
           <div class="pk-group-head">
             <h2>{{ g.name }} {% if g.type_url %}<a class="mono" href="{{ g.type_url }}" title="Open the {{ g.name }} type page">{{ g.type_id }}</a>{% else %}<span class="mono">{{ g.type_id }}</span>{% endif %}</h2>
@@ -52,8 +52,11 @@ without a page reload. {% endcomment %}
               <tbody>
               {% for c in g.candidates %}
                 <tr>
-                  <td><input type="checkbox" name="pid" value="{{ c.part_id }}" id="c-{{ c.part_id }}"></td>
-                  <td class="mono"><label for="c-{{ c.part_id }}">{{ c.part_id }}</label>
+                  {% comment %}#84 (Hajime 2026-07-29): only the procedure's four linkable
+                  statuses get a checkbox — the rest (listed under "show all items")
+                  are display-only.{% endcomment %}
+                  <td>{% if c.linkable %}<input type="checkbox" name="pid" value="{{ c.part_id }}" id="c-{{ c.part_id }}">{% else %}<span class="pk-noadd" title="Display only — the Shipping Procedure doesn’t allow linking this status. Re-sync refreshes statuses the mirror hasn’t captured yet.">—</span>{% endif %}</td>
+                  <td class="mono">{% if c.linkable %}<label for="c-{{ c.part_id }}">{{ c.part_id }}</label>{% else %}{{ c.part_id }}{% endif %}
                     <a class="pk-open" href="{% url 'explore:part' part_id=c.part_id %}" target="_blank" rel="noopener" title="Open {{ c.part_id }} (new tab)">&#x2197;</a></td>
                   <td>{{ c.status }}</td>
                   <td>{% if c.qc_up %}<span class="pk-qc-ok" title="QA/QC uploaded">✓</span>{% else %}<span class="pk-qc-bad" title="QA/QC not uploaded">✗</span>{% endif %}</td>
@@ -77,7 +80,7 @@ without a page reload. {% endcomment %}
             hx-post="{% url 'explore:box_pack' part_id=part_id %}"
             hx-target="#pk-body" hx-swap="outerHTML">
         {% csrf_token %}
-        {% if show_unknown %}<input type="hidden" name="show_unknown" value="1">{% endif %}
+        {% if show_all %}<input type="hidden" name="show_all" value="1">{% endif %}
         <div class="pk-group">
           <div class="pk-manual">
             <label for="pk-manual-input">Add by PID (typed or scanned, separated by spaces or commas):</label>
@@ -103,7 +106,7 @@ without a page reload. {% endcomment %}
           hx-target="#pk-body" hx-swap="outerHTML"
           class="pk-group pk-contents">
       {% csrf_token %}
-      {% if show_unknown %}<input type="hidden" name="show_unknown" value="1">{% endif %}
+      {% if show_all %}<input type="hidden" name="show_all" value="1">{% endif %}
       <h2>In the box <span class="mono">{{ n_filled }} of {{ contents|length }} positions filled</span></h2>
       <table class="pk-table">
         <thead><tr><th>Type</th><th>Position</th><th>Item</th><th></th></tr></thead>
