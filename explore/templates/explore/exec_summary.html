@@ -273,7 +273,7 @@
     {% else %}
     <div class="es-log">
       <span class="mono" style="font-size:12px; color:var(--faint);">{{ e.timestamp }}</span>
-      — <b>{{ e.name }}</b> <span class="es-hint">(status: {{ e.status }})</span>
+      — <b>{{ e.name }}</b>{% if e.signature %} · {{ e.signature }}{% endif %} <span class="es-hint">(status: {{ e.status }})</span>
       <div class="es-log-text">{{ e.text }}</div>
     </div>
     {% endif %}

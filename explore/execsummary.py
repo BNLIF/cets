@@ -239,16 +239,22 @@ def merge_es_entry(es_list, name, signature, rank, timestamp, comments) -> list:
     return out
 
 
-def append_comment_log(log, name, status_label, text, timestamp) -> list:
+def append_comment_log(log, name, status_label, text, timestamp,
+                       signature="") -> list:
     """The append-only signee comments log (#82, Hajime's ES-structure
     request): each entry keeps who wrote, when, and the Component Status
-    at that time. Empty text appends nothing; existing entries are never
-    edited or removed."""
+    at that time. Sign-flow entries also carry ``signature`` — ``name`` is
+    the config's position name, so the person who actually signed shows
+    next to it (Hajime 2026-07-31). Empty text appends nothing; existing
+    entries are never edited or removed."""
     out = [e for e in log or [] if isinstance(e, dict)]
     text = (text or "").strip()
     if text:
-        out.append({"name": name, "timestamp": timestamp,
-                    "status": status_label, "text": text})
+        entry = {"name": name, "timestamp": timestamp,
+                 "status": status_label, "text": text}
+        if (signature or "").strip():
+            entry["signature"] = signature.strip()
+        out.append(entry)
     return out
 
 
@@ -720,9 +726,13 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
             status = (f' <font color="#777777">(status: '
                       f'{escape(e.get("status") or "")})</font>'
                       if e.get("status") else "")
+            # sign-flow entries: name is the POSITION — the typed signature
+            # identifies the person (Hajime 2026-07-31)
+            signed = (f' · {escape(e["signature"])}'
+                      if e.get("signature") else "")
             story.append(Paragraph(
                 f'<font face="Courier" size="8">{escape(e.get("timestamp") or "")}</font>'
-                f' — <b>{escape(e.get("name") or "")}</b>{status}',
+                f' — <b>{escape(e.get("name") or "")}</b>{signed}{status}',
                 styles["Normal"]))
             story.append(Paragraph(escape(e.get("text") or ""), styles["Normal"]))
             story.append(Spacer(1, 4))

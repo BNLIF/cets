@@ -2030,10 +2030,11 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
         merged = execsummary.merge_es_entry(
             es_list, name, signature, row["rank"], ts, comment_text)
         # The append-only comments log (#82): the entry keeps the status the
-        # signee is setting with this signature.
+        # signee is setting with this signature, plus the typed signature —
+        # ``name`` is the position, not the person (Hajime 2026-07-31).
         new_log = execsummary.append_comment_log(
             comments_log, name, execsummary.STATUS_LABEL_BY_ID.get(sid, "Unknown"),
-            comment_text, ts)
+            comment_text, ts, signature=signature)
         # The sub-ES selection (#83) rides along like the todos; only the
         # box's actual children count.
         children = {m.get("part_id") for m in current_manifest(

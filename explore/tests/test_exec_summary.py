@@ -440,6 +440,18 @@ class EngineTest(TestCase):
         self.assertEqual(log[0]["status"], "In Fabrication")
         self.assertEqual(log[1]["text"], "ok now")
 
+    def test_comment_log_keeps_the_signature_when_given(self):
+        # Hajime 2026-07-31: sign-flow entries name the POSITION — the typed
+        # signature identifies the person, so it rides on the entry.
+        log = execsummary.append_comment_log(
+            [], "CE Consortium Leader", "In Fabrication", "note",
+            "2026-07-31 09:00", signature="Hajime Muramatsu")
+        self.assertEqual(log[0]["signature"], "Hajime Muramatsu")
+        # standalone comments (no signature) keep the legacy entry shape
+        log = execsummary.append_comment_log(
+            log, "Chao Zhang", "In Fabrication", "another", "2026-07-31 10:00")
+        self.assertNotIn("signature", log[1])
+
     def test_es_payload_carries_log_and_sub_es(self):
         p = execsummary.es_test_payload([], None, "c",
                                         comments_log=[{"name": "A"}],
@@ -477,7 +489,8 @@ class EngineTest(TestCase):
             "certified_flag": True, "uploaded_flag": False,
             "comments_log": [
                 {"name": "A", "timestamp": "2026-07-11 09:00",
-                 "status": "In Fabrication", "text": "pre-reset note"},
+                 "status": "In Fabrication", "text": "pre-reset note",
+                 "signature": "Alice Smith"},
                 {"name": "Chao Zhang", "timestamp": "2026-07-12 09:00",
                  "status": "", "text": "", "event": "reset"}],
             "references": cfg["references"], "subtree": subtree,
@@ -509,6 +522,7 @@ class EngineTest(TestCase):
         first = pages[0]
         self.assertIn("Comments log", first)
         self.assertIn("pre-reset note", first)
+        self.assertIn("Alice Smith", first)     # typed signature next to name
         self.assertIn("signatures have been reset", first)
         # the default PDF says so when there's nothing inside
         last = PdfReader(io.BytesIO(default)).pages[-1].extract_text()
@@ -629,13 +643,17 @@ class PageTest(TestCase):
     def test_comments_log_card_renders_entries(self):
         api = _api(es=[], log=[
             {"name": "Chao Zhang", "timestamp": "2026-07-30 09:00",
-             "status": "In Fabrication", "text": "found a scratch"}])
+             "status": "In Fabrication", "text": "found a scratch",
+             "signature": "C. Zhang"}])
         m1, m2 = _mocked(api)
         with m1, m2:
             html = self.client.get(PAGE).content.decode()
         self.assertIn("Comments log", html)
         self.assertIn("found a scratch", html)
         self.assertIn("(status: In Fabrication)", html)
+        # the typed signature shows next to the bold position name
+        # (Hajime 2026-07-31)
+        self.assertIn("<b>Chao Zhang</b> · C. Zhang", html)
         # #82: the per-signee comment box is a fresh textarea, not prefilled
         self.assertIn("<textarea", html)
         # standalone posting (Hajime 2026-07-30) — the form is offered to
@@ -738,11 +756,14 @@ class SignTest(TestCase):
         self.assertEqual(entry["comments"], "looks good")
         self.assertEqual(payload["test_data"]["todos"]["checked"], [0, 1])
         # #82: the comment is also appended to the log with the status set
+        # and the typed signature (the name is the config's position —
+        # Hajime 2026-07-31)
         log = payload["test_data"]["comments_log"]
         self.assertEqual(len(log), 1)
         self.assertEqual(log[0]["name"], "Chao Zhang")
         self.assertEqual(log[0]["status"], "QA/QC Tests - Passed All")
         self.assertEqual(log[0]["text"], "looks good")
+        self.assertEqual(log[0]["signature"], "Chao Zhang")
         patch = api.patch_component.call_args.args[1]
         self.assertEqual(patch["status"], {"id": 120})
         self.assertTrue(patch["certified_qaqc"])
