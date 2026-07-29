@@ -668,7 +668,8 @@ def append_pdf(base: bytes, extra: bytes) -> bytes:
 def build_detail_pdf(part_id: str, form: dict) -> bytes:
     """The Dashboard's DETAIL summary, minus plots: title, type name,
     generated timestamp, description, todos checklist, sign-off table, the
-    three status fields, references page, sub-components page."""
+    three status fields, the full comments log, references page,
+    sub-components page."""
     buf = io.BytesIO()
     styles = getSampleStyleSheet()
     story = [
@@ -702,6 +703,29 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
         Paragraph("All QA/QC Uploaded", styles["Heading3"]),
         _pf(bool(form.get("uploaded_flag"))),
     ]
+    # The full append-only comments log (Hajime 2026-07-30): the sign-off
+    # table above only carries each signee's LATEST comment, so the log —
+    # which survives resets and takes standalone entries — goes in whole.
+    log = [e for e in form.get("comments_log") or [] if isinstance(e, dict)]
+    if log:
+        story += [Spacer(1, 10), Paragraph("Comments log", styles["Heading3"])]
+        for e in log:
+            if e.get("event") == "reset":
+                story.append(Paragraph(
+                    f'<para align="center"><font color="#777777">—— signatures '
+                    f'have been reset ({escape(e.get("timestamp") or "")}'
+                    f'{", " + escape(e["name"]) if e.get("name") else ""}) ——'
+                    f'</font></para>', styles["Normal"]))
+                continue
+            status = (f' <font color="#777777">(status: '
+                      f'{escape(e.get("status") or "")})</font>'
+                      if e.get("status") else "")
+            story.append(Paragraph(
+                f'<font face="Courier" size="8">{escape(e.get("timestamp") or "")}</font>'
+                f' — <b>{escape(e.get("name") or "")}</b>{status}',
+                styles["Normal"]))
+            story.append(Paragraph(escape(e.get("text") or ""), styles["Normal"]))
+            story.append(Spacer(1, 4))
     refs = form.get("references") or []
     if refs:
         story.append(PageBreak())
@@ -804,8 +828,8 @@ def build_default_pdf(part_id: str, signinfo: dict,
 
 
 def subtree_flowables(rows: list[dict], truncated: bool) -> list:
-    """The Sub-components page: the full recursive contents tree, one row per
-    node indented by depth, with the three QC statuses (Hajime's ES review).
+    """The Sub-components page: the direct sub-components (one level only —
+    Hajime 2026-07-30), one row each with the three QC statuses.
     ``rows`` come from ``parts.subtree_rows``."""
     styles = getSampleStyleSheet()
     if not rows:
@@ -840,6 +864,6 @@ def subtree_flowables(rows: list[dict], truncated: bool) -> list:
     if truncated:
         out.append(Spacer(1, 6))
         out.append(Paragraph(
-            "⚠ Tree truncated — too many sub-components to list them all.",
+            "⚠ List truncated — too many sub-components to list them all.",
             styles["Normal"]))
     return out

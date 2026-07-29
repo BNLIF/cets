@@ -48,6 +48,7 @@
   .es-todo { display: block; font-size: 13px; color: var(--ink); margin: 2px 0; }
   .es-log { border-top: 1px solid var(--rule); padding: 6px 0; font-size: 13px; color: var(--ink); }
   .es-log:first-of-type { border-top: none; padding-top: 0; }
+  .es-log-reset { text-align: center; color: var(--faint); font-size: 12px; }
   .es-log-text { white-space: pre-wrap; margin: 2px 0 0 2px; color: var(--ink); }
   .es-page textarea { width: 100%; resize: vertical; }
   .es-dl { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500;
@@ -218,8 +219,7 @@
       <div hx-get="{% url 'explore:es_subtree' part_id=part_id %}" hx-trigger="load" hx-swap="outerHTML">
         {# until htmx swaps in the tree (with its ES checkboxes), the saved selection rides along as hidden inputs #}
         {% for r in sub_es_rows %}{% if r.checked %}<input type="hidden" name="sub_es" value="{{ r.pid }}">{% endif %}{% endfor %}
-        <p class="es-hint">Loading the full sub-component tree from HWDB — this can take a
-          while on deep assemblies… <span class="es-spin"></span></p>
+        <p class="es-hint">Loading the sub-components from HWDB… <span class="es-spin"></span></p>
       </div>
     </div>
 
@@ -238,19 +238,6 @@
       </div>
       <p class="es-hint">Both flags must be confirmed before signing; patched onto the item with every signature, like the Dashboard.</p>
     </div>
-
-    {% if comments_log %}
-    <div class="es-card">
-      <h2>Comments log</h2>
-      {% for e in comments_log %}
-      <div class="es-log">
-        <span class="mono" style="font-size:12px; color:var(--faint);">{{ e.timestamp }}</span>
-        — <b>{{ e.name }}</b> <span class="es-hint">(status: {{ e.status }})</span>
-        <div class="es-log-text">{{ e.text }}</div>
-      </div>
-      {% endfor %}
-    </div>
-    {% endif %}
 
     <div class="es-card">
       <h2>Sign-off {% if signing.all_signed %}<span class="es-signed">— all signed ✓</span>{% endif %}</h2>
@@ -277,6 +264,36 @@
       {% endfor %}
     </div>
   </form>
+
+  <div class="es-card">
+    <h2>Comments log</h2>
+    {% for e in comments_log %}
+    {% if e.event == "reset" %}
+    <div class="es-log es-log-reset">—— signatures have been reset ({{ e.timestamp }}{% if e.name %}, {{ e.name }}{% endif %}) ——</div>
+    {% else %}
+    <div class="es-log">
+      <span class="mono" style="font-size:12px; color:var(--faint);">{{ e.timestamp }}</span>
+      — <b>{{ e.name }}</b> <span class="es-hint">(status: {{ e.status }})</span>
+      <div class="es-log-text">{{ e.text }}</div>
+    </div>
+    {% endif %}
+    {% empty %}
+    <p class="es-hint">No comments yet.</p>
+    {% endfor %}
+    {% if can_comment %}
+    {# its own form (Hajime 2026-07-30): posting a comment must not submit the sign form's state #}
+    <form method="post">
+      {% csrf_token %}<input type="hidden" name="action" value="comment">
+      <div class="es-row" style="margin-top:8px; align-items:flex-start;">
+        <label style="flex:1;">New comment (appended to the log — entries are permanent)
+          <textarea name="comment_text" rows="2"></textarea></label>
+        <button class="es-btn" style="margin-top:17px;">Post comment</button>
+      </div>
+    </form>
+    {% else %}
+    <p class="es-hint">Posting a comment needs one of the configured signee roles.</p>
+    {% endif %}
+  </div>
 
   <div class="es-card">
     <h2>Generate</h2>

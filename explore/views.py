@@ -1730,7 +1730,7 @@ def explore_exec_summary_view(request, part_id):
 
     POST actions: ``sign`` / ``default_sign`` / ``generate`` (optionally with
     a supplemental-material PDF appended to the summary) / ``reset`` /
-    ``upload_plot``.
+    ``comment`` / ``upload_plot``.
     """
     inst = instance_of(request)
     part_url = _rev(request, "explore:part", args=[part_id])
@@ -1774,6 +1774,8 @@ def explore_exec_summary_view(request, part_id):
         r["checked"] = (r["pid"] in saved_sub_es if saved_sub_es is not None
                         else r["has_es"])
     full_name, role_ids, role_names = _whoami_context(api)
+    signing = (execsummary.compute_status(cfg, es_list, role_ids, role_names)
+               if cfg else None)
     try:
         comp = api.get_component(part_id).get("data") or {}
     except requests.RequestException:
@@ -1793,8 +1795,10 @@ def explore_exec_summary_view(request, part_id):
         "sidebar": navigation.sidebar_tree(inst, {}),
         "part_id": part_id,
         "cfg": cfg, "cfg_msg": cfg_msg,
-        "signing": (execsummary.compute_status(cfg, es_list, role_ids, role_names)
-                    if cfg else None),
+        "signing": signing,
+        # Posting a standalone comment needs one of the configured signee
+        # roles (Hajime 2026-07-30) — same competence as signing some row.
+        "can_comment": bool(signing and any(r["role_ok"] for r in signing["rows"])),
         "todos_checked": (saved_todos or {}).get("checked") or [],
         "comments_log": comments_log,
         "sub_es_rows": sub_es_rows,
@@ -2047,16 +2051,54 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
         messages.success(request, f"Signature for “{name}” posted.")
         return redirect(page_url)
 
+    if action == "comment":
+        # Standalone comment (Hajime 2026-07-30): anyone holding one of the
+        # configured signee roles can post at any time, independent of
+        # signing. Only the log changes — signatures, todos and the sub-ES
+        # selection stay as saved.
+        status = execsummary.compute_status(cfg, es_list, role_ids)
+        if not any(r["role_ok"] for r in status["rows"]):
+            messages.error(request, "Posting a comment needs one of the "
+                                    "configured signee roles.")
+            return redirect(page_url)
+        text = (request.POST.get("comment_text") or "").strip()
+        if not text:
+            messages.error(request, "Type a comment first.")
+            return redirect(page_url)
+        try:
+            comp = api.get_component(part_id).get("data") or {}
+        except requests.RequestException:
+            comp = {}
+        who = full_name or request.user.get_username()
+        new_log = execsummary.append_comment_log(
+            comments_log, who,
+            parts.normalize_status(comp.get("status")) or "Unknown",
+            text, timezone.localtime().strftime(execsummary.TIMESTAMP_FMT))
+        err = _post_es(api, part_id, es_list, saved_todos,
+                       f"ES comment posted by {who}",
+                       comments_log=new_log, sub_es=saved_sub_es)
+        if err:
+            messages.error(request, f"HWDB rejected the comment — {err}")
+        else:
+            messages.success(request, "Comment posted.")
+        return redirect(page_url)
+
     if action == "reset":
         status = execsummary.compute_status(cfg, es_list, role_ids)
         if not status["reset_allowed"]:
             messages.error(request, "RESET needs the final approver’s role.")
             return redirect(page_url)
-        # RESET clears the signatures AND the comments log (the log restarts
-        # with the new signing round); the sub-ES selection is kept.
+        # RESET clears the signatures but KEEPS the comments log — it is
+        # append-only (Hajime 2026-07-30); a marker entry records the reset
+        # in place. The sub-ES selection is kept too.
+        new_log = [e for e in comments_log or [] if isinstance(e, dict)]
+        new_log.append({
+            "name": full_name or request.user.get_username(),
+            "timestamp": timezone.localtime().strftime(execsummary.TIMESTAMP_FMT),
+            "status": "", "text": "", "event": "reset"})
         err = _post_es(api, part_id, [], saved_todos,
                        "ES RESET requested (cleared signatures)",
-                       sub_es=saved_sub_es)
+                       comments_log=new_log, sub_es=saved_sub_es)
         if err:
             messages.error(request, f"HWDB rejected the reset — {err}")
         else:
@@ -2119,6 +2161,9 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             "status_label": status_name or "Unknown",
             "certified_flag": bool(comp.get("certified_qaqc")),
             "uploaded_flag": bool(comp.get("qaqc_uploaded")),
+            # The full log (Hajime 2026-07-30): the sign-off table only
+            # shows each signee's latest comment.
+            "comments_log": comments_log,
             "references": cfg["references"],
             "subtree": subtree_rows(api, part_id),
             "plot_blocks": plot_blocks,
@@ -2785,11 +2830,11 @@ def explore_assembly_view(request, part_id):
 @login_not_required
 @fnal_login_required
 def explore_es_subtree_view(request, part_id):
-    """The executive summary's recursive sub-component list (Hajime's ES
-    review): the full tree to the leaves with per-item status / uploaded /
-    certified, loaded lazily via htmx so the signing page renders fast.
-    Read-only; the walk can take a while on deep assemblies. Errors render
-    as in-page hints at 200 — htmx 1.x doesn't swap non-2xx responses."""
+    """The executive summary's sub-component list: the DIRECT children only
+    (Hajime 2026-07-30 — the recursive walk ran deep and slow on CRUs) with
+    per-item status / uploaded / certified, loaded lazily via htmx so the
+    signing page renders fast. Read-only. Errors render as in-page hints at
+    200 — htmx 1.x doesn't swap non-2xx responses."""
     ctx = {"part_id": part_id, "rows": [], "truncated": False, "error": None,
            "show_es": False}
     try:
@@ -2806,9 +2851,9 @@ def explore_es_subtree_view(request, part_id):
             logger.exception("explore_es_subtree_view(%s) crashed", part_id)
             ctx["error"] = "fetch_failed"
     if ctx["error"] is None:
-        # The ES column (#83): on a config-carrying type, direct children get
-        # their sub-ES checkbox/link merged into the tree rows. Best-effort —
-        # a failure just leaves the tree without the column.
+        # The ES column (#83): on a config-carrying type, the children get
+        # their sub-ES checkbox/link merged into the rows. Best-effort —
+        # a failure just leaves the list without the column.
         try:
             cfg, _msg = execsummary.load_config(api, part_id.rsplit("-", 1)[0])
             if cfg:
@@ -2819,7 +2864,7 @@ def explore_es_subtree_view(request, part_id):
                                     else r["has_es"])
                     info[r["pid"]] = r
                 for row in ctx["rows"]:
-                    if row["depth"] == 0 and row["part_id"] in info:
+                    if row["part_id"] in info:
                         row["es"] = info[row["part_id"]]
                 ctx["show_es"] = bool(info)
         except Exception:

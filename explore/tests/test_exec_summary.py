@@ -61,8 +61,8 @@ def _api(cfg=CFG, es=None, todos=None, roles=(41,), log=None, sub_es=None):
     api.get_subcomponents.return_value = {"data": [
         {"part_id": "D05700300001-00012", "type_name": "FEB",
          "functional_position": "FEB1", "operation": "mount"}]}
-    # the subtree walk revisits children; the seen-guard stops the recursion
-    # even though this constant manifest names the same child at every level
+    # the sub-component list reads only this manifest (direct children,
+    # Hajime 2026-07-30) — the child's own contents are never fetched
     api.get_test_types.return_value = {"data": [{"id": 17, "name": "ES"}]}
     api.post_test_type.return_value = {"status": "OK"}
     api.post_test.return_value = {"status": "OK"}
@@ -475,6 +475,11 @@ class EngineTest(TestCase):
             "todos": {**cfg["todos"], "checked": [0]}, "signee_rows": rows,
             "status_label": "QA/QC Tests - Passed All",
             "certified_flag": True, "uploaded_flag": False,
+            "comments_log": [
+                {"name": "A", "timestamp": "2026-07-11 09:00",
+                 "status": "In Fabrication", "text": "pre-reset note"},
+                {"name": "Chao Zhang", "timestamp": "2026-07-12 09:00",
+                 "status": "", "text": "", "event": "reset"}],
             "references": cfg["references"], "subtree": subtree,
             "sub_es": [{"pid": "D05700300001-00012", "title": "FEB summary",
                         "url": "https://example.org/hw/dev/part/D05700300001-00012/exec-summary/"}]})
@@ -484,8 +489,8 @@ class EngineTest(TestCase):
             "uploaded_flag": False}, ([], False))
         self.assertTrue(detail.startswith(b"%PDF"))
         self.assertTrue(default.startswith(b"%PDF"))
-        # the recursive tree lands on the detail PDF's last page, with the
-        # nested (depth-1) node and the status columns
+        # the sub-components land on the detail PDF's last page, with the
+        # status columns
         import io
         from pypdf import PdfReader
         pages = [p.extract_text() for p in PdfReader(io.BytesIO(detail)).pages]
@@ -495,11 +500,16 @@ class EngineTest(TestCase):
         self.assertIn("Z00100300001-07630", last)
         self.assertIn("Certified", last)
         # #83: the sub-ES list gets its own page, before Sub-components.
-        # (#82's comments log is page-only — the sign-off table already
-        # carries the latest comments in the PDF.)
         es_page = pages[-2]
         self.assertIn("Executive Summaries of Sub-components", es_page)
         self.assertIn("FEB summary", es_page)
+        # the FULL comments log rides with the sign-off section (Hajime
+        # 2026-07-30) — the table alone only shows each signee's latest
+        # comment; reset markers show too
+        first = pages[0]
+        self.assertIn("Comments log", first)
+        self.assertIn("pre-reset note", first)
+        self.assertIn("signatures have been reset", first)
         # the default PDF says so when there's nothing inside
         last = PdfReader(io.BytesIO(default)).pages[-1].extract_text()
         self.assertIn("No sub-components.", last)
@@ -628,12 +638,33 @@ class PageTest(TestCase):
         self.assertIn("(status: In Fabrication)", html)
         # #82: the per-signee comment box is a fresh textarea, not prefilled
         self.assertIn("<textarea", html)
+        # standalone posting (Hajime 2026-07-30) — the form is offered to
+        # role-holding users even outside a signing turn
+        self.assertIn('name="comment_text"', html)
+
+    def test_reset_marker_renders_as_a_divider(self):
+        api = _api(es=[], log=[
+            {"name": "Chao Zhang", "timestamp": "2026-07-30 09:00",
+             "status": "", "text": "", "event": "reset"}])
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("signatures have been reset", html)
+        self.assertIn("es-log-reset", html)
+
+    def test_empty_log_still_offers_the_comment_form(self):
+        api = _api(es=[])
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("No comments yet.", html)
+        self.assertIn('name="comment_text"', html)
 
     def test_subtree_section_lazy_loads_in_both_modes(self):
-        # The recursive tree is slow (2 calls/node) — the page ships a
+        # The child records are fetched one by one — the page ships a
         # placeholder that htmx fills after load, in DETAIL and DEFAULT mode.
         # The sub-ES card (#83) reads the box's own manifest inline (one
-        # shallow call), but children are never walked on the page GET.
+        # shallow call), but children are never fetched on the page GET.
         for api in (_api(), _api(cfg=None)):
             m1, m2 = _mocked(api)
             with m1, m2:
@@ -763,9 +794,10 @@ class SignTest(TestCase):
         payload = api.post_test.call_args.args[1]
         self.assertEqual(payload["test_data"]["sub_es"], ["D05700300001-00012"])
 
-    def test_reset_clears_log_but_keeps_sub_es(self):
-        # #82/#83: RESET clears signatures AND the comments log (a new
-        # signing round starts clean); the sub-ES selection is kept.
+    def test_reset_keeps_the_log_and_appends_a_marker(self):
+        # Hajime 2026-07-30: the log is append-only — RESET clears the
+        # signatures but keeps every entry, recording the reset in place.
+        # The sub-ES selection is kept too.
         old = [{"name": "A", "timestamp": "t0", "status": "Unknown", "text": "x"}]
         api = _api(es=[_entry("Chao Zhang", 2), _entry("Hajime Muramatsu", 1)],
                    log=old, sub_es=["D05700300001-00012"])
@@ -774,8 +806,60 @@ class SignTest(TestCase):
             self.client.post(PAGE, {"action": "reset"})
         payload = api.post_test.call_args.args[1]
         self.assertEqual(payload["test_data"]["ES"], [])
-        self.assertNotIn("comments_log", payload["test_data"])
+        log = payload["test_data"]["comments_log"]
+        self.assertEqual(log[0], old[0])
+        self.assertEqual(log[1]["event"], "reset")
+        self.assertEqual(log[1]["name"], "Chao Zhang")
         self.assertEqual(payload["test_data"]["sub_es"], ["D05700300001-00012"])
+
+    def test_standalone_comment_appends_without_touching_signatures(self):
+        # Hajime 2026-07-30: comments post at any time, independent of
+        # signing — only the log grows; ES list, todos, sub-ES selection and
+        # the item's flags stay as saved.
+        old = [{"name": "A", "timestamp": "t0", "status": "Unknown", "text": "x"}]
+        es = [_entry("Hajime Muramatsu", 1)]
+        todos = {"title": "QC Checks", "check_list": ["a"], "checked": [0]}
+        api = _api(es=es, todos=todos, log=old, sub_es=["D05700300001-00012"])
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.post(PAGE, {"action": "comment",
+                                           "comment_text": "mid-flow note"},
+                                    follow=True)
+        payload = api.post_test.call_args.args[1]
+        self.assertEqual(payload["test_data"]["ES"], es)
+        self.assertEqual(payload["test_data"]["todos"], todos)
+        self.assertEqual(payload["test_data"]["sub_es"], ["D05700300001-00012"])
+        log = payload["test_data"]["comments_log"]
+        self.assertEqual(log[0], old[0])
+        self.assertEqual(log[1]["name"], "Chao Zhang")
+        self.assertEqual(log[1]["text"], "mid-flow note")
+        self.assertEqual(log[1]["status"], "QA/QC Tests - Passed All")
+        api.patch_component.assert_not_called()
+        self.assertIn("Comment posted", resp.content.decode())
+
+    def test_blank_standalone_comment_is_refused(self):
+        api = _api(es=[])
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.post(PAGE, {"action": "comment",
+                                           "comment_text": "   "}, follow=True)
+        api.post_test.assert_not_called()
+        self.assertIn("Type a comment first", resp.content.decode())
+
+    def test_comment_needs_a_signee_role(self):
+        # "user with the correct permissions" (Hajime 2026-07-30): posting
+        # requires one of the roles the config's signees use.
+        roled = {**CFG, "signees": [
+            {"name": "Chao Zhang", "rank": 2, "roles": [41]},
+            {"name": "Hajime Muramatsu", "rank": 1, "roles": [41]}]}
+        api = _api(cfg=roled, es=[], roles=(7,))
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.post(PAGE, {"action": "comment",
+                                           "comment_text": "hi"}, follow=True)
+        api.post_test.assert_not_called()
+        self.assertIn("needs one of the configured signee roles",
+                      resp.content.decode())
 
     def test_existing_es_test_type_is_not_recreated(self):
         api = _api(es=[])   # fixture: the type already lists "ES"

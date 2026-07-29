@@ -1,6 +1,7 @@
-"""Tests for the executive summary's recursive sub-component tree (Hajime's
-ES review, 2026-07-17): the ``subtree_rows`` walk (full depth, cycle-guarded,
-node-capped) and the htmx-loaded partial that shows it on the ES page.
+"""Tests for the executive summary's sub-component list: ``subtree_rows``
+(direct children only since Hajime's 2026-07-30 call — the recursive walk ran
+deep and slow on CRUs; node-capped, cable-end aware) and the htmx-loaded
+partial that shows it on the ES page.
 
     python manage.py test explore
 """
@@ -36,32 +37,35 @@ def _walk_api(tree, components=None):
 
 
 class SubtreeWalkTest(TestCase):
-    def test_three_levels_preorder_with_depth_and_statuses(self):
+    def test_direct_children_only_with_statuses(self):
+        # Hajime 2026-07-30: one level only — nested sub-components are
+        # neither listed nor fetched.
         api = _walk_api(
             {BOX: [_row("A"), _row("B")], "A": [_row("A1")], "A1": [_row("A1a")]},
-            components={"A1": {"status": {"name": "In Repair"},
-                               "qaqc_uploaded": False, "certified_qaqc": True}})
+            components={"B": {"status": {"name": "In Repair"},
+                              "qaqc_uploaded": False, "certified_qaqc": True}})
         rows, truncated = subtree_rows(api, BOX)
         self.assertFalse(truncated)
         self.assertEqual([(r["part_id"], r["depth"]) for r in rows],
-                         [("A", 0), ("A1", 1), ("A1a", 2), ("B", 0)])
-        a1 = rows[1]
-        self.assertEqual(a1["status"], "In Repair")
-        self.assertFalse(a1["uploaded"])
-        self.assertTrue(a1["certified"])
+                         [("A", 0), ("B", 0)])
+        b = rows[1]
+        self.assertEqual(b["status"], "In Repair")
+        self.assertFalse(b["uploaded"])
+        self.assertTrue(b["certified"])
         self.assertEqual(rows[0]["status"], "Passed")
+        # only the root's manifest is read — children are never walked
+        api.get_subcomponents.assert_called_once_with(BOX)
 
     def test_unmounted_children_are_excluded(self):
         api = _walk_api({BOX: [_row("A"), _row("GONE", op="unmount")]})
         rows, _ = subtree_rows(api, BOX)
         self.assertEqual([r["part_id"] for r in rows], ["A"])
 
-    def test_cycles_and_double_mounts_terminate(self):
-        api = _walk_api({BOX: [_row("A")], "A": [_row("B")],
-                         "B": [_row("A"), _row(BOX)]})
+    def test_self_refs_and_double_mounts_are_listed_once(self):
+        api = _walk_api({BOX: [_row("A"), _row("A", pos="P2"), _row(BOX)]})
         rows, truncated = subtree_rows(api, BOX)
         self.assertFalse(truncated)
-        self.assertEqual([r["part_id"] for r in rows], ["A", "B"])
+        self.assertEqual([r["part_id"] for r in rows], ["A"])
 
     def test_node_cap_truncates_with_a_warning(self):
         api = _walk_api({BOX: [_row("A"), _row("B"), _row("C")]})
@@ -118,6 +122,8 @@ class SubtreeCableTest(TestCase):
         self.assertEqual(rows[0]["status"], "Passed")  # fetched with the base PID
 
     def test_peer_backrefs_do_not_become_contents(self):
+        # The cable's own manifest (its peers) is never fetched now — only
+        # the root's rows are listed, so connectivity can't leak in.
         rows, _ = subtree_rows(self._cable_api(), self.FLANGE)
         listed = {r["part_id"] for r in rows}
         self.assertNotIn(self.BOARD, listed)
@@ -142,7 +148,7 @@ class SubtreePartialViewTest(TestCase):
         return (mock.patch("explore.views.mint_for", return_value="bearer"),
                 mock.patch("explore.views.FnalDbApiClient", return_value=api))
 
-    def test_partial_renders_indented_rows_with_flags(self):
+    def test_partial_renders_direct_children_with_flags(self):
         api = _walk_api({BOX: [_row("D05700300001-00012", "FEB", "FEB1")],
                          "D05700300001-00012": [_row("Z00100300001-07630", "LArASIC", "U1")]})
         m1, m2 = self._mocked(api)
@@ -151,11 +157,11 @@ class SubtreePartialViewTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
         self.assertIn("D05700300001-00012", html)
-        self.assertIn('href="/hw/dev/part/Z00100300001-07630/"', html)
-        self.assertIn("--depth: 1;", html)                     # nested node indented
+        # one level only (Hajime 2026-07-30): the FEB's own contents stay out
+        self.assertNotIn("Z00100300001-07630", html)
         self.assertIn('<span class="es-yes">Yes</span>', html)  # uploaded
         self.assertIn('<span class="es-no">No</span>', html)    # certified
-        self.assertIn("2 sub-components", html)
+        self.assertIn("1 direct sub-component", html)
         # the template's own commentary must not leak into the page ({# #}
         # is single-line only — a multi-line one renders literally)
         self.assertNotIn("swapped in by htmx", html)

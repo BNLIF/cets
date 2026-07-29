@@ -1,6 +1,7 @@
-{% comment %}The ES page's recursive sub-component list — swapped in by htmx
-after page load (the walk is slow: ~2 HWDB calls per node). Errors render at
-200 as in-place hints; htmx 1.x doesn't swap non-2xx responses.{% endcomment %}
+{% comment %}The ES page's direct sub-component list (one level only — Hajime
+2026-07-30) — swapped in by htmx after page load (one HWDB call per child).
+Errors render at 200 as in-place hints; htmx 1.x doesn't swap non-2xx
+responses.{% endcomment %}
 {% if error == "link" %}
 <p class="es-hint">FNAL session expired —
   <a href="{% url 'hwdb:link' %}?next={{ request.path|urlencode }}">re-link</a>
@@ -28,9 +29,9 @@ after page load (the walk is slow: ~2 HWDB calls per node). Errors render at
   {% endfor %}
   </tbody>
 </table>
-<p class="es-hint">{{ rows|length }} sub-component{{ rows|length|pluralize }} down to the leaves,
+<p class="es-hint">{{ rows|length }} direct sub-component{{ rows|length|pluralize }},
   statuses live from HWDB; included in the generated summary PDF.
   {% if show_es %}Ticked ES boxes list that item’s executive summary (with link) on its own page of
   the generated PDF; the selection is saved with each signature.{% endif %}
-  {% if truncated %}<span class="es-no">&#9888; Tree truncated — too many sub-components to list them all.</span>{% endif %}</p>
+  {% if truncated %}<span class="es-no">&#9888; List truncated — too many sub-components to list them all.</span>{% endif %}</p>
 {% endif %}
