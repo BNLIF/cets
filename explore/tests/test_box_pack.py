@@ -158,11 +158,18 @@ class PackPageTest(TestCase):
         self.assertNotIn(f'value="{IN_BOX}"', html)       # already in the box
         self.assertIn("pk-qc-ok", html)                   # QC marks rendered
         self.assertIn("pk-qc-bad", html)
+        # The two QC flags shown as separate columns (Hajime 2026-07-28).
+        self.assertIn("<th>Uploaded</th>", html)
+        self.assertIn("<th>Certified</th>", html)
         self.assertIn(DOC_TYPE, html)                     # second type group
         self.assertIn('name="manual"', html)              # add-by-PID box
         # per-type sync button targets that type's node sync endpoint
         self.assertIn(f'data-sync-url="/hw/dev/sync-tests/{CHILD_TYPE}/"', html)
         self.assertIn(f'data-sync-url="/hw/dev/sync-tests/{DOC_TYPE}/"', html)
+        # both sync tiers offered: new-items only, and the full re-sync that
+        # refreshes QC flags/status of already-mirrored items
+        self.assertIn('data-mode="incremental"', html)
+        self.assertIn('data-mode="components"', html)
         # each candidate links to its part page (new tab, next to the label)
         self.assertIn(f'class="pk-open" href="/hw/dev/part/{GOOD}/"', html)
         # uncurated type → header falls back to plain text, no dead link

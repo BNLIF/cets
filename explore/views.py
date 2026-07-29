@@ -1029,9 +1029,12 @@ def _pack_groups(instance, connectors, manifest, show_unknown=False) -> list[dic
             # (#74) — show the free ones this group's picks will land in.
             "positions": sorted(free_pos, key=str),
             "n_free": len(free_pos), "total": rows.count(),
+            # The two QC flags shown separately (Hajime 2026-07-28) — a
+            # combined mark hid which one was missing.
             "candidates": [
                 {"part_id": r.part_id, "status": r.status or "—",
-                 "qc_ok": bool(r.qaqc_uploaded and r.certified_qaqc)}
+                 "qc_up": bool(r.qaqc_uploaded),
+                 "qc_cert": bool(r.certified_qaqc)}
                 for r in rows[:_PACK_CANDIDATE_CAP]],
         })
     return groups

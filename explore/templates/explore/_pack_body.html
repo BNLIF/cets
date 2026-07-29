@@ -28,8 +28,15 @@ without a page reload. {% endcomment %}
         <div class="pk-group">
           <div class="pk-group-head">
             <h2>{{ g.name }} {% if g.type_url %}<a class="mono" href="{{ g.type_url }}" title="Open the {{ g.name }} type page">{{ g.type_id }}</a>{% else %}<span class="mono">{{ g.type_id }}</span>{% endif %}</h2>
-            <button type="button" class="pk-sync" data-sync-url="{% url 'explore:node_sync' part_type_id=g.type_id %}"
-                    title="Fetch this type’s new items from HWDB into the mirror, then reload">Sync new items</button>
+            <span class="pk-sync-btns">
+              <button type="button" class="pk-sync" data-mode="incremental"
+                      data-sync-url="{% url 'explore:node_sync' part_type_id=g.type_id %}"
+                      title="Fetch this type’s new items from HWDB into the mirror, then reload — does not refresh items already listed">Sync new items</button>
+              {# QC flags/status of already-mirrored items only refresh on a re-sync (Hajime 2026-07-28). #}
+              <button type="button" class="pk-sync" data-mode="components"
+                      data-sync-url="{% url 'explore:node_sync' part_type_id=g.type_id %}"
+                      title="Re-fetch every item of this type from HWDB — refreshes status and QC flags of items already listed, then reload">Re-sync</button>
+            </span>
           </div>
           {% comment %}Shippers reference sub-components by Functional
           Position name (#74) — the free positions picks will land in.{% endcomment %}
@@ -41,7 +48,7 @@ without a page reload. {% endcomment %}
           {% if g.candidates %}
           <div class="pk-scroll">
             <table class="pk-table">
-              <thead><tr><th></th><th>Item</th><th>Status</th><th>QC</th></tr></thead>
+              <thead><tr><th></th><th>Item</th><th>Status</th><th>Uploaded</th><th>Certified</th></tr></thead>
               <tbody>
               {% for c in g.candidates %}
                 <tr>
@@ -49,7 +56,8 @@ without a page reload. {% endcomment %}
                   <td class="mono"><label for="c-{{ c.part_id }}">{{ c.part_id }}</label>
                     <a class="pk-open" href="{% url 'explore:part' part_id=c.part_id %}" target="_blank" rel="noopener" title="Open {{ c.part_id }} (new tab)">&#x2197;</a></td>
                   <td>{{ c.status }}</td>
-                  <td>{% if c.qc_ok %}<span class="pk-qc-ok" title="QA/QC uploaded and certified">✓</span>{% else %}<span class="pk-qc-bad" title="QA/QC not uploaded/certified yet">✗</span>{% endif %}</td>
+                  <td>{% if c.qc_up %}<span class="pk-qc-ok" title="QA/QC uploaded">✓</span>{% else %}<span class="pk-qc-bad" title="QA/QC not uploaded">✗</span>{% endif %}</td>
+                  <td>{% if c.qc_cert %}<span class="pk-qc-ok" title="Certified QA/QC">✓</span>{% else %}<span class="pk-qc-bad" title="Not certified">✗</span>{% endif %}</td>
                 </tr>
               {% endfor %}
               </tbody>

@@ -64,6 +64,7 @@
   .pk-submit:hover { border-color: var(--accent); }
   .pk-hint { font-size: 11.5px; color: var(--faint); }
   .pk-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .pk-sync-btns { display: flex; gap: 6px; flex-shrink: 0; }
   .pk-sync { font: inherit; font-size: 12px; font-weight: 600; color: var(--dim);
     background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm);
     padding: 4px 12px; cursor: pointer; white-space: nowrap; }
@@ -111,9 +112,11 @@
 </div>
 
 <script>
-// Per-type "Sync new items" (same streaming pattern as the leaf page): pulls
-// the type's new items into the mirror, then reloads so the picker refreshes.
-// Delegated because htmx swaps #pk-body (and the buttons in it) on each add.
+// Per-type sync buttons (same streaming pattern as the leaf page): "Sync new
+// items" (incremental) pulls new items only; "Re-sync" (components mode)
+// re-fetches every item's detail so status/QC flags of already-mirrored items
+// refresh too. Then reloads so the picker refreshes. Delegated because htmx
+// swaps #pk-body (and the buttons in it) on each add.
 document.addEventListener("click", function (e) {
   var btn = e.target.closest(".pk-sync");
   if (!btn || btn.disabled) return;
@@ -122,11 +125,14 @@ document.addEventListener("click", function (e) {
   var btns = document.querySelectorAll(".pk-sync");
   (async function () {
     btns.forEach(function (b) { b.disabled = true; });
+    var mode = btn.dataset.mode || "incremental";
     var log = btn.closest(".pk-group").querySelector(".pk-sync-log");
-    log.style.display = "block"; log.textContent = "Syncing new items from HWDB…\n";
+    log.style.display = "block";
+    log.textContent = (mode === "incremental" ? "Syncing new items from HWDB…\n"
+                                              : "Re-syncing all items from HWDB…\n");
     var fd = new FormData();
     fd.append("csrfmiddlewaretoken", csrfEl.value);
-    fd.append("mode", "incremental");
+    fd.append("mode", mode);
     var resp;
     try { resp = await fetch(btn.dataset.syncUrl, { method: "POST", body: fd }); }
     catch (e) {
