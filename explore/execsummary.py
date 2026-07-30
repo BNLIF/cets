@@ -777,23 +777,6 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
                                            styles["Normal"]))
             elif pb.get("error"):
                 story.append(Paragraph(f"⚠ {pb['error']}", styles["Normal"]))
-    # Sub-component ESes on their own page, like the sub-components list
-    # (#83, Hajime's ES-structure request).
-    sub_es = form.get("sub_es") or []
-    if sub_es:
-        story.append(PageBreak())
-        story.append(Paragraph("Executive Summaries of Sub-components", styles["Heading2"]))
-        for e in sub_es:
-            title = escape(e.get("title") or e.get("pid") or "")
-            story.append(Paragraph(
-                f'• <link href="{e.get("url") or ""}" color="blue">{title}</link>'
-                f' — <font face="Courier">{escape(e.get("pid") or "")}</font>',
-                styles["Normal"]))
-            if e.get("url"):
-                story.append(Paragraph(
-                    f'<font color="#777777" size="8">{escape(e["url"])}</font>',
-                    styles["Normal"]))
-            story.append(Spacer(1, 4))
     story.append(PageBreak())
     story.append(Paragraph("Sub-components", styles["Heading2"]))
     story += subtree_flowables(*(form.get("subtree") or ([], False)))
@@ -839,7 +822,9 @@ def build_default_pdf(part_id: str, signinfo: dict,
 
 def subtree_flowables(rows: list[dict], truncated: bool) -> list:
     """The Sub-components page: the direct sub-components (one level only —
-    Hajime 2026-07-30), one row each with the three QC statuses.
+    Hajime 2026-07-30), one row each with the three QC statuses and, for
+    children that already have an executive summary, a link to its ES page
+    (``es_url``, added by the view; the column stays empty otherwise).
     ``rows`` come from ``parts.subtree_rows``."""
     styles = getSampleStyleSheet()
     if not rows:
@@ -853,7 +838,7 @@ def subtree_flowables(rows: list[dict], truncated: bool) -> list:
         color, text = ("#19b478", "Yes") if flag else ("#dc3c3c", "No")
         return Paragraph(f'<font color="{color}"><b>{text}</b></font>', cell)
 
-    body = [["Part", "Status", "Uploaded", "Certified"]]
+    body = [["Part", "Status", "Uploaded", "Certified", "Exec summary"]]
     for r in rows:
         conn = f".{r['connection']}" if r.get("connection") else ""  # cable end (#72)
         label = (f"{r['part_id']}{conn} ({r.get('type_name') or '?'}) "
@@ -862,8 +847,10 @@ def subtree_flowables(rows: list[dict], truncated: bool) -> list:
             Paragraph("&nbsp;" * 4 * r["depth"] + escape(label), cell),
             Paragraph(escape(r.get("status") or "—"), cell),
             _yn(r.get("uploaded")), _yn(r.get("certified")),
+            (Paragraph(f'<link href="{r["es_url"]}" color="blue">open</link>', cell)
+             if r.get("es_url") else ""),
         ])
-    table = Table(body, colWidths=[248, 110, 55, 55], repeatRows=1)
+    table = Table(body, colWidths=[218, 95, 50, 50, 55], repeatRows=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8e8e8")),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),

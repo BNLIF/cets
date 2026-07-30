@@ -651,13 +651,18 @@ class PartViewTest(TestCase):
         self.assertIn("ES_D05700200099_test_v8.json", html)   # config named
         self.assertIn("/hw/dev/part/D05700200099-00007/exec-summary/", html)
 
-    def test_no_es_card_when_type_has_no_config(self):
+    def test_es_card_shows_without_a_config_too(self):
+        # Every item can carry an ES (2026-07-30) — a configless type still
+        # gets the card (the ES page runs DEFAULT mode), just without the
+        # config-driven header lines.
         api = self._api()
         api.get_component_type_images.return_value = {"data": []}
         with mock.patch("explore.views.mint_for", return_value="bearer"), \
              mock.patch("explore.views.FnalDbApiClient", return_value=api):
             html = self.client.get("/hw/dev/part/D05700200099-00007/").content.decode()
-        self.assertNotIn("Executive summary", html)
+        self.assertIn("Executive summary", html)
+        self.assertIn("/hw/dev/part/D05700200099-00007/exec-summary/", html)
+        self.assertNotIn("Consortium:", html)
 
 
 class TestDataDownloadTest(TestCase):

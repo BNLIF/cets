@@ -1,6 +1,6 @@
-"""Tests for extending a box type's connector positions (issue #69): the
-complete-envelope PATCH, continuation naming, validation, and the write
-gate. HWDB is mocked.
+"""Tests for editing a box type's connector positions (issue #69): the
+complete-envelope PATCH, continuation naming, rename/retarget/delete,
+validation, and the write + architect gates. HWDB is mocked.
 
     python manage.py test explore
 """
@@ -10,9 +10,10 @@ from __future__ import annotations
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
+from explore import navigation
 from explore.models import HierarchyNode as H
 from explore.views import _next_position_names, _type_patch_envelope
 
@@ -44,6 +45,7 @@ def _api():
     api = mock.MagicMock()
     api.get_component_type.return_value = {"data": TYPE_RECORD}
     api.patch_component_type.return_value = {"status": "OK", "data": "Updated"}
+    api.whoami.return_value = {"data": {"architect": True}}
     return api
 
 
@@ -81,14 +83,55 @@ class BoxTypeViewTest(TestCase):
         self.client.force_login(self.user)
         _leaf()
 
-    def test_page_lists_positions_read_only(self):
+    def test_page_lists_positions_with_edit_controls(self):
         api = _api()
         m1, m2 = _mocked(api)
         with m1, m2:
             resp = self.client.get(PAGE)
         html = resp.content.decode()
-        self.assertIn("FEB1", html)
-        self.assertIn("deleting or renaming", html)  # the add-only guardrail note
+        self.assertIn('value="FEB1"', html)          # editable name field
+        self.assertIn("deleting or renaming", html)  # the occupied-position guardrail note
+
+    def test_edit_renames_and_retargets_a_position(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"action": "edit", "op": "save", "position": "FEB1",
+                                    "new_name": "FEMB1", "child_type": "d05700300002"})
+        payload = api.patch_component_type.call_args.args[1]
+        self.assertEqual(payload["connectors"],
+                         {"FEMB1": "D05700300002", "FEB2": "D05700300001"})
+        self.assertEqual(payload["name"], TYPE_RECORD["full_name"])
+
+    def test_delete_removes_a_position(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"action": "edit", "op": "delete", "position": "FEB2"})
+        payload = api.patch_component_type.call_args.args[1]
+        self.assertEqual(payload["connectors"], {"FEB1": "D05700300001"})
+
+    def test_edit_validation_blocks_bad_input(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"action": "edit", "op": "save", "position": "FEB1",
+                                    "new_name": "FEB2", "child_type": "D05700300001"})  # name collision
+            self.client.post(PAGE, {"action": "edit", "op": "save", "position": "GONE",
+                                    "new_name": "X1", "child_type": "D05700300001"})    # unknown position
+            self.client.post(PAGE, {"action": "edit", "op": "save", "position": "FEB1",
+                                    "new_name": "FEB1", "child_type": "not-a-type"})    # bad type id
+            self.client.post(PAGE, {"action": "edit", "op": "save", "position": "FEB1",
+                                    "new_name": "FEB1", "child_type": "D05700300001"})  # no-op
+        api.patch_component_type.assert_not_called()
+
+    def test_non_architect_is_forbidden(self):
+        api = _api()
+        api.whoami.return_value = {"data": {"architect": False}}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.get(PAGE)
+        self.assertEqual(resp.status_code, 403)
 
     def test_add_positions_patches_complete_envelope(self):
         api = _api()
@@ -126,6 +169,7 @@ class BoxTypeViewTest(TestCase):
                                     follow=True)
         self.assertIn("no permission", resp.content.decode())
 
+    @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_prod_is_forbidden(self):
         api = _api()
         m1, m2 = _mocked(api)
@@ -222,3 +266,39 @@ class CloneTypeTest(TestCase):
             resp = self._clone()
         api.patch_component_type.assert_not_called()
         self.assertIn("didn’t return its id", resp.content.decode())
+
+
+class LeafLinkTest(TestCase):
+    """The component-type page offers the positions editor to architects only
+    (session-cached whoami)."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("w", "w@w.io", "pw")
+        self.client.force_login(self.user)
+        sys = H.objects.create(
+            instance="dev", level=H.LEVEL_SYSTEM, system_id=5, part_type_id="",
+            system_name="Z.Sandbox", name="Z.Sandbox")
+        sub = H.objects.create(
+            instance="dev", level=H.LEVEL_SUBSYSTEM, parent=sys, system_id=5,
+            subsystem_id=998, part_type_id="", system_name="Z.Sandbox",
+            subsystem_name="HWDBUnitTest", name="HWDBUnitTest")
+        H.objects.create(
+            instance="dev", level=H.LEVEL_TYPE, parent=sub, system_id=5,
+            system_name="Z.Sandbox", subsystem_id=998, subsystem_name="HWDBUnitTest",
+            name="Test Type 007", part_type_id=PTID, full_name="x",
+            tests_synced_at=timezone.now(), shipments_synced_at=timezone.now())
+
+    def test_architect_sees_the_positions_link(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(navigation.leaf_path_for("dev", PTID)).content.decode()
+        self.assertIn(f"/hw/dev/box-type/{PTID}/", html)
+
+    def test_non_architect_does_not_see_the_link(self):
+        api = _api()
+        api.whoami.return_value = {"data": {"architect": False}}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(navigation.leaf_path_for("dev", PTID)).content.decode()
+        self.assertNotIn(f"/hw/dev/box-type/{PTID}/", html)

@@ -190,6 +190,10 @@ def explore_view(request, trail=None):
     # ES config editor link (any leaf type, even ones without a config yet —
     # saving a config there is what marks a type as requiring an exec summary).
     can_edit_es = bool(leaf) and inst in settings.HWDB_WRITE_INSTANCES
+    # Type-positions editor link (#69 follow-up): architects only. The flag
+    # comes from a session-cached whoami, so the mirror-only render costs at
+    # most one live call per session.
+    can_edit_type = can_edit_es and _is_architect(request, inst)
     empty_pids = []
     if is_shipping:
         # Shipping extras — boxes are regular components too (charts/breakdown
@@ -288,6 +292,7 @@ def explore_view(request, trail=None):
             "empty_boxes_page": empty_boxes_page,
             "can_create_box": can_create_box,
             "can_edit_es": can_edit_es,
+            "can_edit_type": can_edit_type,
             "empty_pids": empty_pids,
             # Deep-link the part type to this instance's FNAL web UI.
             "hwdb_ui_base": settings.HWDB_PROFILES[inst]["ui"],
@@ -683,6 +688,10 @@ def explore_part_view(request, part_id):
     # until the hierarchy-chart one exists.
     es_cfg, es_cfg_msg = (execsummary.load_config(api, ptid)
                           if inst in settings.HWDB_WRITE_INSTANCES else (None, ""))
+    # The ES card shows for EVERY item on a write instance (2026-07-30):
+    # configless types run the ES page in DEFAULT mode, so any item can
+    # carry a summary.
+    can_es = inst in settings.HWDB_WRITE_INSTANCES
     exec_summaries = sorted(
         (a for a in detail["attachments"]
          if (a["image_name"] or "").lower().startswith(
@@ -720,7 +729,7 @@ def explore_part_view(request, part_id):
     # (only when that card actually renders — same condition as the template).
     shown = {a["image_id"] for sec in detail["sections"] for a in sec["attachments"]}
     shown |= sheet_ids
-    if packing or es_cfg:
+    if can_es:
         shown |= {a["image_id"] for a in exec_summaries}
     other_attachments = [a for a in detail["attachments"] if a["image_id"] not in shown]
 
@@ -752,6 +761,7 @@ def explore_part_view(request, part_id):
         "exec_summaries": exec_summaries,
         "es_cfg": es_cfg,
         "es_cfg_msg": es_cfg_msg,
+        "can_es": can_es,
         # Ship/receive checklist runs on this box (issue #65), by workflow.
         "checklists": ({c.workflow: c for c in
                         BoxChecklist.for_instance(inst).filter(part_id=part_id)}
@@ -1458,6 +1468,43 @@ def _type_patch_envelope(type_record: dict, connectors: dict) -> dict:
     }
 
 
+def _is_architect(request, inst, api=None) -> bool:
+    """Whether the signed-in user's HWDB account holds the architect flag on
+    this instance (``users/whoami``), session-cached so pages can gate links
+    without a live call on every render. Failures read as False and are NOT
+    cached, so a transient outage doesn't lock the session out."""
+    key = f"hwdb_architect_{inst}"
+    cached = request.session.get(key)
+    if isinstance(cached, bool):
+        return cached
+    try:
+        if api is None:
+            api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"],
+                                  mint_for(request))
+        flag = bool((api.whoami().get("data") or {}).get("architect"))
+    except Exception as e:
+        logger.warning("architect check on %s failed: %s", inst, e)
+        return False
+    request.session[key] = flag
+    return flag
+
+
+def _patch_type_positions(request, api, part_type_id, record, connectors, ok_msg):
+    """PATCH the type's complete envelope with ``connectors`` swapped in and
+    flash the outcome — HWDB refusals (e.g. touching a position a linked item
+    occupies) surface verbatim."""
+    payload = _type_patch_envelope(record, connectors)
+    try:
+        body = api.patch_component_type(part_type_id, payload)
+        ok, detail = body.get("status") == "OK", body.get("data")
+    except requests.RequestException as e:
+        ok, detail = False, _hwdb_error_detail(e)
+    if ok:
+        messages.success(request, ok_msg)
+    else:
+        messages.error(request, f"HWDB rejected the type update — {detail}")
+
+
 def _find_part_type_id(body, exclude: str):
     """Dig the new type's part_type_id out of the create response — the
     OpenAPI spec leaves the response shape undocumented, so search any
@@ -1561,15 +1608,17 @@ def _clone_box_type(request, api, inst, part_type_id, record, connectors, page_u
 @login_not_required
 @fnal_login_required
 def explore_box_type_view(request, part_type_id):
-    """Extend a shipping-box type's positions (issue #69): bulk-add connector
-    slots ("N positions named PREFIX# accepting type X") via a complete-
-    envelope ``PATCH component-types/{id}``. Add-only by design — HWDB
-    forbids deleting or renaming positions that linked items use, so
-    existing positions render read-only and are echoed untouched. The
+    """Edit a box type's positions (issue #69): bulk-add connector slots
+    ("N positions named PREFIX# accepting type X"), rename / retarget /
+    delete an existing one, or clone the type — all via a complete-envelope
+    ``PATCH component-types/{id}``. HWDB forbids deleting or renaming a
+    position that a linked item occupies; those refusals surface verbatim.
+    Architects only (the FNAL UI remains the sanctioned authoring route;
+    this page covers touch-ups like fixing a freshly cloned type). The
     packing pages read connectors live, so changes show up immediately.
     """
     inst = instance_of(request)
-    if inst not in settings.HWDB_WRITE_INSTANCES or not curation.is_shipping_type(inst, part_type_id):
+    if inst not in settings.HWDB_WRITE_INSTANCES:
         return HttpResponseForbidden("Box-type editing is not enabled here.")
     page_url = _rev(request, "explore:box_type", args=[part_type_id])
     try:
@@ -1581,6 +1630,9 @@ def explore_box_type_view(request, part_type_id):
         messages.error(request, FNAL_UNAVAILABLE)
         return redirect(_rev(request, "explore:home"))
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    if not _is_architect(request, inst, api):
+        return HttpResponseForbidden(
+            "Editing component types needs the HWDB architect role.")
 
     try:
         record = api.get_component_type(part_type_id).get("data") or {}
@@ -1592,6 +1644,31 @@ def explore_box_type_view(request, part_type_id):
     if request.method == "POST" and (request.POST.get("action") or "extend") == "clone":
         return _clone_box_type(request, api, inst, part_type_id, record,
                                connectors, page_url)
+
+    if request.method == "POST" and request.POST.get("action") == "edit":
+        pos = request.POST.get("position") or ""
+        new_name = (request.POST.get("new_name") or "").strip()
+        child = (request.POST.get("child_type") or "").strip().upper()
+        if pos not in connectors:
+            messages.error(request, f"Position “{pos}” isn’t on the type — reload the page.")
+        elif request.POST.get("op") == "delete":
+            rest = {k: v for k, v in connectors.items() if k != pos}
+            _patch_type_positions(request, api, part_type_id, record, rest,
+                                  f"Deleted position {pos}.")
+        elif not re.fullmatch(r"[A-Za-z0-9 _.-]{1,40}", new_name):
+            messages.error(request, "Position name must be 1–40 plain characters.")
+        elif not re.fullmatch(r"[A-Z]\d{11}", child):
+            messages.error(request, f"“{child}” doesn’t look like a component-type id.")
+        elif new_name != pos and new_name in connectors:
+            messages.error(request, f"The type already has a position named “{new_name}”.")
+        elif new_name == pos and child == connectors[pos]:
+            messages.success(request, "Nothing to change.")
+        else:
+            updated = {(new_name if k == pos else k): (child if k == pos else v)
+                       for k, v in connectors.items()}
+            _patch_type_positions(request, api, part_type_id, record, updated,
+                                  f"Position {pos} is now {new_name}, accepting {child}.")
+        return redirect(page_url)
 
     if request.method == "POST":
         prefix = (request.POST.get("prefix") or "").strip()
@@ -1608,19 +1685,11 @@ def explore_box_type_view(request, part_type_id):
             messages.error(request, f"“{child}” doesn’t look like a component-type id.")
         else:
             new_names = _next_position_names(connectors, prefix, count)
-            payload = _type_patch_envelope(
-                record, {**connectors, **{n: child for n in new_names}})
-            try:
-                body = api.patch_component_type(part_type_id, payload)
-                ok, detail = body.get("status") == "OK", body.get("data")
-            except requests.RequestException as e:
-                ok, detail = False, _hwdb_error_detail(e)
-            if ok:
-                messages.success(
-                    request, f"Added {count} position(s) {new_names[0]}…{new_names[-1]} "
-                             f"accepting {child}.")
-            else:
-                messages.error(request, f"HWDB rejected the type update — {detail}")
+            _patch_type_positions(
+                request, api, part_type_id, record,
+                {**connectors, **{n: child for n in new_names}},
+                f"Added {count} position(s) {new_names[0]}…{new_names[-1]} "
+                f"accepting {child}.")
         return redirect(page_url)
 
     # Names for the accepted child types, from the mirror where known.
@@ -1750,12 +1819,9 @@ def explore_exec_summary_view(request, part_id):
 
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
     cfg, cfg_msg = execsummary.load_config(api, ptid)
-    # Any type can carry an executive summary, not just shipping boxes. Until
-    # the hierarchy-chart "requires ES" marking exists, the mark is the type's
-    # ES_{ptid}_*.json config in HWDB; shipping types additionally run
-    # configless (DEFAULT mode), as before.
-    if cfg is None and not curation.is_shipping_type(inst, ptid):
-        return HttpResponseForbidden("Executive summaries are not enabled for this type.")
+    # Every item can carry an executive summary (2026-07-30, to exercise the
+    # sub-component ES links): a type's ES_{ptid}_*.json config selects the
+    # full DETAIL flow; any type without one just runs DEFAULT mode.
 
     if request.method == "POST":
         return _exec_summary_action(request, api, part_id, ptid, cfg,
@@ -1766,13 +1832,7 @@ def explore_exec_summary_view(request, part_id):
     plot_blocks = (execsummary.resolve_plots(
         api, cfg, part_id, _children_of(api), images_rows)
         if cfg and cfg["plots"] else [])
-    es_list, saved_todos, comments_log, saved_sub_es = execsummary.fetch_es_state(api, part_id)
-    # The sub-ES list (#83): default selection is "every child that has an
-    # ES"; once a signature saved a choice, that choice wins.
-    sub_es_rows = _sub_es_rows(request, api, part_id) if cfg else []
-    for r in sub_es_rows:
-        r["checked"] = (r["pid"] in saved_sub_es if saved_sub_es is not None
-                        else r["has_es"])
+    es_list, saved_todos, comments_log, _saved_sub_es = execsummary.fetch_es_state(api, part_id)
     full_name, role_ids, role_names = _whoami_context(api)
     signing = (execsummary.compute_status(cfg, es_list, role_ids, role_names)
                if cfg else None)
@@ -1801,7 +1861,6 @@ def explore_exec_summary_view(request, part_id):
         "can_comment": bool(signing and any(r["role_ok"] for r in signing["rows"])),
         "todos_checked": (saved_todos or {}).get("checked") or [],
         "comments_log": comments_log,
-        "sub_es_rows": sub_es_rows,
         "full_name": full_name,
         "status_options": execsummary.STATUS_OPTIONS,
         "status_current_id": execsummary.STATUS_ID_BY_LABEL.get(status_name),
@@ -1816,6 +1875,27 @@ def explore_exec_summary_view(request, part_id):
 def _children_of(api):
     """Manifest-row lookup for ES plot sub_part_id addressing."""
     return lambda pid: current_manifest(_safe_get_data(api.get_subcomponents, pid))
+
+
+def _es_link_subtree(request, api, part_id) -> tuple[list[dict], bool]:
+    """The direct sub-components for the PDF's Sub-components table, each
+    child that already HAS a generated executive summary carrying an
+    absolute link to its ES page (not every item is required to have one —
+    the rest leave the column empty). PUBLIC_ORIGIN so the URLs survive
+    the www proxy, like the scan QR."""
+    rows, truncated = subtree_rows(api, part_id)
+    has = {}   # per pid — a cable lists both ends (#72), check it once
+    for r in rows:
+        pid = r["part_id"]
+        if pid not in has:
+            has[pid] = any((i.get("image_name") or "").lower().startswith(
+                               f"executivesummary_{pid.lower()}_")
+                           for i in _safe_get_data(api.get_images, pid))
+        if has[pid]:
+            path = _rev(request, "explore:exec_summary", args=[pid])
+            r["es_url"] = (settings.PUBLIC_ORIGIN + path if settings.PUBLIC_ORIGIN
+                           else request.build_absolute_uri(path))
+    return rows, truncated
 
 
 _SUB_ES_CHILD_CAP = 40
@@ -1942,7 +2022,7 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
                     "status_label": execsummary.STATUS_LABEL_BY_ID.get(sid, "Unknown"),
                     "certified_flag": certified, "uploaded_flag": uploaded}
         pdf_bytes = execsummary.build_default_pdf(
-            part_id, signinfo, subtree_rows(api, part_id))
+            part_id, signinfo, _es_link_subtree(request, api, part_id))
         name = f"ExecutiveSummary_{part_id}_{timezone.now():{execsummary.FILENAME_TS_FMT}}.pdf"
         err = _upload_summary_pdf(api, part_id, io.BytesIO(pdf_bytes), name)
         if err:
@@ -2035,13 +2115,11 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
         new_log = execsummary.append_comment_log(
             comments_log, name, execsummary.STATUS_LABEL_BY_ID.get(sid, "Unknown"),
             comment_text, ts, signature=signature)
-        # The sub-ES selection (#83) rides along like the todos; only the
-        # box's actual children count.
-        children = {m.get("part_id") for m in current_manifest(
-            _safe_get_data(api.get_subcomponents, part_id))}
-        sub_es = [p for p in request.POST.getlist("sub_es") if p in children]
+        # The sub-ES selection (#83) is gone — the PDF links every direct
+        # sub-component's ES page instead; any legacy saved selection just
+        # rides through untouched.
         err = _post_es(api, part_id, merged, todos, f"ES signature updated: {name}",
-                       comments_log=new_log, sub_es=sub_es)
+                       comments_log=new_log, sub_es=saved_sub_es)
         if err:
             messages.error(request, f"HWDB rejected the signature — {err}")
             return redirect(page_url)
@@ -2142,18 +2220,6 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
                     b.update(bytes=b["render_bytes"], uploaded=False,
                              upload_name=None, image_id=None)
             execsummary.download_plot_images(api, plot_blocks)
-        # The sub-ES page (#83) lists the saved selection (default: every
-        # child with an ES) with absolute links — PUBLIC_ORIGIN so the PDF's
-        # URLs survive the www proxy, like the scan QR.
-        sub_entries = []
-        for r in _sub_es_rows(request, api, part_id):
-            if (r["pid"] in saved_sub_es if saved_sub_es is not None
-                    else r["has_es"]):
-                sub_entries.append({
-                    "pid": r["pid"], "title": r["title"],
-                    "url": (settings.PUBLIC_ORIGIN + r["url"]
-                            if settings.PUBLIC_ORIGIN
-                            else request.build_absolute_uri(r["url"]))})
         pdf_bytes = execsummary.build_detail_pdf(part_id, {
             "type_name": leaf.name if leaf else "",
             "description": cfg["test_description"],
@@ -2166,9 +2232,8 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             # shows each signee's latest comment.
             "comments_log": comments_log,
             "references": cfg["references"],
-            "subtree": subtree_rows(api, part_id),
+            "subtree": _es_link_subtree(request, api, part_id),
             "plot_blocks": plot_blocks,
-            "sub_es": sub_entries,
         })
         if supp:
             try:
@@ -2852,18 +2917,14 @@ def explore_es_subtree_view(request, part_id):
             logger.exception("explore_es_subtree_view(%s) crashed", part_id)
             ctx["error"] = "fetch_failed"
     if ctx["error"] is None:
-        # The ES column (#83): on a config-carrying type, the children get
-        # their sub-ES checkbox/link merged into the rows. Best-effort —
-        # a failure just leaves the list without the column.
+        # The ES column (#83): on a config-carrying type, each child gets its
+        # ES-page link (and whether a summary exists yet) merged into the
+        # rows. Best-effort — a failure just leaves the list without the
+        # column.
         try:
             cfg, _msg = execsummary.load_config(api, part_id.rsplit("-", 1)[0])
             if cfg:
-                _es, _todos, _log, saved = execsummary.fetch_es_state(api, part_id)
-                info = {}
-                for r in _sub_es_rows(request, api, part_id):
-                    r["checked"] = (r["pid"] in saved if saved is not None
-                                    else r["has_es"])
-                    info[r["pid"]] = r
+                info = {r["pid"]: r for r in _sub_es_rows(request, api, part_id)}
                 for row in ctx["rows"]:
                     if row["part_id"] in info:
                         row["es"] = info[row["part_id"]]

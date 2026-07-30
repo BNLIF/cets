@@ -245,7 +245,7 @@
       </div>
       {% endif %}
 
-      {% if packing or es_cfg %}
+      {% if can_es %}
       <div class="sd-card">
         <h2>Executive summary</h2>
         {% if es_cfg.consortium_name %}<div style="font-size:13px; color:var(--ink); margin:3px 0;"><b>Consortium:</b> {{ es_cfg.consortium_name }}</div>{% endif %}

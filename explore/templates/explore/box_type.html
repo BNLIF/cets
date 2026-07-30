@@ -25,6 +25,15 @@
   .pk-table th { text-align: left; font-weight: 500; color: var(--faint); font-size: 11px; padding: 4px 8px; }
   .pk-table td { padding: 5px 8px; border-top: 1px solid var(--rule); }
   .pk-table .mono { font-family: var(--font-mono); font-size: 12.5px; }
+  .pk-table input { font: inherit; font-size: 12.5px; color: var(--ink); background: var(--surface);
+    border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 3px 6px; width: 100%; box-sizing: border-box; }
+  .bt-actions form { display: flex; gap: 6px; }
+  .bt-mini { font: inherit; font-size: 11.5px; color: var(--accent-ink); background: var(--accent-soft);
+    border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--rule)); border-radius: var(--r-sm);
+    padding: 3px 9px; cursor: pointer; }
+  .bt-mini:hover { border-color: var(--accent); }
+  .bt-mini.bt-danger { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
+    border-color: color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); }
   .pk-scroll { max-height: 340px; overflow-y: auto; border: 1px solid var(--rule); border-radius: var(--r-sm); }
   .pk-empty { color: var(--faint); font-size: 13px; padding: 6px 2px; }
   .pk-hint { font-size: 11.5px; color: var(--faint); }
@@ -57,17 +66,34 @@
     {% if positions %}
     <div class="pk-scroll">
       <table class="pk-table">
-        <thead><tr><th>Position</th><th>Accepts</th></tr></thead>
+        <thead><tr><th style="width:32%">Position</th><th>Accepts</th><th></th></tr></thead>
         <tbody>
         {% for p in positions %}
-          <tr><td class="mono">{{ p.name }}</td>
-              <td>{% if p.child_name %}{{ p.child_name }} {% endif %}<span class="mono">{{ p.child }}</span></td></tr>
+          <tr>
+            <td><input form="pos-f{{ forloop.counter }}" name="new_name" class="mono"
+                       required maxlength="40" value="{{ p.name }}"></td>
+            <td><input form="pos-f{{ forloop.counter }}" name="child_type" class="mono"
+                       required pattern="[A-Za-z]\d{11}" list="bt-child-options" value="{{ p.child }}"
+                       title="{{ p.child_name|default:'accepting component type' }}"></td>
+            <td class="bt-actions">
+              <form id="pos-f{{ forloop.counter }}" method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="edit">
+                <input type="hidden" name="position" value="{{ p.name }}">
+                <button type="submit" class="bt-mini" name="op" value="save"
+                        title="Rename the position and/or change what it accepts">Save</button>
+                <button type="submit" class="bt-mini bt-danger" name="op" value="delete" formnovalidate
+                        onclick="return confirm('Delete position {{ p.name }} from every box of this type?')">Delete</button>
+              </form>
+            </td>
+          </tr>
         {% endfor %}
         </tbody>
       </table>
     </div>
-    <p class="pk-hint" style="margin:10px 0 0;">Existing positions are read-only here: HWDB does not allow
-      deleting or renaming a position that any linked item occupies, so the Explorer only ever adds.</p>
+    <p class="pk-hint" style="margin:10px 0 0;">Save renames a position or changes what it accepts; Delete
+      removes it — each applies to the type, so every box of it changes shape. HWDB does not allow
+      deleting or renaming a position that any linked item occupies; those edits will be rejected.</p>
     {% else %}
     <div class="pk-empty">This type has no positions yet — boxes of it can’t hold anything until some are added.</div>
     {% endif %}

@@ -181,6 +181,7 @@ instances:
     # five all-boxes subsystems as prod, with dev's own CRP subsystem ids.
     shipping_types:
       - D00599800007   # HWDBUnitTest › "Test Type 007" (ship/receive workflow)
+      - D00599800027   # HWDBUnitTest › Chao's shipping-box type (sub-ES testing, 2026-07-30)
       - "55.50"        # FD2-VD Top CRP › Shipping box (Shipping box, Container)
       - "56.50"        # FD2-VD Bottom CRP › Shipping box
       - "57.6"         # FD2-VD TDE › Shipping Containers (Electronics Box, FEB, …)

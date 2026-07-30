@@ -24,14 +24,13 @@ responses.{% endcomment %}
       <td>{{ r.status|default:"—" }}</td>
       <td>{% if r.uploaded == None %}—{% elif r.uploaded %}<span class="es-yes">Yes</span>{% else %}<span class="es-no">No</span>{% endif %}</td>
       <td>{% if r.certified == None %}—{% elif r.certified %}<span class="es-yes">Yes</span>{% else %}<span class="es-no">No</span>{% endif %}</td>
-      {% if show_es %}<td>{% if r.es %}{% if r.es.has_es %}<input type="checkbox" name="sub_es" value="{{ r.part_id }}"{% if r.es.checked %} checked{% endif %} title="Include this item’s executive summary (with link) in the generated PDF"> <a href="{{ r.es.url }}" target="_blank" rel="noopener" title="Open {{ r.part_id }}’s executive summary (new tab)">&#x2197;</a>{% else %}<span class="es-hint">none yet</span>{% endif %}{% else %}—{% endif %}</td>{% endif %}
+      {% if show_es %}<td>{% if r.es.has_es %}<a href="{{ r.es.url }}" target="_blank" rel="noopener" title="Open {{ r.part_id }}’s executive summary (new tab)"><span class="es-yes">Yes</span> &#x2197;</a>{% endif %}</td>{% endif %}
     </tr>
   {% endfor %}
   </tbody>
 </table>
 <p class="es-hint">{{ rows|length }} direct sub-component{{ rows|length|pluralize }},
-  statuses live from HWDB; included in the generated summary PDF.
-  {% if show_es %}Ticked ES boxes list that item’s executive summary (with link) on its own page of
-  the generated PDF; the selection is saved with each signature.{% endif %}
+  statuses live from HWDB; items that already have an executive summary link to
+  it, here and in the generated summary PDF.
   {% if truncated %}<span class="es-no">&#9888; List truncated — too many sub-components to list them all.</span>{% endif %}</p>
 {% endif %}

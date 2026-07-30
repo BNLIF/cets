@@ -477,7 +477,8 @@ class EngineTest(TestCase):
         subtree = ([
             {"part_id": "D05700300001-00012", "type_name": "FEB",
              "functional_position": "FEB1", "depth": 0,
-             "status": "QA/QC Tests - Passed All", "uploaded": True, "certified": True},
+             "status": "QA/QC Tests - Passed All", "uploaded": True, "certified": True,
+             "es_url": "https://example.org/hw/dev/part/D05700300001-00012/exec-summary/"},
             {"part_id": "Z00100300001-07630", "type_name": "LArASIC",
              "functional_position": "U1", "depth": 1,
              "status": None, "uploaded": None, "certified": None},
@@ -493,9 +494,7 @@ class EngineTest(TestCase):
                  "signature": "Alice Smith"},
                 {"name": "Chao Zhang", "timestamp": "2026-07-12 09:00",
                  "status": "", "text": "", "event": "reset"}],
-            "references": cfg["references"], "subtree": subtree,
-            "sub_es": [{"pid": "D05700300001-00012", "title": "FEB summary",
-                        "url": "https://example.org/hw/dev/part/D05700300001-00012/exec-summary/"}]})
+            "references": cfg["references"], "subtree": subtree})
         default = execsummary.build_default_pdf(BOX, {
             "signature": "Chao", "comments": "", "timestamp": "now",
             "status_label": "Unknown", "certified_flag": False,
@@ -512,10 +511,11 @@ class EngineTest(TestCase):
         self.assertIn("D05700300001-00012", last)
         self.assertIn("Z00100300001-07630", last)
         self.assertIn("Certified", last)
-        # #83: the sub-ES list gets its own page, before Sub-components.
-        es_page = pages[-2]
-        self.assertIn("Executive Summaries of Sub-components", es_page)
-        self.assertIn("FEB summary", es_page)
+        # every sub-component row links its own ES page (#83 revised):
+        # an "Exec summary" column with "open" links, no separate selected
+        # list — the live child page answers "does it have an ES?".
+        self.assertIn("Exec summary", last)
+        self.assertIn("open", last)
         # the FULL comments log rides with the sign-off section (Hajime
         # 2026-07-30) — the table alone only shows each signee's latest
         # comment; reset markers show too
@@ -589,10 +589,11 @@ class PageTest(TestCase):
         self.assertIn("Default sign-off", html)
         self.assertIn("Chao Zhang", html)                  # whoami prefill
 
-    def test_subtree_gets_es_column_with_default_selection(self):
-        # #83: the sub-ES selection lives as an ES column on the lazy
-        # sub-component tree — children with an ES get a pre-ticked checkbox
-        # + link; children without one show "none yet".
+    def test_subtree_gets_es_column_with_links(self):
+        # #83 revised: the ES column on the lazy sub-component tree links a
+        # child's ES page only when a summary already exists (not every item
+        # is required to carry one) — no selection checkboxes, empty cell
+        # otherwise.
         api = _api(es=[])
         api.get_subcomponents.return_value = {"data": [
             {"part_id": "D05700300001-00012", "type_name": "FEB",
@@ -607,38 +608,12 @@ class PageTest(TestCase):
         with m1, m2:
             html = self.client.get(f"/hw/dev/part/{BOX}/es-subtree/").content.decode()
         self.assertIn("<th>ES</th>", html)
-        self.assertIn('name="sub_es" value="D05700300001-00012" checked', html)
-        self.assertIn("none yet", html)                    # -00013 has none
-        # the ES link opens the child's own ES page
+        self.assertNotIn('name="sub_es"', html)            # no selection checkboxes
+        # only the child WITH a generated summary links its ES page; the
+        # other cell stays empty (an ES isn't required of every item)
         self.assertIn('/hw/dev/part/D05700300001-00012/exec-summary/', html)
-
-    def test_saved_sub_es_selection_beats_the_default(self):
-        api = _api(es=[], sub_es=[])                       # user deselected all
-        api.get_images.side_effect = lambda pid: {"data": [
-            {"image_id": "es1", "created": "2026-07-01T00:00:00",
-             "image_name": f"ExecutiveSummary_{pid}_20260701_000000.pdf"}]
-            } if pid != BOX else {"data": []}
-        m1, m2 = _mocked(api)
-        with m1, m2:
-            html = self.client.get(f"/hw/dev/part/{BOX}/es-subtree/").content.decode()
-            page = self.client.get(PAGE).content.decode()
-        self.assertIn('name="sub_es" value="D05700300001-00012"', html)
-        self.assertNotIn('value="D05700300001-00012" checked', html)
-        # deselected-all → no hidden fallback inputs on the page either
-        self.assertNotIn('type="hidden" name="sub_es"', page)
-
-    def test_page_carries_selection_as_hidden_inputs_until_tree_loads(self):
-        # #83: signing before the htmx tree arrives must not wipe the
-        # selection — the placeholder carries it as hidden inputs.
-        api = _api(es=[])
-        api.get_images.side_effect = lambda pid: {"data": [
-            {"image_id": "es1", "created": "2026-07-01T00:00:00",
-             "image_name": f"ExecutiveSummary_{pid}_20260701_000000.pdf"}]
-            } if pid != BOX else {"data": []}
-        m1, m2 = _mocked(api)
-        with m1, m2:
-            page = self.client.get(PAGE).content.decode()
-        self.assertIn('<input type="hidden" name="sub_es" value="D05700300001-00012">', page)
+        self.assertNotIn('/hw/dev/part/D05700300001-00013/exec-summary/', html)
+        self.assertNotIn("none yet", html)
 
     def test_comments_log_card_renders_entries(self):
         api = _api(es=[], log=[
@@ -706,9 +681,9 @@ CHIP_PAGE = f"/hw/dev/part/{CHIP}/exec-summary/"
 
 
 class NonShippingTypeTest(TestCase):
-    """Any type can carry an executive summary, not just shipping boxes.
-    Until the hierarchy-chart "requires ES" marking exists, the mark is an
-    ES_{ptid}_*.json config on the type in HWDB."""
+    """Every item can carry an executive summary (2026-07-30): an
+    ES_{ptid}_*.json config on the type selects the full DETAIL flow, and
+    any type without one runs the page in DEFAULT mode."""
 
     def setUp(self):
         self.user = get_user_model().objects.create_user("s", "s@s.io", "pw")
@@ -725,12 +700,13 @@ class NonShippingTypeTest(TestCase):
         self.assertIn("ES_Z00100300001_test_v8.json", html)  # config displayed
         self.assertIn("Hajime Muramatsu", html)              # signees from it
 
-    def test_unmarked_type_is_forbidden(self):
+    def test_unmarked_type_runs_default_mode(self):
         api = _api(cfg=None)   # no ES_*.json on the type
         m1, m2 = _mocked(api)
         with m1, m2:
-            resp = self.client.get(CHIP_PAGE)
-        self.assertEqual(resp.status_code, 403)
+            html = self.client.get(CHIP_PAGE).content.decode()
+        self.assertIn('value="default_sign"', html)          # one-signature flow
+        self.assertNotIn('value="sign"', html)               # no config rows
 
 
 class SignTest(TestCase):
@@ -803,15 +779,16 @@ class SignTest(TestCase):
         payload = api.post_test.call_args.args[1]
         self.assertEqual(payload["test_data"]["comments_log"], old)
 
-    def test_sign_saves_sub_es_selection(self):
-        # #83: the ticked sub-ES pids ride along like the todos; only the
-        # box's actual children survive validation.
-        api = _api(es=[])
+    def test_sign_preserves_legacy_sub_es_untouched(self):
+        # #83 revised: the selection UI is gone (the PDF links every child's
+        # ES page); a legacy saved selection rides through signatures
+        # unchanged, and posted sub_es fields are ignored.
+        api = _api(es=[], sub_es=["D05700300001-00012"])
         m1, m2 = _mocked(api)
         with m1, m2:
             self.client.post(PAGE, {
                 **self._sign_post(),
-                "sub_es": ["D05700300001-00012", "D09999900001-00001"]})
+                "sub_es": ["D09999900001-00001"]})
         payload = api.post_test.call_args.args[1]
         self.assertEqual(payload["test_data"]["sub_es"], ["D05700300001-00012"])
 

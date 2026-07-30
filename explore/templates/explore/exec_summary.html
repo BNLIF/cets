@@ -217,8 +217,6 @@
     <div class="es-card">
       <h2>Sub-components</h2>
       <div hx-get="{% url 'explore:es_subtree' part_id=part_id %}" hx-trigger="load" hx-swap="outerHTML">
-        {# until htmx swaps in the tree (with its ES checkboxes), the saved selection rides along as hidden inputs #}
-        {% for r in sub_es_rows %}{% if r.checked %}<input type="hidden" name="sub_es" value="{{ r.pid }}">{% endif %}{% endfor %}
         <p class="es-hint">Loading the sub-components from HWDB… <span class="es-spin"></span></p>
       </div>
     </div>
