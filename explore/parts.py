@@ -14,6 +14,10 @@ instead of the generic per-key sections.
 from __future__ import annotations
 
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from hwdb.api_client import FnalDbApiClient
 
 from .shipments import (
     _is_image, _spec_data, current_manifest, fold_entries, shipment_details,
@@ -177,6 +181,49 @@ def _manifest_children(api, pid: str, depth: int, seen: set) -> list[dict]:
     return kids
 
 
+_FETCH_WORKERS = 8
+
+
+def _thread_client(api):
+    """A fresh client for a worker thread — one keep-alive Session per
+    thread, since a shared Session must not fan out across threads (see
+    FnalDbApiClient). Test doubles pass through as-is."""
+    if isinstance(api, FnalDbApiClient):
+        bearer = (api.session.headers.get("Authorization") or "")
+        return FnalDbApiClient(api.base_url, bearer.removeprefix("Bearer "))
+    return api
+
+
+def fetch_map(api, fn, keys, *, workers: int = _FETCH_WORKERS) -> dict:
+    """``{key: fn(client, key)}`` for the unique ``keys`` across a small
+    worker pool (one client per thread); a failed key maps to ``None``.
+    For fanning the per-child HWDB reads of a user-facing page out — the
+    latency of N sequential round-trips is what made the ES sub-components
+    pane crawl (Hajime, 2026-07-30)."""
+    out = {}
+    uniq = list(dict.fromkeys(keys))
+    if not uniq:
+        return out
+    local = threading.local()
+
+    def _run(key):
+        cli = getattr(local, "client", None)
+        if cli is None:
+            cli = local.client = _thread_client(api)
+        return fn(cli, key)
+
+    with ThreadPoolExecutor(max_workers=min(workers, len(uniq))) as pool:
+        futs = {pool.submit(_run, k): k for k in uniq}
+        for fut in as_completed(futs):
+            key = futs[fut]
+            try:
+                out[key] = fut.result()
+            except Exception as e:
+                logger.warning("parallel fetch for %s failed: %s", key, e)
+                out[key] = None
+    return out
+
+
 def subtree_rows(api, root_pid: str, *, max_nodes: int = _SUBTREE_NODE_CAP
                  ) -> tuple[list[dict], bool]:
     """The DIRECT sub-components of ``root_pid``, each with the three QC
@@ -185,26 +232,23 @@ def subtree_rows(api, root_pid: str, *, max_nodes: int = _SUBTREE_NODE_CAP
     review); limited to one level on his 2026-07-30 call — a CRU's nested
     tree runs deep and slow, and "if we hear complaints, we would consider
     other ways". The root itself is excluded — its statuses already headline
-    the executive summary. Returns ``(rows, truncated)``.
-
-    Deliberately sequential: the one client keeps its keep-alive Session, and
-    a shared Session must not fan out across threads (see FnalDbApiClient)."""
+    the executive summary. Per-child records are fetched in parallel
+    (``fetch_map``). Returns ``(rows, truncated)``."""
     seen = {root_pid}
     kids = _manifest_children(api, root_pid, 0, seen)
     truncated = len(kids) > max_nodes
     if truncated:
         logger.warning("subtree for %s truncated at %d nodes", root_pid, max_nodes)
+    kids = kids[:max_nodes]
+    comps = fetch_map(api, lambda cli, pid: cli.get_component(pid).get("data") or {},
+                      [row["part_id"] for row in kids])
     rows: list[dict] = []
-    for row in kids[:max_nodes]:
-        status = uploaded = certified = None
-        try:
-            comp = api.get_component(row["part_id"]).get("data") or {}
-            status = normalize_status(comp.get("status"))
-            uploaded = comp.get("qaqc_uploaded")
-            certified = comp.get("certified_qaqc")
-        except Exception as e:
-            logger.warning("subtree: record for %s failed: %s", row["part_id"], e)
-        row.update(status=status, uploaded=uploaded, certified=certified)
+    for row in kids:
+        comp = comps.get(row["part_id"])   # None = record fetch failed
+        row.update(
+            status=normalize_status(comp.get("status")) if comp is not None else None,
+            uploaded=comp.get("qaqc_uploaded") if comp is not None else None,
+            certified=comp.get("certified_qaqc") if comp is not None else None)
         rows.append(row)
     return rows, truncated
 

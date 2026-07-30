@@ -1877,6 +1877,17 @@ def _children_of(api):
     return lambda pid: current_manifest(_safe_get_data(api.get_subcomponents, pid))
 
 
+def _has_es_map(api, pids) -> dict:
+    """pid → whether a generated ``ExecutiveSummary_*.pdf`` exists on it,
+    fetched in parallel (one HWDB call per unique pid; a failed fetch reads
+    as "no ES")."""
+    def _check(cli, pid):
+        return any((i.get("image_name") or "").lower().startswith(
+                       f"executivesummary_{pid.lower()}_")
+                   for i in (cli.get_images(pid).get("data") or []))
+    return parts.fetch_map(api, _check, pids)
+
+
 def _es_link_subtree(request, api, part_id) -> tuple[list[dict], bool]:
     """The direct sub-components for the PDF's Sub-components table, each
     child that already HAS a generated executive summary carrying an
@@ -1884,48 +1895,13 @@ def _es_link_subtree(request, api, part_id) -> tuple[list[dict], bool]:
     the rest leave the column empty). PUBLIC_ORIGIN so the URLs survive
     the www proxy, like the scan QR."""
     rows, truncated = subtree_rows(api, part_id)
-    has = {}   # per pid — a cable lists both ends (#72), check it once
+    has = _has_es_map(api, [r["part_id"] for r in rows])
     for r in rows:
-        pid = r["part_id"]
-        if pid not in has:
-            has[pid] = any((i.get("image_name") or "").lower().startswith(
-                               f"executivesummary_{pid.lower()}_")
-                           for i in _safe_get_data(api.get_images, pid))
-        if has[pid]:
-            path = _rev(request, "explore:exec_summary", args=[pid])
+        if has.get(r["part_id"]):
+            path = _rev(request, "explore:exec_summary", args=[r["part_id"]])
             r["es_url"] = (settings.PUBLIC_ORIGIN + path if settings.PUBLIC_ORIGIN
                            else request.build_absolute_uri(path))
     return rows, truncated
-
-
-_SUB_ES_CHILD_CAP = 40
-
-
-def _sub_es_rows(request, api, part_id) -> list[dict]:
-    """The container's direct children for the "summary of Executive
-    Summaries" (#83, Hajime's ES-structure request): one row per linked
-    sub-component — title from the child type's ES-config Test Description
-    (type name when unconfigured), plus whether the child has an ES yet.
-    Fetch-capped so a huge box doesn't stall the signing page."""
-    manifest = current_manifest(_safe_get_data(api.get_subcomponents, part_id))
-    rows, titles, seen = [], {}, set()
-    for m in manifest[:_SUB_ES_CHILD_CAP]:
-        pid = m.get("part_id")
-        if not pid or pid in seen:   # a cable lists both ends (#72) — once
-            continue
-        seen.add(pid)
-        ptid = pid.rsplit("-", 1)[0]
-        if ptid not in titles:
-            child_cfg, _msg = execsummary.load_config(api, ptid)
-            titles[ptid] = ((child_cfg or {}).get("test_description")
-                            or m.get("type_name") or ptid)
-        has_es = any((i.get("image_name") or "").lower().startswith(
-                         f"executivesummary_{pid.lower()}_")
-                     for i in _safe_get_data(api.get_images, pid))
-        rows.append({"pid": pid, "title": titles[ptid], "has_es": has_es,
-                     "position": m.get("functional_position") or "",
-                     "url": _rev(request, "explore:exec_summary", args=[pid])})
-    return rows
 
 
 @login_not_required
@@ -2900,7 +2876,9 @@ def explore_es_subtree_view(request, part_id):
     (Hajime 2026-07-30 — the recursive walk ran deep and slow on CRUs) with
     per-item status / uploaded / certified, loaded lazily via htmx so the
     signing page renders fast. Read-only. Errors render as in-page hints at
-    200 — htmx 1.x doesn't swap non-2xx responses."""
+    200 — htmx 1.x doesn't swap non-2xx responses (the page's error handler
+    covers those). no-store: Safari caches XHR GETs aggressively when no
+    Cache-Control is sent, and a stale cached fragment survives refreshes."""
     ctx = {"part_id": part_id, "rows": [], "truncated": False, "error": None,
            "show_es": False}
     try:
@@ -2923,16 +2901,19 @@ def explore_es_subtree_view(request, part_id):
         # column.
         try:
             cfg, _msg = execsummary.load_config(api, part_id.rsplit("-", 1)[0])
-            if cfg:
-                info = {r["pid"]: r for r in _sub_es_rows(request, api, part_id)}
+            if cfg and ctx["rows"]:
+                has = _has_es_map(api, [r["part_id"] for r in ctx["rows"]])
                 for row in ctx["rows"]:
-                    if row["part_id"] in info:
-                        row["es"] = info[row["part_id"]]
-                ctx["show_es"] = bool(info)
+                    row["es"] = {"has_es": bool(has.get(row["part_id"])),
+                                 "url": _rev(request, "explore:exec_summary",
+                                             args=[row["part_id"]])}
+                ctx["show_es"] = True
         except Exception:
             logger.warning("es subtree: sub-ES info for %s failed",
                            part_id, exc_info=True)
-    return render(request, "explore/_es_subtree.html", ctx)
+    resp = render(request, "explore/_es_subtree.html", ctx)
+    resp["Cache-Control"] = "no-store"
+    return resp
 
 
 # A full part id, e.g. ``D08100100003-00226`` — type-id segment then a sequence.

@@ -155,6 +155,9 @@ class SubtreePartialViewTest(TestCase):
         with m1, m2:
             resp = self.client.get(PAGE)
         self.assertEqual(resp.status_code, 200)
+        # Safari caches XHR GETs without Cache-Control and a stale fragment
+        # survives refreshes (Hajime 2026-07-30) — always no-store.
+        self.assertEqual(resp["Cache-Control"], "no-store")
         html = resp.content.decode()
         self.assertIn("D05700300001-00012", html)
         # one level only (Hajime 2026-07-30): the FEB's own contents stay out

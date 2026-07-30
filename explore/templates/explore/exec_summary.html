@@ -216,7 +216,7 @@
 
     <div class="es-card">
       <h2>Sub-components</h2>
-      <div hx-get="{% url 'explore:es_subtree' part_id=part_id %}" hx-trigger="load" hx-swap="outerHTML">
+      <div class="es-subtree-pane" hx-get="{% url 'explore:es_subtree' part_id=part_id %}" hx-trigger="load" hx-swap="outerHTML">
         <p class="es-hint">Loading the sub-components from HWDB… <span class="es-spin"></span></p>
       </div>
     </div>
@@ -348,9 +348,8 @@
   {% if not cfg %}
   <div class="es-card">
     <h2>Sub-components</h2>
-    <div hx-get="{% url 'explore:es_subtree' part_id=part_id %}" hx-trigger="load" hx-swap="outerHTML">
-      <p class="es-hint">Loading the full sub-component tree from HWDB — this can take a
-        while on deep assemblies… <span class="es-spin"></span></p>
+    <div class="es-subtree-pane" hx-get="{% url 'explore:es_subtree' part_id=part_id %}" hx-trigger="load" hx-swap="outerHTML">
+      <p class="es-hint">Loading the sub-components from HWDB… <span class="es-spin"></span></p>
     </div>
   </div>
   {% endif %}
@@ -407,6 +406,25 @@ document.querySelectorAll(".es-req").forEach(function (l) {
 var sumsOpen = document.getElementById("es-sums-open");
 if (sumsOpen) sumsOpen.addEventListener("click", function () {
   window.open(document.getElementById("es-sums").value, "_blank");
+});
+// A failed sub-components fetch must not spin forever — htmx 1.x swaps
+// nothing on a non-2xx or aborted request, which reads as an eternal
+// spinner (Hajime's Safari, 2026-07-30). Surface it with a retry instead.
+["htmx:responseError", "htmx:sendError", "htmx:timeout"].forEach(function (ev) {
+  document.body.addEventListener(ev, function (evt) {
+    var el = evt.detail.elt;
+    if (!el || !el.classList || !el.classList.contains("es-subtree-pane")) return;
+    var xhr = evt.detail.xhr;
+    var why = xhr && xhr.status ? "HTTP " + xhr.status : "network error or timeout";
+    el.innerHTML = '<p class="es-plot-err">⚠ Couldn’t load the sub-components (' +
+      why + '). <a href="#" data-es-retry>Retry</a></p>';
+    el.querySelector("[data-es-retry]").addEventListener("click", function (e) {
+      e.preventDefault();
+      el.innerHTML = '<p class="es-hint">Loading the sub-components from HWDB… ' +
+        '<span class="es-spin"></span></p>';
+      htmx.trigger(el, "load");
+    });
+  });
 });
 </script>
 {% endblock %}
