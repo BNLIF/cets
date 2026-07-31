@@ -506,24 +506,34 @@ class EngineTest(TestCase):
         import io
         from pypdf import PdfReader
         pages = [p.extract_text() for p in PdfReader(io.BytesIO(detail)).pages]
-        last = pages[-1]
-        self.assertIn("Sub-components", last)
-        self.assertIn("D05700300001-00012", last)
-        self.assertIn("Z00100300001-07630", last)
-        self.assertIn("Certified", last)
-        # every sub-component row links its own ES page (#83 revised):
-        # an "Exec summary" column with "open" links, no separate selected
-        # list — the live child page answers "does it have an ES?".
-        self.assertIn("Exec summary", last)
-        self.assertIn("open", last)
-        # the FULL comments log rides with the sign-off section (Hajime
-        # 2026-07-30) — the table alone only shows each signee's latest
-        # comment; reset markers show too
+        # datasheet layout (2026-07-31): page 1 = masthead + status/QA-QC
+        # (flags + checklist as one section) + sign-offs + references +
+        # sub-components, all in flow; the comments log gets its own page
         first = pages[0]
-        self.assertIn("Comments log", first)
-        self.assertIn("pre-reset note", first)
-        self.assertIn("Alice Smith", first)     # typed signature next to name
-        self.assertIn("signatures have been reset", first)
+        self.assertIn(BOX, first)                          # masthead PID
+        self.assertIn("STATUS & QA/QC", first)
+        self.assertNotIn("GATE", first)
+        self.assertIn("QA/QC Tests - Passed All", first)
+        self.assertIn("SUB-COMPONENTS", first)             # in flow, no page break
+        self.assertIn("direct sub-component", first)
+        self.assertIn("D05700300001-00012", first)
+        self.assertIn("Z00100300001-07630", first)
+        self.assertIn("QC-CERT.", first)
+        self.assertIn("QC-UPL.", first)
+        # children with a generated summary link it from the "Exe.Sum."
+        # column (#83 revised); the column stays empty otherwise
+        self.assertIn("Exe.Sum.", first)
+        self.assertIn("open", first)
+        # the FULL comments log gets its own page (Hajime 2026-07-30),
+        # NEWEST FIRST — the sign-off table only shows each signee's latest
+        # comment; reset markers show too
+        log_page = pages[1]
+        self.assertIn("COMMENTS LOG", log_page)
+        self.assertIn("pre-reset note", log_page)
+        self.assertIn("Alice Smith", log_page)  # typed signature next to name
+        self.assertIn("signatures reset", log_page)
+        self.assertLess(log_page.index("signatures reset"),
+                        log_page.index("pre-reset note"))  # newest first
         # the default PDF says so when there's nothing inside
         last = PdfReader(io.BytesIO(default)).pages[-1].extract_text()
         self.assertIn("No sub-components.", last)

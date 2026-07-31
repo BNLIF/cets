@@ -626,33 +626,193 @@ def compute_status(cfg, es_list, user_role_ids, role_names=None) -> dict:
 
 # ---- PDF ------------------------------------------------------------------
 
-def _pf(flag: bool) -> Paragraph:
-    color, text = ("#19b478", "PASS") if flag else ("#dc3c3c", "FAIL")
-    return Paragraph(f'<font color="{color}"><b>{text}</b></font>',
-                     getSampleStyleSheet()["Normal"])
+# ---- The "datasheet" PDF layout (2026-07-31): hairline section rules and
+# aligned columns instead of boxed fields — least ink, most rows per page.
+# One header (no title + "Selected Item Numbers" duplication), the three
+# status fields as one row, the comments log and sub-components on their
+# own pages, plots kept. ----
+
+_INK = colors.HexColor("#16202a")
+_HAIRLINE = colors.HexColor("#c8d0d6")
+_GREY = "#6a767f"
+
+
+def _ds(name: str, **kw) -> ParagraphStyle:
+    return ParagraphStyle(name, parent=getSampleStyleSheet()["Normal"], **kw)
+
+
+# Flush-left tables draw the section rules edge to edge; the last column
+# keeps no right padding so right-aligned text meets the rule's end.
+def _flush(extra=()):
+    return [("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (-1, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 1),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2), *extra]
+
+
+def _qr_drawing(url: str, size: float = 76):
+    """A QR code pointing at ``url`` (reportlab's built-in widget), scaled
+    to ``size`` points square."""
+    from reportlab.graphics.barcode.qr import QrCodeWidget
+    from reportlab.graphics.shapes import Drawing
+    widget = QrCodeWidget(url)
+    x1, y1, x2, y2 = widget.getBounds()
+    d = Drawing(size, size, transform=[size / (x2 - x1), 0, 0,
+                                       size / (y2 - y1), 0, 0])
+    d.add(widget)
+    return d
+
+
+def _summary_header(part_id: str, facts: list[tuple[str, str]],
+                    qr_url: str = "", kind: str = "") -> Table:
+    """The header block above the heavy rule: title + facts grid on the
+    left, a QR code to the live part page on the right. ``facts`` values
+    may carry Paragraph markup (pre-escaped by the caller)."""
+    title = Paragraph(f'<font size="13.5"><b>Executive Summary{escape(kind)}: '
+                      f'<font face="Courier-Bold">{escape(part_id)}</font></b>'
+                      f'</font>', _ds("hd-t", leading=17, spaceAfter=7))
+    key = _ds("hd-k", fontSize=8.5, leading=11.5)
+    val = _ds("hd-v", fontSize=8.5, leading=11.5)
+    rows = [[Paragraph(f"<b>{escape(k)}</b>", key), Paragraph(v, val)]
+            for k, v in facts]
+    facts_t = Table(rows, colWidths=[88, 282])
+    facts_t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
+                                 ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                                 ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                                 ("TOPPADDING", (0, 0), (-1, -1), 0.5),
+                                 ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5)]))
+    right = _qr_drawing(qr_url) if qr_url else ""
+    outer = Table([[[title, facts_t], right]], colWidths=[382, 86])
+    outer.setStyle(TableStyle([("LINEBELOW", (0, 0), (-1, -1), 1.8, _INK),
+                               ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                               ("ALIGN", (-1, 0), (-1, -1), "RIGHT"),
+                               *_flush([("BOTTOMPADDING", (0, 0), (-1, -1), 8)])]))
+    return outer
+
+
+def _section(title: str, note: str = "") -> list:
+    left = Paragraph(f'<font size="8"><b>{escape(title.upper())}</b></font>',
+                     _ds("sec-l"))
+    right = Paragraph(f'<para align="right"><font size="7.5" color="{_GREY}">'
+                      f'{escape(note)}</font></para>', _ds("sec-r"))
+    t = Table([[left, right]], colWidths=[240, 228])
+    t.setStyle(TableStyle([("LINEBELOW", (0, 0), (-1, -1), 0.9, _INK),
+                           ("VALIGN", (0, 0), (-1, -1), "BOTTOM"), *_flush()]))
+    return [Spacer(1, 13), t, Spacer(1, 4)]
+
+
+def _yesno(flag, style) -> Paragraph:
+    if flag is None:
+        return Paragraph("—", style)
+    color, text = ("#19b478", "Yes") if flag else ("#dc3c3c", "No")
+    return Paragraph(f'<font color="{color}"><b>{text}</b></font>', style)
+
+
+def _gate_grid(status_label, certified, uploaded) -> Table:
+    key = _ds("g-k", fontSize=6.8, leading=9, textColor=colors.HexColor(_GREY))
+    val = _ds("g-v", fontSize=9, leading=11.5)
+    cells = [[Paragraph("COMPONENT STATUS", key),
+              Paragraph("CERTIFIED QA/QC", key),
+              Paragraph("ALL QA/QC UPLOADED", key)],
+             [Paragraph(f"<b>{escape(status_label or 'Unknown')}</b>", val),
+              _yesno(bool(certified), val), _yesno(bool(uploaded), val)]]
+    t = Table(cells, colWidths=[180, 120, 168])
+    t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), *_flush()]))
+    return t
+
+
+def _checks_grid(items, checked) -> Table:
+    cell = _ds("ck", fontSize=8.5, leading=11.5)
+    cols, rows = 2, []
+    for i in range(0, len(items), cols):
+        row = []
+        for j, item in enumerate(items[i:i + cols]):
+            mark = ('<font face="ZapfDingbats" color="#19b478" size="7">4</font>'
+                    if i + j in checked else f'<font color="{_GREY}">—</font>')
+            row.append(Paragraph(f"{mark} {escape(item)}", cell))
+        row += [""] * (cols - len(row))
+        rows.append(row)
+    t = Table(rows, colWidths=[234, 234])
+    t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), *_flush()]))
+    return t
+
+
+def _col_head(text: str) -> Paragraph:
+    return Paragraph(f'<font size="7" color="{_GREY}">{escape(text)}</font>',
+                     _ds("col-h", leading=9))
 
 
 def _signoff_table(rows) -> Table:
-    """The DETAIL sign-off table: Position / Signature / Comments / Date,
-    one row per configured signee in signing order."""
-    styles = getSampleStyleSheet()
-    body = [["Position", "Signature", "Comments", "Sign-off date/time"]]
+    """Sign-offs: Position / Signature / Date / Comment (latest), one row
+    per configured signee in signing order."""
+    cell = _ds("so-c", fontSize=8.5, leading=11)
+    body = [[_col_head("POSITION"), _col_head("SIGNATURE"),
+             _col_head("DATE"), _col_head("COMMENT (LATEST)")]]
     for r in rows:
         e = r["entry"] or {}
-        body.append([
-            Paragraph(r["name"], styles["Normal"]),
-            Paragraph(e.get("signature") or "—", styles["Normal"]),
-            Paragraph(e.get("comments") or "—", styles["Normal"]),
-            Paragraph(e.get("timestamp") or "—", styles["Normal"]),
-        ])
-    table = Table(body, colWidths=[110, 140, 190, 110])
-    table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8e8e8")),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-    ]))
-    return table
+        body.append([Paragraph(escape(r["name"]), cell),
+                     Paragraph(escape(e.get("signature") or "—"), cell),
+                     Paragraph(escape(e.get("timestamp") or "—"), cell),
+                     Paragraph(escape(e.get("comments") or "—"), cell)])
+    t = Table(body, colWidths=[100, 100, 90, 178], repeatRows=1)
+    t.setStyle(TableStyle([
+        ("LINEBELOW", (0, 0), (-1, 0), 0.9, _INK),
+        ("LINEBELOW", (0, 1), (-1, -1), 0.4, _HAIRLINE),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"), *_flush()]))
+    return t
+
+
+def _log_flowables(log: list[dict]) -> list:
+    """The append-only comments log, NEWEST FIRST, as a Time / Who /
+    QA-QC Status / Comment table — the comment column is the widest so long
+    notes wrap there; reset markers span the width as centered grey rows."""
+    ts = _ds("lg-t", fontName="Courier", fontSize=7.5, leading=10.5)
+    who = _ds("lg-w", fontSize=8.5, leading=11)
+    st = _ds("lg-s", fontSize=8, leading=10.5, textColor=colors.HexColor("#8a949c"))
+    txt = _ds("lg-x", fontSize=8.5, leading=11)
+    body = [[_col_head("TIME"), _col_head("WHO"),
+             _col_head("QA/QC STATUS"), _col_head("COMMENT")]]
+    resets = []
+    for e in reversed(log):
+        if e.get("event") == "reset":
+            resets.append(len(body))
+            body.append([Paragraph(
+                f'<para align="center"><font color="#8a949c"><i>— signatures reset'
+                f' · {escape(e.get("timestamp") or "")}'
+                f'{" · " + escape(e["name"]) if e.get("name") else ""} —</i></font>'
+                f'</para>', txt), "", "", ""])
+            continue
+        # sign-flow entries: name is the POSITION — the typed signature
+        # identifies the person (Hajime 2026-07-31)
+        signed = f' · {escape(e["signature"])}' if e.get("signature") else ""
+        body.append([Paragraph(escape(e.get("timestamp") or ""), ts),
+                     Paragraph(f'<b>{escape(e.get("name") or "")}</b>{signed}', who),
+                     Paragraph(escape(e.get("status") or "—"), st),
+                     Paragraph(escape(e.get("text") or ""), txt)])
+    t = Table(body, colWidths=[76, 126, 76, 190], repeatRows=1)
+    style = [("LINEBELOW", (0, 0), (-1, 0), 0.9, _INK),
+             ("LINEBELOW", (0, 1), (-1, -1), 0.4, _HAIRLINE),
+             ("VALIGN", (0, 0), (-1, -1), "TOP"), *_flush()]
+    for i in resets:
+        style.append(("SPAN", (0, i), (-1, i)))
+    t.setStyle(TableStyle(style))
+    return [t]
+
+
+def _reference_flowables(refs: list[dict]) -> list:
+    """Clickable references: the comment is the link text (URL when there is
+    none), with the raw URL trailing in grey so print readers keep it."""
+    small = _ds("ref", fontSize=8.5, leading=12.5)
+    out = []
+    for r in refs:
+        href = escape(r["url"], {'"': "&quot;"})
+        label = escape(r.get("comments") or r["url"])
+        tail = (f' <font size="7" color="{_GREY}">— {escape(r["url"])}</font>'
+                if r.get("comments") else "")
+        out.append(Paragraph(
+            f'• <link href="{href}" color="blue"><u>{label}</u></link>{tail}', small))
+    return out
 
 
 def append_pdf(base: bytes, extra: bytes) -> bytes:
@@ -672,85 +832,78 @@ def append_pdf(base: bytes, extra: bytes) -> bytes:
 
 
 def build_detail_pdf(part_id: str, form: dict) -> bytes:
-    """The Dashboard's DETAIL summary, minus plots: title, type name,
-    generated timestamp, description, todos checklist, sign-off table, the
-    three status fields, the full comments log, references page,
-    sub-components page."""
+    """The DETAIL summary in the datasheet layout: page one carries the
+    header block (title + facts grid + QR code to the live part page),
+    the status/QA-QC section (flags + QC checklist as one gate), the
+    sign-off table, the sub-components table with per-child "Exe.Sum."
+    links to each generated summary PDF, and clickable references; the
+    full append-only comments log gets its own page (newest first — it
+    outgrows the sign-off table's latest-comment column); then the config
+    plots."""
     buf = io.BytesIO()
-    styles = getSampleStyleSheet()
-    story = [
-        Paragraph(f"Executive Summary — {part_id}", styles["Title"]),
-        Paragraph("Selected Item Numbers", styles["Heading3"]),
-        Paragraph(part_id, styles["Normal"]),
-    ]
+    facts = []
     if form.get("type_name"):
-        story.append(Paragraph(f'<para align="center">{form["type_name"]}</para>',
-                               styles["Heading2"]))
-    story.append(Paragraph(
-        f'<para align="center">Generated: {datetime.now():{TIMESTAMP_FMT}}</para>',
-        styles["Normal"]))
+        value = escape(form["type_name"])
+        if form.get("type_path"):
+            value += (f' <font color="{_GREY}">in {escape(form["type_path"])}'
+                      f'</font>')
+        if form.get("instance"):
+            value += f' &nbsp;·&nbsp; HWDB: <b>{escape(form["instance"])}</b>'
+        facts.append(("Component type", value))
+    elif form.get("instance"):
+        facts.append(("HWDB", f'<b>{escape(form["instance"])}</b>'))
+    if form.get("consortium"):
+        facts.append(("Consortium", escape(form["consortium"])))
+    facts.append(("Generated", f"{datetime.now():{TIMESTAMP_FMT}}"))
     if form.get("description"):
-        story += [Paragraph("Test Description", styles["Heading3"]),
-                  Paragraph(form["description"], styles["Normal"])]
+        facts.append(("Description", escape(form["description"])))
+    story = [_summary_header(part_id, facts, qr_url=form.get("part_url") or "")]
+
+    # Status, flags and the QC checklist share one section — they are all
+    # the same gate.
     todos = form.get("todos") or {}
-    if todos.get("check_list"):
-        story.append(Paragraph(todos.get("title") or "QC Checks", styles["Heading3"]))
-        checked = set(todos.get("checked") or [])
-        for i, item in enumerate(todos["check_list"]):
-            mark = "[x]" if i in checked else "[ ]"
-            story.append(Paragraph(f"{mark} {item}", styles["Normal"]))
-    story += [Spacer(1, 10), Paragraph("Sign-off", styles["Heading3"]),
-              _signoff_table(form["signee_rows"]), Spacer(1, 12)]
-    story += [
-        Paragraph("Component Status", styles["Heading3"]),
-        Paragraph(form.get("status_label") or "Unknown", styles["Normal"]),
-        Paragraph("Consortium Certified QA/QC", styles["Heading3"]),
-        _pf(bool(form.get("certified_flag"))),
-        Paragraph("All QA/QC Uploaded", styles["Heading3"]),
-        _pf(bool(form.get("uploaded_flag"))),
-    ]
-    # The full append-only comments log (Hajime 2026-07-30): the sign-off
-    # table above only carries each signee's LATEST comment, so the log —
-    # which survives resets and takes standalone entries — goes in whole.
-    log = [e for e in form.get("comments_log") or [] if isinstance(e, dict)]
-    if log:
-        story += [Spacer(1, 10), Paragraph("Comments log", styles["Heading3"])]
-        for e in log:
-            if e.get("event") == "reset":
-                story.append(Paragraph(
-                    f'<para align="center"><font color="#777777">—— signatures '
-                    f'have been reset ({escape(e.get("timestamp") or "")}'
-                    f'{", " + escape(e["name"]) if e.get("name") else ""}) ——'
-                    f'</font></para>', styles["Normal"]))
-                continue
-            status = (f' <font color="#777777">(status: '
-                      f'{escape(e.get("status") or "")})</font>'
-                      if e.get("status") else "")
-            # sign-flow entries: name is the POSITION — the typed signature
-            # identifies the person (Hajime 2026-07-31)
-            signed = (f' · {escape(e["signature"])}'
-                      if e.get("signature") else "")
-            story.append(Paragraph(
-                f'<font face="Courier" size="8">{escape(e.get("timestamp") or "")}</font>'
-                f' — <b>{escape(e.get("name") or "")}</b>{signed}{status}',
-                styles["Normal"]))
-            story.append(Paragraph(escape(e.get("text") or ""), styles["Normal"]))
-            story.append(Spacer(1, 4))
+    n = len(todos.get("check_list") or [])
+    checked = {i for i in (todos.get("checked") or [])
+               if isinstance(i, int) and 0 <= i < n}
+    note = (f"{todos.get('title') or 'QC Checks'}: {len(checked)} of {n} confirmed"
+            if n else "")
+    story += _section("Status & QA/QC", note)
+    story.append(_gate_grid(form.get("status_label"), form.get("certified_flag"),
+                            form.get("uploaded_flag")))
+    if n:
+        story += [Spacer(1, 7), _checks_grid(todos["check_list"], checked)]
+
+    rows = form.get("signee_rows") or []
+    signed = sum(1 for r in rows if r.get("entry"))
+    story += _section("Sign-offs", f"{signed} of {len(rows)} signed")
+    story.append(_signoff_table(rows))
+
+    subtree = form.get("subtree") or ([], False)
+    n_sub = len(subtree[0])
+    story += _section("Sub-components",
+                      f"{n_sub} direct sub-component{'s' if n_sub != 1 else ''}")
+    story += subtree_flowables(*subtree)
+
     refs = form.get("references") or []
     if refs:
+        story += _section("References")
+        story += _reference_flowables(refs)
+
+    # The full append-only comments log (Hajime 2026-07-30) on its own page —
+    # the sign-off table only carries each signee's LATEST comment.
+    log = [e for e in form.get("comments_log") or [] if isinstance(e, dict)]
+    if log:
         story.append(PageBreak())
-        story.append(Paragraph("Reference URLs", styles["Heading2"]))
-        for r in refs:
-            story.append(Paragraph(
-                f'• <link href="{r["url"]}" color="blue">{r["url"]}</link>',
-                styles["Normal"]))
-            if r.get("comments"):
-                story.append(Paragraph(
-                    f'<font color="#777777">{r["comments"]}</font>', styles["Normal"]))
+        story += _section("Comments log", "newest first · append-only; survives resets")
+        story += _log_flowables(log)
+
     plot_blocks = form.get("plot_blocks") or []
     if plot_blocks:
         story.append(PageBreak())
-        story.append(Paragraph("Plots", styles["Heading2"]))
+        story += _section("Plots")
+        title = _ds("pl-t", fontSize=9.5, leading=12)
+        src_style = _ds("pl-s", fontSize=7.5, leading=10,
+                        textColor=colors.HexColor(_GREY))
         for pb in plot_blocks:
             if pb.get("uploaded"):
                 src = f"Uploaded image: {pb['upload_name']}"
@@ -760,9 +913,10 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
                 src = (f"Image: {pb['image_name']} "
                        f"(history_order={pb['history_order']}) · {pb['pid']}")
             story += [
-                Spacer(1, 8),
-                Paragraph(f"{pb['title']} — {pb['test_type_name']}", styles["Heading3"]),
-                Paragraph(src, styles["Normal"]),
+                Spacer(1, 10),
+                Paragraph(f"<b>{escape(pb['title'])}</b> — "
+                          f"{escape(pb['test_type_name'])}", title),
+                Paragraph(escape(src), src_style),
             ]
             if pb.get("bytes"):
                 try:
@@ -774,47 +928,46 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
                     story += [Spacer(1, 6), img]
                 except Exception as e:
                     story.append(Paragraph(f"(image could not be embedded: {e})",
-                                           styles["Normal"]))
+                                           src_style))
             elif pb.get("error"):
-                story.append(Paragraph(f"⚠ {pb['error']}", styles["Normal"]))
-    story.append(PageBreak())
-    story.append(Paragraph("Sub-components", styles["Heading2"]))
-    story += subtree_flowables(*(form.get("subtree") or ([], False)))
+                story.append(Paragraph(f"⚠ {escape(pb['error'])}", src_style))
+
     SimpleDocTemplate(buf, pagesize=letter).build(story)
     return buf.getvalue()
 
 
 def build_default_pdf(part_id: str, signinfo: dict,
                       subtree: tuple[list[dict], bool]) -> bytes:
-    """The Dashboard's DEFAULT summary: the three status fields and a single
-    sign-off row — no config, no checklist, no references."""
+    """The configless DEFAULT summary in the same datasheet layout: header
+    block, the status/QA-QC row, the single whoami sign-off row, and the
+    sub-components table — no checklist, no references."""
     buf = io.BytesIO()
-    styles = getSampleStyleSheet()
-    story = [
-        Paragraph(f"Executive Summary — {part_id}", styles["Title"]),
-        Paragraph("Selected Item Numbers", styles["Heading3"]),
-        Paragraph(part_id, styles["Normal"]),
-        Paragraph("Component Status", styles["Heading3"]),
-        Paragraph(signinfo.get("status_label") or "Unknown", styles["Normal"]),
-        Paragraph("Consortium Certified QA/QC", styles["Heading3"]),
-        _pf(bool(signinfo.get("certified_flag"))),
-        Paragraph("All QA/QC Uploaded", styles["Heading3"]),
-        _pf(bool(signinfo.get("uploaded_flag"))),
-        Spacer(1, 10), Paragraph("Sign-off", styles["Heading3"]),
-    ]
+    facts = []
+    if signinfo.get("instance"):
+        facts.append(("HWDB", f'<b>{escape(signinfo["instance"])}</b>'))
+    facts.append(("Generated", f"{datetime.now():{TIMESTAMP_FMT}}"))
+    story = [_summary_header(part_id, facts, kind=" (default)",
+                             qr_url=signinfo.get("part_url") or "")]
+    story += _section("Status & QA/QC")
+    story.append(_gate_grid(signinfo.get("status_label"),
+                            signinfo.get("certified_flag"),
+                            signinfo.get("uploaded_flag")))
+    story += _section("Sign-off")
+    cell = _ds("dso-c", fontSize=8.5, leading=11)
     table = Table(
-        [["Signature", "Comments", "Sign-off date/time"],
-         [signinfo.get("signature") or "—", signinfo.get("comments") or "—",
-          signinfo.get("timestamp") or "—"]],
-        colWidths=[140, 280, 120])
+        [[_col_head("SIGNATURE"), _col_head("DATE"), _col_head("COMMENT")],
+         [Paragraph(escape(signinfo.get("signature") or "—"), cell),
+          Paragraph(escape(signinfo.get("timestamp") or "—"), cell),
+          Paragraph(escape(signinfo.get("comments") or "—"), cell)]],
+        colWidths=[130, 100, 238])
     table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8e8e8")),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-    ]))
+        ("LINEBELOW", (0, 0), (-1, 0), 0.9, _INK),
+        ("LINEBELOW", (0, 1), (-1, -1), 0.4, _HAIRLINE),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"), *_flush()]))
     story.append(table)
-    story.append(PageBreak())
-    story.append(Paragraph("Sub-components", styles["Heading2"]))
+    n_sub = len(subtree[0])
+    story += _section("Sub-components",
+                      f"{n_sub} direct sub-component{'s' if n_sub != 1 else ''}")
     story += subtree_flowables(*subtree)
     SimpleDocTemplate(buf, pagesize=letter).build(story)
     return buf.getvalue()
@@ -823,40 +976,36 @@ def build_default_pdf(part_id: str, signinfo: dict,
 def subtree_flowables(rows: list[dict], truncated: bool) -> list:
     """The Sub-components page: the direct sub-components (one level only —
     Hajime 2026-07-30), one row each with the three QC statuses and, for
-    children that already have an executive summary, a link to its ES page
-    (``es_url``, added by the view; the column stays empty otherwise).
-    ``rows`` come from ``parts.subtree_rows``."""
+    children that already have a generated executive summary, an "Exe.Sum."
+    link straight to that PDF (``es_url``, added by the view; the column
+    stays empty otherwise). ``rows`` come from ``parts.subtree_rows``."""
     styles = getSampleStyleSheet()
     if not rows:
         return [Paragraph("No sub-components.", styles["Normal"])]
-    cell = ParagraphStyle("subtree-cell", parent=styles["Normal"],
-                          fontSize=8, leading=10)
+    cell = _ds("subtree-cell", fontSize=8, leading=10.5)
 
-    def _yn(flag):
-        if flag is None:
-            return Paragraph("—", cell)
-        color, text = ("#19b478", "Yes") if flag else ("#dc3c3c", "No")
-        return Paragraph(f'<font color="{color}"><b>{text}</b></font>', cell)
-
-    body = [["Part", "Status", "Uploaded", "Certified", "Exec summary"]]
+    body = [[_col_head("Part"), _col_head("Type"), _col_head("Position"),
+             _col_head("Status"), _col_head("QC-UPL."), _col_head("QC-CERT."),
+             _col_head("Exe.Sum.")]]
     for r in rows:
         conn = f".{r['connection']}" if r.get("connection") else ""  # cable end (#72)
-        label = (f"{r['part_id']}{conn} ({r.get('type_name') or '?'}) "
-                 f"@ {r.get('functional_position') or '—'}")
+        part = (f'<font face="Courier" size="7.5">{escape(r["part_id"] + conn)}'
+                f'</font>')
         body.append([
-            Paragraph("&nbsp;" * 4 * r["depth"] + escape(label), cell),
+            Paragraph("&nbsp;" * 4 * r["depth"] + part, cell),
+            Paragraph(escape(r.get("type_name") or "—"), cell),
+            Paragraph(escape(r.get("functional_position") or "—"), cell),
             Paragraph(escape(r.get("status") or "—"), cell),
-            _yn(r.get("uploaded")), _yn(r.get("certified")),
-            (Paragraph(f'<link href="{r["es_url"]}" color="blue">open</link>', cell)
+            _yesno(r.get("uploaded"), cell), _yesno(r.get("certified"), cell),
+            (Paragraph(f'<link href="{escape(r["es_url"], {chr(34): "&quot;"})}"'
+                       f' color="blue"><u>open</u></link>', cell)
              if r.get("es_url") else ""),
         ])
-    table = Table(body, colWidths=[218, 95, 50, 50, 55], repeatRows=1)
+    table = Table(body, colWidths=[116, 82, 70, 72, 40, 44, 44], repeatRows=1)
     table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8e8e8")),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
-    ]))
+        ("LINEBELOW", (0, 0), (-1, 0), 0.9, _INK),
+        ("LINEBELOW", (0, 1), (-1, -1), 0.4, _HAIRLINE),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"), *_flush()]))
     out = [table]
     if truncated:
         out.append(Spacer(1, 6))

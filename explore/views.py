@@ -1877,30 +1877,46 @@ def _children_of(api):
     return lambda pid: current_manifest(_safe_get_data(api.get_subcomponents, pid))
 
 
+def _abs_url(request, path: str) -> str:
+    """Absolute URL for links baked into PDFs — PUBLIC_ORIGIN so they
+    survive the www proxy, like the scan QR."""
+    return (settings.PUBLIC_ORIGIN + path if settings.PUBLIC_ORIGIN
+            else request.build_absolute_uri(path))
+
+
 def _has_es_map(api, pids) -> dict:
-    """pid → whether a generated ``ExecutiveSummary_*.pdf`` exists on it,
-    fetched in parallel (one HWDB call per unique pid; a failed fetch reads
-    as "no ES")."""
+    """pid → its newest generated ``ExecutiveSummary_*.pdf`` as
+    ``{"image_id", "image_name"}`` (None = no ES / fetch failed), fetched in
+    parallel. The gate filename embeds the timestamp, so name order is
+    chronological."""
     def _check(cli, pid):
-        return any((i.get("image_name") or "").lower().startswith(
-                       f"executivesummary_{pid.lower()}_")
-                   for i in (cli.get_images(pid).get("data") or []))
+        best = None
+        for i in (cli.get_images(pid).get("data") or []):
+            name = i.get("image_name") or ""
+            if (name.lower().startswith(f"executivesummary_{pid.lower()}_")
+                    and (best is None or name > best["image_name"])):
+                best = {"image_id": i.get("image_id"), "image_name": name}
+        return best
     return parts.fetch_map(api, _check, pids)
 
 
 def _es_link_subtree(request, api, part_id) -> tuple[list[dict], bool]:
     """The direct sub-components for the PDF's Sub-components table, each
     child that already HAS a generated executive summary carrying an
-    absolute link to its ES page (not every item is required to have one —
-    the rest leave the column empty). PUBLIC_ORIGIN so the URLs survive
-    the www proxy, like the scan QR."""
+    absolute link to that PDF — the newest HWDB attachment itself, served
+    through the explorer's authenticated proxy (HWDB's own ``/img/{id}``
+    endpoint demands a bearer, probed 2026-07-31, so a direct API link can't
+    open in a browser). PUBLIC_ORIGIN so the URLs survive the www proxy,
+    like the scan QR."""
     rows, truncated = subtree_rows(api, part_id)
-    has = _has_es_map(api, [r["part_id"] for r in rows])
+    es = _has_es_map(api, [r["part_id"] for r in rows])
     for r in rows:
-        if has.get(r["part_id"]):
-            path = _rev(request, "explore:exec_summary", args=[r["part_id"]])
-            r["es_url"] = (settings.PUBLIC_ORIGIN + path if settings.PUBLIC_ORIGIN
-                           else request.build_absolute_uri(path))
+        img = es.get(r["part_id"])
+        if img and img.get("image_id"):
+            r["es_url"] = _abs_url(
+                request,
+                _rev(request, "explore:shipment_image", args=[img["image_id"]])
+                + "?" + urlencode({"name": img["image_name"], "inline": 1}))
     return rows, truncated
 
 
@@ -1996,7 +2012,10 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
         _patch_item_flags(api, part_id, sid, certified, uploaded, comments)
         signinfo = {"signature": full_name, "comments": comments, "timestamp": ts,
                     "status_label": execsummary.STATUS_LABEL_BY_ID.get(sid, "Unknown"),
-                    "certified_flag": certified, "uploaded_flag": uploaded}
+                    "certified_flag": certified, "uploaded_flag": uploaded,
+                    "instance": instance_of(request),
+                    "part_url": _abs_url(request, _rev(request, "explore:part",
+                                                       args=[part_id]))}
         pdf_bytes = execsummary.build_default_pdf(
             part_id, signinfo, _es_link_subtree(request, api, part_id))
         name = f"ExecutiveSummary_{part_id}_{timezone.now():{execsummary.FILENAME_TS_FMT}}.pdf"
@@ -2196,8 +2215,19 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
                     b.update(bytes=b["render_bytes"], uploaded=False,
                              upload_name=None, image_id=None)
             execsummary.download_plot_images(api, plot_blocks)
+        inst = instance_of(request)
+        # The type's full parent path for the header ("DUNE / FD1-HD HVS /
+        # HWDBUnitTest") — from the mirror leaf, like the type name.
+        type_path = (" / ".join(x for x in (
+            curation.project_label(inst, leaf.project).rsplit(" (", 1)[0],
+            leaf.system_name, leaf.subsystem_name) if x) if leaf else "")
         pdf_bytes = execsummary.build_detail_pdf(part_id, {
             "type_name": leaf.name if leaf else "",
+            "type_path": type_path,
+            "consortium": cfg["consortium_name"],
+            "instance": inst,
+            "part_url": _abs_url(request, _rev(request, "explore:part",
+                                               args=[part_id])),
             "description": cfg["test_description"],
             "todos": {**cfg["todos"], "checked": ((saved_todos or {}).get("checked") or [])},
             "signee_rows": status["rows"],
