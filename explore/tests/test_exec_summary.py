@@ -506,6 +506,9 @@ class EngineTest(TestCase):
         import io
         from pypdf import PdfReader
         pages = [p.extract_text() for p in PdfReader(io.BytesIO(detail)).pages]
+        # the PDF document title names the summary (shows in browser tabs)
+        self.assertEqual(PdfReader(io.BytesIO(detail)).metadata.title,
+                         f"Executive Summary: {BOX}")
         # datasheet layout (2026-07-31): page 1 = masthead + status/QA-QC
         # (flags + checklist as one section) + sign-offs + references +
         # sub-components, all in flow; the comments log gets its own page
@@ -545,6 +548,39 @@ class EngineTest(TestCase):
         flows = execsummary.subtree_flowables(rows, True)
         texts = [getattr(f, "text", "") for f in flows]
         self.assertTrue(any("truncated" in t for t in texts))
+
+
+class SubtreeEsLinkTest(TestCase):
+    """The PDF's Exe.Sum. links point at the FNAL HWDB web UI — a permanent
+    host — never at this app's own hostname (Chao 2026-07-31: a locally
+    generated PDF was baking 127.0.0.1 links into HWDB)."""
+
+    def test_es_url_targets_the_hwdb_images_page(self):
+        from django.conf import settings
+
+        from explore.views import _es_link_subtree
+        api = mock.MagicMock()
+        api.get_subcomponents.return_value = {"data": [
+            {"part_id": "D05700300001-00012", "type_name": "FEB",
+             "functional_position": "FEB1", "operation": "mount"},
+            {"part_id": "D05700300001-00013", "type_name": "FEB",
+             "functional_position": "FEB2", "operation": "mount"}]}
+        api.get_component.side_effect = lambda pid: {"data": {
+            "status": {"name": "In Fabrication"}, "qaqc_uploaded": False,
+            "certified_qaqc": False, "component_id": int(pid[-2:])}}
+        # only child -00012 already has a generated summary
+        api.get_images.side_effect = lambda pid: {"data": (
+            [{"image_id": 7,
+              "image_name": f"ExecutiveSummary_{pid}_20260730120000.pdf"}]
+            if pid.endswith("00012") else [])}
+        request = mock.Mock(resolver_match=mock.Mock(namespace="explore_dev"))
+        rows, truncated = _es_link_subtree(request, api, BOX)
+        self.assertFalse(truncated)
+        by_pid = {r["part_id"]: r for r in rows}
+        ui = settings.HWDB_PROFILES["dev"]["ui"]
+        self.assertEqual(by_pid["D05700300001-00012"]["es_url"],
+                         f"{ui}/view/images/component/12")
+        self.assertNotIn("es_url", by_pid["D05700300001-00013"])
 
 
 class PageTest(TestCase):
@@ -635,10 +671,10 @@ class PageTest(TestCase):
             html = self.client.get(PAGE).content.decode()
         self.assertIn("Comments log", html)
         self.assertIn("found a scratch", html)
-        self.assertIn("(status: In Fabrication)", html)
-        # the typed signature shows next to the bold position name
-        # (Hajime 2026-07-31)
-        self.assertIn("<b>Chao Zhang</b> · C. Zhang", html)
+        self.assertIn("In Fabrication", html)
+        # the typed signature (the person) gets the bold; the position
+        # name stays plain — same as the generated PDF
+        self.assertIn("<b>C. Zhang</b> · Chao Zhang", html)
         # #82: the per-signee comment box is a fresh textarea, not prefilled
         self.assertIn("<textarea", html)
         # standalone posting (Hajime 2026-07-30) — the form is offered to
@@ -652,7 +688,7 @@ class PageTest(TestCase):
         m1, m2 = _mocked(api)
         with m1, m2:
             html = self.client.get(PAGE).content.decode()
-        self.assertIn("signatures have been reset", html)
+        self.assertIn("signatures reset", html)
         self.assertIn("es-log-reset", html)
 
     def test_empty_log_still_offers_the_comment_form(self):

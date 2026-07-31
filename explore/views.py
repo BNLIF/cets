@@ -1877,46 +1877,31 @@ def _children_of(api):
     return lambda pid: current_manifest(_safe_get_data(api.get_subcomponents, pid))
 
 
-def _abs_url(request, path: str) -> str:
-    """Absolute URL for links baked into PDFs — PUBLIC_ORIGIN so they
-    survive the www proxy, like the scan QR."""
-    return (settings.PUBLIC_ORIGIN + path if settings.PUBLIC_ORIGIN
-            else request.build_absolute_uri(path))
-
-
 def _has_es_map(api, pids) -> dict:
-    """pid → its newest generated ``ExecutiveSummary_*.pdf`` as
-    ``{"image_id", "image_name"}`` (None = no ES / fetch failed), fetched in
-    parallel. The gate filename embeds the timestamp, so name order is
-    chronological."""
+    """pid → True when the item already has a generated
+    ``ExecutiveSummary_*.pdf`` attachment (None = fetch failed), checked in
+    parallel."""
     def _check(cli, pid):
-        best = None
-        for i in (cli.get_images(pid).get("data") or []):
-            name = i.get("image_name") or ""
-            if (name.lower().startswith(f"executivesummary_{pid.lower()}_")
-                    and (best is None or name > best["image_name"])):
-                best = {"image_id": i.get("image_id"), "image_name": name}
-        return best
+        return any((i.get("image_name") or "").lower().startswith(
+            f"executivesummary_{pid.lower()}_")
+            for i in (cli.get_images(pid).get("data") or []))
     return parts.fetch_map(api, _check, pids)
 
 
 def _es_link_subtree(request, api, part_id) -> tuple[list[dict], bool]:
     """The direct sub-components for the PDF's Sub-components table, each
-    child that already HAS a generated executive summary carrying an
-    absolute link to that PDF — the newest HWDB attachment itself, served
-    through the explorer's authenticated proxy (HWDB's own ``/img/{id}``
-    endpoint demands a bearer, probed 2026-07-31, so a direct API link can't
-    open in a browser). PUBLIC_ORIGIN so the URLs survive the www proxy,
-    like the scan QR."""
+    child that already HAS a generated executive summary linking its
+    images page in the FNAL HWDB web UI, where the ES PDFs are listed —
+    a permanent host, unlike this app's (Chao 2026-07-31: a locally
+    generated PDF was baking 127.0.0.1 proxy links into HWDB). No
+    login-free direct PDF URL exists (``/img/{id}`` demands a bearer,
+    probed 2026-07-31), so the images page is the closest stable target."""
+    ui = settings.HWDB_PROFILES[instance_of(request)]["ui"]
     rows, truncated = subtree_rows(api, part_id)
     es = _has_es_map(api, [r["part_id"] for r in rows])
     for r in rows:
-        img = es.get(r["part_id"])
-        if img and img.get("image_id"):
-            r["es_url"] = _abs_url(
-                request,
-                _rev(request, "explore:shipment_image", args=[img["image_id"]])
-                + "?" + urlencode({"name": img["image_name"], "inline": 1}))
+        if es.get(r["part_id"]) and r.get("component_id"):
+            r["es_url"] = f"{ui}/view/images/component/{r['component_id']}"
     return rows, truncated
 
 
@@ -2014,8 +1999,10 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
                     "status_label": execsummary.STATUS_LABEL_BY_ID.get(sid, "Unknown"),
                     "certified_flag": certified, "uploaded_flag": uploaded,
                     "instance": instance_of(request),
-                    "part_url": _abs_url(request, _rev(request, "explore:part",
-                                                       args=[part_id]))}
+                    # the QR target: the FNAL HWDB record is permanent; this
+                    # app's hostname may change (Chao 2026-07-31)
+                    "part_url": (f"{settings.HWDB_PROFILES[instance_of(request)]['ui']}"
+                                 f"/edit/component/{part_id}")}
         pdf_bytes = execsummary.build_default_pdf(
             part_id, signinfo, _es_link_subtree(request, api, part_id))
         name = f"ExecutiveSummary_{part_id}_{timezone.now():{execsummary.FILENAME_TS_FMT}}.pdf"
@@ -2226,8 +2213,10 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             "type_path": type_path,
             "consortium": cfg["consortium_name"],
             "instance": inst,
-            "part_url": _abs_url(request, _rev(request, "explore:part",
-                                               args=[part_id])),
+            # the QR target: the FNAL HWDB record is permanent; this app's
+            # hostname may change (Chao 2026-07-31)
+            "part_url": (f"{settings.HWDB_PROFILES[inst]['ui']}"
+                         f"/edit/component/{part_id}"),
             "description": cfg["test_description"],
             "todos": {**cfg["todos"], "checked": ((saved_todos or {}).get("checked") or [])},
             "signee_rows": status["rows"],

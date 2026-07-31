@@ -784,10 +784,13 @@ def _log_flowables(log: list[dict]) -> list:
                 f'</para>', txt), "", "", ""])
             continue
         # sign-flow entries: name is the POSITION — the typed signature
-        # identifies the person (Hajime 2026-07-31)
-        signed = f' · {escape(e["signature"])}' if e.get("signature") else ""
+        # identifies the person, so the PERSON gets the bold, not the title
+        if e.get("signature"):
+            who_txt = f'<b>{escape(e["signature"])}</b> · {escape(e.get("name") or "")}'
+        else:
+            who_txt = f'<b>{escape(e.get("name") or "")}</b>'
         body.append([Paragraph(escape(e.get("timestamp") or ""), ts),
-                     Paragraph(f'<b>{escape(e.get("name") or "")}</b>{signed}', who),
+                     Paragraph(who_txt, who),
                      Paragraph(escape(e.get("status") or "—"), st),
                      Paragraph(escape(e.get("text") or ""), txt)])
     t = Table(body, colWidths=[76, 126, 76, 190], repeatRows=1)
@@ -932,7 +935,8 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
             elif pb.get("error"):
                 story.append(Paragraph(f"⚠ {escape(pb['error'])}", src_style))
 
-    SimpleDocTemplate(buf, pagesize=letter).build(story)
+    SimpleDocTemplate(buf, pagesize=letter,
+                      title=f"Executive Summary: {part_id}").build(story)
     return buf.getvalue()
 
 
@@ -969,7 +973,8 @@ def build_default_pdf(part_id: str, signinfo: dict,
     story += _section("Sub-components",
                       f"{n_sub} direct sub-component{'s' if n_sub != 1 else ''}")
     story += subtree_flowables(*subtree)
-    SimpleDocTemplate(buf, pagesize=letter).build(story)
+    SimpleDocTemplate(buf, pagesize=letter,
+                      title=f"Executive Summary (default): {part_id}").build(story)
     return buf.getvalue()
 
 

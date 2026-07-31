@@ -46,10 +46,17 @@
   .es-signed { color: var(--good); font-weight: 700; font-size: 12px; }
   .es-waiting { color: var(--faint); font-size: 12px; }
   .es-todo { display: block; font-size: 13px; color: var(--ink); margin: 2px 0; }
-  .es-log { border-top: 1px solid var(--rule); padding: 6px 0; font-size: 13px; color: var(--ink); }
-  .es-log:first-of-type { border-top: none; padding-top: 0; }
+  .es-log-table { width: 100%; border-collapse: collapse; font-size: 13px; color: var(--ink); }
+  .es-log-table th { text-align: left; font-size: 11px; font-weight: 600; color: var(--faint);
+    text-transform: uppercase; letter-spacing: .03em; padding: 0 10px 4px 0;
+    border-bottom: 1px solid var(--ink); }
+  .es-log-table td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--rule);
+    vertical-align: top; }
+  .es-log-table th:last-child, .es-log-table td:last-child { padding-right: 0; width: 45%; }
+  .es-log-time { font-size: 12px; color: var(--faint); white-space: nowrap; }
+  .es-log-status { color: var(--faint); }
   .es-log-reset { text-align: center; color: var(--faint); font-size: 12px; }
-  .es-log-text { white-space: pre-wrap; margin: 2px 0 0 2px; color: var(--ink); }
+  .es-log-text { white-space: pre-wrap; }
   .es-page textarea { width: 100%; resize: vertical; }
   .es-dl { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500;
     color: var(--good); text-decoration: none; border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule));
@@ -265,19 +272,29 @@
 
   <div class="es-card">
     <h2>Comments log</h2>
-    {% for e in comments_log %}
-    {% if e.event == "reset" %}
-    <div class="es-log es-log-reset">—— signatures have been reset ({{ e.timestamp }}{% if e.name %}, {{ e.name }}{% endif %}) ——</div>
+    {% if comments_log %}
+    <table class="es-log-table">
+      <thead><tr><th>Time</th><th>Who</th><th>QA/QC status</th><th>Comment</th></tr></thead>
+      <tbody>
+        {# newest first, same as the generated PDF #}
+        {% for e in comments_log reversed %}
+        {% if e.event == "reset" %}
+        <tr><td colspan="4" class="es-log-reset"><i>— signatures reset · {{ e.timestamp }}{% if e.name %} · {{ e.name }}{% endif %} —</i></td></tr>
+        {% else %}
+        <tr>
+          <td class="mono es-log-time">{{ e.timestamp }}</td>
+          {# sign-flow entries: name is the POSITION, signature the person — the person gets the bold #}
+          <td>{% if e.signature %}<b>{{ e.signature }}</b> · {{ e.name }}{% else %}<b>{{ e.name }}</b>{% endif %}</td>
+          <td class="es-log-status">{{ e.status|default:"—" }}</td>
+          <td class="es-log-text">{{ e.text }}</td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
     {% else %}
-    <div class="es-log">
-      <span class="mono" style="font-size:12px; color:var(--faint);">{{ e.timestamp }}</span>
-      — <b>{{ e.name }}</b>{% if e.signature %} · {{ e.signature }}{% endif %} <span class="es-hint">(status: {{ e.status }})</span>
-      <div class="es-log-text">{{ e.text }}</div>
-    </div>
-    {% endif %}
-    {% empty %}
     <p class="es-hint">No comments yet.</p>
-    {% endfor %}
+    {% endif %}
     {% if can_comment %}
     {# its own form (Hajime 2026-07-30): posting a comment must not submit the sign form's state #}
     <form method="post">
