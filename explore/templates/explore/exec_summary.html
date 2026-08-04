@@ -143,9 +143,9 @@
       <div class="es-hint">Uploaded image <span class="mono">{{ b.upload_name }}</span>{% if b.kind == "image" %} — supersedes the config’s test-record image{% endif %}</div>
       {% elif b.kind == "image" %}
       <div class="es-hint">Image: <span class="mono">{{ b.image_name }}</span> (history_order={{ b.history_order }}) · <span class="mono">{{ b.pid }}</span></div>
-      {% else %}
+      {% elif b.kind == "numeric" %}
       <div class="es-hint">Numeric plot (data_paths: <span class="mono">{{ b.data_paths|join:", " }}</span>) — rendered from this item’s latest <span class="mono">{{ b.test_type_name }}</span> record.</div>
-      {% endif %}
+      {% endif %}{# kind == "fields": values only, no image hint #}
       {% if b.error %}<div class="es-plot-err">&#9888; {{ b.error }}</div>{% endif %}
       {% if b.png_b64 and b.image_id %}
       {# both sources exist (numeric slot with an upload) — toggle; the generated PDF embeds whichever is showing #}
@@ -175,7 +175,7 @@
       </table>
       {% endif %}
       <a class="es-btn quiet" style="display:inline-block; margin-top:8px; text-decoration:none;"
-         href="{% url 'explore:es_plot' part_id=part_id index=b.index %}">Upload image{% if b.fields %} / fill fields{% endif %}</a>
+         href="{% url 'explore:es_plot' part_id=part_id index=b.index %}">{% if b.kind == "fields" %}Fill fields{% else %}Upload image{% if b.fields %} / fill fields{% endif %}{% endif %}</a>
     </div>
     {% endfor %}
     </div>

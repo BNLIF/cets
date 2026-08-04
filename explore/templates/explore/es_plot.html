@@ -57,6 +57,8 @@
   <p class="es-sub">Plot slot of <span class="mono">{{ part_id }}</span>’s executive summary.
     Uploads and field values go straight to HWDB; this page has no local state.</p>
 
+  {# a fields-only slot (no image_path / data_paths) carries no image at all #}
+  {% if b.kind != "fields" %}
   <div class="es-card">
     <h2>Image</h2>
     {% if b.uploaded %}
@@ -84,6 +86,7 @@
       <span class="mono">ESPlot_{{ part_id }}_{{ b.slug }}_&lt;timestamp&gt;.&lt;ext&gt;</span> —
       the newest upload fills this slot (HWDB keeps every version).</p>
   </div>
+  {% endif %}
 
   {% if b.fields %}
   <div class="es-card">

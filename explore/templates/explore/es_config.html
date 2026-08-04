@@ -159,6 +159,7 @@
       <select class="f-kind" style="flex:0 0 210px;">
         <option value="image">image (from a test record)</option>
         <option value="numeric">numeric (data_paths)</option>
+        <option value="fields">fields only (no plot)</option>
       </select>
       <input class="f-title" placeholder="title">
       <input class="f-ttn" placeholder="test type name, e.g. RoomT QC Test">
@@ -213,7 +214,7 @@
     return node;
   }
   function syncPlotKind(p) {
-    var kind = $(".f-kind", p).value;
+    var kind = $(".f-kind", p).value;   // "fields" hides both source rows
     $(".g-image", p).style.display = kind === "image" ? "" : "none";
     $(".g-numeric", p).style.display = kind === "numeric" ? "" : "none";
   }
@@ -246,8 +247,10 @@
       var n = add("t-plot", "ec-plots");
       var isNew = !p; p = p || {};
       var ip = p.image_path || null;
-      // a fresh plot defaults to image; a config-loaded one keeps its kind
-      $(".f-kind", n).value = (ip || isNew) ? "image" : "numeric";
+      // a fresh plot defaults to image; a config-loaded one keeps its kind —
+      // fields with neither source = a fields-only slot
+      $(".f-kind", n).value = (ip || isNew) ? "image"
+        : ((p.fields || []).length && !(p.data_paths || []).length) ? "fields" : "numeric";
       $(".f-title", n).value = p.title || "";
       $(".f-ttn", n).value = p.test_type_name || "";
       if (ip) { $(".f-image-name", n).value = ip.image_name || ""; $(".f-ho", n).value = ip.history_order || 0; }
@@ -294,12 +297,12 @@
       if (!isNaN(layer) && pos) o.sub_part_id = {layer: layer, pos_name: pos};
       if (kind === "image") {
         o.image_path = {image_name: imageName, history_order: parseInt($(".f-ho", p).value, 10) || 0};
-      } else {
+      } else if (kind === "numeric") {
         o.data_paths = paths;
         var bins = parseInt($(".f-bins", p).value, 10);
         if (!isNaN(bins)) o.bins = bins;
         if ($(".f-sum", p).checked) o.sum = true;
-      }
+      }   // "fields": neither source key — the fields list alone defines it
       var fields = $$(".g-fields .ec-field", p).map(function (r) {
         var label = $(".f-flabel", r).value.trim();
         if (!label) return null;

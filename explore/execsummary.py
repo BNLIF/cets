@@ -189,6 +189,10 @@ def _normalize(cfg: dict) -> dict:
             plots.append({**base, "kind": "image",
                           "image_name": (ip.get("image_name") or "").strip(),
                           "history_order": max(ho, 0)})
+        elif base["fields"] and not (p.get("data_paths") or []):
+            # A fields-only slot (Hajime 2026-08-05): values without a plot.
+            # No image machinery, no "data_paths must have length 1/2" error.
+            plots.append({**base, "kind": "fields"})
         else:
             try:
                 bins = int(p.get("bins") or 40)
@@ -603,6 +607,9 @@ def resolve_plots(api, cfg, part_id: str, children_of, item_images,
         if p["fields"]:
             blk["fields"] = resolve_plot_fields(
                 api, p, blk["pid"], (plot_fields or {}).get(p["slug"]) or {})
+        if p["kind"] == "fields":   # values only — no image to resolve
+            blocks.append(blk)
+            continue
         up = _newest_upload(item_images, plot_upload_prefix(part_id, p))
         if up:
             blk.update(image_id=str(up["image_id"]), uploaded=True,
@@ -991,7 +998,9 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
         src_style = _ds("pl-s", fontSize=7.5, leading=10,
                         textColor=colors.HexColor(_GREY))
         for pb in plot_blocks:
-            if pb.get("uploaded"):
+            if pb.get("kind") == "fields":
+                src = ""   # a fields-only slot — no plot, no source line
+            elif pb.get("uploaded"):
                 src = f"Uploaded image: {pb['upload_name']}"
             elif pb.get("kind") == "numeric":
                 src = f"Numeric plot (data_paths: {', '.join(pb.get('data_paths') or [])})"
@@ -1002,8 +1011,9 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
                 Spacer(1, 10),
                 Paragraph(f"<b>{escape(pb['title'])}</b> — "
                           f"{escape(pb['test_type_name'])}", title),
-                Paragraph(escape(src), src_style),
             ]
+            if src:
+                story.append(Paragraph(escape(src), src_style))
             # The plot's field group (#85) as a compact label/value grid —
             # auto values were resolved from the latest QC record when this
             # PDF was generated; manual ones come from the ES record.

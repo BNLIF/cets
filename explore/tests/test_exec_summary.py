@@ -1177,10 +1177,10 @@ CFG_FIELDS = {**CFG, "plots": [
 PLOT_PAGE = f"/hw/dev/part/{BOX}/exec-summary/plot/0/"
 
 
-def _fields_api(**kw):
-    """_api() with the fields config; QC test records carry the data_path
+def _fields_api(cfg=CFG_FIELDS, **kw):
+    """_api() with a fields config; QC test records carry the data_path
     value, the "ES" record keeps its usual shape."""
-    api = _api(cfg=CFG_FIELDS, **kw)
+    api = _api(cfg=cfg, **kw)
     es_resp = api.get_tests.return_value
 
     def get_tests(pid, test_type_id=None, history=False):
@@ -1437,3 +1437,80 @@ class ExtrasAndDefaultLogTest(TestCase):
         html = resp.content.decode()
         self.assertIn("Config posted", html)             # the save still lands
         self.assertIn("test type isn’t in place yet", html)
+
+
+# ---- fields-only slots (Hajime 2026-08-05): values without a plot ----------
+
+CFG_ONLY_FIELDS = {**CFG, "plots": [
+    {"title": "TOP CRU QC", "test_type_name": "RoomT QC",
+     "fields": [
+         {"label": "Factory", "data_path": "DATA.rms_mean"},
+         {"label": "Operator note"},
+     ]},
+]}
+
+
+class FieldsOnlySlotTest(TestCase):
+    """A plot entry with fields but neither image_path nor data_paths is a
+    fields-only slot: no image machinery, no "data_paths must have length
+    1/2" error — just the field grid."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("s", "s@s.io", "pw")
+        self.client.force_login(self.user)
+
+    def test_normalize_classifies_the_kinds(self):
+        plots = execsummary._normalize(CFG_ONLY_FIELDS)["plots"]
+        self.assertEqual(plots[0]["kind"], "fields")
+        # no fields AND no source stays a (broken) numeric slot — a real
+        # config mistake keeps its error
+        broken = execsummary._normalize({**CFG, "plots": [
+            {"title": "X", "test_type_name": "T"}]})["plots"]
+        self.assertEqual(broken[0]["kind"], "numeric")
+
+    def test_resolve_carries_fields_without_an_error(self):
+        api = _fields_api(cfg=CFG_ONLY_FIELDS)
+        cfg = execsummary._normalize(CFG_ONLY_FIELDS)
+        blk = execsummary.resolve_plots(api, cfg, BOX, lambda pid: [], [])[0]
+        self.assertIsNone(blk["error"])
+        self.assertIsNone(blk["image_id"])
+        self.assertEqual(blk["fields"][0]["value"], "12.5")
+
+    def test_plot_page_hides_the_image_card(self):
+        api = _fields_api(cfg=CFG_ONLY_FIELDS, es=[])
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PLOT_PAGE).content.decode()
+        self.assertNotIn("Invalid config", html)
+        self.assertNotIn('name="plot_image"', html)        # no upload form
+        self.assertNotIn("<h2>Image</h2>", html)
+        self.assertIn('name="field:Operator note"', html)  # fields still edit
+
+    def test_es_page_shows_values_only_card(self):
+        api = _fields_api(cfg=CFG_ONLY_FIELDS, es=[])
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertNotIn("Numeric plot (data_paths:", html)
+        self.assertNotIn("Invalid config", html)
+        self.assertIn(">Fill fields</a>", html)
+        self.assertIn("12.5", html)
+
+    def test_pdf_renders_the_block_without_error_or_source_line(self):
+        form = {"status_label": "OK", "certified_flag": True, "uploaded_flag": True,
+                "signee_rows": [], "subtree": ([], False),
+                "plot_blocks": [{
+                    "title": "TOP CRU QC", "test_type_name": "RoomT QC",
+                    "kind": "fields", "pid": BOX, "uploaded": False,
+                    "error": None, "image_id": None,
+                    "fields": [{"label": "Factory", "data_path": "",
+                                "auto": False, "value": "Grenoble",
+                                "error": None}]}]}
+        pdf = execsummary.build_detail_pdf(BOX, form)
+        import io
+        from pypdf import PdfReader
+        text = "".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages)
+        self.assertIn("TOP CRU QC", text)
+        self.assertIn("Grenoble", text)
+        self.assertNotIn("Numeric plot", text)
+        self.assertNotIn("Invalid config", text)
