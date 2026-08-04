@@ -1,0 +1,122 @@
+{% extends 'explore/base.html' %}
+{% block title %}{{ b.title }} · ES plot · {{ part_id }} · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .es-page { padding: 22px 30px 56px; max-width: 860px; }
+  .es-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .es-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .es-crumbs a:hover { text-decoration: underline; }
+  .es-crumbs .sep { color: var(--faint); margin: 0 7px; }
+  .es-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 2px; }
+  .es-page h1 .mono { font-family: var(--font-mono); }
+  .es-sub { color: var(--dim); font-size: 13px; margin: 0 0 12px; }
+  .es-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
+  .es-flash.success { color: var(--good); background: var(--good-bg);
+    border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule)); }
+  .es-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
+    border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+  .es-card { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg);
+    padding: 12px 16px; margin-bottom: 12px; }
+  .es-card h2 { font-size: 12px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em;
+    margin: 0 0 8px; }
+  .es-hint { font-size: 11.5px; color: var(--faint); }
+  .es-err { font-size: 12.5px; color: var(--bad, #a33); margin-top: 4px; overflow-wrap: anywhere; }
+  .es-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+  .es-page input[type=text] { font: inherit; font-size: 13px; color: var(--ink);
+    background: var(--surface); border: 1px solid var(--rule);
+    border-radius: var(--r-sm); padding: 6px 8px; width: 100%; }
+  .es-btn { font: inherit; font-size: 13px; font-weight: 600; color: var(--accent-ink);
+    background: var(--accent-soft); border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--rule));
+    border-radius: var(--r-sm); padding: 6px 15px; cursor: pointer; }
+  .es-btn:hover { border-color: var(--accent); }
+  .es-btn.quiet { color: var(--dim); background: var(--surface); border-color: var(--rule); }
+  .es-plot-img { max-width: 100%; max-height: 420px; width: auto; height: auto; margin-top: 6px;
+    border: 1px solid var(--rule); border-radius: var(--r-sm); }
+  .es-fields { width: 100%; border-collapse: collapse; font-size: 13px; color: var(--ink); }
+  .es-fields th { text-align: left; font-size: 11px; font-weight: 600; color: var(--faint);
+    text-transform: uppercase; letter-spacing: .03em; padding: 0 12px 4px 0;
+    border-bottom: 1px solid var(--ink); }
+  .es-fields td { padding: 6px 12px 6px 0; border-bottom: 1px solid var(--rule);
+    vertical-align: middle; }
+  .es-fields td.lab { width: 38%; color: var(--dim); }
+  .es-auto-val { font-family: var(--font-mono); font-size: 12.5px; }
+</style>
+
+<div class="es-page">
+  <div class="es-crumbs">
+    <a href="{% url 'explore:home' %}">Explorer</a>
+    <span class="sep">›</span><a href="{% url 'explore:part' part_id=part_id %}">{{ part_id }}</a>
+    <span class="sep">›</span><a href="{% url 'explore:exec_summary' part_id=part_id %}">Executive summary</a>
+    <span class="sep">›</span>{{ b.title }}
+  </div>
+
+  {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+
+  <h1>{{ b.title }}{% if b.test_type_name %} — {{ b.test_type_name }}{% endif %}</h1>
+  <p class="es-sub">Plot slot of <span class="mono">{{ part_id }}</span>’s executive summary.
+    Uploads and field values go straight to HWDB; this page has no local state.</p>
+
+  <div class="es-card">
+    <h2>Image</h2>
+    {% if b.uploaded %}
+    <div class="es-hint">Uploaded image <span class="mono">{{ b.upload_name }}</span>{% if b.kind == "image" %} — supersedes the config’s test-record image{% endif %}</div>
+    {% elif b.kind == "image" %}
+    <div class="es-hint">Image: <span class="mono">{{ b.image_name }}</span> (history_order={{ b.history_order }}) · <span class="mono">{{ b.pid }}</span></div>
+    {% else %}
+    <div class="es-hint">Numeric plot (data_paths: <span class="mono">{{ b.data_paths|join:", " }}</span>) — rendered from the latest <span class="mono">{{ b.test_type_name }}</span> record.</div>
+    {% endif %}
+    {% if b.error %}<div class="es-err">&#9888; {{ b.error }}</div>{% endif %}
+    {% if b.image_id %}
+      {% if b.is_pdf %}<a href="{% url 'explore:shipment_image' image_id=b.image_id %}?name={{ b.image_name|urlencode }}&amp;inline=1" target="_blank" rel="noopener">{{ b.image_name }} <span aria-hidden="true">&#x2197;</span></a>
+      {% else %}<img class="es-plot-img" src="{% url 'explore:shipment_image' image_id=b.image_id %}" alt="{{ b.title }}">
+      {% endif %}
+    {% elif b.png_b64 %}
+    <img class="es-plot-img" src="data:image/png;base64,{{ b.png_b64 }}" alt="{{ b.title }}">
+    {% endif %}
+    <form method="post" enctype="multipart/form-data" class="es-row" style="margin-top:10px;">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="upload_plot">
+      <input type="file" name="plot_image" accept=".png,.jpg,.jpeg,.gif,image/*" required style="font-size:12px; color:var(--dim); max-width: 260px;">
+      <button class="es-btn quiet">{% if b.image_id or b.png_b64 %}Upload replacement{% else %}Upload plot image{% endif %}</button>
+    </form>
+    <p class="es-hint" style="margin: 8px 0 0;">Uploads post onto the item as
+      <span class="mono">ESPlot_{{ part_id }}_{{ b.slug }}_&lt;timestamp&gt;.&lt;ext&gt;</span> —
+      the newest upload fills this slot (HWDB keeps every version).</p>
+  </div>
+
+  {% if b.fields %}
+  <div class="es-card">
+    <h2>Fields</h2>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="save_fields">
+      <table class="es-fields">
+        <thead><tr><th>Label</th><th>Value</th></tr></thead>
+        <tbody>
+          {% for f in b.fields %}
+          <tr>
+            <td class="lab">{{ f.label }}</td>
+            <td>
+              {% if f.auto %}
+                {% if f.value is not None %}<span class="es-auto-val">{{ f.value }}</span>{% endif %}
+                {% if f.error %}<div class="es-err">&#9888; {{ f.error }}</div>{% endif %}
+                <div class="es-hint">auto — <span class="mono">{{ f.data_path }}</span> from the latest <span class="mono">{{ b.test_type_name }}</span> record</div>
+              {% else %}
+                <input type="text" name="field:{{ f.label }}" value="{{ f.value }}" maxlength="500">
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class="es-row" style="margin-top:10px;">
+        <button class="es-btn">Save field values</button>
+        <span class="es-hint">Saved into the item’s “ES” test record — every save is a new
+          version, old ones are preserved. These values show on the executive-summary page and PDF.</span>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

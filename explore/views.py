@@ -12,7 +12,8 @@ from django.contrib.auth.decorators import login_not_required
 from django.core.paginator import Paginator
 from django.db.models import F, Q
 from django.http import (
-    HttpResponse, HttpResponseForbidden, JsonResponse, StreamingHttpResponse,
+    Http404, HttpResponse, HttpResponseForbidden, JsonResponse,
+    StreamingHttpResponse,
 )
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -1760,17 +1761,109 @@ def _ensure_es_test_type(api, ptid) -> str | None:
 
 
 def _post_es(api, part_id, es_list, todos, comments,
-             comments_log=None, sub_es=None) -> str | None:
+             comments_log=None, sub_es=None, plot_fields=None) -> str | None:
     """Post the consolidated ES test record; returns an error string or None."""
     err = _ensure_es_test_type(api, part_id.rsplit("-", 1)[0])
     if err:
         return f"couldn’t create the “ES” test type — {err}"
     try:
         body = api.post_test(part_id, execsummary.es_test_payload(
-            es_list, todos, comments, comments_log=comments_log, sub_es=sub_es))
+            es_list, todos, comments, comments_log=comments_log, sub_es=sub_es,
+            plot_fields=plot_fields))
     except requests.RequestException as e:
         return _hwdb_error_detail(e)
     return None if body.get("status") == "OK" else str(body.get("data") or body)
+
+
+def _handle_plot_upload(request, api, part_id, plot) -> None:
+    """Validate and post one manually-uploaded plot image (ESPlot_* on the
+    item, newest wins the slot); outcome lands in messages — the caller
+    redirects."""
+    img = request.FILES.get("plot_image")
+    ext = img.name.rsplit(".", 1)[-1].lower() if img and "." in img.name else ""
+    if plot is None or img is None or ext not in ("png", "jpg", "jpeg", "gif"):
+        messages.error(request, "Pick a PNG/JPG/GIF image for a configured plot.")
+        return
+    if img.size > 10 * 1024 * 1024:
+        messages.error(request, "That image is over 10 MB — too large for a plot.")
+        return
+    name = (execsummary.plot_upload_prefix(part_id, plot)
+            + f"{timezone.now():{execsummary.FILENAME_TS_FMT}}.{ext}")
+    try:
+        body = api.post_component_image(
+            part_id, img, name, comments=f"ES plot upload: {plot['title']}")
+    except requests.RequestException as e:
+        messages.error(request, f"HWDB rejected the plot image — {_hwdb_error_detail(e)}")
+        return
+    if body.get("status") != "OK":
+        messages.error(request, f"HWDB rejected the plot image — {body.get('data') or body}")
+        return
+    messages.success(request, f"Plot image posted as {name} — it now fills "
+                              f"the “{plot['title']}” slot.")
+
+
+@login_not_required
+@fnal_login_required
+def explore_es_plot_view(request, part_id, index):
+    """One plot slot's entry page (#85): the current image, the upload
+    control, the manual fields as inputs, and the auto (data_path) fields
+    read-only with their live QC-record values. This is most consortia's
+    entry path — scripting a QC test-record upload is the barrier a web
+    form doesn't have. Manual values are stored in the ES test record
+    (append-only, so every edit is a preserved version)."""
+    inst = instance_of(request)
+    page_url = _rev(request, "explore:es_plot", args=[part_id, index])
+    es_url = _rev(request, "explore:exec_summary", args=[part_id])
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return HttpResponseForbidden("Executive summaries are not enabled here.")
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(es_url)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    cfg, _msg = execsummary.load_config(api, part_id.rsplit("-", 1)[0])
+    plot = next((p for p in (cfg["plots"] if cfg else [])
+                 if p["index"] == index), None)
+    if plot is None:
+        raise Http404("No such plot slot.")
+
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "upload_plot":
+            _handle_plot_upload(request, api, part_id, plot)
+            return redirect(page_url)
+        if action == "save_fields":
+            (es_list, saved_todos, comments_log, saved_sub_es,
+             plot_fields) = execsummary.fetch_es_state(api, part_id)
+            values = {f["label"]: request.POST.get(f"field:{f['label']}") or ""
+                      for f in plot["fields"] if not f["data_path"]}
+            err = _post_es(api, part_id, es_list, saved_todos,
+                           f"ES plot fields updated: {plot['title']}",
+                           comments_log=comments_log, sub_es=saved_sub_es,
+                           plot_fields=execsummary.set_plot_fields(
+                               plot_fields, plot["slug"], values))
+            if err:
+                messages.error(request, f"HWDB rejected the field values — {err}")
+            else:
+                messages.success(request, f"Field values saved for “{plot['title']}”.")
+            return redirect(page_url)
+        messages.error(request, "Unknown action.")
+        return redirect(page_url)
+
+    *_rest, plot_fields = execsummary.fetch_es_state(api, part_id)
+    blk = execsummary.resolve_plots(
+        api, {"plots": [plot]}, part_id, _children_of(api),
+        _safe_get_data(api.get_images, part_id), plot_fields=plot_fields)[0]
+    return render(request, "explore/es_plot.html", {
+        "active_nav": "shipments",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "part_id": part_id,
+        "b": blk,
+    })
 
 
 def _patch_item_flags(api, part_id, status_id, certified, uploaded, comment) -> None:
@@ -1829,10 +1922,12 @@ def explore_exec_summary_view(request, part_id):
 
     # ---- GET: assemble the signing page, all state live from HWDB ----
     images_rows = _safe_get_data(api.get_images, part_id)
+    (es_list, saved_todos, comments_log, _saved_sub_es,
+     saved_plot_fields) = execsummary.fetch_es_state(api, part_id)
     plot_blocks = (execsummary.resolve_plots(
-        api, cfg, part_id, _children_of(api), images_rows)
+        api, cfg, part_id, _children_of(api), images_rows,
+        plot_fields=saved_plot_fields)
         if cfg and cfg["plots"] else [])
-    es_list, saved_todos, comments_log, _saved_sub_es = execsummary.fetch_es_state(api, part_id)
     full_name, role_ids, role_names = _whoami_context(api)
     signing = (execsummary.compute_status(cfg, es_list, role_ids, role_names)
                if cfg else None)
@@ -2023,30 +2118,11 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
         except ValueError:
             idx = -1
         plot = next((p for p in cfg["plots"] if p["index"] == idx), None)
-        img = request.FILES.get("plot_image")
-        ext = img.name.rsplit(".", 1)[-1].lower() if img and "." in img.name else ""
-        if plot is None or img is None or ext not in ("png", "jpg", "jpeg", "gif"):
-            messages.error(request, "Pick a PNG/JPG/GIF image for a configured plot.")
-            return redirect(page_url)
-        if img.size > 10 * 1024 * 1024:
-            messages.error(request, "That image is over 10 MB — too large for a plot.")
-            return redirect(page_url)
-        name = (execsummary.plot_upload_prefix(part_id, plot)
-                + f"{timezone.now():{execsummary.FILENAME_TS_FMT}}.{ext}")
-        try:
-            body = api.post_component_image(
-                part_id, img, name, comments=f"ES plot upload: {plot['title']}")
-        except requests.RequestException as e:
-            messages.error(request, f"HWDB rejected the plot image — {_hwdb_error_detail(e)}")
-            return redirect(page_url)
-        if body.get("status") != "OK":
-            messages.error(request, f"HWDB rejected the plot image — {body.get('data') or body}")
-            return redirect(page_url)
-        messages.success(request, f"Plot image posted as {name} — it now fills "
-                                  f"the “{plot['title']}” slot.")
+        _handle_plot_upload(request, api, part_id, plot)
         return redirect(page_url)
 
-    es_list, saved_todos, comments_log, saved_sub_es = execsummary.fetch_es_state(api, part_id)
+    (es_list, saved_todos, comments_log, saved_sub_es,
+     saved_plot_fields) = execsummary.fetch_es_state(api, part_id)
     full_name, role_ids, role_names = _whoami_context(api)
     checked = []
     for v in request.POST.getlist("todo"):
@@ -2101,7 +2177,8 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
         # sub-component's ES page instead; any legacy saved selection just
         # rides through untouched.
         err = _post_es(api, part_id, merged, todos, f"ES signature updated: {name}",
-                       comments_log=new_log, sub_es=saved_sub_es)
+                       comments_log=new_log, sub_es=saved_sub_es,
+                       plot_fields=saved_plot_fields)
         if err:
             messages.error(request, f"HWDB rejected the signature — {err}")
             return redirect(page_url)
@@ -2137,7 +2214,8 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             text, timezone.localtime().strftime(execsummary.TIMESTAMP_FMT))
         err = _post_es(api, part_id, es_list, saved_todos,
                        f"ES comment posted by {who}",
-                       comments_log=new_log, sub_es=saved_sub_es)
+                       comments_log=new_log, sub_es=saved_sub_es,
+                       plot_fields=saved_plot_fields)
         if err:
             messages.error(request, f"HWDB rejected the comment — {err}")
         else:
@@ -2159,7 +2237,8 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             "status": "", "text": "", "event": "reset"})
         err = _post_es(api, part_id, [], saved_todos,
                        "ES RESET requested (cleared signatures)",
-                       comments_log=new_log, sub_es=saved_sub_es)
+                       comments_log=new_log, sub_es=saved_sub_es,
+                       plot_fields=saved_plot_fields)
         if err:
             messages.error(request, f"HWDB rejected the reset — {err}")
         else:
@@ -2192,7 +2271,8 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
         if cfg["plots"]:
             plot_blocks = execsummary.resolve_plots(
                 api, cfg, part_id, _children_of(api),
-                _safe_get_data(api.get_images, part_id))
+                _safe_get_data(api.get_images, part_id),
+                plot_fields=saved_plot_fields)
             # The page's per-slot source toggle travels with the POST: the
             # PDF embeds whichever source is showing (a mistaken upload can
             # be overridden by the data_paths plot).

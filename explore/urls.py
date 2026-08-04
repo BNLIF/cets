@@ -40,6 +40,8 @@ urlpatterns = [
     path("part/<str:part_id>/pack/", views.explore_box_pack_view, name="box_pack"),
     path("part/<str:part_id>/exec-summary/", views.explore_exec_summary_view,
          name="exec_summary"),
+    path("part/<str:part_id>/exec-summary/plot/<int:index>/",
+         views.explore_es_plot_view, name="es_plot"),
     path("part/<str:part_id>/es-subtree/", views.explore_es_subtree_view,
          name="es_subtree"),
     path("part/<str:part_id>/preship/", views.explore_preship_view, name="preship"),

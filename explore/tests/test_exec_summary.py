@@ -35,7 +35,8 @@ CFG = {
 }
 
 
-def _api(cfg=CFG, es=None, todos=None, roles=(41,), log=None, sub_es=None):
+def _api(cfg=CFG, es=None, todos=None, roles=(41,), log=None, sub_es=None,
+         plot_fields=None):
     api = mock.MagicMock()
     api.get_component_type_images.return_value = {"data": [
         {"image_id": "cfg1", "image_name": f"ES_D00599800007_test.json",
@@ -50,6 +51,8 @@ def _api(cfg=CFG, es=None, todos=None, roles=(41,), log=None, sub_es=None):
         td["comments_log"] = log
     if sub_es is not None:
         td["sub_es"] = sub_es
+    if plot_fields is not None:
+        td["plot_fields"] = plot_fields
     api.get_tests.return_value = {"data": [{"test_data": td}] if es is not None else []}
     api.whoami.return_value = {"data": {
         "full_name": "Chao Zhang", "roles": [{"id": r, "name": f"role{r}"} for r in roles]}}
@@ -305,8 +308,9 @@ class ImagePlotPageTest(TestCase):
         self.assertIn("D05700300001-00012", html)          # sub_part_id resolved pid
         self.assertIn("Numeric plot (data_paths:", html)   # rendered numeric slot
         self.assertIn("data:image/png;base64,", html)      # ...as an inline image
-        self.assertIn("Upload replacement", html)          # ...upload overrides it
-        self.assertEqual(html.count('name="plot_image"'), 3)  # one form per slot
+        # entry moved to the per-slot plot pages (#85) — one link per slot
+        self.assertEqual(html.count("exec-summary/plot/"), 3)
+        self.assertNotIn('name="plot_image"', html)
         self.assertLess(html.index("Plots (3 configured)"), html.index("Sign-off"))
 
     def test_uploaded_numeric_slot_offers_source_toggle(self):
@@ -1100,6 +1104,9 @@ class ConfigEditorTest(TestCase):
         self.assertIn("Contents match", html)
         self.assertIn("ES_D00599800007_test.json", html)   # current file named
         self.assertIn("Edit the ES config", html)
+        # per-plot field rows (#85): the plot template carries the editor
+        self.assertIn("data-add-field", html)
+        self.assertIn('id="t-field"', html)
 
     def test_editor_offers_template_when_type_has_none(self):
         api = _api(cfg=None)
@@ -1152,3 +1159,186 @@ class ConfigEditorTest(TestCase):
         with m1, m2:
             resp = self.client.get("/hw/es-config/D00599800007/")
         self.assertEqual(resp.status_code, 403)
+
+
+# ---- per-plot field groups (#85) --------------------------------------------
+
+CFG_FIELDS = {**CFG, "plots": [
+    {"title": "Noise RMS", "test_type_name": "RoomT QC",
+     "image_path": {"image_name": "noise.png"},
+     "fields": [
+         {"label": "RMS mean", "data_path": "DATA.rms_mean"},
+         {"label": "Operator note"},
+         {"label": "   "},        # blank label — dropped
+         "garbage",               # non-dict — dropped
+     ]},
+]}
+
+PLOT_PAGE = f"/hw/dev/part/{BOX}/exec-summary/plot/0/"
+
+
+def _fields_api(**kw):
+    """_api() with the fields config; QC test records carry the data_path
+    value, the "ES" record keeps its usual shape."""
+    api = _api(cfg=CFG_FIELDS, **kw)
+    es_resp = api.get_tests.return_value
+
+    def get_tests(pid, test_type_id=None, history=False):
+        if test_type_id == "ES":
+            return es_resp
+        return {"data": [{"images": [{"image_name": "noise.png",
+                                      "image_id": "img-noise"}],
+                          "test_data": {"DATA": {"rms_mean": 12.5}}}]}
+
+    api.get_tests.side_effect = get_tests
+    return api
+
+
+class PlotFieldsTest(TestCase):
+    """#85 (Hajime/Greg, the APA DB's per-plot fields): a field WITH a
+    data_path resolves live from the QC record; one WITHOUT is typed on the
+    plot page and stored in the ES test record."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("s", "s@s.io", "pw")
+        self.client.force_login(self.user)
+
+    def test_config_parses_fields_and_drops_blank_labels(self):
+        plots = execsummary._normalize(CFG_FIELDS)["plots"]
+        self.assertEqual(plots[0]["fields"], [
+            {"label": "RMS mean", "data_path": "DATA.rms_mean"},
+            {"label": "Operator note", "data_path": ""}])
+
+    def test_payload_carries_plot_fields(self):
+        p = execsummary.es_test_payload([], None, "c",
+                                        plot_fields={"p00-x": {"A": "1"}})
+        self.assertEqual(p["test_data"]["plot_fields"], {"p00-x": {"A": "1"}})
+        self.assertNotIn("plot_fields", execsummary.es_test_payload(
+            [], None, "c")["test_data"])
+
+    def test_set_plot_fields_replaces_one_slot_and_drops_blanks(self):
+        saved = {"p01-other": {"K": "v"}, "junk": "not-a-dict"}
+        out = execsummary.set_plot_fields(
+            saved, "p00-Noise-RMS", {"Operator note": " ok ", "Empty": "  "})
+        self.assertEqual(out, {"p01-other": {"K": "v"},
+                               "p00-Noise-RMS": {"Operator note": "ok"}})
+        # clearing every value removes the slot entirely
+        self.assertEqual(execsummary.set_plot_fields(
+            out, "p00-Noise-RMS", {"Operator note": ""}),
+            {"p01-other": {"K": "v"}})
+
+    def test_resolve_fields_auto_from_qc_record_manual_from_saved(self):
+        api = _fields_api()
+        plot = execsummary._normalize(CFG_FIELDS)["plots"][0]
+        rows = execsummary.resolve_plot_fields(
+            api, plot, BOX, {"Operator note": "looks fine"})
+        self.assertEqual(rows[0]["value"], "12.5")     # float → %g text
+        self.assertTrue(rows[0]["auto"])
+        self.assertIsNone(rows[0]["error"])
+        self.assertEqual(rows[1]["value"], "looks fine")
+        self.assertFalse(rows[1]["auto"])
+
+    def test_resolve_fields_reports_a_data_path_miss(self):
+        api = _fields_api()
+        plot = execsummary._normalize(
+            {**CFG_FIELDS, "plots": [{**CFG_FIELDS["plots"][0], "fields": [
+                {"label": "Missing", "data_path": "DATA.nope"}]}]})["plots"][0]
+        rows = execsummary.resolve_plot_fields(api, plot, BOX, {})
+        self.assertIsNone(rows[0]["value"])
+        self.assertIn("DATA.nope", rows[0]["error"])
+
+    def test_plot_page_renders_inputs_and_auto_values(self):
+        api = _fields_api(es=[],
+                          plot_fields={"p00-Noise-RMS": {"Operator note": "looks fine"}})
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PLOT_PAGE).content.decode()
+        self.assertIn("Noise RMS", html)
+        self.assertIn("12.5", html)                       # auto value, read-only
+        self.assertNotIn('name="field:RMS mean"', html)   # ...never an input
+        self.assertIn('name="field:Operator note"', html)
+        self.assertIn('value="looks fine"', html)         # prefilled from ES record
+        self.assertIn('name="plot_image"', html)          # upload lives here now
+
+    def test_plot_page_404s_on_an_unknown_slot(self):
+        api = _fields_api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.get(f"/hw/dev/part/{BOX}/exec-summary/plot/9/")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_save_fields_posts_es_record_preserving_state(self):
+        old_log = [{"name": "A", "timestamp": "t0", "status": "U", "text": "x"}]
+        api = _fields_api(es=[_entry("Hajime Muramatsu", 1)], log=old_log,
+                          sub_es=["D05700300001-00012"],
+                          plot_fields={"p01-other": {"K": "v"}})
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PLOT_PAGE, {
+                "action": "save_fields",
+                "field:Operator note": "checked by hand",
+                "field:RMS mean": "999"})   # auto field — ignored
+        payload = api.post_test.call_args.args[1]
+        self.assertEqual(payload["test_data"]["plot_fields"], {
+            "p01-other": {"K": "v"},
+            "p00-Noise-RMS": {"Operator note": "checked by hand"}})
+        # signatures, log and the legacy sub-ES selection all ride through
+        self.assertEqual(payload["test_data"]["ES"][0]["name"], "Hajime Muramatsu")
+        self.assertEqual(payload["test_data"]["comments_log"], old_log)
+        self.assertEqual(payload["test_data"]["sub_es"], ["D05700300001-00012"])
+
+    def test_plot_page_upload_posts_the_image(self):
+        api = _fields_api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PLOT_PAGE, {
+                "action": "upload_plot",
+                "plot_image": SimpleUploadedFile("noise.png", PNG,
+                                                 content_type="image/png")})
+        name = api.post_component_image.call_args.args[2]
+        self.assertTrue(name.startswith(f"ESPlot_{BOX}_p00-Noise-RMS_"))
+
+    def test_sign_preserves_plot_fields(self):
+        api = _api(es=[], plot_fields={"p00-Noise-RMS": {"Operator note": "ok"}})
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {
+                "sign": "Chao Zhang", "sig:Chao Zhang": "Chao Zhang",
+                "todo": ["0", "1"], "status_id": "120",
+                "certified": "on", "uploaded": "on"})
+        payload = api.post_test.call_args.args[1]
+        self.assertEqual(payload["test_data"]["plot_fields"],
+                         {"p00-Noise-RMS": {"Operator note": "ok"}})
+
+    def test_es_page_shows_field_values_readonly_with_entry_link(self):
+        api = _fields_api(es=[],
+                          plot_fields={"p00-Noise-RMS": {"Operator note": "looks fine"}})
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("Operator note", html)
+        self.assertIn("looks fine", html)
+        self.assertIn("12.5", html)
+        self.assertNotIn('name="field:', html)            # display only here
+        self.assertIn(f"exec-summary/plot/0/", html)      # entry link
+
+    def test_pdf_renders_the_field_grid_under_the_plot(self):
+        form = {"status_label": "OK", "certified_flag": True, "uploaded_flag": True,
+                "signee_rows": [], "subtree": ([], False),
+                "plot_blocks": [{
+                    "title": "Noise RMS", "test_type_name": "RoomT QC",
+                    "kind": "image", "image_name": "noise.png",
+                    "history_order": 0, "pid": BOX, "uploaded": False,
+                    "fields": [
+                        {"label": "RMS mean", "data_path": "DATA.rms_mean",
+                         "auto": True, "value": "12.5", "error": None},
+                        {"label": "Operator note", "data_path": "",
+                         "auto": False, "value": "looks fine", "error": None}]}]}
+        pdf = execsummary.build_detail_pdf(BOX, form)
+        import io
+        from pypdf import PdfReader
+        text = "".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages)
+        self.assertIn("RMS mean", text)
+        self.assertIn("12.5", text)
+        self.assertIn("Operator note", text)
+        self.assertIn("looks fine", text)

@@ -170,7 +170,16 @@ def _normalize(cfg: dict) -> dict:
                 # SiPM board inside a box).
                 "part_id": str(p.get("part_id") or "").strip(),
                 "sub_part_id": (p.get("sub_part_id")
-                                if isinstance(p.get("sub_part_id"), dict) else None)}
+                                if isinstance(p.get("sub_part_id"), dict) else None),
+                # Optional per-plot field group (#85, Hajime/Greg — the APA
+                # DB's filled fields next to each plot): a field WITH a
+                # data_path resolves live from the QC test record; one
+                # WITHOUT is typed on the plot page and stored in the ES
+                # test record. Labels are explicit, never data-path keys.
+                "fields": [{"label": str(f["label"]).strip(),
+                            "data_path": str(f.get("data_path") or "").strip()}
+                           for f in p.get("fields") or []
+                           if isinstance(f, dict) and str(f.get("label") or "").strip()]}
         ip = p.get("image_path")
         if isinstance(ip, dict) and (ip.get("image_name") or "").strip():
             try:
@@ -200,26 +209,30 @@ def _normalize(cfg: dict) -> dict:
 
 # ---- ES record state ------------------------------------------------------
 
-def fetch_es_state(api, part_id: str) -> tuple[list, dict | None, list, list | None]:
-    """Latest ``(ES list, todos payload, comments log, sub-ES selection)``
-    off the item's "ES" test record — the Dashboard's source of truth for
-    who has signed. ``comments_log`` (#82) and ``sub_es`` (#83) are absent
-    on records written before those features; sub_es None means "never
-    chosen" (callers default to everything)."""
+def fetch_es_state(api, part_id: str
+                   ) -> tuple[list, dict | None, list, list | None, dict]:
+    """Latest ``(ES list, todos payload, comments log, sub-ES selection,
+    plot fields)`` off the item's "ES" test record — the Dashboard's source
+    of truth for who has signed. ``comments_log`` (#82), ``sub_es`` (#83)
+    and ``plot_fields`` (#85, ``{slug: {label: value}}`` typed on the plot
+    pages) are absent on records written before those features; sub_es None
+    means "never chosen" (callers default to everything)."""
     try:
         data = api.get_tests(part_id, test_type_id="ES").get("data") or []
     except Exception as e:
         logger.warning("ES test fetch for %s failed: %s", part_id, e)
-        return [], None, [], None
+        return [], None, [], None, {}
     td = (data[0].get("test_data") or {}) if data and isinstance(data[0], dict) else {}
     es = td.get("ES")
     todos = td.get("todos")
     log = td.get("comments_log")
     sub_es = td.get("sub_es")
+    plot_fields = td.get("plot_fields")
     return ((es if isinstance(es, list) else []),
             (todos if isinstance(todos, dict) else None),
             (log if isinstance(log, list) else []),
-            (sub_es if isinstance(sub_es, list) else None))
+            (sub_es if isinstance(sub_es, list) else None),
+            (plot_fields if isinstance(plot_fields, dict) else {}))
 
 
 def merge_es_entry(es_list, name, signature, rank, timestamp, comments) -> list:
@@ -259,7 +272,7 @@ def append_comment_log(log, name, status_label, text, timestamp,
 
 
 def es_test_payload(es_list, todos_payload, comments,
-                    comments_log=None, sub_es=None) -> dict:
+                    comments_log=None, sub_es=None, plot_fields=None) -> dict:
     payload = {"comments": comments, "test_type": "ES",
                "test_data": {"ES": es_list}}
     if isinstance(todos_payload, dict):
@@ -268,7 +281,22 @@ def es_test_payload(es_list, todos_payload, comments,
         payload["test_data"]["comments_log"] = comments_log
     if sub_es is not None:
         payload["test_data"]["sub_es"] = sub_es
+    if plot_fields:
+        payload["test_data"]["plot_fields"] = plot_fields
     return payload
+
+
+def set_plot_fields(plot_fields, slug: str, values: dict) -> dict:
+    """The saved manual field values with one plot's group replaced (#85):
+    other slots ride through, non-dict garbage is dropped, blank values are
+    not stored (the label just renders empty)."""
+    out = {k: v for k, v in (plot_fields or {}).items()
+           if isinstance(v, dict) and k != slug}
+    kept = {str(k): str(v).strip() for k, v in (values or {}).items()
+            if str(v or "").strip()}
+    if kept:
+        out[slug] = kept
+    return out
 
 
 def todos_payload(cfg, checked: list[int]) -> dict:
@@ -500,7 +528,43 @@ def render_numeric_plot(test_data: dict, plot: dict, label: str):
     return None, "Invalid config: data_paths must have length 1 (histogram) or 2 (scatter)."
 
 
-def resolve_plots(api, cfg, part_id: str, children_of, item_images) -> list[dict]:
+def _fmt_field_value(v):
+    """A resolved data_path value as display text; None passes through (the
+    caller reports the miss)."""
+    if v is None:
+        return None
+    if isinstance(v, float):
+        return f"{v:g}"
+    if isinstance(v, (str, int, bool)):
+        return str(v)
+    return json.dumps(v)   # a list/object at the path — shown verbatim
+
+
+def resolve_plot_fields(api, plot, pid: str, saved: dict) -> list[dict]:
+    """The plot's field group (#85) as display rows ``{label, data_path,
+    auto, value, error}``: data_path fields read the resolved pid's LATEST
+    test record of the plot's test type (live — never stored, same rule as
+    numeric plots); manual fields read the values typed on the plot page
+    (``saved``, the ES record's ``plot_fields[slug]``)."""
+    rows = []
+    rec, err = (None, None)
+    if any(f["data_path"] for f in plot["fields"]):
+        rec, err = _test_record_at(api, pid, plot["test_type_name"], 0)
+    td = (rec or {}).get("test_data") or {}
+    for f in plot["fields"]:
+        if f["data_path"]:
+            value = None if err else _fmt_field_value(_get_by_path(td, f["data_path"]))
+            rows.append({**f, "auto": True, "value": value,
+                         "error": err or (None if value is not None else
+                                          f"No value at data_path '{f['data_path']}'.")})
+        else:
+            rows.append({**f, "auto": False,
+                         "value": str(saved.get(f["label"]) or ""), "error": None})
+    return rows
+
+
+def resolve_plots(api, cfg, part_id: str, children_of, item_images,
+                  plot_fields=None) -> list[dict]:
     """Resolve every config plot slot. Image slots resolve to an HWDB
     image_id (the page streams the bytes through the existing image proxy);
     the newest manual ESPlot_* upload on the item wins any slot; image_path
@@ -510,20 +574,17 @@ def resolve_plots(api, cfg, part_id: str, children_of, item_images) -> list[dict
     single-item only — no type-wide "sum" fan-out). An uploaded numeric slot
     still renders (page toggle between the two) but the upload keeps the PDF
     (``bytes`` stays unset so download_plot_images fetches it). Failures land
-    in ``error``, shown verbatim."""
+    in ``error``, shown verbatim. ``plot_fields`` (#85) is the ES record's
+    saved manual field values; each block gets its field group resolved
+    under the same pid addressing as the plot."""
     blocks = []
     for p in cfg["plots"]:
         blk = {**p, "pid": part_id, "image_id": None, "error": None,
                "uploaded": False, "upload_name": None, "is_pdf": False}
-        up = _newest_upload(item_images, plot_upload_prefix(part_id, p))
-        if up:
-            blk.update(image_id=str(up["image_id"]), uploaded=True,
-                       upload_name=up.get("image_name"))
-            if p["kind"] == "image":
-                blocks.append(blk)
-                continue
         # single_pid addressing (both kinds, the Dashboard's rule): explicit
-        # part_id or sub_part_id in the config, else the item itself.
+        # part_id or sub_part_id in the config, else the item itself. First,
+        # so the field group resolves under it even when an upload covers
+        # the slot.
         if p["sub_part_id"]:
             resolved = _resolve_sub_part_id(
                 children_of, part_id,
@@ -531,6 +592,16 @@ def resolve_plots(api, cfg, part_id: str, children_of, item_images) -> list[dict
             blk["pid"] = resolved or part_id
         elif p["part_id"]:
             blk["pid"] = p["part_id"]
+        if p["fields"]:
+            blk["fields"] = resolve_plot_fields(
+                api, p, blk["pid"], (plot_fields or {}).get(p["slug"]) or {})
+        up = _newest_upload(item_images, plot_upload_prefix(part_id, p))
+        if up:
+            blk.update(image_id=str(up["image_id"]), uploaded=True,
+                       upload_name=up.get("image_name"))
+            if p["kind"] == "image":
+                blocks.append(blk)
+                continue
         if p["kind"] == "image":
             blk["is_pdf"] = p["image_name"].lower().endswith(".pdf")
             rec, err = _test_record_at(api, blk["pid"], p["test_type_name"],
@@ -921,6 +992,25 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
                           f"{escape(pb['test_type_name'])}", title),
                 Paragraph(escape(src), src_style),
             ]
+            # The plot's field group (#85) as a compact label/value grid —
+            # auto values were resolved from the latest QC record when this
+            # PDF was generated; manual ones come from the ES record.
+            flds = [f for f in pb.get("fields") or []
+                    if isinstance(f, dict) and "value" in f]
+            if flds:
+                f_lab = _ds("pf-l", fontSize=7.5, leading=10,
+                            textColor=colors.HexColor(_GREY))
+                f_val = _ds("pf-v", fontSize=8.5, leading=11)
+                ft = Table(
+                    [[Paragraph(escape(f["label"]), f_lab),
+                      Paragraph(escape(f.get("value") or "")
+                                or f'<font color="{_GREY}">—</font>', f_val)]
+                     for f in flds],
+                    colWidths=[160, 308])
+                ft.setStyle(TableStyle([
+                    ("LINEBELOW", (0, 0), (-1, -1), 0.4, _HAIRLINE),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"), *_flush()]))
+                story += [Spacer(1, 4), ft]
             if pb.get("bytes"):
                 try:
                     img = Image(io.BytesIO(pb["bytes"]))

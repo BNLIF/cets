@@ -179,7 +179,20 @@
       <input class="f-layer" type="number" placeholder="sub layer" title="sub_part_id layer: 1 = direct children">
       <input class="f-pos" placeholder="sub position name" title="sub_part_id pos_name">
     </div>
+    {# per-plot field group (#85): label/value rows under the plot #}
+    <div class="g-fields"></div>
+    <div class="ec-row">
+      <button type="button" class="ec-add" data-add-field>+ add field</button>
+      <span class="ec-hint">optional label/value rows under the plot — with a data_path the value fills
+        itself from the latest test record; without one it is typed on the plot’s page</span>
+    </div>
   </div>
+</template>
+<template id="t-field">
+  <div class="ec-row ec-field" style="margin-left:14px;">
+    <input class="f-flabel" placeholder="field label, e.g. RMS mean (e-)">
+    <input class="f-fpath" placeholder="data_path (blank = typed on the plot page)" style="font-family:var(--font-mono); font-size:12px;">
+    <button type="button" class="ec-del" title="Remove field">&#x2715;</button></div>
 </template>
 
 {{ initial|json_script:"ec-initial" }}
@@ -203,6 +216,13 @@
     var kind = $(".f-kind", p).value;
     $(".g-image", p).style.display = kind === "image" ? "" : "none";
     $(".g-numeric", p).style.display = kind === "numeric" ? "" : "none";
+  }
+  function addField(plotNode, f) {
+    var node = document.getElementById("t-field").content.firstElementChild.cloneNode(true);
+    $(".g-fields", plotNode).appendChild(node);
+    f = f || {};
+    $(".f-flabel", node).value = f.label || "";
+    $(".f-fpath", node).value = f.data_path || "";
   }
   var adders = {
     todo: function (text) { $(".f-todo", add("t-todo", "ec-todos")).value = text || ""; },
@@ -236,6 +256,7 @@
       $(".f-sum", n).checked = !!p.sum;
       $(".f-pid", n).value = p.part_id || "";
       if (p.sub_part_id) { $(".f-layer", n).value = p.sub_part_id.layer; $(".f-pos", n).value = p.sub_part_id.pos_name || ""; }
+      (p.fields || []).forEach(function (f) { addField(n, f); });
       syncPlotKind(n);
     },
   };
@@ -279,6 +300,15 @@
         if (!isNaN(bins)) o.bins = bins;
         if ($(".f-sum", p).checked) o.sum = true;
       }
+      var fields = $$(".g-fields .ec-field", p).map(function (r) {
+        var label = $(".f-flabel", r).value.trim();
+        if (!label) return null;
+        var f = {label: label};
+        var dp = $(".f-fpath", r).value.trim();
+        if (dp) f.data_path = dp;
+        return f;
+      }).filter(Boolean);
+      if (fields.length) o.fields = fields;
       return o;
     }).filter(Boolean);
     if (plots.length) cfg.plots = plots;
@@ -316,10 +346,15 @@
   function refresh() { preview.value = JSON.stringify(collect(), null, 2); }
 
   form.addEventListener("click", function (e) {
+    if (e.target.hasAttribute && e.target.hasAttribute("data-add-field")) {
+      addField(e.target.closest(".ec-plot")); refresh(); return;
+    }
     var addKind = e.target.getAttribute && e.target.getAttribute("data-add");
     if (addKind) { adders[addKind](); refresh(); return; }
     if (e.target.classList.contains("ec-del")) {
-      var row = e.target.closest(".ec-plot") || e.target.closest(".ec-row");
+      // a field row first — it sits inside .ec-plot, which must NOT match
+      var row = e.target.closest(".ec-field") || e.target.closest(".ec-plot")
+                || e.target.closest(".ec-row");
       if (row) { row.remove(); refresh(); }
     }
   });

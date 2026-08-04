@@ -69,6 +69,9 @@
   .es-plot img { max-width: 100%; max-height: 260px; width: auto; height: auto; margin-top: 6px;
     display: block; border: 1px solid var(--rule); border-radius: var(--r-sm); background: #fff; }
   .es-plot-err { font-size: 12.5px; color: var(--bad, #a33); margin-top: 4px; overflow-wrap: anywhere; }
+  .es-plot-fields { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 6px; }
+  .es-plot-fields td { padding: 3px 10px 3px 0; border-bottom: 1px solid var(--rule); color: var(--ink); }
+  .es-plot-fields td.lab { width: 45%; color: var(--dim); }
   .es-sum { cursor: pointer; font-size: 12px; color: var(--faint); text-transform: uppercase;
     letter-spacing: .04em; }
   .es-sum:hover { color: var(--dim); }
@@ -160,19 +163,24 @@
         {% else %}<a class="es-src-upload" href="{% url 'explore:shipment_image' image_id=b.image_id %}?inline=1" target="_blank" rel="noopener" title="Open full size in a new tab"><img src="{% url 'explore:shipment_image' image_id=b.image_id %}" alt="{{ b.title }}" loading="lazy"></a>
         {% endif %}
       {% endif %}
-      <form method="post" enctype="multipart/form-data" class="es-row" style="margin-top:6px;">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="upload_plot">
-        <input type="hidden" name="plot_index" value="{{ b.index }}">
-        <input type="file" name="plot_image" accept=".png,.jpg,.jpeg,.gif,image/*" required style="font-size:12px; color:var(--dim); max-width: 230px;">
-        <button class="es-btn quiet">{% if b.image_id or b.png_b64 %}Upload replacement{% else %}Upload plot image{% endif %}</button>
-      </form>
+      {% if b.fields %}
+      {# the plot's field group (#85) — display only; values are typed on the plot's own page #}
+      <table class="es-plot-fields">
+        {% for f in b.fields %}
+        <tr>
+          <td class="lab">{{ f.label }}</td>
+          <td>{% if f.value %}{% if f.auto %}<span class="mono">{{ f.value }}</span>{% else %}{{ f.value }}{% endif %}{% else %}<span class="es-hint">—</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% endif %}
+      <a class="es-btn quiet" style="display:inline-block; margin-top:8px; text-decoration:none;"
+         href="{% url 'explore:es_plot' part_id=part_id index=b.index %}">Upload image{% if b.fields %} / fill fields{% endif %}</a>
     </div>
     {% endfor %}
     </div>
-    <p class="es-hint" style="margin: 8px 0 0;">Click a plot for full size. Uploads post onto the item as
-      <span class="mono" style="font-size:11px;">ESPlot_{{ part_id }}_p&lt;n&gt;-&lt;title&gt;_&lt;timestamp&gt;.&lt;ext&gt;</span> —
-      the newest upload fills its slot (HWDB keeps every version).</p>
+    <p class="es-hint" style="margin: 8px 0 0;">Click a plot for full size. Each plot’s page handles
+      image uploads{% if cfg %} and field values{% endif %} — everything posts to HWDB, newest wins.</p>
   </div>
   </div>
   {% endif %}
