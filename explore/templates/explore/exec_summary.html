@@ -192,6 +192,8 @@
     <h2>Summary</h2>
     {% if cfg.consortium_name %}<div class="es-kv"><b>Consortium:</b> {{ cfg.consortium_name }}</div>{% endif %}
     {% if cfg.test_description %}<div class="es-kv"><b>Description:</b> {{ cfg.test_description }}</div>{% endif %}
+    {# arbitrary top-level config fields (#86) — ES-level facts, shown here and in the PDF header #}
+    {% for x in cfg.extras %}<div class="es-kv"><b>{{ x.label }}:</b> {{ x.value }}</div>{% endfor %}
     {% if summaries %}
     <div class="es-row" style="margin-top: 8px;">
       <label>Summary PDFs ({{ summaries|length }})
@@ -279,46 +281,6 @@
   </form>
 
   <div class="es-card">
-    <h2>Comments log</h2>
-    {% if comments_log %}
-    <table class="es-log-table">
-      <thead><tr><th>Time</th><th>Who</th><th>QA/QC status</th><th>Comment</th></tr></thead>
-      <tbody>
-        {# newest first, same as the generated PDF #}
-        {% for e in comments_log reversed %}
-        {% if e.event == "reset" %}
-        <tr><td colspan="4" class="es-log-reset"><i>— signatures reset · {{ e.timestamp }}{% if e.name %} · {{ e.name }}{% endif %} —</i></td></tr>
-        {% else %}
-        <tr>
-          <td class="mono es-log-time">{{ e.timestamp }}</td>
-          {# sign-flow entries: name is the POSITION, signature the person — the person gets the bold #}
-          <td>{% if e.signature %}<b>{{ e.signature }}</b> · {{ e.name }}{% else %}<b>{{ e.name }}</b>{% endif %}</td>
-          <td class="es-log-status">{{ e.status|default:"—" }}</td>
-          <td class="es-log-text">{{ e.text }}</td>
-        </tr>
-        {% endif %}
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <p class="es-hint">No comments yet.</p>
-    {% endif %}
-    {% if can_comment %}
-    {# its own form (Hajime 2026-07-30): posting a comment must not submit the sign form's state #}
-    <form method="post">
-      {% csrf_token %}<input type="hidden" name="action" value="comment">
-      <div class="es-row" style="margin-top:8px; align-items:flex-start;">
-        <label style="flex:1;">New comment (appended to the log — entries are permanent)
-          <textarea name="comment_text" rows="2"></textarea></label>
-        <button class="es-btn" style="margin-top:17px;">Post comment</button>
-      </div>
-    </form>
-    {% else %}
-    <p class="es-hint">Posting a comment needs one of the configured signee roles.</p>
-    {% endif %}
-  </div>
-
-  <div class="es-card">
     <h2>Generate</h2>
     <div class="es-row">
       <form method="post" enctype="multipart/form-data" id="es-generate">{% csrf_token %}<input type="hidden" name="action" value="generate">
@@ -378,6 +340,47 @@
     </div>
   </div>
   {% endif %}
+
+  {# both modes (#86): the log lives in the item's "ES" test record either way #}
+  <div class="es-card">
+    <h2>Comments log</h2>
+    {% if comments_log %}
+    <table class="es-log-table">
+      <thead><tr><th>Time</th><th>Who</th><th>QA/QC status</th><th>Comment</th></tr></thead>
+      <tbody>
+        {# newest first, same as the generated PDF #}
+        {% for e in comments_log reversed %}
+        {% if e.event == "reset" %}
+        <tr><td colspan="4" class="es-log-reset"><i>— signatures reset · {{ e.timestamp }}{% if e.name %} · {{ e.name }}{% endif %} —</i></td></tr>
+        {% else %}
+        <tr>
+          <td class="mono es-log-time">{{ e.timestamp }}</td>
+          {# sign-flow entries: name is the POSITION, signature the person — the person gets the bold #}
+          <td>{% if e.signature %}<b>{{ e.signature }}</b> · {{ e.name }}{% else %}<b>{{ e.name }}</b>{% endif %}</td>
+          <td class="es-log-status">{{ e.status|default:"—" }}</td>
+          <td class="es-log-text">{{ e.text }}</td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="es-hint">No comments yet.</p>
+    {% endif %}
+    {% if can_comment %}
+    {# its own form (Hajime 2026-07-30): posting a comment must not submit the sign form's state #}
+    <form method="post">
+      {% csrf_token %}<input type="hidden" name="action" value="comment">
+      <div class="es-row" style="margin-top:8px; align-items:flex-start;">
+        <label style="flex:1;">New comment (appended to the log — entries are permanent)
+          <textarea name="comment_text" rows="2"></textarea></label>
+        <button class="es-btn" style="margin-top:17px;">Post comment</button>
+      </div>
+    </form>
+    {% else %}
+    <p class="es-hint">Posting a comment needs one of the configured signee roles.</p>
+    {% endif %}
+  </div>
 
   <div class="es-card">
     <h2>Type config</h2>

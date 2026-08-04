@@ -1342,3 +1342,98 @@ class PlotFieldsTest(TestCase):
         self.assertIn("12.5", text)
         self.assertIn("Operator note", text)
         self.assertIn("looks fine", text)
+
+
+# ---- #86: top-level extras, default-mode comments log, config-save check ----
+
+class ExtrasAndDefaultLogTest(TestCase):
+    """#86 (Hajime 2026-08-04): arbitrary top-level config fields display on
+    the page and in the PDF header; the comments log works in DEFAULT mode;
+    saving a config also makes sure the "ES" test type exists."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("s", "s@s.io", "pw")
+        self.client.force_login(self.user)
+
+    def test_normalize_collects_extra_top_level_fields(self):
+        cfg = execsummary._normalize({**CFG, "Production site": "Daresbury",
+                                      "Batch": 7, "component_type_id": "D007"})
+        self.assertEqual(cfg["extras"], [
+            {"label": "Production site", "value": "Daresbury"},
+            {"label": "Batch", "value": "7"}])
+        self.assertEqual(execsummary._normalize(CFG)["extras"], [])
+
+    def test_extras_show_on_the_page_and_in_the_pdf_header(self):
+        api = _api(cfg={**CFG, "Production site": "Daresbury"}, es=[])
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("Production site", html)
+        self.assertIn("Daresbury", html)
+        pdf = execsummary.build_detail_pdf(BOX, {
+            "extras": [{"label": "Production site", "value": "Daresbury"}],
+            "status_label": "OK", "certified_flag": True, "uploaded_flag": True,
+            "signee_rows": [], "subtree": ([], False)})
+        import io
+        from pypdf import PdfReader
+        first = PdfReader(io.BytesIO(pdf)).pages[0].extract_text()
+        self.assertIn("Production site", first)
+        self.assertIn("Daresbury", first)
+
+    def test_default_mode_shows_the_log_and_offers_the_comment_form(self):
+        api = _api(cfg=None, es=[], log=[
+            {"name": "Chao Zhang", "timestamp": "2026-08-04 09:00",
+             "status": "In Fabrication", "text": "default-mode note"}])
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("Comments log", html)
+        self.assertIn("default-mode note", html)
+        # no config → no signee roles; anyone FNAL-linked may post (#86)
+        self.assertIn('name="comment_text"', html)
+
+    def test_default_mode_comment_posts_without_a_config(self):
+        api = _api(cfg=None, es=[], roles=())   # not even a signee role
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"action": "comment",
+                                    "comment_text": "left in default mode"})
+        payload = api.post_test.call_args.args[1]
+        log = payload["test_data"]["comments_log"]
+        self.assertEqual(log[-1]["text"], "left in default mode")
+        self.assertEqual(log[-1]["name"], "Chao Zhang")
+
+    def test_default_pdf_carries_the_comments_log_page(self):
+        log = [{"name": "Chao Zhang", "timestamp": "2026-08-04 09:00",
+                "status": "In Fabrication", "text": "default-mode note"}]
+        pdf = execsummary.build_default_pdf(
+            BOX, {"signature": "Chao Zhang", "timestamp": "t",
+                  "comments": "c", "status_label": "OK",
+                  "certified_flag": True, "uploaded_flag": True},
+            ([], False), log=log)
+        import io
+        from pypdf import PdfReader
+        pages = [p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages]
+        self.assertIn("COMMENTS LOG", pages[-1])
+        self.assertIn("default-mode note", pages[-1])
+
+    def test_config_save_creates_the_missing_es_test_type(self):
+        api = _api()
+        api.get_test_types.return_value = {"data": []}   # not there yet
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(CFG_PAGE, {"config_json": json.dumps(CFG)})
+        api.post_test_type.assert_called_once()
+        self.assertEqual(api.post_test_type.call_args.args[1]["name"], "ES")
+
+    def test_config_save_warns_when_the_test_type_cannot_be_made(self):
+        api = _api()
+        api.get_test_types.return_value = {"data": []}
+        api.post_test_type.return_value = {"status": "ERROR", "data": "no perms"}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.post(CFG_PAGE, {"config_json": json.dumps(CFG)},
+                                    follow=True)
+        html = resp.content.decode()
+        self.assertIn("Config posted", html)             # the save still lands
+        self.assertIn("test type isn’t in place yet", html)

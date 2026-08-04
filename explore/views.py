@@ -1953,7 +1953,10 @@ def explore_exec_summary_view(request, part_id):
         "signing": signing,
         # Posting a standalone comment needs one of the configured signee
         # roles (Hajime 2026-07-30) — same competence as signing some row.
-        "can_comment": bool(signing and any(r["role_ok"] for r in signing["rows"])),
+        # In DEFAULT mode (#86) anyone FNAL-linked may post, like the
+        # default sign-off itself.
+        "can_comment": (any(r["role_ok"] for r in signing["rows"])
+                        if signing else True),
         "todos_checked": (saved_todos or {}).get("checked") or [],
         "comments_log": comments_log,
         "full_name": full_name,
@@ -2050,6 +2053,14 @@ def explore_es_config_view(request, part_type_id):
             return redirect(back)
         messages.success(request, f"Config posted as {name} — it now applies to "
                                   f"every {part_type_id} item.")
+        # #86 (Hajime): signatures live in an "ES" test record, so make sure
+        # the test type exists as soon as the type carries a config. A
+        # failure only warns — the signing path still self-heals.
+        err = _ensure_es_test_type(api, part_type_id)
+        if err:
+            messages.warning(request, f"Heads-up — the “ES” test type isn’t in "
+                                      f"place yet ({err}). It will be retried "
+                                      f"at the first signature.")
         return redirect(next_url or back)
 
     raw, current_name = execsummary.load_raw_config(api, part_type_id)
@@ -2098,14 +2109,55 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
                     # app's hostname may change (Chao 2026-07-31)
                     "part_url": (f"{settings.HWDB_PROFILES[instance_of(request)]['ui']}"
                                  f"/edit/component/{part_id}")}
+        # The comments log rides into the DEFAULT PDF too (#86).
+        _es, _td, def_log, _se, _pf = execsummary.fetch_es_state(api, part_id)
         pdf_bytes = execsummary.build_default_pdf(
-            part_id, signinfo, _es_link_subtree(request, api, part_id))
+            part_id, signinfo, _es_link_subtree(request, api, part_id),
+            log=def_log)
         name = f"ExecutiveSummary_{part_id}_{timezone.now():{execsummary.FILENAME_TS_FMT}}.pdf"
         err = _upload_summary_pdf(api, part_id, io.BytesIO(pdf_bytes), name)
         if err:
             messages.error(request, f"Summary PDF upload failed — {err}")
         else:
             messages.success(request, f"Signed and posted {name}.")
+        return redirect(page_url)
+
+    if action == "comment":
+        # Standalone comment (Hajime 2026-07-30): posts at any time,
+        # independent of signing — only the log changes. With a config it
+        # needs one of the configured signee roles; in DEFAULT mode (#86)
+        # any FNAL-linked user may post, the same competence as the
+        # default sign-off itself.
+        (es_list, saved_todos, comments_log, saved_sub_es,
+         saved_plot_fields) = execsummary.fetch_es_state(api, part_id)
+        full_name, role_ids, _names = _whoami_context(api)
+        if cfg is not None:
+            status = execsummary.compute_status(cfg, es_list, role_ids)
+            if not any(r["role_ok"] for r in status["rows"]):
+                messages.error(request, "Posting a comment needs one of the "
+                                        "configured signee roles.")
+                return redirect(page_url)
+        text = (request.POST.get("comment_text") or "").strip()
+        if not text:
+            messages.error(request, "Type a comment first.")
+            return redirect(page_url)
+        try:
+            comp = api.get_component(part_id).get("data") or {}
+        except requests.RequestException:
+            comp = {}
+        who = full_name or request.user.get_username()
+        new_log = execsummary.append_comment_log(
+            comments_log, who,
+            parts.normalize_status(comp.get("status")) or "Unknown",
+            text, timezone.localtime().strftime(execsummary.TIMESTAMP_FMT))
+        err = _post_es(api, part_id, es_list, saved_todos,
+                       f"ES comment posted by {who}",
+                       comments_log=new_log, sub_es=saved_sub_es,
+                       plot_fields=saved_plot_fields)
+        if err:
+            messages.error(request, f"HWDB rejected the comment — {err}")
+        else:
+            messages.success(request, "Comment posted.")
         return redirect(page_url)
 
     if cfg is None:
@@ -2189,39 +2241,6 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
         messages.success(request, f"Signature for “{name}” posted.")
         return redirect(page_url)
 
-    if action == "comment":
-        # Standalone comment (Hajime 2026-07-30): anyone holding one of the
-        # configured signee roles can post at any time, independent of
-        # signing. Only the log changes — signatures, todos and the sub-ES
-        # selection stay as saved.
-        status = execsummary.compute_status(cfg, es_list, role_ids)
-        if not any(r["role_ok"] for r in status["rows"]):
-            messages.error(request, "Posting a comment needs one of the "
-                                    "configured signee roles.")
-            return redirect(page_url)
-        text = (request.POST.get("comment_text") or "").strip()
-        if not text:
-            messages.error(request, "Type a comment first.")
-            return redirect(page_url)
-        try:
-            comp = api.get_component(part_id).get("data") or {}
-        except requests.RequestException:
-            comp = {}
-        who = full_name or request.user.get_username()
-        new_log = execsummary.append_comment_log(
-            comments_log, who,
-            parts.normalize_status(comp.get("status")) or "Unknown",
-            text, timezone.localtime().strftime(execsummary.TIMESTAMP_FMT))
-        err = _post_es(api, part_id, es_list, saved_todos,
-                       f"ES comment posted by {who}",
-                       comments_log=new_log, sub_es=saved_sub_es,
-                       plot_fields=saved_plot_fields)
-        if err:
-            messages.error(request, f"HWDB rejected the comment — {err}")
-        else:
-            messages.success(request, "Comment posted.")
-        return redirect(page_url)
-
     if action == "reset":
         status = execsummary.compute_status(cfg, es_list, role_ids)
         if not status["reset_allowed"]:
@@ -2298,6 +2317,7 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             "part_url": (f"{settings.HWDB_PROFILES[inst]['ui']}"
                          f"/edit/component/{part_id}"),
             "description": cfg["test_description"],
+            "extras": cfg["extras"],
             "todos": {**cfg["todos"], "checked": ((saved_todos or {}).get("checked") or [])},
             "signee_rows": status["rows"],
             "status_label": status_name or "Unknown",

@@ -196,6 +196,13 @@ def _normalize(cfg: dict) -> dict:
                 bins = 40
             plots.append({**base, "kind": "numeric", "bins": bins,
                           "data_paths": [str(x) for x in p.get("data_paths") or []]})
+    # Arbitrary top-level keys (#86, Hajime 2026-08-04): the editor's "Extra
+    # fields" card writes them; they are ES-level facts, shown on the page
+    # and in the PDF header — not silently carried.
+    known = {"consortium_name", "consortium name", "test_description",
+             "todos", "signees", "references", "plots", "component_type_id"}
+    extras = [{"label": str(k), "value": _fmt_field_value(v) or ""}
+              for k, v in cfg.items() if k not in known]
     return {
         "consortium_name": cfg.get("consortium_name") or cfg.get("consortium name") or "",
         "test_description": str(desc or ""),
@@ -204,6 +211,7 @@ def _normalize(cfg: dict) -> dict:
         "signees": signees,
         "references": refs,
         "plots": plots,
+        "extras": extras,
     }
 
 
@@ -931,6 +939,10 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
     facts.append(("Generated", f"{datetime.now():{TIMESTAMP_FMT}}"))
     if form.get("description"):
         facts.append(("Description", escape(form["description"])))
+    # Arbitrary top-level config fields (#86) — ES-level facts, after the
+    # built-in rows.
+    for x in form.get("extras") or []:
+        facts.append((escape(x["label"]), escape(x.get("value") or "")))
     story = [_summary_header(part_id, facts, qr_url=form.get("part_url") or "")]
 
     # Status, flags and the QC checklist share one section — they are all
@@ -1031,10 +1043,11 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
 
 
 def build_default_pdf(part_id: str, signinfo: dict,
-                      subtree: tuple[list[dict], bool]) -> bytes:
+                      subtree: tuple[list[dict], bool], log=None) -> bytes:
     """The configless DEFAULT summary in the same datasheet layout: header
     block, the status/QA-QC row, the single whoami sign-off row, and the
-    sub-components table — no checklist, no references."""
+    sub-components table — no checklist, no references. ``log`` (#86) adds
+    the comments-log page, same as the DETAIL layout."""
     buf = io.BytesIO()
     facts = []
     if signinfo.get("instance"):
@@ -1063,6 +1076,11 @@ def build_default_pdf(part_id: str, signinfo: dict,
     story += _section("Sub-components",
                       f"{n_sub} direct sub-component{'s' if n_sub != 1 else ''}")
     story += subtree_flowables(*subtree)
+    log = [e for e in log or [] if isinstance(e, dict)]
+    if log:
+        story.append(PageBreak())
+        story += _section("Comments log", "newest first · append-only; survives resets")
+        story += _log_flowables(log)
     SimpleDocTemplate(buf, pagesize=letter,
                       title=f"Executive Summary (default): {part_id}").build(story)
     return buf.getvalue()
