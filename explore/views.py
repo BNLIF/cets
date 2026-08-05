@@ -27,15 +27,15 @@ from hwdb.fnal import flow
 from hwdb.fnal import session as fnal_session
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
 
-from . import (charts, checklists, curation, events, execsummary, navigation,
-               parts, scanning)
+from . import (activity, charts, checklists, curation, events, execsummary,
+               navigation, parts, scanning)
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, sync_test_events
 from .hierarchy import sync_hierarchy, sync_system
 from .instances import instance_of, namespace_of
 from .models import (
-    BoxChecklist, HierarchyNode, HierarchySyncState, HwdbComponentEvent,
-    PackScan, ShipmentItem,
+    ActivityEvent, BoxChecklist, HierarchyNode, HierarchySyncState,
+    HwdbComponentEvent, PackScan, ShipmentItem,
 )
 from .queries import (
     component_breakdowns, component_qc_flags, component_type_progress,
@@ -603,6 +603,14 @@ def explore_shipment_refresh_view(request, part_id):
                 request,
                 f"{part_id} refreshed — {labels[new.ship_status]} · "
                 f"{new.location_name or 'no location yet'}.")
+            if (new.ship_status, new.location_name) != (row.ship_status,
+                                                        row.location_name):
+                activity.log(
+                    inst, ActivityEvent.KIND_SYNC,
+                    f"{part_id} moved — {labels[new.ship_status]} · "
+                    f"{new.location_name or 'no location yet'}",
+                    part_id=part_id, part_type_id=row.part_type_id,
+                    actor=request.user.get_username())
         else:
             messages.success(request, f"{part_id} refreshed.")
     return redirect(_safe_next(request, fallback))
@@ -1017,6 +1025,13 @@ def explore_part_location_view(request, part_id):
     except Exception as e:
         logger.warning("refresh_box(%s) failed: %s", part_id, e)
     messages.success(request, "Location update posted to HWDB.")
+    row = ShipmentItem.for_instance(inst).filter(part_id=part_id).first()
+    activity.log(
+        inst, ActivityEvent.KIND_LOCATION,
+        f"{part_id} location set to "
+        f"{(row.location_name if row else '') or 'a new location'}",
+        part_id=part_id, part_type_id=ptid,
+        actor=request.user.get_username())
     return redirect(part_url)
 
 
@@ -1129,6 +1144,9 @@ def explore_box_create_view(request, part_type_id):
     except Exception as e:
         logger.warning("refresh_box(%s) failed: %s", part_id, e)
     messages.success(request, f"Box {part_id} minted in the {inst} HWDB.")
+    activity.log(inst, ActivityEvent.KIND_MINTED, f"Box {part_id} minted",
+                 part_id=part_id, part_type_id=part_type_id,
+                 actor=request.user.get_username())
     return redirect(_rev(request, "explore:part", args=[part_id]))
 
 
@@ -1515,6 +1533,14 @@ def explore_box_pack_view(request, part_id):
     if added:
         _refresh_box_quietly(api, inst, ptid, part_id)
         messages.success(request, f"Added {len(added)} item(s): {', '.join(added)}.")
+        # Feed (#88): per-item adds would be noisy — record only the moment
+        # the box becomes full (every position holds an item).
+        if state and all(state.values()):
+            activity.log(inst, ActivityEvent.KIND_PACK,
+                         f"{part_id} fully packed — all {len(state)} "
+                         f"position(s) filled",
+                         part_id=part_id, part_type_id=ptid,
+                         actor=request.user.get_username())
     for pid, detail in failed:
         messages.error(request, f"{pid} was not added — {detail}")
     if is_htmx:
@@ -2224,6 +2250,10 @@ def explore_es_config_view(request, part_type_id):
             return redirect(back)
         messages.success(request, f"Config posted as {name} — it now applies to "
                                   f"every {part_type_id} item.")
+        activity.log(inst, ActivityEvent.KIND_ES,
+                     f"ES config updated for type {part_type_id}",
+                     part_type_id=part_type_id,
+                     actor=request.user.get_username())
         # #86 (Hajime): signatures live in an "ES" test record, so make sure
         # the test type exists as soon as the type carries a config. A
         # failure only warns — the signing path still self-heals.
@@ -2291,6 +2321,10 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             messages.error(request, f"Summary PDF upload failed — {err}")
         else:
             messages.success(request, f"Signed and posted {name}.")
+            activity.log(inst, ActivityEvent.KIND_ES,
+                         f"{part_id}: Executive Summary (default) signed and posted",
+                         part_id=part_id, part_type_id=ptid,
+                         actor=request.user.get_username())
         return redirect(page_url)
 
     if action == "comment":
@@ -2329,6 +2363,10 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             messages.error(request, f"HWDB rejected the comment — {err}")
         else:
             messages.success(request, "Comment posted.")
+            activity.log(inst, ActivityEvent.KIND_ES,
+                         f"{part_id}: ES comment posted",
+                         part_id=part_id, part_type_id=ptid,
+                         actor=request.user.get_username())
         return redirect(page_url)
 
     if cfg is None:
@@ -2410,6 +2448,10 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             f"[ExecSum] signature '{name}' uploaded, also Status, QAQC Certified, "
             f"and Uploaded flags updated.")
         messages.success(request, f"Signature for “{name}” posted.")
+        activity.log(inst, ActivityEvent.KIND_ES,
+                     f"{part_id}: ES signature “{name}” posted",
+                     part_id=part_id, part_type_id=ptid,
+                     actor=request.user.get_username())
         return redirect(page_url)
 
     if action == "reset":
@@ -2433,6 +2475,10 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             messages.error(request, f"HWDB rejected the reset — {err}")
         else:
             messages.success(request, "Signatures cleared.")
+            activity.log(inst, ActivityEvent.KIND_ES,
+                         f"{part_id}: ES reset — signatures cleared",
+                         part_id=part_id, part_type_id=ptid,
+                         actor=request.user.get_username())
         return redirect(page_url)
 
     if action == "generate":
@@ -2513,6 +2559,10 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             messages.error(request, f"Summary PDF upload failed — {err}")
         else:
             messages.success(request, f"Summary generated and posted as {name}.")
+            activity.log(inst, ActivityEvent.KIND_ES,
+                         f"{part_id}: Executive Summary generated and posted",
+                         part_id=part_id, part_type_id=ptid,
+                         actor=request.user.get_username())
         return redirect(page_url)
 
     messages.error(request, "Unknown action.")
@@ -2707,6 +2757,10 @@ def explore_preship_view(request, part_id):
             messages.success(request,
                              "Pre-shipping checklist written to HWDB (shipping sheet "
                              "uploaded, checklist patched).")
+            activity.log(inst, ActivityEvent.KIND_CHECKLIST,
+                         f"{part_id}: pre-shipping checklist written to HWDB",
+                         part_id=part_id, part_type_id=ptid,
+                         actor=request.user.get_username())
             return redirect(page_url)
 
         cl.current_scene = scene + 1
@@ -2912,11 +2966,19 @@ def explore_shipping_view(request, part_id):
                 return redirect(page_url)
             _refresh_box_quietly(api, inst, ptid, part_id)
             messages.success(request, "Box marked In-Transit in HWDB.")
+            activity.log(inst, ActivityEvent.KIND_LOCATION,
+                         f"{part_id} shipped — marked In-Transit",
+                         part_id=part_id, part_type_id=ptid,
+                         actor=request.user.get_username())
 
         if scene == checklists.N_SHIPPING_SCENES:
             cl.completed_at = timezone.now()
             cl.save(update_fields=["completed_at", "updated_at"])
             messages.success(request, "Shipping checklist complete.")
+            activity.log(inst, ActivityEvent.KIND_CHECKLIST,
+                         f"{part_id}: shipping checklist complete",
+                         part_id=part_id, part_type_id=ptid,
+                         actor=request.user.get_username())
         else:
             cl.current_scene = scene + 1
             cl.save(update_fields=["current_scene", "updated_at"])
@@ -3069,15 +3131,25 @@ def explore_receiving_view(request, part_id):
             if cl.route == "confirm_transshipping":
                 messages.success(
                     request, "Arrival location posted; contents stay linked (transshipping).")
+                detail = "contents stay linked (transshipping)"
             else:
                 messages.success(
                     request, f"Arrival location posted for the box and {len(manifest)} "
                              "item(s); all contents detached.")
+                detail = f"{len(manifest)} item(s) detached"
+            activity.log(inst, ActivityEvent.KIND_LOCATION,
+                         f"{part_id} arrived — location posted, {detail}",
+                         part_id=part_id, part_type_id=ptid,
+                         actor=request.user.get_username())
 
         if scene == checklists.N_RECEIVING_SCENES:
             cl.completed_at = timezone.now()
             cl.save(update_fields=["completed_at", "updated_at"])
             messages.success(request, "Receiving checklist complete.")
+            activity.log(inst, ActivityEvent.KIND_CHECKLIST,
+                         f"{part_id}: receiving checklist complete",
+                         part_id=part_id, part_type_id=ptid,
+                         actor=request.user.get_username())
         else:
             cl.current_scene = scene + 1
             cl.save(update_fields=["current_scene", "updated_at"])
@@ -3219,6 +3291,25 @@ def explore_search_view(request):
     return render(request, "explore/search.html",
                   {"active_nav": "search", "q": request.GET.get("q", ""),
                    "sidebar": navigation.sidebar_tree(instance_of(request), {})})
+
+
+@login_not_required
+@fnal_login_required
+def explore_activities_view(request):
+    """The Activities feed (#88): latest mirrored changes on this instance —
+    sync summaries (one row per run, never per item) and in-app writes.
+    Mirror-only; a rolling window pruned to the last month, so the part page
+    stays the authoritative history."""
+    inst = instance_of(request)
+    activity.prune()
+    page_obj = Paginator(ActivityEvent.for_instance(inst), 100).get_page(
+        request.GET.get("page"))
+    return render(request, "explore/activities.html", {
+        "active_nav": "activities",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "page_obj": page_obj,
+        "retention_days": activity.RETENTION_DAYS,
+    })
 
 
 @login_not_required

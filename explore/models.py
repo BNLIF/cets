@@ -297,6 +297,49 @@ class PackScan(InstanceScoped):
         return f"PackScan({self.username}, {self.part_id})"
 
 
+class ActivityEvent(InstanceScoped):
+    """One row on the Activities feed (#88): something changed, recorded as a
+    side effect of work already happening — the feed never calls HWDB.
+
+    Two sources: sync runs log ONE summary row per run and only when they
+    mirrored something new (10,000 known items re-synced = no row); in-app
+    writes (mint, pack, location, ES, checklists) log one row each. A rolling
+    window — ``activity.prune()`` drops rows older than a month; the part
+    page stays the authoritative history."""
+
+    KIND_SYNC = "sync"
+    KIND_MINTED = "minted"
+    KIND_LOCATION = "location"
+    KIND_PACK = "pack"
+    KIND_ES = "es"
+    KIND_CHECKLIST = "checklist"
+    KIND_LABELS = {
+        KIND_SYNC: "Sync",
+        KIND_MINTED: "New box",
+        KIND_LOCATION: "Location",
+        KIND_PACK: "Packing",
+        KIND_ES: "Exec summary",
+        KIND_CHECKLIST: "Checklist",
+    }
+
+    kind = models.CharField(max_length=12)
+    part_id = models.CharField(max_length=50, blank=True, default="")
+    part_type_id = models.CharField(max_length=20, blank=True, default="")
+    summary = models.TextField()
+    actor = models.CharField(max_length=150, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    @property
+    def kind_label(self) -> str:
+        return self.KIND_LABELS.get(self.kind, self.kind)
+
+    def __str__(self):
+        return f"ActivityEvent({self.kind}, {self.summary[:40]})"
+
+
 class HierarchySyncState(models.Model):
     """One row per HWDB instance recording that instance's last hierarchy
     (skeleton) sync run.

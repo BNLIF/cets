@@ -25,8 +25,8 @@ from django.utils import timezone
 
 from hwdb.api_client import FnalDbApiClient
 
-from . import parts
-from .models import HierarchyNode, HwdbComponentEvent, HwdbTestEvent
+from . import activity, parts
+from .models import ActivityEvent, HierarchyNode, HwdbComponentEvent, HwdbTestEvent
 
 logger = logging.getLogger(__name__)
 
@@ -412,6 +412,8 @@ def sync_test_events(
                         yield f"sync tests ({mode}): fetched {done}/{len(process)}\n"
 
         # --- Test events ---
+        n_tests_before = (HwdbTestEvent.for_instance(instance)
+                          .filter(part_type_id=part_type_id).count())
         if mode == "full":
             HwdbTestEvent.for_instance(instance).filter(part_type_id=part_type_id).delete()
         else:
@@ -471,6 +473,21 @@ def sync_test_events(
         node.n_tests = n_tests
         node.n_components = len(part_ids) or node.n_components
         node.save(update_fields=["tests_synced_at", "n_tests", "n_components"])
+
+        # Activities feed (#88): one summary row per run, only when the run
+        # mirrored something new. ``new_test_rows`` counts ALL rewritten rows
+        # in full mode, so the honest new-test figure is the net delta.
+        d_tests = n_tests - n_tests_before
+        bits = []
+        if new:
+            bits.append(f"{len(new)} new component(s)")
+        if d_tests > 0:
+            bits.append(f"{d_tests} new test event(s)")
+        if bits:
+            activity.log(
+                instance, ActivityEvent.KIND_SYNC,
+                f"Test sync: {' · '.join(bits)} on {node.name or part_type_id}",
+                part_type_id=part_type_id)
         yield (
             f"done ({mode}): {len(new_test_rows)} new test event(s), "
             f"{n_tests} total · {len(part_ids)} component(s)\n"

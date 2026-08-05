@@ -14,6 +14,7 @@ urlpatterns = [
     path("shipments/", views.shipments_view, name="shipments"),
     path("shipments/search/", views.explore_shipments_search_api_view,
          name="shipments_search_api"),
+    path("activities/", views.explore_activities_view, name="activities"),
     path("search/", views.explore_search_view, name="search"),
     path("search/api/", views.explore_search_api_view, name="search_api"),
     path("docs/", views.explore_docs_view, name="docs"),

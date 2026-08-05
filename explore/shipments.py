@@ -24,7 +24,8 @@ from django.utils import timezone
 
 from hwdb.api_client import FnalDbApiClient
 
-from .models import HierarchyNode, HwdbComponentEvent, ShipmentItem
+from . import activity
+from .models import ActivityEvent, HierarchyNode, HwdbComponentEvent, ShipmentItem
 
 logger = logging.getLogger(__name__)
 
@@ -353,6 +354,20 @@ def sync_shipments(api_base_url: str, bearer: str, part_type_id: str,
     HierarchyNode.for_instance(instance).filter(
         level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id
     ).update(shipments_synced_at=timezone.now())
+
+    # Activities feed (#88): one summary row per run, only when new boxes
+    # appeared — never a row per box.
+    new_pids = [r.part_id for r in ship_rows if r.part_id not in known]
+    if new_pids:
+        type_name = (HierarchyNode.for_instance(instance)
+                     .filter(level=HierarchyNode.LEVEL_TYPE,
+                             part_type_id=part_type_id)
+                     .values_list("name", flat=True).first())
+        activity.log(
+            instance, ActivityEvent.KIND_SYNC,
+            f"Shipment sync: {len(new_pids)} new box(es) of "
+            f"{type_name or part_type_id}",
+            part_type_id=part_type_id)
 
     mirrored = ShipmentItem.for_instance(instance).filter(part_type_id=part_type_id)
     n_full = mirrored.filter(n_contents__gt=0).count()
