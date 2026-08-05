@@ -179,7 +179,7 @@
                     <a{% if hwdb_instance == "dev" %} class="is-on" aria-current="true"{% endif %}
                        href="{{ instance_homes.dev }}" title="Development HWDB (sandbox)">Development</a>
                 </nav>
-                <div class="ex-side-label">Curated hierarchy</div>
+                <div class="ex-side-label">{{ sidebar_label|default:"Curated hierarchy" }}</div>
                 {% for node in sidebar %}{% include "explore/_tree_node.html" with node=node %}{% endfor %}
             </aside>
             {% endif %}

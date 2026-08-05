@@ -357,15 +357,71 @@ def explore_type_summary_view(request):
     return JsonResponse({"types": types})
 
 
+# Shipments dashboard status tabs (#87). In Transit is HWDB location id 0;
+# otherwise contents decide the bucket — see ShipmentItem.ship_status.
+_SHIP_TABS = [
+    ("transit", "In transit",
+     "Location is HWDB's “In Transit” — shipped, not yet arrived."),
+    ("packing", "In packing",
+     "Holds at least one item — not fully unpacked, or being packed for the "
+     "next shipment."),
+    ("empty", "Empty box",
+     "Nothing inside — pick one to start packing. Boxes with no location "
+     "event yet show “—”."),
+]
+
+
+def _shipping_sidebar(request, entries, sel_type):
+    """The shipping-only sidebar (#87): the Explorer tree's node shape
+    (_tree_node.html), pruned to the curated shipping types — System ›
+    Subsystem folders with type leaves. A leaf click filters the boxes table
+    (?type=); "All shipping boxes" clears the filter. Leaf count = mirrored
+    boxes (0 renders faint); a green count = that type's shipments synced."""
+    base = _rev(request, "explore:shipments")
+
+    def _node(label, url, count, current, is_leaf, empty=False, synced=False,
+              title="", open_=False):
+        return {"label": label, "url": url, "count": count, "current": current,
+                "open": open_, "dim": False, "children": [], "is_leaf": is_leaf,
+                "empty": empty, "synced": synced, "title": title or label}
+
+    total = sum(n for _leaf, n in entries)
+    nodes = [_node("All shipping boxes", base, total, not sel_type, True,
+                   empty=total == 0,
+                   title="Every box across all shipping types")]
+    systems, subs = {}, {}
+    for leaf, n in entries:
+        sys_node = systems.get(leaf.system_id)
+        if sys_node is None:
+            sys_node = systems[leaf.system_id] = _node(
+                leaf.system_name, "", 0, False, False, open_=True,
+                title=f"{leaf.system_name} ({leaf.system_id})")
+            nodes.append(sys_node)
+        sub_node = subs.get((leaf.system_id, leaf.subsystem_id))
+        if sub_node is None:
+            sub_node = subs[(leaf.system_id, leaf.subsystem_id)] = _node(
+                leaf.subsystem_name, "", 0, False, False, open_=True,
+                title=f"{leaf.subsystem_name} ({leaf.system_id}.{leaf.subsystem_id})")
+            sys_node["children"].append(sub_node)
+        sub_node["children"].append(_node(
+            leaf.name, f"{base}?{urlencode({'type': leaf.part_type_id})}", n,
+            leaf.part_type_id == sel_type, True, empty=n == 0,
+            synced=bool(leaf.shipments_synced_at),
+            title=f"{leaf.name} ({leaf.part_type_id})"))
+        sub_node["count"] += n
+        sys_node["count"] += n
+    return nodes
+
+
 @login_not_required
 @fnal_login_required
 def shipments_view(request):
-    """Top-level Shipments dashboard (Hajime's ask): all boxes across the
-    curated shipping types in one view, each linking into the box's existing
-    leaf node view. Reads the mirror (skip-empties, like the leaf panel)."""
+    """Top-level Shipments dashboard (Hajime's ask; redesigned in #87): every
+    box across the curated shipping types, split into status tabs — In transit
+    / In packing / Empty box — with a shipping-only sidebar (?type= filter),
+    search (?q=, matches box PID / type name / type id), and a per-row refresh.
+    Reads the mirror only."""
     inst = instance_of(request)
-    boxes, n_types = [], 0
-    agg = {"total": 0, "in_transit": 0, "delivered": 0}
     # Explicit ids + every mirrored type under a curated shipping subsystem
     # (the "86.990" selectors).
     ptids = set(curation.shipping_types(inst))
@@ -375,66 +431,135 @@ def shipments_view(request):
             level=HierarchyNode.LEVEL_TYPE, project="D",
             system_id=sid, subsystem_id=ssid,
         ).values_list("part_type_id", flat=True))
-    # Tracked types grouped by subsystem — the page renders one collapsible
-    # card per group with a compact per-type table (boxes-first, 0-box rows
-    # dimmed). sync_targets feeds the "Sync all types" button.
-    groups, sync_targets = {}, []
+
+    # entries feeds the sidebar; sync_targets the sweep buttons.
+    boxes, entries, sync_targets = [], [], []
     for ptid in sorted(ptids):
         leaf = HierarchyNode.for_instance(inst).filter(
             level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
         if not leaf:  # curated but not yet refreshed into the mirror
             continue
-        n_types += 1
         sync_targets.append({
             "ptid": ptid, "name": leaf.name,
             "url": _rev(request, "explore:shipment_sync", args=[ptid]),
         })
         path = navigation.leaf_path_for(inst, ptid)
-        rows = list(ShipmentItem.for_instance(inst).filter(part_type_id=ptid, n_contents__gt=0))
-        in_transit = sum(1 for r in rows if r.location_id == 0)
-        delivered = sum(1 for r in rows if r.location_id not in (0, None))
-        agg["total"] += len(rows)
-        agg["in_transit"] += in_transit
-        agg["delivered"] += delivered
-        sec = {
-            "leaf": leaf, "path": path, "n": len(rows),
-            "in_transit": in_transit, "delivered": delivered,
-            "synced_at": leaf.shipments_synced_at,
-        }
-        g = groups.setdefault((leaf.system_id, leaf.subsystem_id), {
-            "sid": leaf.system_id, "ssid": leaf.subsystem_id,
-            "system_name": leaf.system_name, "subsystem_name": leaf.subsystem_name,
-            "active": [], "idle": [], "n": 0, "in_transit": 0, "delivered": 0,
-            "n_unsynced": 0,
-        })
-        g["active" if rows else "idle"].append(sec)
-        g["n"] += len(rows)
-        g["in_transit"] += in_transit
-        g["delivered"] += delivered
-        g["n_unsynced"] += 0 if leaf.shipments_synced_at else 1
+        rows = list(ShipmentItem.for_instance(inst).filter(part_type_id=ptid))
+        entries.append((leaf, len(rows)))
         for r in rows:
-            boxes.append({"box": r, "type_name": leaf.name, "path": path})
-    groups = [groups[k] for k in sorted(groups)]
+            boxes.append({"box": r, "type_name": leaf.name, "ptid": ptid,
+                          "path": path, "status": r.ship_status})
 
-    # In-transit first, then most-recently-arrived first.
-    boxes.sort(key=lambda x: (
-        0 if x["box"].location_id == 0 else 1,
+    sel_type = request.GET.get("type") or ""
+    if sel_type and sel_type not in {leaf.part_type_id for leaf, _n in entries}:
+        sel_type = ""
+    q = (request.GET.get("q") or "").strip()
+    tab = request.GET.get("tab") or ""
+
+    def _match(b):
+        needle = q.lower()
+        return (needle in b["box"].part_id.lower()
+                or needle in b["type_name"].lower()
+                or needle in b["ptid"].lower())
+
+    hits = [b for b in boxes if _match(b)] if q else boxes
+    if q and len(hits) == 1:
+        # A query that narrows to exactly ONE box shows that box: jump to its
+        # status tab, and drop a type filter that would hide it.
+        tab = hits[0]["status"]
+        sel_type = ""
+    filtered = [b for b in hits if not sel_type or b["ptid"] == sel_type]
+
+    if tab not in {k for k, _l, _c in _SHIP_TABS}:
+        tab = "transit"
+    counts = {k: 0 for k, _l, _c in _SHIP_TABS}
+    for b in filtered:
+        counts[b["status"]] += 1
+
+    rows = [b for b in filtered if b["status"] == tab]
+    # Most-recently-arrived first (for transit boxes that's the transit event).
+    rows.sort(key=lambda x: (
         -(x["box"].last_arrived.timestamp() if x["box"].last_arrived else 0),
+        x["box"].part_id,
     ))
-    page_obj = Paginator(boxes, 50).get_page(request.GET.get("page"))
-    # htmx pager clicks swap just the boxes pane in place (no scroll-to-top).
+    page_obj = Paginator(rows, 50).get_page(request.GET.get("page"))
+
+    def _qs(k, page=None):
+        params = {"tab": k}
+        if sel_type:
+            params["type"] = sel_type
+        if q:
+            params["q"] = q
+        if page is not None:
+            params["page"] = page
+        return "?" + urlencode(params)
+
+    pane_ctx = {
+        "tabs": [{"key": k, "label": lbl, "count": counts[k], "url": _qs(k),
+                  "active": k == tab} for k, lbl, _c in _SHIP_TABS],
+        "tab": tab,
+        "tab_caption": next(c for k, _l, c in _SHIP_TABS if k == tab),
+        "page_obj": page_obj,
+        "prev_url": _qs(tab, page_obj.previous_page_number()) if page_obj.has_previous() else "",
+        "next_url": _qs(tab, page_obj.next_page_number()) if page_obj.has_next() else "",
+        "can_pack": inst in settings.HWDB_WRITE_INSTANCES,
+    }
+    # htmx tab/pager clicks swap just the boxes pane in place (no scroll-to-top).
     if getattr(request, "htmx", False) and request.htmx.target == "shipments-pane":
-        return render(request, "explore/_shipments_table.html", {"page_obj": page_obj})
+        return render(request, "explore/_shipments_table.html", pane_ctx)
     return render(request, "explore/shipments.html", {
         "active_nav": "shipments",
-        "sidebar": navigation.sidebar_tree(inst, {}),
-        "groups": groups,
-        "n_types": n_types,
+        "sidebar": _shipping_sidebar(request, entries, sel_type),
+        "sidebar_label": "Shipping types",
+        "n_types": len(entries),
         "sync_targets": sync_targets,
-        "page_obj": page_obj,
-        "summary": agg,
-        "hwdb_ui_base": settings.HWDB_PROFILES[inst]["ui"],
+        "sel_type": sel_type,
+        "sel_leaf": next((leaf for leaf, _n in entries
+                          if leaf.part_type_id == sel_type), None),
+        "q": q,
+        **pane_ctx,
     })
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_shipment_refresh_view(request, part_id):
+    """Re-mirror ONE box from HWDB — the per-row ⟳ on the Shipments page
+    (#87). Same unit of work as the full sync's per-box fetch (2–3 calls),
+    via shipments.refresh_box (#61), so users don't need "Re-sync all" to see
+    one box move."""
+    inst = instance_of(request)
+    fallback = _rev(request, "explore:shipments")
+    row = ShipmentItem.for_instance(inst).filter(part_id=part_id).first()
+    if row is None:
+        raise Http404("Unknown box")
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': fallback, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(_safe_next(request, fallback))
+
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    try:
+        refresh_box(api, inst, row.part_type_id, part_id)
+    except Exception as e:
+        logger.warning("shipment refresh %s failed: %s", part_id, e)
+        messages.error(request, f"Couldn't refresh {part_id} — {e}")
+    else:
+        new = ShipmentItem.for_instance(inst).filter(part_id=part_id).first()
+        labels = {k: lbl for k, lbl, _c in _SHIP_TABS}
+        if new:
+            messages.success(
+                request,
+                f"{part_id} refreshed — {labels[new.ship_status]} · "
+                f"{new.location_name or 'no location yet'}.")
+        else:
+            messages.success(request, f"{part_id} refreshed.")
+    return redirect(_safe_next(request, fallback))
 
 
 @login_not_required

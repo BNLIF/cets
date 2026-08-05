@@ -179,9 +179,10 @@ class DevShipmentsTest(TestCase):
         self.assertNotIn('id="node-unsynced"', html)  # both syncs marked done
 
     def test_shipments_tab_is_instance_scoped(self):
+        # The box sits at a real location with contents → "In packing" (#87).
         self._box()
-        dev_html = self.client.get("/hw/dev/shipments/").content.decode()
-        prod_html = self.client.get("/hw/shipments/").content.decode()
+        dev_html = self.client.get("/hw/dev/shipments/", {"tab": "packing"}).content.decode()
+        prod_html = self.client.get("/hw/shipments/", {"tab": "packing"}).content.decode()
         self.assertIn("D00599800007-00133", dev_html)
         self.assertNotIn("D00599800007-00133", prod_html)
 
@@ -195,7 +196,7 @@ class DevShipmentsTest(TestCase):
             instance="dev", part_type_id="D08699000012",
             part_id="D08699000012-00001", location_name="Ash River",
             location_id=190, n_contents=2)
-        html = self.client.get("/hw/dev/shipments/").content.decode()
+        html = self.client.get("/hw/dev/shipments/", {"tab": "packing"}).content.decode()
         self.assertIn("Ash River Scaffolding", html)
         self.assertIn("D08699000012-00001", html)
 

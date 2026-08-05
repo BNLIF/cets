@@ -682,8 +682,32 @@ class ShipmentImageViewTest(TestCase):
         self.assertEqual(resp.json()["error"], "fnal_link")
 
 
+class ShipStatusTest(TestCase):
+    """ShipmentItem.ship_status — the #87 bucket rule: transit wins, then
+    contents decide (location set or not doesn't matter)."""
+
+    def _item(self, **kw):
+        return ShipmentItem(part_type_id=SHIP_PTID, part_id="B", **kw)
+
+    def test_in_transit_wins_over_contents(self):
+        self.assertEqual(self._item(location_id=0, n_contents=5).ship_status, "transit")
+
+    def test_contents_at_location_is_packing(self):
+        self.assertEqual(self._item(location_id=200, n_contents=2).ship_status, "packing")
+
+    def test_contents_without_location_is_packing(self):
+        self.assertEqual(self._item(location_id=None, n_contents=3).ship_status, "packing")
+
+    def test_empty_at_location_is_empty(self):
+        self.assertEqual(self._item(location_id=200, n_contents=0).ship_status, "empty")
+
+    def test_empty_without_location_is_empty(self):
+        self.assertEqual(self._item(location_id=None, n_contents=0).ship_status, "empty")
+
+
 class ShipmentsPageTest(TestCase):
-    """Top-level Shipments dashboard (Hajime's ask)."""
+    """Top-level Shipments dashboard (Hajime's ask; #87 redesign: status tabs
+    + shipping sidebar + search + per-row refresh)."""
 
     def setUp(self):
         self.user = get_user_model().objects.create_user("sp", "s@p.io", "pw")
@@ -700,29 +724,98 @@ class ShipmentsPageTest(TestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertIn(reverse("explore:login"), resp["Location"])
 
-    def test_lists_boxes_with_summary_and_leaf_links(self):
+    def test_default_transit_tab_lists_transit_boxes_only(self):
         html = self.client.get(reverse("explore:shipments")).content.decode()
-        self.assertIn("B1", html)
-        self.assertIn("B2", html)
-        # each box links into the existing leaf node view
+        self.assertIn(">B1<", html)
+        self.assertNotIn(">B2<", html)          # packing box lives on its own tab
+        # each box's Type column links into the existing leaf node view
         self.assertIn(navigation.leaf_path_for("prod", self.leaf.part_type_id), html)
-        self.assertIn("ship-pill is-transit", html)
-        self.assertIn("ship-pill is-delivered", html)
+        # tab badges count ALL tabs, not just the active one
+        self.assertIn("In transit", html)
+        self.assertIn("In packing", html)
+        self.assertIn("Empty box", html)
+
+    def test_packing_tab_lists_boxes_with_contents_at_a_location(self):
+        html = self.client.get(reverse("explore:shipments"),
+                               {"tab": "packing"}).content.decode()
+        self.assertIn(">B2<", html)
+        self.assertNotIn(">B1<", html)
+
+    def test_empty_tab_lists_empty_boxes(self):
+        # Empty boxes are first-class now (#87) — including boxes with no
+        # location event yet ("new" boxes land here too).
+        ShipmentItem.objects.create(part_type_id=self.leaf.part_type_id, part_id="EMPTYBOX",
+                                    location_name="FNAL", location_id=1, n_contents=0)
+        ShipmentItem.objects.create(part_type_id=self.leaf.part_type_id, part_id="NEWBOX",
+                                    n_contents=0)
+        html = self.client.get(reverse("explore:shipments")).content.decode()
+        self.assertNotIn("EMPTYBOX", html)      # not on the transit tab
+        html = self.client.get(reverse("explore:shipments"),
+                               {"tab": "empty"}).content.decode()
+        self.assertIn("EMPTYBOX", html)
+        self.assertIn("NEWBOX", html)
+
+    def test_bogus_tab_falls_back_to_transit(self):
+        resp = self.client.get(reverse("explore:shipments"), {"tab": "bogus"})
+        self.assertEqual(resp.context["tab"], "transit")
+
+    def test_type_filter_narrows_the_table_and_shows_chip(self):
+        other = H.objects.create(
+            level=H.LEVEL_TYPE, parent=self.leaf.parent, system_id=81,
+            system_name="FD CE", subsystem_id=202, subsystem_name="CE Shipping Box",
+            name="Spare box", part_type_id="D08120200002", n_components=0)
+        ShipmentItem.objects.create(part_type_id=other.part_type_id, part_id="SPARE1",
+                                    location_name="In Transit", location_id=0, n_contents=1)
+        url = reverse("explore:shipments")
+        html = self.client.get(url, {"type": other.part_type_id}).content.decode()
+        self.assertIn("SPARE1", html)
+        self.assertNotIn(">B1<", html)
+        self.assertIn("ship-chip", html)               # dismissable filter chip
+        self.assertIn("Clear the type filter", html)
+        # unknown type ids are ignored
+        html = self.client.get(url, {"type": "NOPE"}).content.decode()
+        self.assertIn(">B1<", html)
+
+    def test_search_matches_pid_type_name_and_ptid(self):
+        resp = self.client.get(reverse("explore:shipments"), {"q": "shipping box"})
+        self.assertEqual(resp.context["tabs"][0]["count"], 1)   # B1 via type name
+        resp = self.client.get(reverse("explore:shipments"), {"q": "D0812"})
+        self.assertEqual(resp.context["tabs"][0]["count"], 1)   # via part_type_id
+        resp = self.client.get(reverse("explore:shipments"), {"q": "zzz"})
+        self.assertEqual(sum(t["count"] for t in resp.context["tabs"]), 0)
+
+    def test_single_hit_search_jumps_to_the_boxs_tab(self):
+        # "B2" narrows to one box (in packing): the table shows that box even
+        # though the request landed on the default transit tab.
+        resp = self.client.get(reverse("explore:shipments"), {"q": "B2"})
+        self.assertEqual(resp.context["tab"], "packing")
+        self.assertIn(">B2<", resp.content.decode())
+
+    def test_single_hit_search_drops_a_hiding_type_filter(self):
+        other = H.objects.create(
+            level=H.LEVEL_TYPE, parent=self.leaf.parent, system_id=81,
+            system_name="FD CE", subsystem_id=202, subsystem_name="CE Shipping Box",
+            name="Spare box", part_type_id="D08120200002", n_components=0)
+        resp = self.client.get(reverse("explore:shipments"),
+                               {"q": "B2", "type": other.part_type_id})
+        self.assertEqual(resp.context["sel_type"], "")
+        self.assertIn(">B2<", resp.content.decode())
 
     def test_htmx_pager_click_returns_just_the_pane(self):
-        # 51 boxes with contents → 2 pages; an hx-get from the pager swaps the
+        # 51 packing boxes → 2 pages; an hx-get from the pager swaps the
         # boxes pane in place (fragment only, no full page / scroll-to-top).
-        for i in range(49):
+        for i in range(50):
             ShipmentItem.objects.create(part_type_id=self.leaf.part_type_id,
                                         part_id=f"C{i:03d}", location_id=200,
                                         n_contents=1)
-        frag = self.client.get(reverse("explore:shipments"), {"page": 2},
+        frag = self.client.get(reverse("explore:shipments"),
+                               {"tab": "packing", "page": 2},
                                HTTP_HX_REQUEST="true",
                                HTTP_HX_TARGET="shipments-pane").content.decode()
         self.assertTrue(frag.strip().startswith('<div id="shipments-pane"'))
         self.assertIn("Page 2 of 2", frag)
         self.assertNotIn("<html", frag)                # not the full page
-        self.assertIn('hx-get="?page=1"', frag)
+        self.assertIn("tab=packing", frag)             # pager links keep the tab
         self.assertIn('hx-target="#shipments-pane"', frag)
 
     def test_nav_has_shipments_tab_active(self):
@@ -730,34 +823,33 @@ class ShipmentsPageTest(TestCase):
         self.assertIn("eh-nav-item active", html)
         self.assertIn(">Shipments<", html)
 
-    def test_skips_empty_boxes(self):
-        ShipmentItem.objects.create(part_type_id=self.leaf.part_type_id, part_id="EMPTYBOX",
-                                    location_name="FNAL", location_id=1, n_contents=0)
-        html = self.client.get(reverse("explore:shipments")).content.decode()
-        self.assertNotIn("EMPTYBOX", html)
-
-    def test_types_grouped_by_subsystem_with_ids_and_idle_rows(self):
-        # A second type in the same subsystem with no boxes gets a dimmed row
-        # in the group's compact table, not a card of its own.
+    def test_shipping_sidebar_replaces_the_site_tree(self):
+        # The sidebar is the Explorer tree pruned to shipping types (#87):
+        # System › Subsystem folders, type leaves filtering via ?type=, an
+        # "All shipping boxes" reset on top; 0-box types render faint.
         H.objects.create(
             level=H.LEVEL_TYPE, parent=self.leaf.parent, system_id=81,
             system_name="FD CE", subsystem_id=202, subsystem_name="CE Shipping Box",
             name="Spare box", part_type_id="D08120200002", n_components=0)
         html = self.client.get(reverse("explore:shipments")).content.decode()
-        self.assertEqual(html.count('<details class="tsg"'), 1)  # one subsystem group
-        self.assertIn("(81.202)", html)                    # system.subsystem id in the header
-        self.assertIn("2 boxes", html)                     # group header: B1 + B2
-        self.assertIn("D08120200001", html)                # type ids in the rows
-        self.assertIn("D08120200002", html)
-        self.assertIn('class="tsg-row-idle"', html)        # 0-box row dimmed
-        self.assertIn("never — open to sync", html)
+        self.assertIn("Shipping types", html)          # sidebar label swapped
+        self.assertNotIn("Curated hierarchy", html)
+        self.assertIn("All shipping boxes", html)
+        self.assertIn("?type=D08120200001", html)      # leaf click = filter
+        self.assertIn("?type=D08120200002", html)
+        self.assertIn("FD CE", html)                   # system folder
+        # the 0-box type renders faint (is-empty), the 2-box one doesn't
+        self.assertIn("is-empty", html)
+        # selecting a type highlights its leaf
+        html = self.client.get(reverse("explore:shipments"),
+                               {"type": "D08120200001"}).content.decode()
+        self.assertIn("extree-leaf is-cur", html)
 
     def test_sync_all_button_with_targets(self):
         html = self.client.get(reverse("explore:shipments")).content.decode()
         self.assertIn('id="shipall-btn"', html)            # Sync new (incremental)
         self.assertIn('data-mode="incremental"', html)
         self.assertIn('id="shipall-full-btn"', html)       # Re-sync all (full)
-        self.assertIn('id="tsg-toggle"', html)             # expand/collapse all
         self.assertIn('id="shipall-data"', html)
         # the target list carries each type's streaming sync endpoint
         self.assertIn(f'"/hw/sync-shipments/{self.leaf.part_type_id}/"', html)
@@ -780,17 +872,91 @@ class ShipmentsPageTest(TestCase):
         self.assertEqual(m.call_args.kwargs["mode"], "full")
 
     def test_paginated_50_per_page(self):
-        # setUp already made 2 non-empty boxes; add 53 → 55 total across 2 pages.
+        # setUp already made 1 packing box; add 53 → 54 on that tab, 2 pages.
         ShipmentItem.objects.bulk_create([
             ShipmentItem(part_type_id=self.leaf.part_type_id, part_id=f"X{i}",
                          location_name="FNAL", location_id=1, n_contents=1)
             for i in range(53)
         ])
-        pg = self.client.get(reverse("explore:shipments")).context["page_obj"]
-        self.assertEqual(pg.paginator.count, 55)
+        url = reverse("explore:shipments")
+        pg = self.client.get(url, {"tab": "packing"}).context["page_obj"]
+        self.assertEqual(pg.paginator.count, 54)
         self.assertEqual(pg.paginator.num_pages, 2)
         self.assertEqual(len(pg.object_list), 50)
-        pg2 = self.client.get(reverse("explore:shipments") + "?page=2").context["page_obj"]
-        self.assertEqual(len(pg2.object_list), 5)
-        # summary still counts all boxes, not just the page
-        self.assertEqual(pg.paginator.count, 55)
+        pg2 = self.client.get(url, {"tab": "packing", "page": 2}).context["page_obj"]
+        self.assertEqual(len(pg2.object_list), 4)
+
+    def test_every_row_has_a_refresh_button(self):
+        html = self.client.get(reverse("explore:shipments")).content.decode()
+        self.assertIn("/hw/part/B1/refresh-shipment/", html)
+        self.assertIn("ship-rfbtn", html)
+
+    def test_start_packing_only_on_empty_tab_of_write_instances(self):
+        ShipmentItem.objects.create(part_type_id=self.leaf.part_type_id,
+                                    part_id="EMPTYBOX", location_id=1, n_contents=0)
+        url = reverse("explore:shipments")
+        with override_settings(HWDB_WRITE_INSTANCES=["dev"]):
+            # prod not writable → no packing link
+            html = self.client.get(url, {"tab": "empty"}).content.decode()
+            self.assertNotIn("Start packing", html)
+        html = self.client.get(url, {"tab": "empty"}).content.decode()
+        self.assertIn("Start packing", html)
+        self.assertIn("/hw/part/EMPTYBOX/pack/", html)
+        # …and never on the other tabs
+        html = self.client.get(url).content.decode()
+        self.assertNotIn("Start packing", html)
+
+
+class ShipmentRefreshViewTest(TestCase):
+    """POST part/<pid>/refresh-shipment/ — the per-row ⟳ (#87)."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("rf", "r@f.io", "pw")
+        self.client.force_login(self.user)
+        self.leaf = _ship_leaf()
+        ShipmentItem.objects.create(part_type_id=SHIP_PTID, part_id="B1",
+                                    location_name="In Transit", location_id=0,
+                                    n_contents=3)
+        self.url = "/hw/part/B1/refresh-shipment/"
+
+    def test_remirrors_one_box_and_redirects_back(self):
+        with mock.patch("explore.views.refresh_box") as m, \
+             mock.patch("explore.views.mint_for", return_value="b"):
+            resp = self.client.post(self.url, {"next": "/hw/shipments/?tab=transit"})
+        self.assertEqual(m.call_args.args[1:], ("prod", SHIP_PTID, "B1"))
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "/hw/shipments/?tab=transit")
+
+    def test_flashes_the_boxs_new_status(self):
+        def _move(api, inst, ptid, pid):
+            ShipmentItem.objects.filter(part_id=pid).update(
+                location_name="CERN", location_id=200)
+        with mock.patch("explore.views.refresh_box", side_effect=_move), \
+             mock.patch("explore.views.mint_for", return_value="b"):
+            resp = self.client.post(self.url, {"next": "/hw/shipments/"},
+                                    follow=True)
+        html = resp.content.decode()
+        self.assertIn("B1 refreshed", html)
+        self.assertIn("In packing", html)
+        self.assertIn("CERN", html)
+
+    def test_failed_refresh_flashes_an_error(self):
+        with mock.patch("explore.views.refresh_box", side_effect=RuntimeError("boom")), \
+             mock.patch("explore.views.mint_for", return_value="b"):
+            resp = self.client.post(self.url, {"next": "/hw/shipments/"}, follow=True)
+        self.assertIn("Couldn", resp.content.decode())
+
+    def test_unknown_box_404s(self):
+        with mock.patch("explore.views.mint_for", return_value="b"):
+            resp = self.client.post("/hw/part/NOPE/refresh-shipment/")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_requires_post(self):
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 405)
+
+    def test_unsafe_next_falls_back_to_shipments(self):
+        with mock.patch("explore.views.refresh_box"), \
+             mock.patch("explore.views.mint_for", return_value="b"):
+            resp = self.client.post(self.url, {"next": "https://evil.example/x"})
+        self.assertEqual(resp["Location"], reverse("explore:shipments"))

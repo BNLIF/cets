@@ -212,6 +212,16 @@ class ShipmentItem(InstanceScoped):
         return self.location_id == 0
 
     @property
+    def ship_status(self) -> str:
+        """Status bucket for the Shipments dashboard (#87). In Transit wins;
+        otherwise contents decide — ≥1 item is "in packing" (not fully
+        unpacked, or being packed for the next trip), 0 is an empty box ready
+        to start packing. Whether a location is set doesn't matter."""
+        if self.location_id == 0:
+            return "transit"
+        return "packing" if self.n_contents else "empty"
+
+    @property
     def status_label(self) -> str:
         if self.location_id == 0:
             return "In transit"

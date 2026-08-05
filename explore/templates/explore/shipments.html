@@ -5,17 +5,42 @@
 <style>
   .ship-page { padding: 26px 30px 56px; max-width: 1100px; }
   .ship-page h1 { font-size: 1.5rem; color: var(--ink); margin: 0 0 4px; letter-spacing: -0.01em; }
-  .ship-page .subtitle { color: var(--dim); margin: 0 0 20px; font-size: 14px; }
-  .ship-page h2 { font-size: 14px; color: var(--faint); text-transform: uppercase;
-    letter-spacing: .04em; margin: 30px 0 12px; }
+  .ship-page .subtitle { color: var(--dim); margin: 0 0 16px; font-size: 14px; }
 
-  .ship-cards { display: flex; gap: 12px; margin-bottom: 22px; flex-wrap: wrap; }
-  .ship-card { flex: 1 1 130px; border: 1px solid var(--rule); background: var(--page);
-    border-radius: var(--r-lg); padding: 14px 16px; border-left: 3px solid var(--rule-hard); }
-  .ship-card.is-transit { border-left-color: var(--accent); }
-  .ship-card.is-delivered { border-left-color: var(--good); }
-  .ship-card-n { font-size: 26px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1.1; }
-  .ship-card-l { font-size: 12px; color: var(--faint); margin-top: 2px; }
+  .ship-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
+  .ship-flash.success { color: var(--good); background: var(--good-bg);
+    border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule)); }
+  .ship-flash.error { color: var(--bad); background: color-mix(in oklch, var(--bad) 8%, var(--page));
+    border: 1px solid color-mix(in oklch, var(--bad) 35%, var(--rule)); overflow-wrap: anywhere; }
+
+  .ship-searchrow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0 0 6px; }
+  .ship-search { flex: 0 1 380px; min-width: 220px; margin: 0; }
+  .ship-search input { font: inherit; font-size: 13px; color: var(--ink); width: 100%;
+    background: var(--page); border: 1px solid var(--rule); border-radius: 999px; padding: 7px 15px; }
+  .ship-search input:focus { outline: none; border-color: var(--accent); }
+  .ship-search input::placeholder { color: var(--faint); }
+  .ship-chip { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600;
+    color: var(--accent-ink); background: var(--accent-soft);
+    border: 1px solid color-mix(in oklch, var(--accent) 40%, var(--rule));
+    border-radius: 999px; padding: 4px 6px 4px 13px; }
+  .ship-chip .mono { font-weight: 400; font-size: 11px; }
+  .ship-chip a { font-size: 12px; font-weight: 700; line-height: 1; color: var(--accent-ink);
+    text-decoration: none; border-radius: 999px; padding: 2px 7px; }
+  .ship-chip a:hover { background: color-mix(in oklch, var(--accent) 18%, transparent); }
+  .ship-actions { display: flex; gap: 6px; margin-left: auto; }
+
+  .ship-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--rule-hard); margin: 10px 0 0; flex-wrap: wrap; }
+  .ship-tab { font-size: 13px; font-weight: 600; color: var(--dim); text-decoration: none;
+    border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0;
+    padding: 8px 15px 7px; margin-bottom: -1px; }
+  .ship-tab:hover { color: var(--ink); background: var(--surface); }
+  .ship-tab.on { color: var(--accent-ink); background: var(--page);
+    border-color: var(--rule-hard); border-bottom: 1px solid var(--page); }
+  .ship-tab .n { font-weight: 700; font-variant-numeric: tabular-nums; margin-left: 5px;
+    font-size: 11.5px; color: var(--faint); background: var(--surface);
+    border-radius: 999px; padding: 1px 7px; }
+  .ship-tab.on .n { color: var(--accent-ink); background: var(--accent-soft); }
+  .ship-tabcap { font-size: 12px; color: var(--faint); margin: 10px 2px 10px; }
 
   .ship-table-wrap { border: 1px solid var(--rule); border-radius: var(--r-lg);
     background: var(--page); overflow-x: auto; }
@@ -27,14 +52,19 @@
   .ship-table tbody tr:hover { background: var(--surface); }
   .ship-table tr:last-child td { border-bottom: none; }
   .ship-table .mono { font-family: var(--font-mono); font-size: 12.5px; }
-  .ship-pill { font-size: 11px; font-weight: 600; padding: 1px 9px; border-radius: 999px;
-    border: 1px solid var(--rule); color: var(--dim); white-space: nowrap; }
-  .ship-pill.is-transit { color: var(--accent-ink); background: var(--accent-soft);
-    border-color: color-mix(in oklch, var(--accent) 30%, var(--rule)); }
-  .ship-pill.is-delivered { color: var(--good); background: var(--good-bg);
-    border-color: color-mix(in oklch, var(--good) 30%, var(--rule)); }
   .ship-link { color: var(--accent-ink); text-decoration: none; }
   .ship-link:hover { text-decoration: underline; }
+  .ship-act { text-align: right; white-space: nowrap; }
+  .ship-rf-form { display: inline; margin: 0; }
+  .ship-rfbtn { font-size: 13px; line-height: 1; cursor: pointer; color: var(--dim);
+    background: var(--page); border: 1px solid var(--rule); border-radius: 999px;
+    width: 24px; height: 24px; padding: 0; vertical-align: middle; }
+  .ship-rfbtn:hover { color: var(--accent-ink); border-color: var(--rule-hard); background: var(--surface); }
+  .ship-rfbtn:disabled { color: var(--faint); cursor: default; }
+  .ship-packbtn { font-size: 11.5px; font-weight: 600; color: var(--good); background: var(--good-bg);
+    border: 1px solid color-mix(in oklch, var(--good) 30%, var(--rule));
+    border-radius: 999px; padding: 2px 11px; text-decoration: none; margin-right: 6px; }
+  .ship-packbtn:hover { border-color: var(--good); }
 
   .pager { display: flex; align-items: center; justify-content: center; gap: 18px;
     margin-top: 14px; font-size: 13px; }
@@ -45,44 +75,30 @@
   .pager-mid { color: var(--dim); font-variant-numeric: tabular-nums; }
   .empty { text-align: center; padding: 40px 16px; color: var(--faint); }
 
-  /* tracked-types groups: one collapsible card per shipping subsystem */
-  .tsg { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg);
-    margin-bottom: 10px; }
-  .tsg-sum { display: flex; align-items: baseline; justify-content: space-between; gap: 14px;
-    flex-wrap: wrap; padding: 12px 16px; cursor: pointer; list-style: none; }
-  .tsg-sum::-webkit-details-marker { display: none; }
-  .tsg-sum::before { content: "▸"; color: var(--faint); font-size: 11px; margin-right: 2px; }
-  details.tsg[open] > .tsg-sum::before { content: "▾"; }
-  .tsg-sum:hover { background: var(--surface); border-radius: var(--r-lg); }
-  .tsg-name { font-size: 14px; font-weight: 600; color: var(--ink); }
-  .tsg-sep { color: var(--faint); font-weight: 400; }
-  .tsg-stat { font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
-  .tsg-body { padding: 2px 16px 14px; }
-  .tsg-id { font-family: var(--font-mono); font-size: 11.5px; font-weight: 400; color: var(--faint); }
-  .tsg-row-idle td, .tsg-row-idle a.ship-link { color: var(--faint); }
-  .tsg-head { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
-  .tsg-actions { display: flex; gap: 6px; }
-  .shipall-log { display: none; margin: 0 0 12px; background: #1c1812; color: #e7dfce;
+  .shipall-log { display: none; margin: 10px 0 4px; background: #1c1812; color: #e7dfce;
     border-radius: 8px; padding: 12px; font-family: var(--font-mono); font-size: 12px;
     white-space: pre-wrap; max-height: 260px; overflow: auto; }
 </style>
 
 <div class="ship-page">
   <h1>Shipments</h1>
-  <p class="subtitle">Boxes in transit and delivered across {{ n_types }} curated shipping type{{ n_types|pluralize }}. Click a box to open its full timeline &amp; contents.</p>
+  <p class="subtitle">Boxes across {{ n_types }} curated shipping type{{ n_types|pluralize }}. Pick a type in the sidebar, or search; click a box to open its full timeline &amp; contents.</p>
 
-  <div class="ship-cards">
-    <div class="ship-card"><div class="ship-card-n">{{ summary.total }}</div><div class="ship-card-l">Boxes with contents</div></div>
-    <div class="ship-card is-transit"><div class="ship-card-n">{{ summary.in_transit }}</div><div class="ship-card-l">In transit</div></div>
-    <div class="ship-card is-delivered"><div class="ship-card-n">{{ summary.delivered }}</div><div class="ship-card-l">Delivered</div></div>
-  </div>
+  {% for m in messages %}<div class="ship-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
 
-  {% include "explore/_shipments_table.html" %}
-
-  <div class="tsg-head">
-    <h2>Tracked shipping types</h2>
-    <div class="tsg-actions">
-      <button id="tsg-toggle" class="btn btn-sm btn-ghost" type="button">Expand all</button>
+  <div class="ship-searchrow">
+    <form method="get" action="" class="ship-search">
+      <input type="hidden" name="tab" value="{{ tab }}">
+      {% if sel_type %}<input type="hidden" name="type" value="{{ sel_type }}">{% endif %}
+      <input type="search" name="q" value="{{ q }}"
+             placeholder="Search — box PID, type name, or type ID…" aria-label="Search shipments">
+    </form>
+    {% if sel_leaf %}
+    <span class="ship-chip">{{ sel_leaf.name }} <span class="mono">{{ sel_leaf.part_type_id }}</span>
+      <a href="?tab={{ tab }}{% if q %}&amp;q={{ q|urlencode }}{% endif %}"
+         title="Clear the type filter" aria-label="Clear the type filter">&#x2715;</a></span>
+    {% endif %}
+    <div class="ship-actions">
       <button id="shipall-btn" class="btn btn-sm btn-primary" type="button" data-mode="incremental"
               title="Fetch newly-registered boxes only across all tracked types (cheap)">Sync new</button>
       <button id="shipall-full-btn" class="btn btn-sm btn-ghost" type="button" data-mode="full"
@@ -90,45 +106,8 @@
     </div>
   </div>
   <pre id="shipall-log" class="shipall-log"></pre>
-  {% if groups %}
-  {% for g in groups %}
-  <details class="tsg">
-    <summary class="tsg-sum">
-      <span class="tsg-name">{{ g.system_name }} <span class="tsg-sep">›</span> {{ g.subsystem_name }} <span class="tsg-id">({{ g.sid }}.{{ g.ssid }})</span></span>
-      <span class="tsg-stat">{% if g.n %}{{ g.n }} box{{ g.n|pluralize:"es" }} · {{ g.in_transit }} in transit · {{ g.delivered }} delivered{% else %}no boxes{% endif %}{% if g.idle %} · {{ g.idle|length }} type{{ g.idle|length|pluralize }} without boxes{% endif %}</span>
-    </summary>
-    <div class="tsg-body">
-      <table class="ship-table">
-        <thead><tr><th>Type</th><th>Part type id</th><th>Boxes</th><th>In transit</th><th>Delivered</th><th>Synced</th></tr></thead>
-        <tbody>
-        {% for s in g.active %}
-        <tr onclick="if(!getSelection().toString())location.href='{{ s.path }}'">
-          <td><a class="ship-link" href="{{ s.path }}" onclick="event.stopPropagation()">{{ s.leaf.name }}</a></td>
-          <td class="mono">{{ s.leaf.part_type_id }}</td>
-          <td class="mono">{{ s.n }}</td>
-          <td class="mono">{{ s.in_transit }}</td>
-          <td class="mono">{{ s.delivered }}</td>
-          <td>{{ s.synced_at|timesince }} ago</td>
-        </tr>
-        {% endfor %}
-        {% for s in g.idle %}
-        <tr class="tsg-row-idle" onclick="if(!getSelection().toString())location.href='{{ s.path }}'">
-          <td><a class="ship-link" href="{{ s.path }}" onclick="event.stopPropagation()">{{ s.leaf.name }}</a></td>
-          <td class="mono">{{ s.leaf.part_type_id }}</td>
-          <td class="mono">0</td>
-          <td class="mono">—</td>
-          <td class="mono">—</td>
-          <td>{% if s.synced_at %}{{ s.synced_at|timesince }} ago · empty{% else %}never — open to sync{% endif %}</td>
-        </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </details>
-  {% endfor %}
-  {% else %}
-  <div class="empty"><p>No shipping types are curated and refreshed yet.</p></div>
-  {% endif %}
+
+  {% include "explore/_shipments_table.html" %}
 </div>
 
 {% csrf_token %}
@@ -174,15 +153,6 @@
   }
   btns.forEach(function (b) {
     if (b) b.addEventListener("click", function () { sweep(b.dataset.mode); });
-  });
-
-  // Expand/collapse every subsystem group at once.
-  var tgl = document.getElementById("tsg-toggle");
-  if (tgl) tgl.addEventListener("click", function () {
-    var all = document.querySelectorAll("details.tsg");
-    var anyClosed = Array.prototype.some.call(all, function (d) { return !d.open; });
-    all.forEach(function (d) { d.open = anyClosed; });
-    tgl.textContent = anyClosed ? "Collapse all" : "Expand all";
   });
 })();
 </script>
