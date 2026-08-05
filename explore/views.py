@@ -610,7 +610,7 @@ def explore_shipment_refresh_view(request, part_id):
                     f"{part_id} moved — {labels[new.ship_status]} · "
                     f"{new.location_name or 'no location yet'}",
                     part_id=part_id, part_type_id=row.part_type_id,
-                    actor=request.user.get_username())
+                    actor=activity.actor_of(request))
         else:
             messages.success(request, f"{part_id} refreshed.")
     return redirect(_safe_next(request, fallback))
@@ -1031,7 +1031,7 @@ def explore_part_location_view(request, part_id):
         f"{part_id} location set to "
         f"{(row.location_name if row else '') or 'a new location'}",
         part_id=part_id, part_type_id=ptid,
-        actor=request.user.get_username())
+        actor=activity.actor_of(request))
     return redirect(part_url)
 
 
@@ -1146,7 +1146,7 @@ def explore_box_create_view(request, part_type_id):
     messages.success(request, f"Box {part_id} minted in the {inst} HWDB.")
     activity.log(inst, ActivityEvent.KIND_MINTED, f"Box {part_id} minted",
                  part_id=part_id, part_type_id=part_type_id,
-                 actor=request.user.get_username())
+                 actor=activity.actor_of(request))
     return redirect(_rev(request, "explore:part", args=[part_id]))
 
 
@@ -1540,7 +1540,7 @@ def explore_box_pack_view(request, part_id):
                          f"{part_id} fully packed — all {len(state)} "
                          f"position(s) filled",
                          part_id=part_id, part_type_id=ptid,
-                         actor=request.user.get_username())
+                         actor=activity.actor_of(request))
     for pid, detail in failed:
         messages.error(request, f"{pid} was not added — {detail}")
     if is_htmx:
@@ -2253,7 +2253,7 @@ def explore_es_config_view(request, part_type_id):
         activity.log(inst, ActivityEvent.KIND_ES,
                      f"ES config updated for type {part_type_id}",
                      part_type_id=part_type_id,
-                     actor=request.user.get_username())
+                     actor=activity.actor_of(request))
         # #86 (Hajime): signatures live in an "ES" test record, so make sure
         # the test type exists as soon as the type carries a config. A
         # failure only warns — the signing path still self-heals.
@@ -2324,7 +2324,7 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             activity.log(inst, ActivityEvent.KIND_ES,
                          f"{part_id}: Executive Summary (default) signed and posted",
                          part_id=part_id, part_type_id=ptid,
-                         actor=request.user.get_username())
+                         actor=activity.actor_of(request))
         return redirect(page_url)
 
     if action == "comment":
@@ -2366,7 +2366,7 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             activity.log(inst, ActivityEvent.KIND_ES,
                          f"{part_id}: ES comment posted",
                          part_id=part_id, part_type_id=ptid,
-                         actor=request.user.get_username())
+                         actor=activity.actor_of(request))
         return redirect(page_url)
 
     if cfg is None:
@@ -2451,7 +2451,7 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
         activity.log(inst, ActivityEvent.KIND_ES,
                      f"{part_id}: ES signature “{name}” posted",
                      part_id=part_id, part_type_id=ptid,
-                     actor=request.user.get_username())
+                     actor=activity.actor_of(request))
         return redirect(page_url)
 
     if action == "reset":
@@ -2478,7 +2478,7 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             activity.log(inst, ActivityEvent.KIND_ES,
                          f"{part_id}: ES reset — signatures cleared",
                          part_id=part_id, part_type_id=ptid,
-                         actor=request.user.get_username())
+                         actor=activity.actor_of(request))
         return redirect(page_url)
 
     if action == "generate":
@@ -2562,7 +2562,7 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             activity.log(inst, ActivityEvent.KIND_ES,
                          f"{part_id}: Executive Summary generated and posted",
                          part_id=part_id, part_type_id=ptid,
-                         actor=request.user.get_username())
+                         actor=activity.actor_of(request))
         return redirect(page_url)
 
     messages.error(request, "Unknown action.")
@@ -2760,7 +2760,7 @@ def explore_preship_view(request, part_id):
             activity.log(inst, ActivityEvent.KIND_CHECKLIST,
                          f"{part_id}: pre-shipping checklist written to HWDB",
                          part_id=part_id, part_type_id=ptid,
-                         actor=request.user.get_username())
+                         actor=activity.actor_of(request))
             return redirect(page_url)
 
         cl.current_scene = scene + 1
@@ -2969,7 +2969,7 @@ def explore_shipping_view(request, part_id):
             activity.log(inst, ActivityEvent.KIND_LOCATION,
                          f"{part_id} shipped — marked In-Transit",
                          part_id=part_id, part_type_id=ptid,
-                         actor=request.user.get_username())
+                         actor=activity.actor_of(request))
 
         if scene == checklists.N_SHIPPING_SCENES:
             cl.completed_at = timezone.now()
@@ -2978,7 +2978,7 @@ def explore_shipping_view(request, part_id):
             activity.log(inst, ActivityEvent.KIND_CHECKLIST,
                          f"{part_id}: shipping checklist complete",
                          part_id=part_id, part_type_id=ptid,
-                         actor=request.user.get_username())
+                         actor=activity.actor_of(request))
         else:
             cl.current_scene = scene + 1
             cl.save(update_fields=["current_scene", "updated_at"])
@@ -3140,7 +3140,7 @@ def explore_receiving_view(request, part_id):
             activity.log(inst, ActivityEvent.KIND_LOCATION,
                          f"{part_id} arrived — location posted, {detail}",
                          part_id=part_id, part_type_id=ptid,
-                         actor=request.user.get_username())
+                         actor=activity.actor_of(request))
 
         if scene == checklists.N_RECEIVING_SCENES:
             cl.completed_at = timezone.now()
@@ -3149,7 +3149,7 @@ def explore_receiving_view(request, part_id):
             activity.log(inst, ActivityEvent.KIND_CHECKLIST,
                          f"{part_id}: receiving checklist complete",
                          part_id=part_id, part_type_id=ptid,
-                         actor=request.user.get_username())
+                         actor=activity.actor_of(request))
         else:
             cl.current_scene = scene + 1
             cl.save(update_fields=["current_scene", "updated_at"])

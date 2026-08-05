@@ -55,6 +55,42 @@ class ActivityLogTest(TestCase):
         self.assertEqual(ActivityEvent.objects.get().kind_label, "Exec summary")
 
 
+class ActorOfTest(TestCase):
+    """The recorded actor is the FNAL user, never the Django session user —
+    someone also signed into CETS proper as ``admin`` must still show as
+    their FNAL credkey; the ``fnal:`` namespace prefix never surfaces."""
+
+    def setUp(self):
+        from hwdb.fnal.session import LINK_KEY
+        self.LINK_KEY = LINK_KEY
+        self.user = get_user_model().objects.create_user("admin", "a@a.io", "pw")
+        self.client.force_login(self.user)
+
+    def _request(self, link=None):
+        session = self.client.session
+        if link is not None:
+            session[self.LINK_KEY] = link
+            session.save()
+        request = mock.Mock()
+        request.session = session
+        request.user = self.user
+        return request
+
+    def test_session_link_credkey_wins_over_django_user(self):
+        request = self._request(link={"credkey": "chaoz", "vault_token": "x"})
+        self.assertEqual(activity.actor_of(request), "chaoz")
+
+    def test_fallback_strips_fnal_prefix(self):
+        request = self._request()
+        request.user = mock.Mock()
+        request.user.get_username.return_value = "fnal:chaoz"
+        self.assertEqual(activity.actor_of(request), "chaoz")
+
+    def test_fallback_plain_username_passes_through(self):
+        request = self._request()
+        self.assertEqual(activity.actor_of(request), "admin")
+
+
 class ShipmentSyncSummaryTest(TestCase):
     """sync_shipments logs ONE summary row per run — only when new boxes
     appeared, never one row per box."""
@@ -147,12 +183,18 @@ class RefreshRowEventTest(TestCase):
                 reverse("explore:shipment_refresh", args=["B1"]))
 
     def test_moved_box_logs_event(self):
+        # A session FNAL link makes the credkey the recorded actor, even
+        # though the Django session user is "rf" (end-to-end actor_of check).
+        from hwdb.fnal.session import LINK_KEY
+        session = self.client.session
+        session[LINK_KEY] = {"credkey": "chaoz", "vault_token": "x"}
+        session.save()
         self._refresh(move_to="CERN")
         e = ActivityEvent.objects.get()
         self.assertEqual(e.kind, ActivityEvent.KIND_SYNC)
         self.assertIn("B1 moved", e.summary)
         self.assertIn("CERN", e.summary)
-        self.assertEqual(e.actor, "rf")
+        self.assertEqual(e.actor, "chaoz")
 
     def test_unmoved_box_logs_nothing(self):
         self._refresh(move_to=None)

@@ -17,11 +17,28 @@ from datetime import timedelta
 
 from django.utils import timezone
 
+from hwdb.fnal.session import LINK_KEY
+
+from .auth import FNAL_USERNAME_PREFIX
 from .models import ActivityEvent
 
 logger = logging.getLogger(__name__)
 
 RETENTION_DAYS = 30
+
+
+def actor_of(request) -> str:
+    """The FNAL identity behind this request, e.g. ``chaoz``.
+
+    Activity rows must record the FNAL user, not the Django session user —
+    someone also signed into CETS proper as ``admin`` would otherwise be
+    recorded as admin. The session's FNAL link is authoritative (every
+    logging site sits behind a successful mint, so it's present); the
+    fallback strips the ``fnal:`` username namespace for display."""
+    link = getattr(request, "session", {}).get(LINK_KEY) or {}
+    if link.get("credkey"):
+        return link["credkey"]
+    return request.user.get_username().removeprefix(FNAL_USERNAME_PREFIX)
 
 
 def prune() -> None:
