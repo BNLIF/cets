@@ -14,7 +14,9 @@
     border: 1px solid color-mix(in oklch, var(--bad) 35%, var(--rule)); overflow-wrap: anywhere; }
 
   .ship-searchrow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0 0 6px; }
-  .ship-search { flex: 0 1 380px; min-width: 220px; margin: 0; }
+  .ship-search { flex: 0 1 380px; min-width: 220px; margin: 0; position: relative; }
+  /* live-results dropdown: the header find's menu, anchored under this input */
+  .ship-search .eh-find-menu { left: 0; right: auto; width: 100%; min-width: 300px; }
   .ship-search input { font: inherit; font-size: 13px; color: var(--ink); width: 100%;
     background: var(--page); border: 1px solid var(--rule); border-radius: 999px; padding: 7px 15px; }
   .ship-search input:focus { outline: none; border-color: var(--accent); }
@@ -87,11 +89,14 @@
   {% for m in messages %}<div class="ship-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
 
   <div class="ship-searchrow">
-    <form method="get" action="" class="ship-search">
+    <form method="get" action="" class="ship-search" id="ship-search"
+          data-api="{% url 'explore:shipments_search_api' %}">
       <input type="hidden" name="tab" value="{{ tab }}">
       {% if sel_type %}<input type="hidden" name="type" value="{{ sel_type }}">{% endif %}
-      <input type="search" name="q" value="{{ q }}"
+      <input type="search" name="q" value="{{ q }}" autocomplete="off" spellcheck="false"
+             role="combobox" aria-expanded="false" aria-controls="ship-search-menu"
              placeholder="Search — box PID, type name, or type ID…" aria-label="Search shipments">
+      <div class="eh-find-menu" id="ship-search-menu" role="listbox" hidden></div>
     </form>
     {% if sel_leaf %}
     <span class="ship-chip">{{ sel_leaf.name }} <span class="mono">{{ sel_leaf.part_type_id }}</span>
@@ -154,6 +159,83 @@
   btns.forEach(function (b) {
     if (b) b.addEventListener("click", function () { sweep(b.dataset.mode); });
   });
+})();
+</script>
+<script>
+// Live results for the search box — the header find's behavior, scoped to
+// shipping types and boxes. A type row applies the ?type= filter; a box row
+// applies ?q=<pid> (single hit → the page jumps to that box's status tab).
+// Plain Enter still submits the form (filter the table by the raw text).
+(function () {
+  var form = document.getElementById("ship-search");
+  if (!form) return;
+  var input = form.querySelector("input[name=q]");
+  var menu = document.getElementById("ship-search-menu");
+  var apiUrl = form.dataset.api;
+  function esc(s) { var d = document.createElement("div"); d.textContent = (s == null ? "" : s); return d.innerHTML; }
+  var rows = [], active = -1;
+
+  function close() { menu.hidden = true; input.setAttribute("aria-expanded", "false"); active = -1; }
+  function open() { menu.hidden = false; input.setAttribute("aria-expanded", "true"); }
+
+  function render(d) {
+    var html = "";
+    if (d.types && d.types.length) {
+      html += "<div class='eh-find-h'>Shipping types</div>";
+      d.types.forEach(function (t) {
+        html += "<a class='eh-find-row' href='" + esc(t.url) + "'>" +
+          "<span class='eh-find-chip leaf'>type</span>" +
+          "<span><span class='eh-find-name'>" + esc(t.name) + "</span>" +
+          "<div class='eh-find-meta'>" + t.n + " box" + (t.n === 1 ? "" : "es") + " mirrored</div></span>" +
+          "<span class='eh-find-id'>" + esc(t.part_type_id) + "</span></a>";
+      });
+    }
+    if (d.boxes && d.boxes.length) {
+      html += "<div class='eh-find-h'>Boxes</div>";
+      d.boxes.forEach(function (b) {
+        html += "<a class='eh-find-row' href='" + esc(b.url) + "'>" +
+          "<span class='eh-find-chip'>box</span>" +
+          "<span><span class='eh-find-name mono'>" + esc(b.part_id) + "</span>" +
+          "<div class='eh-find-meta'>" + esc(b.status) + " · " + esc(b.location) + "</div></span></a>";
+      });
+    }
+    if (!html) { html = "<div class='eh-find-empty'>No matching shipping types or boxes.</div>"; }
+    menu.innerHTML = html;
+    rows = Array.prototype.slice.call(menu.querySelectorAll(".eh-find-row"));
+    active = -1;
+    open();
+  }
+
+  var timer = null, lastQ = null;
+  async function run() {
+    var q = input.value.trim();
+    if (q === lastQ) return;
+    lastQ = q;
+    if (q.length < 2) { close(); return; }
+    try {
+      var resp = await fetch(apiUrl + "?q=" + encodeURIComponent(q), { headers: { "X-Requested-With": "fetch" } });
+      var data = await resp.json();
+      if (input.value.trim() === q) render(data);
+    } catch (e) { close(); }
+  }
+  function setActive(i) {
+    if (!rows.length) return;
+    active = (i + rows.length) % rows.length;
+    rows.forEach(function (r, j) { r.classList.toggle("is-active", j === active); });
+    rows[active].scrollIntoView({ block: "nearest" });
+  }
+
+  input.addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(run, 150); });
+  input.addEventListener("keydown", function (e) {
+    if (e.key === "ArrowDown") { e.preventDefault(); if (menu.hidden) run(); else setActive(active + 1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActive(active - 1); }
+    else if (e.key === "Enter") {
+      if (active >= 0 && rows[active]) { e.preventDefault(); location.href = rows[active].href; }
+      // else: fall through to the normal form submit (?q= filter)
+    } else if (e.key === "Escape") { close(); }
+  });
+  input.addEventListener("focus", function () { if (rows.length && input.value.trim().length >= 2) open(); });
+  document.addEventListener("click", function (e) { if (!form.contains(e.target)) close(); });
 })();
 </script>
 {% endblock %}

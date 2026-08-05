@@ -413,6 +413,19 @@ def _shipping_sidebar(request, entries, sel_type):
     return nodes
 
 
+def _shipping_ptids(inst):
+    """Every curated shipping type: explicit ids + every mirrored type under a
+    curated shipping subsystem (the "86.990" selectors)."""
+    ptids = set(curation.shipping_types(inst))
+    for sid, ssid in curation.shipping_subsystems(inst):
+        # Selectors are project-D coordinates (#71) — see curation._ptid_coord.
+        ptids.update(HierarchyNode.for_instance(inst).filter(
+            level=HierarchyNode.LEVEL_TYPE, project="D",
+            system_id=sid, subsystem_id=ssid,
+        ).values_list("part_type_id", flat=True))
+    return ptids
+
+
 @login_not_required
 @fnal_login_required
 def shipments_view(request):
@@ -422,15 +435,7 @@ def shipments_view(request):
     search (?q=, matches box PID / type name / type id), and a per-row refresh.
     Reads the mirror only."""
     inst = instance_of(request)
-    # Explicit ids + every mirrored type under a curated shipping subsystem
-    # (the "86.990" selectors).
-    ptids = set(curation.shipping_types(inst))
-    for sid, ssid in curation.shipping_subsystems(inst):
-        # Selectors are project-D coordinates (#71) — see curation._ptid_coord.
-        ptids.update(HierarchyNode.for_instance(inst).filter(
-            level=HierarchyNode.LEVEL_TYPE, project="D",
-            system_id=sid, subsystem_id=ssid,
-        ).values_list("part_type_id", flat=True))
+    ptids = _shipping_ptids(inst)
 
     # entries feeds the sidebar; sync_targets the sweep buttons.
     boxes, entries, sync_targets = [], [], []
@@ -519,6 +524,47 @@ def shipments_view(request):
         "q": q,
         **pane_ctx,
     })
+
+
+@login_not_required
+@fnal_login_required
+def explore_shipments_search_api_view(request):
+    """Live results for the Shipments search box, mirroring the header find
+    (#87 follow-up): matching shipping types and boxes from the mirror as
+    JSON. A type row applies the ?type= filter; a box row applies ?q=<pid>
+    (a single hit, so the page jumps to that box's status tab)."""
+    inst = instance_of(request)
+    q = (request.GET.get("q") or "").strip()
+    if len(q) < 2:
+        return JsonResponse({"types": [], "boxes": []})
+    ptids = _shipping_ptids(inst)
+    needle = q.lower()
+
+    types = []
+    for ptid in sorted(ptids):
+        leaf = HierarchyNode.for_instance(inst).filter(
+            level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
+        if not leaf or (needle not in leaf.name.lower()
+                        and needle not in ptid.lower()):
+            continue
+        types.append({
+            "name": leaf.name, "part_type_id": ptid,
+            "n": ShipmentItem.for_instance(inst).filter(part_type_id=ptid).count(),
+            "url": "?" + urlencode({"type": ptid}),
+        })
+        if len(types) >= 5:
+            break
+
+    labels = {k: lbl for k, lbl, _c in _SHIP_TABS}
+    boxes = [{
+        "part_id": b.part_id,
+        "status": labels[b.ship_status],
+        "location": b.location_name or "—",
+        "url": "?" + urlencode({"q": b.part_id}),
+    } for b in (ShipmentItem.for_instance(inst)
+                .filter(part_type_id__in=ptids, part_id__icontains=q)
+                .order_by("part_id")[:8])]
+    return JsonResponse({"types": types, "boxes": boxes})
 
 
 @login_not_required

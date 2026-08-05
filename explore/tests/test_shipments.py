@@ -907,6 +907,77 @@ class ShipmentsPageTest(TestCase):
         self.assertNotIn("Start packing", html)
 
 
+class ShipmentsSearchApiTest(TestCase):
+    """GET shipments/search/ — live results for the page's search box,
+    mirroring the header find (shipping types + boxes from the mirror)."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("sq", "s@q.io", "pw")
+        self.client.force_login(self.user)
+        self.leaf = _ship_leaf()
+        ShipmentItem.objects.create(part_type_id=SHIP_PTID, part_id="D08120200001-00007",
+                                    location_name="In Transit", location_id=0, n_contents=3)
+        ShipmentItem.objects.create(part_type_id=SHIP_PTID, part_id="D08120200001-00008",
+                                    location_name="CERN", location_id=200, n_contents=5)
+        self.url = reverse("explore:shipments_search_api")
+
+    def test_requires_login(self):
+        self.client.logout()
+        resp = self.client.get(self.url, {"q": "box"})
+        self.assertEqual(resp.status_code, 302)
+
+    def test_short_query_returns_nothing(self):
+        data = self.client.get(self.url, {"q": "b"}).json()
+        self.assertEqual(data, {"types": [], "boxes": []})
+
+    def test_matches_types_by_name_and_ptid(self):
+        for q in ("shipping box", "D0812"):
+            types = self.client.get(self.url, {"q": q}).json()["types"]
+            self.assertEqual(len(types), 1)
+            self.assertEqual(types[0]["part_type_id"], SHIP_PTID)
+            self.assertEqual(types[0]["n"], 2)
+            self.assertEqual(types[0]["url"], f"?type={SHIP_PTID}")
+
+    def test_matches_boxes_by_pid_with_status_and_filter_url(self):
+        data = self.client.get(self.url, {"q": "1-00007"}).json()
+        self.assertEqual(data["types"], [])
+        self.assertEqual(len(data["boxes"]), 1)
+        b = data["boxes"][0]
+        self.assertEqual(b["part_id"], "D08120200001-00007")
+        self.assertEqual(b["status"], "In transit")
+        self.assertEqual(b["location"], "In Transit")
+        self.assertEqual(b["url"], "?q=D08120200001-00007")
+
+    def test_empty_box_status_and_placeholder_location(self):
+        ShipmentItem.objects.create(part_type_id=SHIP_PTID,
+                                    part_id="D08120200001-00009", n_contents=0)
+        b = self.client.get(self.url, {"q": "1-00009"}).json()["boxes"][0]
+        self.assertEqual(b["status"], "Empty box")
+        self.assertEqual(b["location"], "—")
+
+    def test_scoped_to_the_instance_and_to_shipping_types(self):
+        # A dev-mirrored box and a box of an uncurated type never surface.
+        ShipmentItem.objects.create(instance="dev", part_type_id=SHIP_PTID,
+                                    part_id="D08120200001-00099", n_contents=1)
+        ShipmentItem.objects.create(part_type_id="D05700200001",
+                                    part_id="D05700200001-00001", n_contents=1)
+        self.assertEqual(self.client.get(self.url, {"q": "1-00099"}).json()["boxes"], [])
+        self.assertEqual(self.client.get(self.url, {"q": "D057"}).json()["boxes"], [])
+
+    def test_box_results_capped_at_8(self):
+        for i in range(10, 22):
+            ShipmentItem.objects.create(part_type_id=SHIP_PTID,
+                                        part_id=f"D08120200001-000{i}", n_contents=1)
+        data = self.client.get(self.url, {"q": "D08120200001-000"}).json()
+        self.assertEqual(len(data["boxes"]), 8)
+
+    def test_page_wires_up_the_live_search(self):
+        html = self.client.get(reverse("explore:shipments")).content.decode()
+        self.assertIn('id="ship-search"', html)
+        self.assertIn(f'data-api="{self.url}"', html)
+        self.assertIn('id="ship-search-menu"', html)
+
+
 class ShipmentRefreshViewTest(TestCase):
     """POST part/<pid>/refresh-shipment/ — the per-row ⟳ (#87)."""
 
