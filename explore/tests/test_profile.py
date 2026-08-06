@@ -51,6 +51,28 @@ class ProfileViewTest(TestCase):
         self.assertIn("type-manager", html)
         self.assertIn("#4", html)              # role id shown
         self.assertIn("Roles (2)", html)
+        # avatar initials are first + last name (CZ), not the first two letters
+        self.assertIn('class="pf-avatar">CZ<', html)
+        # …and the visit caches the name, so the HEADER avatar shows CZ too
+        self.assertIn('class="eh-user-dot">CZ', html)
+        self.assertEqual(self.client.session["fnal_full_name"], "Chao Zhang")
+
+    def test_false_admin_architect_flags_are_hidden(self):
+        api = _api()                            # fixture: both flags False
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("Active ✓", html)
+        self.assertNotIn("Administrator", html)
+        self.assertNotIn("Architect", html)
+
+    def test_true_flags_show(self):
+        api = _api({"data": {**WHOAMI["data"], "architect": True}})
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("Architect ✓", html)
+        self.assertNotIn("Administrator", html)
 
     def test_no_roles_warns_writes_are_refused(self):
         api = _api({"data": {**WHOAMI["data"], "roles": []}})

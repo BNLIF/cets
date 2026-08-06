@@ -28,19 +28,61 @@
     font-size: 13px; color: var(--dim); }
   .act-pager a { color: var(--accent-ink); text-decoration: none; }
   .act-pager a:hover { text-decoration: underline; }
+  .act-tabs { display: flex; gap: 6px; margin: 0 0 14px; }
+  .act-tab { text-decoration: none; color: var(--dim); font-size: 13px; font-weight: 500;
+    padding: 6px 14px; border: 1px solid var(--rule); border-radius: 999px;
+    background: var(--page); }
+  .act-tab:hover { border-color: var(--rule-hard); }
+  .act-tab.on { color: var(--accent-ink); background: var(--accent-soft);
+    border-color: color-mix(in oklch, var(--accent) 35%, var(--rule)); font-weight: 600; }
+  .act-manage { font-size: 12.5px; color: var(--faint); margin: -6px 0 14px; }
+  .act-manage a { color: var(--accent-ink); }
+  .act-tab-n { font-weight: 700; color: #fff; background: var(--bad);
+    border-radius: 999px; padding: 1px 6px; font-size: 10.5px; }
+  .act-markread { margin-left: auto; align-self: center; }
+  .act-markread button { font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+    padding: 5px 13px; border-radius: 999px; border: 1px solid var(--rule-hard);
+    background: var(--page); color: var(--dim); }
+  .act-markread button:hover { border-color: var(--accent); color: var(--accent-ink); }
+  .act-row.is-unread { border-left: 3px solid var(--accent);
+    background: color-mix(in oklch, var(--accent) 4%, var(--page)); }
+  .act-flash { border: 1px solid color-mix(in oklch, var(--good) 40%, var(--rule));
+    background: var(--good-bg); color: var(--ink); border-radius: var(--r-lg);
+    padding: 10px 14px; font-size: 13.5px; margin: 0 0 14px; }
+  .act-flash.error { border-color: color-mix(in oklch, var(--bad) 40%, var(--rule));
+    background: color-mix(in oklch, var(--bad) 8%, var(--page)); }
 </style>
 
 <div class="act-page">
+  {% for m in messages %}<div class="act-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
   <h1>Activities</h1>
   <p class="act-sub">What changed on this instance — sync runs that mirrored something
     new (one entry per run) and writes made from the Explorer. Kept for the last
     {{ retention_days }} days; a part's page remains its full history.</p>
 
+  <div class="act-tabs">
+    <a class="act-tab{% if not watched %} on{% endif %}" href="{% url 'explore:activities' %}">All</a>
+    <a class="act-tab{% if watched %} on{% endif %}" href="?watched=1"
+       title="Only events on the types, boxes and items you watch">Watching{% if unread_ids %} <span class="act-tab-n">{{ unread_ids|length }}</span>{% endif %}</a>
+    {% if watched and unread_ids %}
+    <form method="post" action="{% url 'explore:watch_seen' %}" class="act-markread">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+      <button type="submit" title="Clear the unread badge — marks every watched event read">Mark all read</button>
+    </form>
+    {% endif %}
+  </div>
+  {% if watched %}
+  <p class="act-manage">Showing events on the {{ n_watches }} thing{{ n_watches|pluralize }}
+    you watch — manage them on <a href="{% url 'explore:profile' %}">your profile</a>.
+    Watch a type, box or item from its own page.</p>
+  {% endif %}
+
   <div class="act-group">
     <h2>Latest</h2>
     <div class="act-list">
       {% for e in page_obj %}
-        <div class="act-row">
+        <div class="act-row{% if e.id in unread_ids %} is-unread{% endif %}">
           <span class="act-chip{% if e.kind == 'sync' %} sync{% endif %}">{{ e.kind_label }}</span>
           <span class="act-what">
             {% if e.part_id %}<a href="{% url 'explore:part' e.part_id %}">{{ e.summary }}</a>
@@ -54,16 +96,24 @@
           <span class="act-when" title="{{ e.created_at|date:'Y-m-d H:i' }}">{{ e.created_at|timesince }} ago</span>
         </div>
       {% empty %}
+        {% if watched %}
+        <div class="act-empty">
+          {% if n_watches %}Nothing recent on the things you watch.
+          {% else %}You're not watching anything yet — open a type, box or item
+          and hit “Watch”.{% endif %}
+        </div>
+        {% else %}
         <div class="act-empty">Nothing yet — activity shows up here as syncs find new
           items and as boxes are minted, packed, shipped and signed off.</div>
+        {% endif %}
       {% endfor %}
     </div>
 
     {% if page_obj.has_other_pages %}
       <div class="act-pager">
-        {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}">&larr; Newer</a>{% endif %}
+        {% if page_obj.has_previous %}<a href="?{% if watched %}watched=1&amp;{% endif %}page={{ page_obj.previous_page_number }}">&larr; Newer</a>{% endif %}
         <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
-        {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}">Older &rarr;</a>{% endif %}
+        {% if page_obj.has_next %}<a href="?{% if watched %}watched=1&amp;{% endif %}page={{ page_obj.next_page_number }}">Older &rarr;</a>{% endif %}
       </div>
     {% endif %}
   </div>

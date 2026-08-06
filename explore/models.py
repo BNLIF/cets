@@ -340,6 +340,38 @@ class ActivityEvent(InstanceScoped):
         return f"ActivityEvent({self.kind}, {self.summary[:40]})"
 
 
+class WatchSubscription(InstanceScoped):
+    """One user's watch on a component type, box or item (#90).
+
+    ``part_id`` set = a part-level watch (box or item; ``part_type_id`` rides
+    along for context); ``part_id`` empty = a type-level watch. Notifications
+    are DERIVED at read time from ``ActivityEvent`` rows matching the watch —
+    there is no notification fan-out table. ``seen_at`` marks the last time
+    the user looked at their watched feed; matching events newer than it are
+    the unread count. ``username`` is the FNAL credkey (``activity.actor_of``),
+    never the Django session user."""
+
+    username = models.CharField(max_length=150, db_index=True)
+    part_id = models.CharField(max_length=50, blank=True, default="")
+    part_type_id = models.CharField(max_length=20, blank=True, default="")
+    label = models.CharField(max_length=200, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    seen_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [models.UniqueConstraint(
+            fields=["instance", "username", "part_id", "part_type_id"],
+            name="uniq_watch_per_user_target")]
+
+    @property
+    def display(self) -> str:
+        return self.part_id or self.label or self.part_type_id
+
+    def __str__(self):
+        return f"WatchSubscription({self.username}, {self.display})"
+
+
 class HierarchySyncState(models.Model):
     """One row per HWDB instance recording that instance's last hierarchy
     (skeleton) sync run.

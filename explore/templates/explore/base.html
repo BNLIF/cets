@@ -144,12 +144,12 @@
             </div>
             {% endif %}
             {% if fnal_credkey %}
-            <a class="eh-user" href="{% url 'explore:profile' %}" title="Signed in via FNAL — view your profile">
-                <span class="eh-user-dot">{{ fnal_credkey|slice:":2"|upper }}</span>{{ fnal_credkey }}
+            <a class="eh-user" href="{% url 'explore:profile' %}" title="Signed in via FNAL — view your profile{% if watch_unread %} · {{ watch_unread }} new event(s) on things you watch{% endif %}">
+                <span class="eh-user-dot">{% firstof user_initials fnal_credkey|slice:":2"|upper %}{% if watch_unread %}<span class="eh-avatar-badge">{{ watch_unread }}</span>{% endif %}</span>{{ fnal_credkey }}
             </a>
             {% elif user.is_authenticated %}
-            <a class="eh-user" href="{% url 'explore:profile' %}" title="{{ user.username }} — view your profile">
-                <span class="eh-user-dot">{{ user.get_full_name|default:user.username|slice:":2"|upper }}</span>{{ user.get_full_name|default:user.username }}
+            <a class="eh-user" href="{% url 'explore:profile' %}" title="{{ user.username }} — view your profile{% if watch_unread %} · {{ watch_unread }} new event(s) on things you watch{% endif %}">
+                <span class="eh-user-dot">{% firstof user_initials user.username|slice:":2"|upper %}{% if watch_unread %}<span class="eh-avatar-badge">{{ watch_unread }}</span>{% endif %}</span>{{ user.get_full_name|default:user.username }}
             </a>
             {% endif %}
             {% if user.is_authenticated %}

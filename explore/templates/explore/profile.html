@@ -3,7 +3,9 @@
 
 {% block content %}
 <style>
-  .pf-page { padding: 26px 30px 56px; max-width: 720px; }
+  .pf-page { padding: 26px 30px 56px; max-width: 1100px; }
+  .pf-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 0 36px; align-items: start; }
   .pf-page h1 { font-size: 1.5rem; color: var(--ink); margin: 0 0 4px; letter-spacing: -0.01em; }
   .pf-sub { color: var(--dim); font-size: 13.5px; margin: 0 0 20px; }
   .pf-sub .mono { font-family: var(--font-mono); }
@@ -17,11 +19,12 @@
 
   .pf-card { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg);
     padding: 4px 16px; margin-bottom: 18px; }
-  .pf-row { display: flex; align-items: baseline; gap: 12px; padding: 11px 0;
+  .pf-row { display: flex; align-items: baseline; gap: 12px; padding: 7px 0;
     border-top: 1px solid var(--rule); }
   .pf-row:first-child { border-top: none; }
-  .pf-key { flex: 0 0 150px; font-size: 12px; color: var(--faint); text-transform: uppercase;
+  .pf-key { flex: 0 0 110px; font-size: 12px; color: var(--faint); text-transform: uppercase;
     letter-spacing: .04em; }
+  .pf-flag-sep { color: var(--rule-hard); margin: 0 4px; }
   .pf-val { color: var(--ink); font-size: 13.5px; }
   .pf-val.mono { font-family: var(--font-mono); }
   .pf-yes { color: var(--good); font-weight: 600; }
@@ -29,11 +32,47 @@
 
   .pf-group h2 { font-size: 12px; color: var(--faint); text-transform: uppercase;
     letter-spacing: .04em; margin: 0 0 8px; }
-  .pf-roles { display: flex; flex-wrap: wrap; gap: 8px; }
-  .pf-role { display: inline-flex; align-items: baseline; gap: 7px; font-size: 13px;
+  .pf-group { margin-bottom: 22px; }
+  .pf-watch-row { display: flex; align-items: baseline; gap: 12px; padding: 10px 0;
+    border-top: 1px solid var(--rule); }
+  .pf-watch-row:first-child { border-top: none; }
+  .pf-watch-kind { flex: 0 0 auto; font-size: 10px; font-weight: 600; letter-spacing: .05em;
+    text-transform: uppercase; color: var(--accent-ink); background: var(--accent-soft);
+    padding: 2px 7px; border-radius: 999px; }
+  .pf-watch-name { color: var(--ink); font-size: 13.5px; text-decoration: none; }
+  .pf-watch-name.mono { font-family: var(--font-mono); }
+  a.pf-watch-name:hover { color: var(--accent-ink); }
+  .pf-watch-meta { font-size: 12px; color: var(--faint); }
+  .pf-unwatch { margin-left: auto; font: inherit; font-size: 12px; cursor: pointer;
+    border: 1px solid var(--rule); background: var(--page); color: var(--faint);
+    border-radius: 999px; padding: 2px 10px; }
+  .pf-unwatch:hover { border-color: var(--bad); color: var(--bad); }
+  .pf-nowatch { font-size: 13px; color: var(--faint); }
+  .pf-ev-row { display: flex; align-items: baseline; gap: 12px; padding: 10px 12px;
+    margin: 0 -12px; border-top: 1px solid var(--rule); }
+  .pf-ev-row:first-child { border-top: none; }
+  .pf-ev-row.is-unread { border-left: 3px solid var(--accent);
+    background: color-mix(in oklch, var(--accent) 4%, var(--page)); }
+  .pf-ev-what { min-width: 0; color: var(--ink); font-size: 13.5px; }
+  .pf-ev-what a { color: inherit; text-decoration: none;
+    border-bottom: 1px dotted var(--rule-hard); }
+  .pf-ev-what a:hover { border-bottom-color: var(--accent); color: var(--accent-ink); }
+  .pf-ev-when { margin-left: auto; flex: 0 0 auto; font-size: 12px; color: var(--faint);
+    white-space: nowrap; }
+  .pf-feed-head { display: flex; align-items: baseline; gap: 12px; margin: 0 0 8px; }
+  .pf-feed-head h2 { margin: 0; }
+  .pf-markread { margin-left: auto; }
+  .pf-markread button { font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+    padding: 3px 12px; border-radius: 999px; border: 1px solid var(--rule-hard);
+    background: var(--page); color: var(--dim); }
+  .pf-markread button:hover { border-color: var(--accent); color: var(--accent-ink); }
+  .pf-unread-n { font-weight: 700; color: #fff; background: var(--bad);
+    border-radius: 999px; padding: 1px 6px; font-size: 10.5px; }
+  .pf-roles { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .pf-role { display: inline-flex; align-items: baseline; gap: 6px; font-size: 12px;
     color: var(--accent-ink); background: var(--accent-soft); border-radius: 999px;
-    padding: 5px 13px; }
-  .pf-role .id { font-family: var(--font-mono); font-size: 11px; color: var(--faint); }
+    padding: 2px 10px; }
+  .pf-role .id { font-family: var(--font-mono); font-size: 10.5px; color: var(--faint); }
   .pf-noroles { font-size: 13px; color: var(--faint); }
 </style>
 
@@ -46,8 +85,10 @@
     (<span class="mono">users/whoami</span>). Roles and ids are per-instance —
     the same account differs between production and development.</p>
 
+  <div class="pf-cols">
+  <div>
   <div class="pf-head">
-    <span class="pf-avatar">{{ who.full_name|default:who.username|slice:":2"|upper }}</span>
+    <span class="pf-avatar">{{ initials }}</span>
     <div>
       <div class="pf-name">{{ who.full_name|default:"—" }}</div>
       <div class="pf-uname">{{ who.username }}</div>
@@ -59,23 +100,92 @@
     <div class="pf-row"><div class="pf-key">Email</div><div class="pf-val">{{ who.email|default:"—" }}</div></div>
     <div class="pf-row"><div class="pf-key">User ID</div><div class="pf-val mono">{{ who.user_id|default:"—" }}</div></div>
     {% if who.affiliation %}<div class="pf-row"><div class="pf-key">Affiliation</div><div class="pf-val">{{ who.affiliation }}</div></div>{% endif %}
-    <div class="pf-row"><div class="pf-key">Active</div><div class="pf-val">{% if who.active %}<span class="pf-yes">Yes</span>{% else %}<span class="pf-no">No</span>{% endif %}</div></div>
-    <div class="pf-row"><div class="pf-key">Administrator</div><div class="pf-val">{% if who.administrator %}<span class="pf-yes">Yes</span>{% else %}<span class="pf-no">No</span>{% endif %}</div></div>
-    <div class="pf-row"><div class="pf-key">Architect</div><div class="pf-val">{% if who.architect %}<span class="pf-yes">Yes</span>{% else %}<span class="pf-no">No</span>{% endif %}</div></div>
+    <div class="pf-row"><div class="pf-key">Flags</div><div class="pf-val">
+      <span class="{% if who.active %}pf-yes{% else %}pf-no{% endif %}">Active {% if who.active %}✓{% else %}✗{% endif %}</span>
+      {% if who.administrator %}<span class="pf-flag-sep">·</span>
+      <span class="pf-yes">Administrator ✓</span>{% endif %}
+      {% if who.architect %}<span class="pf-flag-sep">·</span>
+      <span class="pf-yes">Architect ✓</span>{% endif %}
+    </div></div>
+    <div class="pf-row"><div class="pf-key">Roles ({{ roles|length }})</div><div class="pf-val">
+      {% if roles %}
+      <span class="pf-roles">
+        {% for r in roles %}<span class="pf-role">{{ r.name }}<span class="id">#{{ r.id }}</span></span>{% endfor %}
+      </span>
+      {% else %}
+      <span class="pf-noroles">None on this instance — HWDB writes (test submission,
+        executive-summary signing) will be refused until an HWDB architect grants one.</span>
+      {% endif %}
+    </div></div>
   </div>
 
   <div class="pf-group">
-    <h2>Roles ({{ roles|length }})</h2>
-    {% if roles %}
-    <div class="pf-roles">
-      {% for r in roles %}
-      <span class="pf-role">{{ r.name }}<span class="id">#{{ r.id }}</span></span>
+    <h2>Watching ({{ watch_subs|length }})</h2>
+    {% if watch_subs %}
+    <div class="pf-card">
+      {% for s in watch_subs %}
+      <div class="pf-watch-row">
+        <span class="pf-watch-kind">{% if s.part_id %}part{% else %}type{% endif %}</span>
+        {% if s.url %}<a class="pf-watch-name{% if s.part_id %} mono{% endif %}" href="{{ s.url }}">{{ s.display }}</a>
+        {% else %}<span class="pf-watch-name{% if s.part_id %} mono{% endif %}">{{ s.display }}</span>{% endif %}
+        {% if s.part_id and s.label %}<span class="pf-watch-meta">{{ s.label }}</span>{% endif %}
+        {% if not s.part_id %}<span class="pf-watch-meta">{{ s.part_type_id }}</span>{% endif %}
+        <form method="post" action="{% url 'explore:watch_toggle' %}" class="pf-unwatch-form" style="margin-left:auto;">
+          {% csrf_token %}
+          <input type="hidden" name="part_id" value="{{ s.part_id }}">
+          <input type="hidden" name="part_type_id" value="{{ s.part_type_id }}">
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <button class="pf-unwatch" type="submit" title="Stop watching">unwatch</button>
+        </form>
+      </div>
       {% endfor %}
     </div>
+    <p class="pf-nowatch">Their recent events show on the right and under
+      <a href="{% url 'explore:activities' %}?watched=1">Activities › Watching</a>;
+      new ones count on your avatar badge.</p>
     {% else %}
-    <p class="pf-noroles">No roles on this instance — HWDB writes (test submission,
-      executive-summary signing) will be refused until an HWDB architect grants one.</p>
+    <p class="pf-nowatch">Nothing yet — open a component type, box or item and hit
+      “☆ Watch”. New events on watched things show here and under
+      <a href="{% url 'explore:activities' %}?watched=1">Activities › Watching</a>,
+      and light up a badge on your avatar.</p>
     {% endif %}
+  </div>
+
+  </div>
+
+  <div>
+  <div class="pf-group">
+    <div class="pf-feed-head">
+      <h2>Watching activity{% if unread_total %} <span class="pf-unread-n">{{ unread_total }} new</span>{% endif %}</h2>
+      {% if unread_total %}
+      <form method="post" action="{% url 'explore:watch_seen' %}" class="pf-markread">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <button type="submit" title="Clear the unread badge — marks every watched event read">Mark all read</button>
+      </form>
+      {% endif %}
+    </div>
+    {% if watch_events %}
+    <div class="pf-card">
+      {% for e in watch_events %}
+      <div class="pf-ev-row{% if e.id in unread_ids %} is-unread{% endif %}">
+        <span class="pf-watch-kind">{{ e.kind_label }}</span>
+        <span class="pf-ev-what">
+          {% if e.part_id %}<a href="{% url 'explore:part' e.part_id %}">{{ e.summary }}</a>
+          {% else %}{{ e.summary }}{% endif %}
+        </span>
+        <span class="pf-ev-when" title="{{ e.created_at|date:'Y-m-d H:i' }}">{{ e.created_at|timesince }} ago</span>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="pf-nowatch">Newest {{ watch_events|length }} shown — the full feed is
+      <a href="{% url 'explore:activities' %}?watched=1">Activities › Watching</a>.</p>
+    {% else %}
+    <p class="pf-nowatch">No recent events on the things you watch — new ones appear
+      here and highlight until you mark them read.</p>
+    {% endif %}
+  </div>
+  </div>
   </div>
 </div>
 {% endblock %}

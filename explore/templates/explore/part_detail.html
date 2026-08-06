@@ -15,6 +15,12 @@
     letter-spacing: -0.01em; }
   .sd-head a.hwdb { font-size: 13px; color: var(--accent-ink); text-decoration: none; }
   .sd-head a.hwdb:hover { text-decoration: underline; }
+  .sd-watch { font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+    padding: 3px 12px; border-radius: 999px; border: 1px solid var(--rule-hard);
+    background: var(--page); color: var(--dim); }
+  .sd-watch:hover { border-color: var(--accent); color: var(--accent-ink); }
+  .sd-watch.on { color: var(--accent-ink); background: var(--accent-soft);
+    border-color: color-mix(in oklch, var(--accent) 35%, var(--rule)); }
   .sd-subtitle { color: var(--dim); font-size: 13.5px; margin: 0 0 20px; }
 
   .sd-pill { font-size: 12px; font-weight: 600; padding: 2px 11px; border-radius: 999px;
@@ -136,6 +142,16 @@
   <div class="sd-head">
     <h1>{{ part_id }}</h1>
     <a class="hwdb" href="{{ hwdb_ui_base }}/edit/component/{{ part_id }}" target="_blank" rel="noopener">Open in FNAL HWDB &#x2197;</a>
+    <form method="post" action="{% url 'explore:watch_toggle' %}" style="margin:0;">
+      {% csrf_token %}
+      <input type="hidden" name="part_id" value="{{ part_id }}">
+      <input type="hidden" name="part_type_id" value="{{ ptid }}">
+      <input type="hidden" name="label" value="{{ detail.type_name }}">
+      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+      <button class="sd-watch{% if watching %} on{% endif %}" type="submit"
+              title="{% if watching %}Stop watching — its events leave Activities › Watching{% else %}Watch this part — its events show under Activities › Watching and count on your avatar badge{% endif %}">
+        {% if watching %}★ Watching{% else %}☆ Watch{% endif %}</button>
+    </form>
     {% if is_shipping %}
       {% if detail.in_transit %}<span class="sd-pill is-transit">In Transit</span>
       {% elif detail.has_location %}<span class="sd-pill is-delivered">Delivered</span>{% endif %}

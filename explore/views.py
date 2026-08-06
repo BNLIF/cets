@@ -12,7 +12,8 @@ from django.contrib.auth.decorators import login_not_required
 from django.core.paginator import Paginator
 from django.db.models import F, Q
 from django.http import (
-    Http404, HttpResponse, HttpResponseForbidden, JsonResponse,
+    Http404, HttpResponse, HttpResponseBadRequest, HttpResponseForbidden,
+    JsonResponse,
     StreamingHttpResponse,
 )
 from django.shortcuts import redirect, render
@@ -28,7 +29,7 @@ from hwdb.fnal import session as fnal_session
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
 
 from . import (activity, charts, checklists, curation, events, execsummary,
-               navigation, parts, scanning)
+               navigation, parts, scanning, watches)
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, sync_test_events
 from .hierarchy import sync_hierarchy, sync_system
@@ -282,6 +283,9 @@ def explore_view(request, trail=None):
             "view": view,
             "sidebar": navigation.sidebar_tree(inst, view["ctx"]),
             "leaf": leaf,
+            "leaf_watching": bool(leaf) and watches.is_watched(
+                inst, activity.actor_of(request),
+                part_type_id=leaf.part_type_id),
             "charts": charts,
             "parts_page": parts_page,
             "breakdowns": breakdowns,
@@ -919,6 +923,9 @@ def explore_part_view(request, part_id):
         "sidebar": navigation.sidebar_tree(inst, side_ctx),
         "part_id": part_id,
         "ptid": ptid,
+        "watching": watches.is_watched(
+            inst, activity.actor_of(request),
+            part_id=part_id, part_type_id=ptid),
         "detail": detail,
         "is_shipping": is_shipping,
         "other_attachments": other_attachments,
@@ -1679,11 +1686,17 @@ def _is_architect(request, inst, api=None) -> bool:
         if api is None:
             api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"],
                                   mint_for(request))
-        flag = bool((api.whoami().get("data") or {}).get("architect"))
+        who = api.whoami().get("data") or {}
+        flag = bool(who.get("architect"))
     except Exception as e:
         logger.warning("architect check on %s failed: %s", inst, e)
         return False
     request.session[key] = flag
+    # The full name rides along for the header avatar's initials (whoami is
+    # the only place it exists — the FNAL link stores just the credkey).
+    name = who.get("full_name")
+    if isinstance(name, str) and name:
+        request.session["fnal_full_name"] = name
     return flag
 
 
@@ -3299,17 +3312,67 @@ def explore_activities_view(request):
     """The Activities feed (#88): latest mirrored changes on this instance —
     sync summaries (one row per run, never per item) and in-app writes.
     Mirror-only; a rolling window pruned to the last month, so the part page
-    stays the authoritative history."""
+    stays the authoritative history.
+
+    ``?watched=1`` (#90) narrows the feed to events matching the user's
+    watches. Unread rows are highlighted; reading is an explicit act — the
+    "Mark all read" button (watch_seen) — never a side effect of a visit."""
     inst = instance_of(request)
     activity.prune()
-    page_obj = Paginator(ActivityEvent.for_instance(inst), 100).get_page(
-        request.GET.get("page"))
+    actor = activity.actor_of(request)
+    watched = request.GET.get("watched") == "1"
+    n_watches = watches.subs_for(inst, actor).count()
+    qs = (watches.watched_events(inst, actor) if watched
+          else ActivityEvent.for_instance(inst))
+    unread_ids = set(watches.unread_events(inst, actor)
+                     .values_list("id", flat=True))
+    page_obj = Paginator(qs, 100).get_page(request.GET.get("page"))
     return render(request, "explore/activities.html", {
         "active_nav": "activities",
         "sidebar": navigation.sidebar_tree(inst, {}),
         "page_obj": page_obj,
         "retention_days": activity.RETENTION_DAYS,
+        "watched": watched,
+        "n_watches": n_watches,
+        "unread_ids": unread_ids,
     })
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_watch_toggle_view(request):
+    """Watch/unwatch a component type (``part_type_id`` only) or a single
+    part — box or item (``part_id`` set) (#90). Local-only, no HWDB; the
+    watcher is the FNAL identity, like the feed's actor."""
+    inst = instance_of(request)
+    part_id = (request.POST.get("part_id") or "").strip()
+    ptid = (request.POST.get("part_type_id") or "").strip()
+    label = (request.POST.get("label") or "").strip()
+    if not part_id and not ptid:
+        return HttpResponseBadRequest("Nothing to watch.")
+    now_watching = watches.toggle(
+        inst, activity.actor_of(request),
+        part_id=part_id, part_type_id=ptid, label=label)
+    target = part_id or label or ptid
+    if now_watching:
+        messages.success(request, f"Watching {target} — its events show under "
+                                  "Activities › Watching.")
+    else:
+        messages.success(request, f"Stopped watching {target}.")
+    return redirect(_safe_next(request, _rev(request, "explore:activities")))
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_watch_seen_view(request):
+    """"Mark all read" (#90): stamp every watch's seen mark to now. The only
+    way unread clears — viewing a page never marks anything."""
+    inst = instance_of(request)
+    watches.mark_seen(inst, activity.actor_of(request))
+    return redirect(_safe_next(
+        request, _rev(request, "explore:activities") + "?watched=1"))
 
 
 @login_not_required
@@ -3358,12 +3421,33 @@ def explore_profile_view(request):
 
     roles = sorted((r for r in who.get("roles") or [] if isinstance(r, dict)),
                    key=lambda r: r.get("name") or "")
+    # "Chao Zhang" → CZ (first + last name), not the first two letters.
+    words = (who.get("full_name") or "").split()
+    initials = ((words[0][0] + words[-1][0]).upper() if len(words) >= 2
+                else (who.get("full_name") or who.get("username") or "?")[:2].upper())
+    if who.get("full_name"):  # header avatar initials (see _is_architect)
+        request.session["fnal_full_name"] = who["full_name"]
+    # Watched things (#90): quick links + unwatch, plus the right column's
+    # recent watching activity — all from the local tables, no HWDB. Unread
+    # only clears via the explicit "Mark all read" button.
+    actor = activity.actor_of(request)
+    subs = list(watches.subs_for(inst, actor))
+    for s in subs:
+        s.url = (_rev(request, "explore:part", args=[s.part_id]) if s.part_id
+                 else navigation.leaf_path_for(inst, s.part_type_id))
+    unread_ids = set(watches.unread_events(inst, actor)
+                     .values_list("id", flat=True))
     return render(request, "explore/profile.html", {
         "active_nav": "profile",
         "sidebar": navigation.sidebar_tree(inst, {}),
         "instance": inst,
         "who": who,
         "roles": roles,
+        "initials": initials,
+        "watch_subs": subs,
+        "watch_events": list(watches.watched_events(inst, actor)[:20]),
+        "unread_ids": unread_ids,
+        "unread_total": len(unread_ids),
     })
 
 

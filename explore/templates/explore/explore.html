@@ -125,10 +125,23 @@
         </div>
     </div>
     <div class="page-head-actions">
+        {% if view.kind == 'leaf' %}
+        {# A leaf mirrors via its own sync buttons below — the full hierarchy walk doesn't belong here; Watch (#90) takes the slot. #}
+        <form method="post" action="{% url 'explore:watch_toggle' %}" style="margin:0;">
+            {% csrf_token %}
+            <input type="hidden" name="part_type_id" value="{{ leaf.part_type_id }}">
+            <input type="hidden" name="label" value="{{ leaf.name }}">
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <button class="btn {% if leaf_watching %}btn-primary{% else %}btn-ghost{% endif %}" type="submit"
+                    title="{% if leaf_watching %}Stop watching this type{% else %}Watch this type — its events show under Activities › Watching and count on your avatar badge{% endif %}">
+                {% if leaf_watching %}★ Watching{% else %}☆ Watch{% endif %}</button>
+        </form>
+        {% else %}
         <button id="refresh-btn" class="btn btn-primary" type="button" title="Walk the curated systems into the local mirror">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
             Refresh hierarchy
         </button>
+        {% endif %}
     </div>
 </div>
 

@@ -130,10 +130,20 @@ a { color: inherit; }
 }
 a.eh-user:hover { color: var(--ink); }
 .eh-user-dot {
+  position: relative;
   width: 28px; height: 28px; border-radius: 50%;
   background: var(--accent); color: #fff;
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 11.5px; font-weight: 600;
+}
+/* unread-watched count on the avatar (#90), email-style */
+.eh-avatar-badge {
+  position: absolute; top: -5px; right: -7px;
+  min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box;
+  border-radius: 999px; border: 2px solid var(--page);
+  background: var(--bad); color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 9.5px; font-weight: 700; line-height: 1;
 }
 .eh-signout {
   height: 28px; padding: 0 10px;
