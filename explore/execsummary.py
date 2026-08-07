@@ -126,6 +126,16 @@ def load_config(api, part_type_id: str):
     return _normalize(cfg), f"Config: {newest.get('image_name')}"
 
 
+def _norm_field(f: dict) -> dict:
+    """One field-group entry (#85/#94). ``item_path`` addresses the item's
+    latest Item Specifications entry the way ``data_path`` addresses
+    test_data; when both are given, data_path wins and item_path is
+    dropped."""
+    dp = str(f.get("data_path") or "").strip()
+    ip = "" if dp else str(f.get("item_path") or "").strip()
+    return {"label": str(f["label"]).strip(), "data_path": dp, "item_path": ip}
+
+
 def _normalize(cfg: dict) -> dict:
     """The Dashboard's tolerant reading of the config fields."""
     desc = cfg.get("test_description")
@@ -180,12 +190,12 @@ def _normalize(cfg: dict) -> dict:
                                 if isinstance(p.get("sub_part_id"), dict) else None),
                 # Optional per-plot field group (#85, Hajime/Greg — the APA
                 # DB's filled fields next to each plot): a field WITH a
-                # data_path resolves live from the QC test record; one
-                # WITHOUT is typed on the plot page and stored in the ES
-                # test record. Labels are explicit, never data-path keys.
-                "fields": [{"label": str(f["label"]).strip(),
-                            "data_path": str(f.get("data_path") or "").strip()}
-                           for f in p.get("fields") or []
+                # data_path resolves live from the QC test record; one with
+                # an item_path (#94) from the item's latest Item
+                # Specifications entry; one with NEITHER is typed on the
+                # plot page and stored in the ES test record. Labels are
+                # explicit, never path keys.
+                "fields": [_norm_field(f) for f in p.get("fields") or []
                            if isinstance(f, dict) and str(f.get("label") or "").strip()]}
         ip = p.get("image_path")
         if isinstance(ip, dict) and (ip.get("image_name") or "").strip():
@@ -196,7 +206,8 @@ def _normalize(cfg: dict) -> dict:
             plots.append({**base, "kind": "image",
                           "image_name": (ip.get("image_name") or "").strip(),
                           "history_order": max(ho, 0)})
-        elif base["fields"] and not (p.get("data_paths") or []):
+        elif base["fields"] and not (p.get("data_paths") or []) \
+                and not (p.get("item_paths") or []):
             # A fields-only slot (Hajime 2026-08-05): values without a plot.
             # No image machinery, no "data_paths must have length 1/2" error.
             plots.append({**base, "kind": "fields"})
@@ -205,8 +216,13 @@ def _normalize(cfg: dict) -> dict:
                 bins = int(p.get("bins") or 40)
             except (TypeError, ValueError):
                 bins = 40
+            # item_paths (#94): the same 1/2-path plot drawn from the item's
+            # latest Item Specifications entry instead of a test record;
+            # data_paths wins when both are given (same rule as fields).
+            dps = [str(x) for x in p.get("data_paths") or []]
+            ips = [] if dps else [str(x) for x in p.get("item_paths") or []]
             plots.append({**base, "kind": "numeric", "bins": bins,
-                          "data_paths": [str(x) for x in p.get("data_paths") or []]})
+                          "data_paths": dps, "item_paths": ips})
     # Arbitrary top-level keys (#86, Hajime 2026-08-04): the editor's "Extra
     # fields" card writes them; they are ES-level facts, shown on the page
     # and in the PDF header — not silently carried.
@@ -407,6 +423,23 @@ def _test_record_at(api, pid: str, test_type_name: str, history_order: int):
     return (rec if isinstance(rec, dict) else None), None
 
 
+def _item_spec_at(api, pid: str):
+    """``(latest Item Specifications entry, error)`` — the item_path root
+    (#94, APA): the same latest-entry rule as the part page (an FNAL-UI edit
+    appends a new entry and must win — see shipments._spec_block)."""
+    from .shipments import _spec_block
+    if not pid:
+        return None, "Missing pid."
+    try:
+        body = api.get_component(pid)
+    except Exception as e:
+        return None, f"Item fetch failed for {pid}: {e}"
+    spec = _spec_block(body)
+    if spec is None:
+        return None, f"No Item Specifications found for {pid}."
+    return spec, None
+
+
 def _resolve_sub_part_id(children_of, part_id: str, layer, pos_name) -> str | None:
     """The Dashboard's subtree addressing: layer 1 = the item's direct
     children, matched by functional position; ties break on lowest PID."""
@@ -482,15 +515,22 @@ def _flatten_numeric(value) -> list[float]:
 
 def render_numeric_plot(test_data: dict, plot: dict, label: str):
     """``(png bytes | None, note | None)`` — the Dashboard's single-PID
-    numeric plots, drawn with matplotlib instead of Plotly: 1 data_path →
+    numeric plots, drawn with matplotlib instead of Plotly: 1 path →
     histogram (numeric when >80% of values parse, else categorical bar);
-    2 paths → scatter. Type-wide "sum" populations are NOT rendered (that's
-    a fan-out over every item of the type — see the mirror-light rule)."""
+    2 paths → scatter. ``test_data`` is whatever dict the paths address —
+    a test record's test_data (data_paths) or the latest Item Specifications
+    entry (item_paths, #94). Type-wide "sum" populations are NOT rendered
+    (that's a fan-out over every item of the type — see the mirror-light
+    rule)."""
     try:
         from matplotlib.figure import Figure
     except ImportError:
         return None, "matplotlib is not installed on the server."
+    src = "data_path"
     paths = plot.get("data_paths") or []
+    if not paths:
+        paths = plot.get("item_paths") or []
+        src = "item_path"
     title = f"{plot['title']} — {label}"
 
     def _png(draw):
@@ -507,7 +547,7 @@ def render_numeric_plot(test_data: dict, plot: dict, label: str):
         v = _get_by_path(test_data, paths[0])
         values = v if isinstance(v, list) else ([] if v is None else [v])
         if not values:
-            return None, f"No data at data_path '{paths[0]}'."
+            return None, f"No data at {src} '{paths[0]}'."
         nums = _flatten_numeric(values)
         if len(nums) > 0.8 * len(values):
             stats = (f"N={len(nums)}  mean={sum(nums) / len(nums):.4g}  "
@@ -536,7 +576,7 @@ def render_numeric_plot(test_data: dict, plot: dict, label: str):
         ys = _flatten_numeric(_get_by_path(test_data, paths[1]))
         n = min(len(xs), len(ys))
         if not n:
-            return None, f"No numeric (x,y) pairs at data_paths {paths}."
+            return None, f"No numeric (x,y) pairs at {src}s {paths}."
 
         def draw(ax):
             ax.scatter(xs[:n], ys[:n], s=12, alpha=0.7)
@@ -544,7 +584,7 @@ def render_numeric_plot(test_data: dict, plot: dict, label: str):
             ax.set_ylabel(paths[1], fontsize=8)
         return _png(draw), None
 
-    return None, "Invalid config: data_paths must have length 1 (histogram) or 2 (scatter)."
+    return None, f"Invalid config: {src}s must have length 1 (histogram) or 2 (scatter)."
 
 
 def _fmt_field_value(v):
@@ -561,21 +601,31 @@ def _fmt_field_value(v):
 
 def resolve_plot_fields(api, plot, pid: str, saved: dict) -> list[dict]:
     """The plot's field group (#85) as display rows ``{label, data_path,
-    auto, value, error}``: data_path fields read the resolved pid's LATEST
-    test record of the plot's test type (live — never stored, same rule as
-    numeric plots); manual fields read the values typed on the plot page
-    (``saved``, the ES record's ``plot_fields[slug]``)."""
+    item_path, auto, value, error}``: data_path fields read the resolved
+    pid's LATEST test record of the plot's test type; item_path fields (#94)
+    the pid's latest Item Specifications entry (both live — never stored,
+    same rule as numeric plots); manual fields read the values typed on the
+    plot page (``saved``, the ES record's ``plot_fields[slug]``)."""
     rows = []
     rec, err = (None, None)
     if any(f["data_path"] for f in plot["fields"]):
         rec, err = _test_record_at(api, pid, plot["test_type_name"], 0)
     td = (rec or {}).get("test_data") or {}
+    spec, spec_err = (None, None)
+    if any(f["item_path"] for f in plot["fields"]):
+        spec, spec_err = _item_spec_at(api, pid)
     for f in plot["fields"]:
         if f["data_path"]:
             value = None if err else _fmt_field_value(_get_by_path(td, f["data_path"]))
             rows.append({**f, "auto": True, "value": value,
                          "error": err or (None if value is not None else
                                           f"No value at data_path '{f['data_path']}'.")})
+        elif f["item_path"]:
+            value = (None if spec_err else
+                     _fmt_field_value(_get_by_path(spec, f["item_path"])))
+            rows.append({**f, "auto": True, "value": value,
+                         "error": spec_err or (None if value is not None else
+                                               f"No value at item_path '{f['item_path']}'.")})
         else:
             rows.append({**f, "auto": False,
                          "value": str(saved.get(f["label"]) or ""), "error": None})
@@ -637,10 +687,15 @@ def resolve_plots(api, cfg, part_id: str, children_of, item_images,
                         f"Could not find image_name='{p['image_name']}' in test record "
                         f"(pid={blk['pid']}, test={p['test_type_name']}, "
                         f"history_order={p['history_order']}).")
-        else:  # numeric — draw from the resolved pid's latest test record
-            rec, err = _test_record_at(api, blk["pid"], p["test_type_name"], 0)
+        else:  # numeric — draw from the resolved pid's latest test record,
+            # or its latest Item Specifications entry (item_paths, #94)
+            if p.get("item_paths"):
+                root, err = _item_spec_at(api, blk["pid"])
+            else:
+                rec, err = _test_record_at(api, blk["pid"], p["test_type_name"], 0)
+                root = (rec or {}).get("test_data") or {}
             png, note = (None, err) if err else render_numeric_plot(
-                rec.get("test_data") or {}, p, blk["pid"])
+                root, p, blk["pid"])
             if png:
                 blk["png_b64"] = base64.b64encode(png).decode()
                 blk["render_bytes"] = png   # kept for a "plot from data" PDF choice
@@ -1012,6 +1067,9 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
                 src = ""   # a fields-only slot — no plot, no source line
             elif pb.get("uploaded"):
                 src = f"Uploaded image: {pb['upload_name']}"
+            elif pb.get("kind") == "numeric" and pb.get("item_paths"):
+                src = (f"Numeric plot (item_paths: "
+                       f"{', '.join(pb['item_paths'])}) — from the Item Specifications")
             elif pb.get("kind") == "numeric":
                 src = f"Numeric plot (data_paths: {', '.join(pb.get('data_paths') or [])})"
             else:

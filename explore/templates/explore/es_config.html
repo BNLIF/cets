@@ -105,8 +105,9 @@
     <div class="ec-card">
       <h2>Plots</h2>
       <p class="ec-hint" style="margin:0 0 4px;">An <b>image</b> plot shows an image already attached to a test
-        record; a <b>numeric</b> plot (data_paths) is rendered by the Dashboard — the Explorer shows an
-        uploaded image for it. Leave part_id and sub-position blank to target the item itself.</p>
+        record; a <b>numeric</b> plot is rendered from data_paths (the latest test record) or
+        item_paths (the item&#8217;s Item Specifications). Leave part_id and sub-position blank to
+        target the item itself.</p>
       <div id="ec-plots"></div>
       <button type="button" class="ec-add" data-add="plot">+ add plot</button>
     </div>
@@ -160,7 +161,8 @@
     <div class="ec-row">
       <select class="f-kind" style="flex:0 0 210px;">
         <option value="image">image (from a test record)</option>
-        <option value="numeric">numeric (data_paths)</option>
+        <option value="numeric">numeric (from a test record)</option>
+        <option value="numeric-spec">numeric (from the Item Specs)</option>
         <option value="fields">fields only (no plot)</option>
       </select>
       <input class="f-title" placeholder="title">
@@ -177,6 +179,10 @@
       <input class="f-bins" type="number" placeholder="bins">
       <label class="ec-inline"><input class="f-sum" type="checkbox"> sum over the whole type</label>
     </div>
+    <div class="ec-row g-spec" style="display:none;">
+      <input class="f-ipaths" placeholder="item_paths into the Item Specifications, comma-separated">
+      <input class="f-ibins" type="number" placeholder="bins">
+    </div>
     <div class="ec-row">
       <input class="f-pid" placeholder="part_id (blank = the item itself)">
       <input class="f-layer" type="number" placeholder="sub layer" title="sub_part_id layer: 1 = direct children">
@@ -187,14 +193,16 @@
     <div class="ec-row">
       <button type="button" class="ec-add" data-add-field>+ add field</button>
       <span class="ec-hint">optional label/value rows under the plot — with a data_path the value fills
-        itself from the latest test record; without one it is typed on the plot’s page</span>
+        itself from the latest test record; with an item_path, from the item’s Item Specifications;
+        with neither it is typed on the plot’s page</span>
     </div>
   </div>
 </template>
 <template id="t-field">
   <div class="ec-row ec-field" style="margin-left:14px;">
     <input class="f-flabel" placeholder="field label, e.g. RMS mean (e-)">
-    <input class="f-fpath" placeholder="data_path (blank = typed on the plot page)" style="font-family:var(--font-mono); font-size:12px;">
+    <input class="f-fpath" placeholder="data_path (from the test record)" style="font-family:var(--font-mono); font-size:12px;">
+    <input class="f-fipath" placeholder="item_path (from the Item Specs)" style="font-family:var(--font-mono); font-size:12px;">
     <button type="button" class="ec-del" title="Remove field">&#x2715;</button></div>
 </template>
 
@@ -216,9 +224,12 @@
     return node;
   }
   function syncPlotKind(p) {
-    var kind = $(".f-kind", p).value;   // "fields" hides both source rows
+    var kind = $(".f-kind", p).value;   // "fields" hides every source row
     $(".g-image", p).style.display = kind === "image" ? "" : "none";
     $(".g-numeric", p).style.display = kind === "numeric" ? "" : "none";
+    $(".g-spec", p).style.display = kind === "numeric-spec" ? "" : "none";
+    // Item-Specs plots read no test record, so the test type is meaningless
+    $(".f-ttn", p).style.display = kind === "numeric-spec" ? "none" : "";
   }
   function addField(plotNode, f) {
     var node = document.getElementById("t-field").content.firstElementChild.cloneNode(true);
@@ -226,6 +237,7 @@
     f = f || {};
     $(".f-flabel", node).value = f.label || "";
     $(".f-fpath", node).value = f.data_path || "";
+    $(".f-fipath", node).value = f.item_path || "";
   }
   var adders = {
     todo: function (text) { $(".f-todo", add("t-todo", "ec-todos")).value = text || ""; },
@@ -253,12 +265,14 @@
       // a fresh plot defaults to image; a config-loaded one keeps its kind —
       // fields with neither source = a fields-only slot
       $(".f-kind", n).value = (ip || isNew) ? "image"
+        : (p.item_paths || []).length ? "numeric-spec"
         : ((p.fields || []).length && !(p.data_paths || []).length) ? "fields" : "numeric";
       $(".f-title", n).value = p.title || "";
       $(".f-ttn", n).value = p.test_type_name || "";
       if (ip) { $(".f-image-name", n).value = ip.image_name || ""; $(".f-ho", n).value = ip.history_order || 0; }
       $(".f-paths", n).value = (p.data_paths || []).join(", ");
-      if (p.bins) $(".f-bins", n).value = p.bins;
+      $(".f-ipaths", n).value = (p.item_paths || []).join(", ");
+      if (p.bins) { $(".f-bins", n).value = p.bins; $(".f-ibins", n).value = p.bins; }
       $(".f-sum", n).checked = !!p.sum;
       $(".f-pid", n).value = p.part_id || "";
       if (p.sub_part_id) { $(".f-layer", n).value = p.sub_part_id.layer; $(".f-pos", n).value = p.sub_part_id.pos_name || ""; }
@@ -297,8 +311,10 @@
       var kind = $(".f-kind", p).value;
       var imageName = $(".f-image-name", p).value.trim();
       var paths = $(".f-paths", p).value.split(",").map(function (x) { return x.trim(); }).filter(Boolean);
-      if (!title && !ttn && !imageName && !paths.length) return null;
-      var o = {title: title || "Plot", test_type_name: ttn};
+      var ipaths = $(".f-ipaths", p).value.split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      if (!title && !ttn && !imageName && !paths.length && !ipaths.length) return null;
+      var o = {title: title || "Plot",
+               test_type_name: kind === "numeric-spec" ? "" : ttn};
       if ($(".f-pid", p).value.trim()) o.part_id = $(".f-pid", p).value.trim();
       var layer = parseInt($(".f-layer", p).value, 10), pos = $(".f-pos", p).value.trim();
       if (!isNaN(layer) && pos) o.sub_part_id = {layer: layer, pos_name: pos};
@@ -309,13 +325,19 @@
         var bins = parseInt($(".f-bins", p).value, 10);
         if (!isNaN(bins)) o.bins = bins;
         if ($(".f-sum", p).checked) o.sum = true;
-      }   // "fields": neither source key — the fields list alone defines it
+      } else if (kind === "numeric-spec") {
+        o.item_paths = ipaths;
+        var ibins = parseInt($(".f-ibins", p).value, 10);
+        if (!isNaN(ibins)) o.bins = ibins;
+      }   // "fields": no source key at all — the fields list alone defines it
       var fields = $$(".g-fields .ec-field", p).map(function (r) {
         var label = $(".f-flabel", r).value.trim();
         if (!label) return null;
         var f = {label: label};
         var dp = $(".f-fpath", r).value.trim();
-        if (dp) f.data_path = dp;
+        var ip = $(".f-fipath", r).value.trim();
+        if (dp) f.data_path = dp;        // data_path wins over item_path
+        else if (ip) f.item_path = ip;
         return f;
       }).filter(Boolean);
       if (fields.length) o.fields = fields;

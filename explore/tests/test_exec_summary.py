@@ -1302,8 +1302,8 @@ class PlotFieldsTest(TestCase):
     def test_config_parses_fields_and_drops_blank_labels(self):
         plots = execsummary._normalize(CFG_FIELDS)["plots"]
         self.assertEqual(plots[0]["fields"], [
-            {"label": "RMS mean", "data_path": "DATA.rms_mean"},
-            {"label": "Operator note", "data_path": ""}])
+            {"label": "RMS mean", "data_path": "DATA.rms_mean", "item_path": ""},
+            {"label": "Operator note", "data_path": "", "item_path": ""}])
 
     def test_payload_carries_plot_fields(self):
         p = execsummary.es_test_payload([], None, "c",
@@ -1438,6 +1438,152 @@ class PlotFieldsTest(TestCase):
         self.assertIn("12.5", text)
         self.assertIn("Operator note", text)
         self.assertIn("looks fine", text)
+
+
+# ---- #94: item_path fields — values from the Item Specifications ------------
+
+CFG_ITEM = {**CFG, "plots": [
+    {"title": "APA facts", "test_type_name": "",
+     "fields": [
+         {"label": "Vendor", "item_path": "Vendor"},
+         {"label": "Tension", "item_path": "DATA.Winding Tension"},
+         {"label": "Note"},
+     ]},
+]}
+
+# two-entry spec history — the LATEST entry must win (same rule as the part
+# page: an FNAL-UI edit appends)
+BODY_SPECS = {"data": {
+    "status": {"id": 120, "name": "QA/QC Tests - Passed All"},
+    "certified_qaqc": True, "qaqc_uploaded": False,
+    "specifications": [
+        {"Vendor": "original", "DATA": {"Winding Tension": 5.5}},
+        {"Vendor": "Acme", "_meta": {},
+         "DATA": {"Winding Tension": 6.5,
+                  "Tension Profile": [5.1, 5.3, 5.2, 5.4]}},
+    ]}}
+
+CFG_ITEM_PLOT = {**CFG, "plots": [
+    {"title": "Tension profile", "test_type_name": "",
+     "item_paths": ["DATA.Tension Profile"]},
+]}
+
+
+class ItemPathFieldsTest(TestCase):
+    """#94 (Hajime, APA): a field with an ``item_path`` resolves live from
+    the item's latest Item Specifications entry, the way ``data_path``
+    resolves from the latest test record."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("s", "s@s.io", "pw")
+        self.client.force_login(self.user)
+
+    def test_config_parses_item_path_and_data_path_wins(self):
+        plots = execsummary._normalize(CFG_ITEM)["plots"]
+        self.assertEqual(plots[0]["kind"], "fields")
+        self.assertEqual(plots[0]["fields"], [
+            {"label": "Vendor", "data_path": "", "item_path": "Vendor"},
+            {"label": "Tension", "data_path": "", "item_path": "DATA.Winding Tension"},
+            {"label": "Note", "data_path": "", "item_path": ""}])
+        # both set on one field → data_path wins, item_path is dropped
+        both = execsummary._normalize({**CFG, "plots": [
+            {"title": "P", "test_type_name": "T", "fields": [
+                {"label": "X", "data_path": "DATA.x", "item_path": "DATA.y"}]}]})
+        self.assertEqual(both["plots"][0]["fields"][0],
+                         {"label": "X", "data_path": "DATA.x", "item_path": ""})
+
+    def test_resolve_reads_the_latest_spec_entry(self):
+        api = _api()
+        api.get_component.return_value = BODY_SPECS
+        plot = execsummary._normalize(CFG_ITEM)["plots"][0]
+        rows = execsummary.resolve_plot_fields(api, plot, BOX, {"Note": "ok"})
+        self.assertEqual(rows[0]["value"], "Acme")        # latest entry wins
+        self.assertEqual(rows[1]["value"], "6.5")         # DATA.* dotted path
+        self.assertTrue(rows[0]["auto"] and rows[1]["auto"])
+        self.assertEqual(rows[2]["value"], "ok")          # manual rides along
+        api.get_component.assert_called_once_with(BOX)    # one fetch per group
+        api.get_tests.assert_not_called()                 # no test record needed
+
+    def test_resolve_reports_misses_and_missing_specs(self):
+        api = _api()
+        api.get_component.return_value = BODY_SPECS
+        plot = execsummary._normalize({**CFG, "plots": [
+            {"title": "P", "test_type_name": "", "fields": [
+                {"label": "Gone", "item_path": "DATA.nope"}]}]})["plots"][0]
+        rows = execsummary.resolve_plot_fields(api, plot, BOX, {})
+        self.assertIsNone(rows[0]["value"])
+        self.assertIn("No value at item_path 'DATA.nope'", rows[0]["error"])
+        # an item without any specifications reports that, not a key miss
+        api.get_component.return_value = {"data": {}}
+        rows = execsummary.resolve_plot_fields(api, plot, BOX, {})
+        self.assertIn("No Item Specifications found", rows[0]["error"])
+
+    def test_plot_page_shows_item_path_values_readonly(self):
+        api = _api(cfg=CFG_ITEM, es=[])
+        api.get_component.return_value = BODY_SPECS
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PLOT_PAGE).content.decode()
+        self.assertIn("Acme", html)                       # auto value, read-only
+        self.assertIn("Item Specifications", html)        # source hint
+        self.assertNotIn('name="field:Vendor"', html)     # ...never an input
+        self.assertIn('name="field:Note"', html)          # manual still is
+
+    def test_save_fields_ignores_item_path_fields(self):
+        api = _api(cfg=CFG_ITEM, es=[])
+        api.get_component.return_value = BODY_SPECS
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PLOT_PAGE, {
+                "action": "save_fields",
+                "field:Note": "hand-checked",
+                "field:Vendor": "spoofed"})   # auto field — ignored
+        payload = api.post_test.call_args.args[1]
+        self.assertEqual(payload["test_data"]["plot_fields"],
+                         {"p00-APA-facts": {"Note": "hand-checked"}})
+
+    def test_config_parses_item_paths_plot(self):
+        plots = execsummary._normalize(CFG_ITEM_PLOT)["plots"]
+        self.assertEqual(plots[0]["kind"], "numeric")   # a plot, not fields-only
+        self.assertEqual(plots[0]["item_paths"], ["DATA.Tension Profile"])
+        self.assertEqual(plots[0]["data_paths"], [])
+        # both path lists set → data_paths wins, item_paths is dropped
+        both = execsummary._normalize({**CFG, "plots": [
+            {"title": "P", "test_type_name": "T",
+             "data_paths": ["DATA/gain"], "item_paths": ["DATA.x"]}]})
+        self.assertEqual(both["plots"][0]["data_paths"], ["DATA/gain"])
+        self.assertEqual(both["plots"][0]["item_paths"], [])
+
+    def test_resolve_renders_numeric_plot_from_item_specs(self):
+        api = _api()
+        api.get_component.return_value = BODY_SPECS
+        cfg = execsummary._normalize(CFG_ITEM_PLOT)
+        blocks = execsummary.resolve_plots(api, cfg, BOX, lambda pid: [], [])
+        self.assertIsNone(blocks[0]["error"])
+        self.assertTrue(blocks[0]["bytes"].startswith(b"\x89PNG"))
+        self.assertTrue(blocks[0]["png_b64"])
+        api.get_tests.assert_not_called()    # no test record involved
+
+    def test_resolve_reports_item_paths_misses(self):
+        api = _api()
+        api.get_component.return_value = BODY_SPECS
+        cfg = execsummary._normalize({**CFG, "plots": [
+            {"title": "P", "test_type_name": "", "item_paths": ["DATA.nope"]}]})
+        blocks = execsummary.resolve_plots(api, cfg, BOX, lambda pid: [], [])
+        self.assertIn("No data at item_path 'DATA.nope'", blocks[0]["error"])
+        api.get_component.return_value = {"data": {}}   # item without specs
+        blocks = execsummary.resolve_plots(api, cfg, BOX, lambda pid: [], [])
+        self.assertIn("No Item Specifications found", blocks[0]["error"])
+
+    def test_es_page_shows_the_item_paths_plot(self):
+        api = _api(cfg=CFG_ITEM_PLOT, es=[])
+        api.get_component.return_value = BODY_SPECS
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("Numeric plot (item_paths:", html)
+        self.assertIn("Item Specifications", html)
+        self.assertIn("data:image/png;base64,", html)   # rendered inline
 
 
 # ---- #86: top-level extras, default-mode comments log, config-save check ----

@@ -65,6 +65,8 @@
     <div class="es-hint">Uploaded image <span class="mono">{{ b.upload_name }}</span>{% if b.kind == "image" %} — supersedes the config’s test-record image{% endif %}</div>
     {% elif b.kind == "image" %}
     <div class="es-hint">Image: <span class="mono">{{ b.image_name }}</span> (history_order={{ b.history_order }}) · <span class="mono">{{ b.pid }}</span></div>
+    {% elif b.item_paths %}
+    <div class="es-hint">Numeric plot (item_paths: <span class="mono">{{ b.item_paths|join:", " }}</span>) — rendered from the item’s Item Specifications.</div>
     {% else %}
     <div class="es-hint">Numeric plot (data_paths: <span class="mono">{{ b.data_paths|join:", " }}</span>) — rendered from the latest <span class="mono">{{ b.test_type_name }}</span> record.</div>
     {% endif %}
@@ -104,7 +106,8 @@
               {% if f.auto %}
                 {% if f.value is not None %}<span class="es-auto-val">{{ f.value }}</span>{% endif %}
                 {% if f.error %}<div class="es-err">&#9888; {{ f.error }}</div>{% endif %}
-                <div class="es-hint">auto — <span class="mono">{{ f.data_path }}</span> from the latest <span class="mono">{{ b.test_type_name }}</span> record</div>
+                {% if f.data_path %}<div class="es-hint">auto — <span class="mono">{{ f.data_path }}</span> from the latest <span class="mono">{{ b.test_type_name }}</span> record</div>
+                {% else %}<div class="es-hint">auto — <span class="mono">{{ f.item_path }}</span> from the Item Specifications</div>{% endif %}
               {% else %}
                 <input type="text" name="field:{{ f.label }}" value="{{ f.value }}" maxlength="500">
               {% endif %}

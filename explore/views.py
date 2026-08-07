@@ -2058,8 +2058,8 @@ def _handle_plot_upload(request, api, part_id, plot) -> None:
 @fnal_login_required
 def explore_es_plot_view(request, part_id, index):
     """One plot slot's entry page (#85): the current image, the upload
-    control, the manual fields as inputs, and the auto (data_path) fields
-    read-only with their live QC-record values. This is most consortia's
+    control, the manual fields as inputs, and the auto (data_path/item_path)
+    fields read-only with their live values. This is most consortia's
     entry path — scripting a QC test-record upload is the barrier a web
     form doesn't have. Manual values are stored in the ES test record
     (append-only, so every edit is a preserved version)."""
@@ -2092,7 +2092,8 @@ def explore_es_plot_view(request, part_id, index):
             (es_list, saved_todos, comments_log, saved_sub_es,
              plot_fields) = execsummary.fetch_es_state(api, part_id)
             values = {f["label"]: request.POST.get(f"field:{f['label']}") or ""
-                      for f in plot["fields"] if not f["data_path"]}
+                      for f in plot["fields"]
+                      if not f["data_path"] and not f["item_path"]}
             err = _post_es(api, part_id, es_list, saved_todos,
                            f"ES plot fields updated: {plot['title']}",
                            comments_log=comments_log, sub_es=saved_sub_es,

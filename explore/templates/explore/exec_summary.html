@@ -143,6 +143,8 @@
       <div class="es-hint">Uploaded image <span class="mono">{{ b.upload_name }}</span>{% if b.kind == "image" %} — supersedes the config’s test-record image{% endif %}</div>
       {% elif b.kind == "image" %}
       <div class="es-hint">Image: <span class="mono">{{ b.image_name }}</span> (history_order={{ b.history_order }}) · <span class="mono">{{ b.pid }}</span></div>
+      {% elif b.kind == "numeric" and b.item_paths %}
+      <div class="es-hint">Numeric plot (item_paths: <span class="mono">{{ b.item_paths|join:", " }}</span>) — rendered from this item’s Item Specifications.</div>
       {% elif b.kind == "numeric" %}
       <div class="es-hint">Numeric plot (data_paths: <span class="mono">{{ b.data_paths|join:", " }}</span>) — rendered from this item’s latest <span class="mono">{{ b.test_type_name }}</span> record.</div>
       {% endif %}{# kind == "fields": values only, no image hint #}
