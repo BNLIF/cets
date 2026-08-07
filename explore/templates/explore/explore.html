@@ -254,7 +254,7 @@
         {% if breakdowns or qc_flags %}
         <div class="chart-card" id="breakdown-card">
             <div class="panel-title" style="font-size: 14px; margin-bottom: 4px;">Item breakdown</div>
-            <p class="cell-muted" style="margin: 0 0 14px; font-size: 12px;">Items by category, counted from the local mirror — no live fetch. A large <em>(unset)</em> slice usually means those rows were synced before the field was captured; a <strong>Full re-sync</strong> refreshes them.</p>
+            <p class="cell-muted" style="margin: 0 0 14px; font-size: 12px;">Items by category, counted from the local mirror — except <strong>Location</strong>, which loads live from HWDB (#92). A large <em>(unset)</em> slice usually means those rows were synced before the field was captured; a <strong>Full re-sync</strong> refreshes them.</p>
             {% if qc_flags %}
             <div class="qcf-row">
                 {% for f in qc_flags %}
@@ -274,6 +274,11 @@
                     <div class="bd-chart-wrap"><canvas id="bd_{{ b.field }}"></canvas></div>
                 </div>
                 {% endfor %}
+                {# Location distribution (#92): live from HWDB, fetched async — see the breakdown script below. #}
+                <div class="bd-item" id="bd-loc-item" data-url="{% url 'explore:type_locations' part_type_id=leaf.part_type_id %}">
+                    <div class="bd-title">Location <span class="cell-muted" style="font-weight: 400;" id="bd-loc-meta">· loading live from HWDB…</span></div>
+                    <div class="bd-chart-wrap"><canvas id="bd_location"></canvas></div>
+                </div>
             </div>
         </div>
         {{ breakdowns|json_script:"breakdown-config" }}
@@ -605,24 +610,50 @@
     }
 
     // Component breakdown bar charts — mirror-only categorical counts.
+    function bdBarChart(canvas, rows, pngName) {
+        canvas.parentElement.style.height = (rows.length * 26 + 38) + "px";
+        new Chart(canvas, {
+            type: "bar",
+            data: { labels: rows.map(function (r) { return r.value; }),
+                    datasets: [{ data: rows.map(function (r) { return r.n; }), backgroundColor: '#5b8def' }] },
+            options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { x: { beginAtZero: true, ticks: { precision: 0, font: { size: 11 }, color: '#3a414b' } },
+                          y: { ticks: { font: { size: 11 }, color: '#3a414b', autoSkip: false } } } }
+        });
+        addSavePng(canvas, pngName);
+    }
     var bdEl = document.getElementById("breakdown-config");
     if (bdEl && window.Chart) {
         JSON.parse(bdEl.textContent).forEach(function (b) {
             var canvas = document.getElementById("bd_" + b.field);
             if (!canvas) return;
-            var rows = b.rows.slice(0, 15);
-            canvas.parentElement.style.height = (rows.length * 26 + 38) + "px";
-            new Chart(canvas, {
-                type: "bar",
-                data: { labels: rows.map(function (r) { return r.value; }),
-                        datasets: [{ data: rows.map(function (r) { return r.n; }), backgroundColor: '#5b8def' }] },
-                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: { x: { beginAtZero: true, ticks: { precision: 0, font: { size: 11 }, color: '#3a414b' } },
-                              y: { ticks: { font: { size: 11 }, color: '#3a414b', autoSkip: false } } } }
-            });
-            addSavePng(canvas, "breakdown_" + b.field);
+            bdBarChart(canvas, b.rows.slice(0, 15), "breakdown_" + b.field);
         });
+    }
+
+    // Location distribution (#92) — live from HWDB (one paged listing sweep,
+    // no sync involved), fetched async so the page renders without waiting.
+    var locItem = document.getElementById("bd-loc-item");
+    if (locItem && window.Chart) {
+        var locMeta = document.getElementById("bd-loc-meta");
+        fetch(locItem.dataset.url)
+            .then(function (r) {
+                return r.json().then(function (d) { return { ok: r.ok, d: d }; });
+            })
+            .then(function (res) {
+                if (!res.ok) {
+                    locMeta.textContent = (res.d && res.d.error === "fnal_link")
+                        ? "· link your FNAL account to load"
+                        : "· couldn’t load from HWDB";
+                    return;
+                }
+                var rows = res.d.rows || [];
+                locMeta.textContent = "· " + res.d.total + " item" + (res.d.total === 1 ? "" : "s")
+                    + " live from HWDB" + (rows.length > 15 ? ", top 15 of " + rows.length + " locations" : "");
+                bdBarChart(document.getElementById("bd_location"), rows.slice(0, 15), "breakdown_location");
+            })
+            .catch(function () { locMeta.textContent = "· couldn’t load from HWDB"; });
     }
 })();
 

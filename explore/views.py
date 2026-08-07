@@ -361,6 +361,48 @@ def explore_type_summary_view(request):
     return JsonResponse({"types": types})
 
 
+def _location_label(loc) -> str:
+    """A listing row's ``location`` → chart bucket. HWDB serializes it as a
+    ``{id, name}`` ref; id 0 is the "In Transit" sentinel (#42)."""
+    if isinstance(loc, dict):
+        if loc.get("id") == 0:
+            return "In Transit"
+        return loc.get("name") or "(no location)"
+    return str(loc) if loc else "(no location)"
+
+
+@login_not_required
+@fnal_login_required
+def explore_type_locations_view(request, part_type_id):
+    """Live location distribution for one component type (#92, Hajime): a
+    paged sweep of the type's component listing — whose rows carry
+    ``location`` beyond the OpenAPI schema (2026-07-30 probe) — counted per
+    location name. One list call per 500 items, no per-PID fan-out. The
+    leaf page's Item-breakdown panel fetches this async so the page itself
+    renders without waiting; works for every type, not just shipping."""
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        return JsonResponse({"error": "fnal_link", "link": reverse("hwdb:link")},
+                            status=409)
+    except FnalUnavailable:
+        return JsonResponse({"error": "unavailable"}, status=502)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[instance_of(request)]["api"], bearer)
+    counts: dict[str, int] = {}
+    total = 0
+    try:
+        for row in events._list_rows(api, part_type_id):
+            total += 1
+            key = _location_label(row.get("location"))
+            counts[key] = counts.get(key, 0) + 1
+    except Exception:
+        logger.exception("explore_type_locations_view(%s) crashed", part_type_id)
+        return JsonResponse({"error": "fetch_failed"}, status=502)
+    rows = [{"value": v, "n": n}
+            for v, n in sorted(counts.items(), key=lambda kv: -kv[1])]
+    return JsonResponse({"total": total, "rows": rows})
+
+
 # Shipments dashboard status tabs (#87). In Transit is HWDB location id 0;
 # otherwise contents decide the bucket — see ShipmentItem.ship_status.
 _SHIP_TABS = [

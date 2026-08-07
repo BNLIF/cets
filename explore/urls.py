@@ -11,6 +11,8 @@ urlpatterns = [
     path("browse/", views.explore_view, name="browse"),
     path("hierarchy/", views.explore_hierarchy_view, name="hierarchy"),
     path("hierarchy/summary/", views.explore_type_summary_view, name="type_summary"),
+    path("type-locations/<str:part_type_id>/", views.explore_type_locations_view,
+         name="type_locations"),
     path("shipments/", views.shipments_view, name="shipments"),
     path("shipments/search/", views.explore_shipments_search_api_view,
          name="shipments_search_api"),

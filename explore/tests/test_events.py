@@ -549,3 +549,73 @@ class ExploreNodeSyncViewTest(TestCase):
             body = b"".join(resp.streaming_content).decode()
         self.assertEqual(resp.status_code, 200)
         self.assertIn("done", body)
+
+
+class TypeLocationsViewTest(TestCase):
+    """#92 (Hajime): live location distribution for a type — one paged
+    listing sweep counted per location name, fetched async by the leaf
+    page's Item-breakdown panel."""
+
+    PAGE = "/hw/dev/type-locations/D05700200001/"
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("loc", "l@l.io", "pw")
+        self.client.force_login(self.user)
+
+    @staticmethod
+    def _api(pages):
+        api = mock.MagicMock()
+
+        def _make_request(method, endpoint, data=None, params=None):
+            assert endpoint == "component-types/D05700200001/components"
+            page = (params or {}).get("page", 1)
+            return {"data": pages[page - 1], "pagination": {"pages": len(pages)}}
+
+        api._make_request.side_effect = _make_request
+        return api
+
+    def _get(self, api):
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            return self.client.get(self.PAGE)
+
+    def test_counts_locations_across_pages(self):
+        resp = self._get(self._api([
+            [{"part_id": "P1", "location": {"id": 128, "name": "ANL"}},
+             {"part_id": "P2", "location": {"id": 0, "name": "In Transit"}},
+             {"part_id": "P3", "location": None}],
+            [{"part_id": "P4", "location": {"id": 128, "name": "ANL"}},
+             {"part_id": "P5", "location": {"id": 186, "name": "SURF"}}],
+        ]))
+        self.assertEqual(resp.status_code, 200)
+        d = resp.json()
+        self.assertEqual(d["total"], 5)
+        self.assertEqual(d["rows"][0], {"value": "ANL", "n": 2})  # biggest first
+        values = {r["value"]: r["n"] for r in d["rows"]}
+        self.assertEqual(values["In Transit"], 1)      # id 0 sentinel bucket
+        self.assertEqual(values["(no location)"], 1)   # never had a location
+        self.assertEqual(values["SURF"], 1)
+
+    def test_unlinked_gets_409_json(self):
+        with mock.patch("explore.views.mint_for", side_effect=FnalLinkRequired()):
+            resp = self.client.get(self.PAGE)
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(resp.json()["error"], "fnal_link")
+
+    def test_hwdb_failure_gets_502_json(self):
+        api = mock.MagicMock()
+        api._make_request.side_effect = RuntimeError("boom")
+        resp = self._get(api)
+        self.assertEqual(resp.status_code, 502)
+        self.assertEqual(resp.json()["error"], "fetch_failed")
+
+    def test_leaf_page_carries_the_async_tile(self):
+        node = _node(tests_synced_at=timezone.now(), n_tests=0)
+        HwdbComponentEvent.objects.create(
+            part_type_id=node.part_type_id, part_id="P1", status="Passed")
+        html = self.client.get(
+            navigation.leaf_path_for("prod", node.part_type_id)).content.decode()
+        self.assertIn('id="bd-loc-item"', html)
+        self.assertIn(f'data-url="/hw/type-locations/{node.part_type_id}/"', html)
+        self.assertIn('id="bd_location"', html)
+        self.assertIn("loading live from HWDB", html)
