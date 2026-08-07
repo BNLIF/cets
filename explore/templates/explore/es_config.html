@@ -90,7 +90,8 @@
     <div class="ec-card">
       <h2>Signees</h2>
       <p class="ec-hint" style="margin:0 0 4px;">Negative ranks sign first (any order), then ranks descending —
-        rank 0 signs last (the final approver). Roles are HWDB role ids; empty = anyone.</p>
+        rank 0 signs last (the final approver). Roles are HWDB role ids; empty = anyone.
+        Emails are optional — they feed the “email next signee” draft on the ES page.</p>
       <div id="ec-signees"></div>
       <button type="button" class="ec-add" data-add="signee">+ add signee</button>
     </div>
@@ -141,6 +142,7 @@
   <div class="ec-row"><input class="f-name" placeholder="Full name (as in HWDB)">
     <input class="f-rank" type="number" value="0" title="rank">
     <input class="f-roles" placeholder="role ids, e.g. 41, 7" title="HWDB role ids, comma-separated">
+    <input class="f-emails" placeholder="emails, comma-separated" title="notify addresses — a position held by several people can list them all">
     <button type="button" class="ec-del" title="Remove">&#x2715;</button></div>
 </template>
 <template id="t-ref">
@@ -232,6 +234,7 @@
       $(".f-name", n).value = s.name || "";
       $(".f-rank", n).value = (s.rank === undefined ? 0 : s.rank);
       $(".f-roles", n).value = (s.roles || []).join(", ");
+      $(".f-emails", n).value = (s.emails || []).join(", ");
     },
     ref: function (r) {
       var n = add("t-ref", "ec-refs"); r = typeof r === "string" ? {url: r} : (r || {});
@@ -276,7 +279,11 @@
       if (!name) return null;
       var roles = $(".f-roles", r).value.split(",").map(function (x) { return parseInt(x, 10); })
                     .filter(function (x) { return !isNaN(x); });
-      return {name: name, rank: parseInt($(".f-rank", r).value, 10) || 0, roles: roles};
+      var emails = $(".f-emails", r).value.split(",").map(function (x) { return x.trim(); })
+                     .filter(Boolean);
+      var s = {name: name, rank: parseInt($(".f-rank", r).value, 10) || 0, roles: roles};
+      if (emails.length) s.emails = emails;
+      return s;
     }).filter(Boolean);
     if (signees.length) cfg.signees = signees;
     var refs = $$("#ec-refs .ec-row").map(function (r) {

@@ -2161,6 +2161,8 @@ def explore_exec_summary_view(request, part_id):
         "part_id": part_id,
         "cfg": cfg, "cfg_msg": cfg_msg,
         "signing": signing,
+        "notify": _es_notify(request, signing, part_id, page_url, es_list,
+                             full_name),
         # Posting a standalone comment needs one of the configured signee
         # roles (Hajime 2026-07-30) — same competence as signing some row.
         # In DEFAULT mode (#86) anyone FNAL-linked may post, like the
@@ -2183,6 +2185,41 @@ def explore_exec_summary_view(request, part_id):
 def _children_of(api):
     """Manifest-row lookup for ES plot sub_part_id addressing."""
     return lambda pid: current_manifest(_safe_get_data(api.get_subcomponents, pid))
+
+
+def _es_notify(request, signing, part_id, page_url, es_list, full_name):
+    """The "notify next signee(s)" mailto draft (#91, Hajime) — a prepared
+    message to whoever is unsigned and whose turn it is (``rank_allowed``:
+    the role gate applies to the caller, not the notify target). Like the
+    shipping POC email, the app never sends mail itself. None when nothing
+    is pending; with no email on file the draft opens with a blank "To".
+    """
+    if not signing or signing["all_signed"]:
+        return None
+    rows = [r for r in signing["rows"] if r["rank_allowed"] and not r["entry"]]
+    if not rows:
+        return None
+    names = [r["name"] for r in rows]
+    emails = []
+    for r in rows:
+        for e in r.get("emails") or []:
+            if e not in emails:
+                emails.append(e)
+    signed = [e for e in es_list or []
+              if isinstance(e, dict) and (e.get("signature") or "").strip()]
+    last = max(signed, key=lambda e: e.get("timestamp") or "") if signed else None
+    body = (
+        f"Dear {', '.join(names)},\n\n"
+        f"The executive summary for {part_id} is ready for your signature.\n"
+        + (f"“{last.get('name')}” signed as {last.get('signature')} at "
+           f"{last.get('timestamp')}.\n" if last else "")
+        + f"\nSign it here: {request.build_absolute_uri(page_url)}\n\n"
+        f"Sincerely,\n\n{full_name}\n"
+    )
+    subject = f"Executive summary for {part_id} awaits your signature"
+    # subject/body ride along raw for the copy-paste block (no mail client).
+    return {"names": names, "emails": emails, "subject": subject, "body": body,
+            "url": checklists.mailto_url(",".join(emails), subject, body)}
 
 
 def _has_es_map(api, pids) -> dict:

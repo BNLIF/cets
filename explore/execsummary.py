@@ -3,7 +3,7 @@ Dashboard's behavior (mechanics mapped on #53/#54):
 
 - **Config** — newest ``ES_{typeid}_*.json`` on the component TYPE's images:
   consortium name, test description, todos checklist, signees
-  ``[{name, rank, roles}]``, reference URLs. No config → DEFAULT mode.
+  ``[{name, rank, roles, emails}]``, reference URLs. No config → DEFAULT mode.
 - **State** — HWDB's ``"ES"`` test record is the single source of truth:
   ``test_data.ES`` holds one ``{name, signature, rank, timestamp, comments}``
   entry per signee and ``test_data.todos`` the checklist state. Every
@@ -145,7 +145,14 @@ def _normalize(cfg: dict) -> dict:
         except (TypeError, ValueError):
             rank = -1
         roles = [r for r in (s.get("roles") or []) if isinstance(r, int)]
-        signees.append({"name": str(s["name"]), "rank": rank, "roles": roles})
+        # Notify addresses (#91) — a position can be held by several people,
+        # so a list; a comma-separated string is tolerated.
+        emails = s.get("emails")
+        if isinstance(emails, str):
+            emails = emails.split(",")
+        emails = [str(e).strip() for e in (emails or []) if str(e).strip()]
+        signees.append({"name": str(s["name"]), "rank": rank, "roles": roles,
+                        "emails": emails})
     refs = []
     for r in cfg.get("references") or []:
         if isinstance(r, str):
@@ -698,6 +705,9 @@ def compute_status(cfg, es_list, user_role_ids, role_names=None) -> dict:
         rows.append({
             **s, "entry": signed.get(s["name"]),
             "allowed": allowed and role_ok,
+            # Turn-allowed regardless of the CALLER's roles — the notify
+            # targets (#91) are whoever may sign next, not whoever is looking.
+            "rank_allowed": allowed,
             "role_ok": role_ok,
             "role_names": [str((role_names or {}).get(r, r)) for r in s["roles"]],
         })

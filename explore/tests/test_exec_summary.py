@@ -427,6 +427,27 @@ class EngineTest(TestCase):
         st3 = execsummary.compute_status(cfg, [_entry("N", -1)], {99})
         self.assertTrue({r["name"]: r for r in st3["rows"]}["P"]["allowed"])
 
+    def test_normalize_parses_signee_emails(self):
+        # #91: a list, a comma-separated string, or nothing — all tolerated.
+        cfg = execsummary._normalize({**CFG, "signees": [
+            {"name": "A", "rank": 0, "emails": ["a@x.gov", " b@y.edu "]},
+            {"name": "B", "rank": 1, "emails": "c@z.org, d@w.io"},
+            {"name": "C", "rank": 2},
+        ]})
+        by = {s["name"]: s["emails"] for s in cfg["signees"]}
+        self.assertEqual(by["A"], ["a@x.gov", "b@y.edu"])
+        self.assertEqual(by["B"], ["c@z.org", "d@w.io"])
+        self.assertEqual(by["C"], [])
+
+    def test_rank_allowed_ignores_the_callers_roles(self):
+        # #91: the notify target is whoever may sign NEXT, not whoever is
+        # looking — the role gate applies only to "allowed".
+        cfg = execsummary._normalize(CFG)   # Hajime's row requires role 41
+        st = execsummary.compute_status(cfg, [_entry("Chao Zhang", 2)], set())
+        row = {r["name"]: r for r in st["rows"]}["Hajime Muramatsu"]
+        self.assertFalse(row["allowed"])        # caller lacks role 41
+        self.assertTrue(row["rank_allowed"])    # but it IS this row's turn
+
     def test_reset_needs_lowest_nonnegative_rank_roles(self):
         cfg = execsummary._normalize(CFG)   # lowest non-negative = Hajime (roles [41])
         self.assertTrue(execsummary.compute_status(cfg, [], {41})["reset_allowed"])
@@ -1084,6 +1105,72 @@ class GenerateResetUploadTest(TestCase):
         self.assertIn("link", resp["Location"])
 
 
+# ---- "notify next signee" mailto draft (#91) --------------------------------
+
+CFG_EMAILS = {**CFG, "signees": [
+    {"name": "Chao Zhang", "rank": 2, "roles": [], "emails": ["chao@bnl.gov"]},
+    {"name": "Hajime Muramatsu", "rank": 1, "roles": [41],
+     "emails": ["hajime@umn.edu", "lead@fnal.gov"]},
+]}
+
+
+class NotifyNextSigneeTest(TestCase):
+    """#91 (Hajime): a prepared mailto draft to whoever signs next — the app
+    never sends email itself, same as the shipping POC email (#78)."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("s", "s@s.io", "pw")
+        self.client.force_login(self.user)
+
+    def _page(self, api):
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            return self.client.get(PAGE).content.decode()
+
+    def test_draft_targets_the_first_signee(self):
+        html = self._page(_api(cfg=CFG_EMAILS, es=[]))
+        self.assertIn("Email next signee", html)
+        self.assertIn("mailto:chao@bnl.gov?subject=Executive%20summary", html)
+        self.assertNotIn("hajime@umn.edu", html)   # not their turn yet
+
+    def test_draft_moves_on_and_takes_every_address_of_the_position(self):
+        html = self._page(_api(cfg=CFG_EMAILS, es=[_entry("Chao Zhang", 2)]))
+        # one position, two people — both addresses in one draft
+        self.assertIn("mailto:hajime@umn.edu,lead@fnal.gov?subject=", html)
+        # the body names who just signed (percent-encoded timestamp) and
+        # links the signing page
+        self.assertIn("2026-07-11%2009%3A00", html)
+        self.assertIn("Sign%20it%20here", html)
+        # …and the copy-paste fallback carries the same draft raw
+        self.assertIn("Copy the draft", html)
+        self.assertIn("Subject: Executive summary for D00599800007-00128 awaits", html)
+        self.assertIn("Sign it here: http://testserver/hw/dev/part/D00599800007-00128/exec-summary/", html)
+
+    def test_no_draft_when_all_signed(self):
+        html = self._page(_api(cfg=CFG_EMAILS, es=[
+            _entry("Chao Zhang", 2), _entry("Hajime Muramatsu", 1)]))
+        self.assertNotIn("Email next signee", html)
+
+    def test_no_email_on_file_still_offers_the_button(self):
+        # Chao 2026-08-07: the draft must open either way — just with a
+        # blank "To" when the config carries no addresses.
+        html = self._page(_api(es=[]))              # plain CFG — no emails
+        self.assertIn("Email next signee", html)
+        self.assertIn("mailto:?subject=Executive%20summary", html)
+        self.assertIn("no email on file", html)
+        self.assertIn("/hw/dev/es-config/D00599800007/", html)  # points at the config
+
+    def test_unsigned_negative_ranks_are_drafted_together(self):
+        cfg = {**CFG, "signees": [
+            {"name": "QA", "rank": -1, "roles": [], "emails": ["qa@x.gov"]},
+            {"name": "QC", "rank": -2, "roles": [], "emails": ["qc@y.gov"]},
+            {"name": "Lead", "rank": 0, "roles": [], "emails": ["lead@z.gov"]},
+        ]}
+        html = self._page(_api(cfg=cfg, es=[]))
+        self.assertIn("mailto:qa@x.gov,qc@y.gov?", html)
+        self.assertNotIn("lead@z.gov", html)        # rank 0 waits
+
+
 CFG_PAGE = "/hw/dev/es-config/D00599800007/"
 
 
@@ -1107,6 +1194,15 @@ class ConfigEditorTest(TestCase):
         # per-plot field rows (#85): the plot template carries the editor
         self.assertIn("data-add-field", html)
         self.assertIn('id="t-field"', html)
+
+    def test_signee_row_offers_the_emails_field(self):
+        # #91: notify addresses ride on each signee entry.
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(CFG_PAGE).content.decode()
+        self.assertIn('class="f-emails"', html)
+        self.assertIn("email next signee", html)    # hint explains the field
 
     def test_editor_offers_template_when_type_has_none(self):
         api = _api(cfg=None)

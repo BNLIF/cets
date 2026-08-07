@@ -277,6 +277,25 @@
         </div>
       </div>
       {% endfor %}
+      {% if notify %}
+      <div class="es-row" style="margin-top:12px; align-items:center;">
+        <a class="es-btn" style="text-decoration:none;" href="{{ notify.url }}">&#9993; Email next signee{{ notify.names|pluralize }}</a>
+        {% if notify.emails %}
+        <span class="es-hint" style="margin:0;">opens a draft in your mail client to {{ notify.emails|join:", " }}</span>
+        {% else %}
+        <span class="es-hint" style="margin:0;">opens a draft with a blank “To” — no email on file for {{ notify.names|join:", " }};
+          add addresses in the <a href="{% url 'explore:es_config' part_type_id=ptid %}?next={{ request.path|urlencode }}">type’s ES config</a> to prefill.</span>
+        {% endif %}
+      </div>
+      <details style="margin-top:6px;">
+        <summary class="es-hint" style="cursor:pointer; margin:0;">No email client? Copy the draft…</summary>
+        <div style="margin-top:6px;">
+          <div class="es-hint" style="margin:0 0 4px;">To: {% if notify.emails %}{{ notify.emails|join:", " }}{% else %}—{% endif %}</div>
+          <div class="es-hint" style="margin:0 0 4px;">Subject: {{ notify.subject }}</div>
+          <textarea readonly rows="9" style="width:100%; font-family:var(--font-mono); font-size:12px;" onclick="this.select()">{{ notify.body }}</textarea>
+        </div>
+      </details>
+      {% endif %}
     </div>
   </form>
 
