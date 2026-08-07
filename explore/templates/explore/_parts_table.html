@@ -8,6 +8,7 @@ just this pane via htmx (?page=), so the page keeps its scroll position. {% endc
         {% if parts_page.has_next %}<a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.next_page_number }}" hx-get="?page={{ parts_page.next_page_number }}">Next ›</a><a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.paginator.num_pages }}" hx-get="?page={{ parts_page.paginator.num_pages }}">Last »</a>{% else %}<span class="cell-muted">Next ›</span><span class="cell-muted">Last »</span>{% endif %}
     </div>
     {% endif %}
+<div class="tbl-scroll">
     <table class="ship-table">
         <thead><tr><th>Part ID</th><th>Serial number</th><th>Created by</th><th>Updated</th></tr></thead>
         <tbody>
@@ -23,5 +24,6 @@ just this pane via htmx (?page=), so the page keeps its scroll position. {% endc
         {% endfor %}
         </tbody>
     </table>
+</div>
     <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">Mirrored from HWDB on sync, newest update first. Serial number appears after a re-sync; click a row to open the part in a new tab.</p>
 </div>

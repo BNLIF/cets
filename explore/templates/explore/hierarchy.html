@@ -23,7 +23,7 @@
   .hc-canvas svg.hc-cov .hc-box:not(.hc-mapped) { opacity: .35; }
 
   /* type-summary popup (#58) */
-  .hc-pop { position: absolute; top: 12px; right: 12px; width: 330px; max-height: calc(100% - 24px);
+  .hc-pop { position: absolute; top: 12px; right: 12px; width: 330px; max-width: calc(100% - 24px); max-height: calc(100% - 24px);
     overflow: auto; background: var(--page); border: 1px solid var(--rule-hard);
     border-radius: var(--r-lg); box-shadow: 0 10px 30px rgba(0,0,0,.16); z-index: 20;
     padding: 14px 16px; font-size: 13px; }
@@ -209,26 +209,66 @@
     apply();
   }, { passive: false });
 
-  var drag = null;
+  // One pointer drags (mouse or finger); two fingers pinch-zoom about their
+  // midpoint (#93). Pointer events cover both, so no separate touch handlers.
+  var pointers = new Map();   // active pointerId → {x, y}
+  var drag = null, pinch = null;
+
+  function pinchState() {
+    var pts = Array.from(pointers.values());
+    return { d: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1,
+             mx: (pts[0].x + pts[1].x) / 2, my: (pts[0].y + pts[1].y) / 2 };
+  }
+
   svg.addEventListener("pointerdown", function (e) {
-    if (e.button !== 0) return;
-    // remember the real target: pointer capture retargets later events
-    drag = { x: e.clientX, y: e.clientY, moved: 0, box: e.target.closest(".hc-box") };
-    svg.classList.add("hc-panning");
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     svg.setPointerCapture(e.pointerId);
+    if (pointers.size === 1) {
+      // remember the real target: pointer capture retargets later events
+      drag = { x: e.clientX, y: e.clientY, moved: 0, box: e.target.closest(".hc-box") };
+      svg.classList.add("hc-panning");
+    } else {          // a second finger turns the pan into a pinch
+      drag = null;
+      pinch = pinchState();
+    }
   });
   svg.addEventListener("pointermove", function (e) {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch && pointers.size >= 2) {
+      var now = pinchState();
+      var factor = pinch.d / now.d;   // fingers apart → smaller viewBox → zoom in
+      var w = Math.min(MAX_W, Math.max(MIN_W, vb.w * factor));
+      factor = w / vb.w;
+      var p = svgPoint({ clientX: now.mx, clientY: now.my });
+      vb = { x: p.x - (p.x - vb.x) * factor, y: p.y - (p.y - vb.y) * factor,
+             w: vb.w * factor, h: vb.h * factor };
+      var scale = vb.w / svg.getBoundingClientRect().width;
+      vb.x -= (now.mx - pinch.mx) * scale;
+      vb.y -= (now.my - pinch.my) * scale;
+      pinch = now;
+      apply();
+      return;
+    }
     if (!drag) return;
-    var scale = vb.w / svg.getBoundingClientRect().width;
+    var s = vb.w / svg.getBoundingClientRect().width;
     drag.moved += Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y);
-    vb.x -= (e.clientX - drag.x) * scale;
-    vb.y -= (e.clientY - drag.y) * scale;
+    vb.x -= (e.clientX - drag.x) * s;
+    vb.y -= (e.clientY - drag.y) * s;
     drag.x = e.clientX; drag.y = e.clientY;
     apply();
   });
   ["pointerup", "pointercancel"].forEach(function (ev) {
-    svg.addEventListener(ev, function () {
-      if (drag && drag.moved < 5) {  // a click, not a pan (#58)
+    svg.addEventListener(ev, function (e) {
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinch = null;
+      if (pointers.size === 1) {   // pinch ended: keep panning with the finger left
+        var pt = Array.from(pointers.values())[0];
+        drag = { x: pt.x, y: pt.y, moved: 99, box: null };
+        return;
+      }
+      if (drag && drag.moved < 5) {  // a click/tap, not a pan (#58)
         if (drag.box && window.hcBoxClick) window.hcBoxClick(drag.box);
         else document.getElementById("hc-pop").hidden = true;
       }

@@ -42,6 +42,9 @@
     gap: 6px 18px; margin-top: 16px; border: 1px solid var(--rule); background: var(--page);
     border-radius: var(--r-lg); padding: 16px 18px; }
   @media (max-width: 700px) { .panel-meta { grid-template-columns: max-content 1fr; } }
+  /* Per-period + cumulative chart pair — one column on small screens (#93). */
+  .chart-pair { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px; }
+  @media (max-width: 700px) { .chart-pair { grid-template-columns: minmax(0,1fr); } }
   /* shipments summary cards */
   .ship-cards { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
   .ship-card { flex: 1 1 120px; border: 1px solid var(--rule); background: var(--page);
@@ -242,7 +245,7 @@
                 </div>
                 {% endif %}
             </div>
-            <div style="display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px;">
+            <div class="chart-pair">
                 <div><div style="font-size: 13px; color: var(--faint); margin-bottom: 6px; font-family: var(--font-mono);">Per period</div><div style="position: relative; height: 260px;"><canvas id="bar_{{ c.slug }}"></canvas></div></div>
                 <div><div style="font-size: 13px; color: var(--faint); margin-bottom: 6px; font-family: var(--font-mono);">Cumulative</div><div style="position: relative; height: 260px;"><canvas id="line_{{ c.slug }}"></canvas></div></div>
             </div>
@@ -373,6 +376,7 @@
     </div>
     <details class="chart-card ship-boxes" open>
         <summary class="ship-boxes-sum">Boxes ({{ shipments|length }}) <span class="cell-muted" style="font-weight:400;">— click to collapse</span></summary>
+<div class="tbl-scroll">
         <table class="ship-table">
             <thead><tr><th>Box PID</th><th>Status</th><th>Latest location</th><th>Contents</th><th>Shipped</th><th>Received</th></tr></thead>
             <tbody>
@@ -388,6 +392,7 @@
             {% endfor %}
             </tbody>
         </table>
+</div>
         <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">Empty boxes are listed separately below. Latest location + contents count are mirrored; click a box for its full timeline, manifest &amp; shipping checklist (fetched live from HWDB).</p>
     </details>
     {% else %}

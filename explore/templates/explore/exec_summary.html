@@ -364,6 +364,7 @@
   <div class="es-card">
     <h2>Comments log</h2>
     {% if comments_log %}
+<div class="tbl-scroll">
     <table class="es-log-table">
       <thead><tr><th>Time</th><th>Who</th><th>QA/QC status</th><th>Comment</th></tr></thead>
       <tbody>
@@ -383,6 +384,7 @@
         {% endfor %}
       </tbody>
     </table>
+</div>
     {% else %}
     <p class="es-hint">No comments yet.</p>
     {% endif %}

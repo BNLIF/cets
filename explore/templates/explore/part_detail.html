@@ -133,7 +133,7 @@
     display: inline-block; }
   .pk-link:hover { border-color: var(--accent); }
   .pk-hint { font-size: 11.5px; color: var(--faint); }
-  .pk-slots { max-height: 380px; overflow-y: auto; }
+  .pk-slots { max-height: 380px; overflow-y: auto; overflow-x: auto; }
   .pk-tid { font-family: var(--font-mono); font-size: 11px; color: var(--faint); }
   .pk-empty-slot { color: var(--faint); font-family: var(--font-body, inherit); font-size: 12.5px; }
 </style>
@@ -223,6 +223,7 @@
 
       <div class="sd-card">
         <h2>Tests</h2>
+        <div class="tbl-scroll">
         <table class="sd-table">
           <thead><tr><th>Test type</th><th>Status</th><th>Latest</th><th>Data</th><th>Comments</th></tr></thead>
           <tbody>
@@ -243,6 +244,7 @@
           {% endfor %}
           </tbody>
         </table>
+        </div>
       </div>
 
       {% if packing %}
@@ -313,6 +315,7 @@
       <div class="sd-card">
         <h2>Location timeline</h2>
         {% if detail.has_location %}
+        <div class="tbl-scroll">
         <table class="sd-table">
           <thead><tr><th>Arrived</th><th>Location</th><th>By</th><th>Comments</th></tr></thead>
           <tbody>
@@ -326,6 +329,7 @@
           {% endfor %}
           </tbody>
         </table>
+        </div>
         {% else %}
         <div class="sd-empty">No location recorded yet.</div>
         {% endif %}
@@ -441,6 +445,7 @@
   {# Full width below the grid — the assembly/connections table is the widest pane on the page. #}
   <div class="sd-card">
     <h2>{% if detail.is_cable %}Connections{% else %}Assembly{% endif %} ({{ detail.manifest|length }})</h2>
+    <div class="tbl-scroll">
     <table class="sd-table asm-table" data-assembly-base="{% url 'explore:assembly' part_id='__PID__' %}">
       <thead><tr><th>Part</th><th>Type</th><th>Position</th><th>Status</th></tr></thead>
       <tbody>
@@ -462,6 +467,7 @@
       {% endfor %}
       </tbody>
     </table>
+    </div>
   </div>
   {% endif %}
 </div>

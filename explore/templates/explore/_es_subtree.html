@@ -13,6 +13,7 @@ responses.{% endcomment %}
 {% elif not rows %}
 <p class="es-hint">No sub-components.</p>
 {% else %}
+<div class="tbl-scroll">
 <table class="es-tree">
   <thead><tr><th>Part</th><th>Type</th><th>Position</th><th>Status</th><th>Uploaded</th><th>Certified</th>{% if show_es %}<th>ES</th>{% endif %}</tr></thead>
   <tbody>
@@ -29,6 +30,7 @@ responses.{% endcomment %}
   {% endfor %}
   </tbody>
 </table>
+</div>
 <p class="es-hint">{{ rows|length }} direct sub-component{{ rows|length|pluralize }},
   statuses live from HWDB; items that already have an executive summary link to
   it, here and in the generated summary PDF.

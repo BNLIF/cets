@@ -8,6 +8,7 @@ just this pane via htmx (?bpage=), so the page keeps its scroll position. {% end
         {% if empty_boxes_page.has_next %}<a style="color:var(--accent-ink);text-decoration:none;" href="?bpage={{ empty_boxes_page.next_page_number }}" hx-get="?bpage={{ empty_boxes_page.next_page_number }}">Next ›</a><a style="color:var(--accent-ink);text-decoration:none;" href="?bpage={{ empty_boxes_page.paginator.num_pages }}" hx-get="?bpage={{ empty_boxes_page.paginator.num_pages }}">Last »</a>{% else %}<span class="cell-muted">Next ›</span><span class="cell-muted">Last »</span>{% endif %}
     </div>
     {% endif %}
+<div class="tbl-scroll">
     <table class="ship-table">
         <thead><tr><th>Box PID</th><th>Status</th><th>Latest location</th><th>Arrived</th></tr></thead>
         <tbody>
@@ -21,5 +22,6 @@ just this pane via htmx (?bpage=), so the page keeps its scroll position. {% end
         {% endfor %}
         </tbody>
     </table>
+</div>
     <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">Boxes with no current contents — not shown in the table above or on the Shipments tab.</p>
 </div>

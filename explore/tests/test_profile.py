@@ -55,6 +55,8 @@ class ProfileViewTest(TestCase):
         self.assertIn('class="pf-avatar">CZ<', html)
         # …and the visit caches the name, so the HEADER avatar shows CZ too
         self.assertIn('class="eh-user-dot">CZ', html)
+        # …and the page has a tree, so the drawer aside is not marked bare (#93).
+        self.assertIn('<aside class="ex-side" id="ex-side"', html)
         self.assertEqual(self.client.session["fnal_full_name"], "Chao Zhang")
 
     def test_false_admin_architect_flags_are_hidden(self):

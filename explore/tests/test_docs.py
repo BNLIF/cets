@@ -28,6 +28,23 @@ class DocsViewTest(TestCase):
         dev = self.client.get("/hw/dev/docs/").content.decode()
         self.assertIn("/cdbdev/apidoc/redoc", dev)
 
+    def test_mobile_drawer_scaffolding_renders(self):
+        # #93: the aside doubles as the small-screen drawer — it carries a
+        # mobile copy of the main nav and a scrim, and a page WITH a tree
+        # must not be marked bare.
+        html = self.client.get(reverse("explore:docs")).content.decode()
+        self.assertIn('id="ex-scrim"', html)
+        self.assertIn('class="ex-side-nav"', html)
+        self.assertIn('<aside class="ex-side" id="ex-side"', html)
+
+    def test_a_page_without_a_tree_marks_the_drawer_bare(self):
+        # #93 safety net: a view that passes no sidebar still gets the nav
+        # drawer on phones — the aside renders bare (hidden on desktop).
+        from django.template.loader import render_to_string
+        html = render_to_string("explore/base.html", {})
+        self.assertIn('<aside class="ex-side ex-side-bare"', html)
+        self.assertIn('class="ex-side-nav"', html)
+
     def test_anonymous_is_redirected_to_login(self):
         self.client.logout()
         resp = self.client.get(reverse("explore:docs"))

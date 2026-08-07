@@ -42,7 +42,42 @@
         position: sticky; top: 0; max-height: 100vh; overflow: auto;
         border-right: 1px solid var(--rule); background: var(--page); padding: 14px 8px; }
       .ex-layout.collapsed .ex-side { display: none; }
+      .ex-side-bare { display: none; }   /* pages without a tree (#93) */
       .ex-content { flex: 1; min-width: 0; }
+      .ex-side-nav { display: none; }
+      .ex-scrim { display: none; }
+      /* Small screens (#93): the sidebar becomes a slide-in drawer over the
+         content (never squeezes it), openable via the header's existing
+         toggle; a scrim behind it closes on tap. */
+      @media (max-width: 900px) {
+        .ex-side, .ex-layout.collapsed .ex-side, .ex-side-bare {
+          display: block; position: fixed; top: 0; left: 0; bottom: 0; z-index: 90;
+          width: min(300px, 85vw); max-height: none; box-sizing: border-box;
+          border-right: 1px solid var(--rule-hard); box-shadow: 0 0 36px rgba(0,0,0,.28);
+          transform: translateX(-110%); transition: transform .18s ease; }
+        .ex-layout.drawer-open .ex-side { transform: none; }
+        .ex-layout.drawer-open .ex-scrim { display: block; position: fixed; inset: 0;
+          z-index: 85; background: rgba(0,0,0,.35); }
+        @media (prefers-reduced-motion: reduce) { .ex-side { transition: none; } }
+      }
+      /* Very small screens (#93): the header nav folds into the drawer and
+         the search box flexes to the remaining header width. */
+      @media (max-width: 760px) {
+        .eh-find { flex: 1 1 auto; min-width: 0; max-width: 230px; margin-left: auto; }
+        .eh-find input { width: 100%; box-sizing: border-box; }
+        .eh-find-menu { width: min(360px, calc(100vw - 24px)); }
+        .ex-side-nav { display: flex; flex-direction: column; gap: 2px;
+          margin: 0 8px 12px; padding-bottom: 10px; border-bottom: 1px solid var(--rule); }
+        .ex-side-nav a { padding: 9px 10px; border-radius: var(--r-sm); font-size: 14px;
+          font-weight: 500; color: var(--body); text-decoration: none; }
+        .ex-side-nav a:hover { background: var(--surface); }
+        .ex-side-nav a.active { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+      }
+      /* Touch devices (#93): roomier tap targets in the tree/drawer. */
+      @media (pointer: coarse) {
+        .extree-row, .extree-leaf { padding-top: 8px; padding-bottom: 8px; }
+        .ex-side-nav a { padding-top: 12px; padding-bottom: 12px; }
+      }
       .ex-side-label { font-size: 11px; font-weight: 600; letter-spacing: .06em;
         text-transform: uppercase; color: var(--faint); padding: 2px 8px 10px; }
       .extree-folder { margin: 0; }
@@ -145,11 +180,11 @@
             {% endif %}
             {% if fnal_credkey %}
             <a class="eh-user" href="{% url 'explore:profile' %}" title="Signed in via FNAL — view your profile{% if watch_unread %} · {{ watch_unread }} new event(s) on things you watch{% endif %}">
-                <span class="eh-user-dot">{% firstof user_initials fnal_credkey|slice:":2"|upper %}{% if watch_unread %}<span class="eh-avatar-badge">{{ watch_unread }}</span>{% endif %}</span>{{ fnal_credkey }}
+                <span class="eh-user-dot">{% firstof user_initials fnal_credkey|slice:":2"|upper %}{% if watch_unread %}<span class="eh-avatar-badge">{{ watch_unread }}</span>{% endif %}</span><span class="eh-user-name">{{ fnal_credkey }}</span>
             </a>
             {% elif user.is_authenticated %}
             <a class="eh-user" href="{% url 'explore:profile' %}" title="{{ user.username }} — view your profile{% if watch_unread %} · {{ watch_unread }} new event(s) on things you watch{% endif %}">
-                <span class="eh-user-dot">{% firstof user_initials user.username|slice:":2"|upper %}{% if watch_unread %}<span class="eh-avatar-badge">{{ watch_unread }}</span>{% endif %}</span>{{ user.get_full_name|default:user.username }}
+                <span class="eh-user-dot">{% firstof user_initials user.username|slice:":2"|upper %}{% if watch_unread %}<span class="eh-avatar-badge">{{ watch_unread }}</span>{% endif %}</span><span class="eh-user-name">{{ user.get_full_name|default:user.username }}</span>
             </a>
             {% endif %}
             {% if user.is_authenticated %}
@@ -172,8 +207,18 @@
 
     <main class="eh-main">
         <div class="ex-layout" id="ex-layout">
-            {% if sidebar %}
-            <aside class="ex-side" id="ex-side" aria-label="Hierarchy tree">
+            {# The aside always renders: on small screens it is the slide-in drawer and carries the main nav (#93); a page without a tree hides it on desktop via .ex-side-bare. #}
+            <aside class="ex-side{% if not sidebar %} ex-side-bare{% endif %}" id="ex-side" aria-label="Hierarchy tree">
+                <nav class="ex-side-nav" aria-label="Main">
+                    <a{% if active_nav == 'hierarchy' %} class="active"{% endif %} href="{% url 'explore:home' %}">Overview</a>
+                    <a{% if active_nav != 'hierarchy' and active_nav != 'detector' and active_nav != 'shipments' and active_nav != 'activities' and active_nav != 'search' and active_nav != 'docs' %} class="active"{% endif %} href="{% url 'explore:browse' %}">Browse</a>
+                    <a{% if active_nav == 'detector' %} class="active"{% endif %} href="{% url 'explore:hierarchy' %}">Detector</a>
+                    <a{% if active_nav == 'shipments' %} class="active"{% endif %} href="{% url 'explore:shipments' %}">Shipments</a>
+                    <a{% if active_nav == 'activities' %} class="active"{% endif %} href="{% url 'explore:activities' %}">Activities</a>
+                    <a{% if active_nav == 'search' %} class="active"{% endif %} href="{% url 'explore:search' %}">Search</a>
+                    <a{% if active_nav == 'docs' %} class="active"{% endif %} href="{% url 'explore:docs' %}">Docs</a>
+                </nav>
+                {% if sidebar %}
                 <nav class="ex-side-instance" aria-label="HWDB instance">
                     <a{% if hwdb_instance == "prod" %} class="is-on" aria-current="true"{% endif %}
                        href="{{ instance_homes.prod }}" title="Production HWDB">Production</a>
@@ -182,8 +227,9 @@
                 </nav>
                 <div class="ex-side-label">{{ sidebar_label|default:"Curated hierarchy" }}</div>
                 {% for node in sidebar %}{% include "explore/_tree_node.html" with node=node %}{% endfor %}
+                {% endif %}
             </aside>
-            {% endif %}
+            <div class="ex-scrim" id="ex-scrim"></div>
             <div class="ex-content">
                 {% block content %}{% endblock %}
             </div>
@@ -228,16 +274,27 @@
     })();
     </script>
     <script>
-    // Sidebar collapse toggle — works on every explorer page (persisted).
+    // Sidebar toggle — on desktop it collapses the inline tree (persisted);
+    // on small screens it opens/closes the drawer overlay instead (#93).
     (function () {
       var layout = document.getElementById("ex-layout");
       if (!layout) return;
       if (localStorage.getItem("exSideCollapsed") === "1") layout.classList.add("collapsed");
+      var narrow = window.matchMedia("(max-width: 900px)");
       var st = document.getElementById("side-toggle");
       if (st) st.addEventListener("click", function () {
+        if (narrow.matches) { layout.classList.toggle("drawer-open"); return; }
         var hidden = layout.classList.toggle("collapsed");
         localStorage.setItem("exSideCollapsed", hidden ? "1" : "0");
         window.dispatchEvent(new Event("resize"));  // let charts refit
+      });
+      var scrim = document.getElementById("ex-scrim");
+      if (scrim) scrim.addEventListener("click", function () {
+        layout.classList.remove("drawer-open");
+      });
+      // Leaving the narrow mode never strands an open drawer state.
+      narrow.addEventListener("change", function (e) {
+        if (!e.matches) layout.classList.remove("drawer-open");
       });
     })();
     </script>

@@ -153,6 +153,26 @@ a.eh-user:hover { color: var(--ink); }
 }
 .eh-signout:hover { background: var(--surface); }
 
+/* Small screens (#93): the nav links move into the sidebar drawer (see
+ * base.html), the search box flexes down, and the username text drops —
+ * the avatar dot stays. Keeps the 50px header on one line at 320px.
+ * (Search-box and tree-row overrides live in base.html, whose inline
+ * styles load after this sheet.) */
+@media (max-width: 760px) {
+  .eh-header { gap: 10px; padding: 0 12px; }
+  .eh-nav { display: none; }
+  .eh-right { flex: 1 1 auto; min-width: 0; gap: 8px; }
+  .eh-user-name { display: none; }
+}
+
+/* Touch devices (#93): roomier tap targets, same visual design. */
+@media (pointer: coarse) {
+  .eh-nav-item, .eh-signout { padding-top: 6px; padding-bottom: 6px; }
+}
+
+/* Wide tables scroll inside their own card instead of the page body (#93). */
+.tbl-scroll { overflow-x: auto; }
+
 /* The explore page is a full-bleed sidebar layout; the inner .ex-main owns
  * the page padding. (Only the drill-in page uses this chrome.) */
 .eh-main { padding: 0; }
