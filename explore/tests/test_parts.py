@@ -51,6 +51,71 @@ class SpecSectionsTest(TestCase):
     def test_non_dict_blob_is_ignored(self):
         self.assertEqual(parts.spec_sections("a string"), [])
 
+    def test_full_block_renders_datasheet_keys_and_expands_data_in_place(self):
+        # The FNAL web UI writes Item Specifications as datasheet-level keys
+        # next to _meta; the shipping/QC convention nests under DATA. Both
+        # must render — DATA's keys as cards like before, _meta hidden.
+        block = {
+            "Vendor": "Acme",
+            "_meta": {"v": 2},
+            "DATA": {"Calibration": [{"gain": "1.2"}], "Channels": 64},
+        }
+        secs = {s["title"]: s for s in parts.spec_sections(block)}
+        self.assertNotIn("_meta", secs)
+        self.assertNotIn("DATA", secs)
+        self.assertEqual({f["label"]: f["value"] for f in secs["Specifications"]["fields"]},
+                         {"Vendor": "Acme", "Channels": "64"})
+        self.assertEqual(secs["Calibration"]["fields"], [{"label": "gain", "value": "1.2"}])
+
+    def test_bare_list_data_keeps_its_specifications_card(self):
+        secs = parts.spec_sections({"DATA": [{"a": "1"}]})
+        self.assertEqual([s["title"] for s in secs], ["Specifications"])
+        self.assertEqual(secs[0]["fields"], [{"label": "a", "value": "1"}])
+
+    def test_object_and_array_values_carry_a_json_payload(self):
+        # Structured values render as a compact preview + click-to-view modal;
+        # an array of scalars is a flat field, not a dropped card.
+        secs = {s["title"]: s for s in parts.spec_sections({
+            "Curve": [1, 2, 3],
+            "Scan": {"nested": {"a": 1}},
+        })}
+        curve = secs["Specifications"]["fields"][0]
+        self.assertEqual(curve["label"], "Curve")
+        self.assertEqual(curve["value"], "[1, 2, 3]")
+        self.assertEqual(curve["json"], "[\n  1,\n  2,\n  3\n]")
+        nested = secs["Scan"]["fields"][0]
+        self.assertEqual(nested["value"], '{"a": 1}')
+        self.assertIn('"a": 1', nested["json"])
+        # Every card carries its raw JSON for the copy button — the flat
+        # "Specifications" card copies the loose keys' original values.
+        self.assertIn('"nested"', secs["Scan"]["json"])
+        self.assertEqual(json.loads(secs["Specifications"]["json"]),
+                         {"Curve": [1, 2, 3]})
+
+    def test_scalar_fields_carry_no_json_payload(self):
+        secs = parts.spec_sections({"Vendor": "Acme"})
+        self.assertNotIn("json", secs[0]["fields"][0])
+
+
+class LatestSpecTest(TestCase):
+    """Reads follow the write convention: specifications[-1] is current."""
+
+    BODY = {"data": {"specifications": [
+        {"Vendor": "old", "DATA": {"Stage": "created"}},
+        {"Vendor": "new", "DATA": {"Stage": "edited"}},
+    ]}}
+
+    def test_spec_block_returns_the_latest_entry(self):
+        self.assertEqual(shipments._spec_block(self.BODY)["Vendor"], "new")
+
+    def test_spec_data_returns_the_latest_data_blob(self):
+        self.assertEqual(shipments._spec_data(self.BODY), {"Stage": "edited"})
+
+    def test_empty_and_malformed_specs_yield_none(self):
+        self.assertIsNone(shipments._spec_block({"data": {"specifications": []}}))
+        self.assertIsNone(shipments._spec_block({"data": {"specifications": ["x"]}}))
+        self.assertIsNone(shipments._spec_data(None))
+
 
 class TestSummaryTest(TestCase):
     def test_latest_record_per_type_wins(self):
@@ -543,6 +608,52 @@ class PartViewTest(TestCase):
         self.assertIn("photo.jpg", body)        # downloadable attachment
         self.assertIn("Specifications", body)   # generic spec card
         self.assertNotIn("In Transit", body)    # no shipping framing for a normal part
+
+    def test_shows_latest_spec_with_datasheet_level_fields(self):
+        # An FNAL-UI edit appends a new specifications entry whose fields sit
+        # at the top level (no DATA envelope) — the page must show that entry.
+        api = self._api()
+        api.get_component.return_value = {"data": {
+            "serial_number": "SN-7", "component_type": {"name": "ColdADC"},
+            "specifications": [
+                {"DATA": {"Stage": "original"}},
+                {"Vendor": "Acme", "_meta": {"v": 2}},
+            ]}}
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            body = self.client.get(self.url).content.decode()
+        self.assertIn("Vendor", body)
+        self.assertIn("Acme", body)
+        self.assertNotIn("original", body)   # superseded entry
+        self.assertNotIn("_meta", body)      # HWDB bookkeeping stays hidden
+
+    def test_big_spec_cards_and_long_values_fold(self):
+        api = self._api()
+        api.get_component.return_value = {"data": {
+            "serial_number": "SN-7", "component_type": {"name": "ColdADC"},
+            "specifications": [{
+                **{f"Field {i:02d}": f"v{i}" for i in range(14)},
+                "Trace": "x" * 400,
+            }]}}
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            body = self.client.get(self.url).content.decode()
+        self.assertIn("Show 5 more…", body)           # 15 fields, 10 shown
+        self.assertIn('class="sd-vfold"', body)       # 400-char value folds
+        self.assertIn("v13", body)                    # folded ≠ dropped
+
+    def test_object_values_get_a_click_to_view_modal(self):
+        api = self._api()
+        api.get_component.return_value = {"data": {
+            "serial_number": "SN-7", "component_type": {"name": "ColdADC"},
+            "specifications": [{"Curve": [1, 2, 3]}]}}
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            body = self.client.get(self.url).content.decode()
+        self.assertIn('class="sd-jview"', body)                    # preview link
+        self.assertIn('class="sd-jdata" data-label="Curve"', body)  # modal payload
+        self.assertIn('<dialog id="sd-jmodal">', body)             # shared viewer
+        self.assertIn('class="sd-copy"', body)                     # copy button
 
     def test_shipment_url_redirects_to_part(self):
         resp = self.client.get("/hw/shipment/D05700200099-00007/")

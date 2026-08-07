@@ -13,6 +13,7 @@ live on expand (#44), not here.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -124,10 +125,19 @@ _DETAIL_SECTIONS = (
 )
 
 
-def _spec_data(component_body: dict | None) -> dict | None:
-    """The ``specifications[0].DATA`` blob off a full item record, or None."""
+def _spec_block(component_body: dict | None) -> dict | None:
+    """The LATEST ``specifications`` entry off a full item record, or None.
+    The write paths already treat the last entry as current (``patch_shipping``,
+    ``_spec_template``), so reads do too — an edit made in the FNAL web UI
+    appends a new entry and must win over the original."""
     specs = ((component_body or {}).get("data") or {}).get("specifications") or []
-    return (specs[0] or {}).get("DATA") if specs else None
+    entry = specs[-1] if specs else None
+    return entry if isinstance(entry, dict) else None
+
+
+def _spec_data(component_body: dict | None) -> dict | None:
+    """The free-form ``DATA`` blob off the latest specifications entry."""
+    return (_spec_block(component_body) or {}).get("DATA")
 
 
 def has_shipping_checklist(data_blob: dict | None) -> bool:
@@ -195,6 +205,16 @@ def shipment_details(data_blob: dict | None) -> list[dict]:
     return out
 
 
+def spec_field(label: str, value) -> dict:
+    """One display field. An object/array value additionally carries a pretty
+    ``json`` payload — the cell shows a compact preview and the part page opens
+    the payload in a modal on click."""
+    if isinstance(value, (dict, list)):
+        return {"label": label, "value": json.dumps(value, ensure_ascii=False),
+                "json": json.dumps(value, indent=2, ensure_ascii=False)}
+    return {"label": label, "value": str(value)}
+
+
 def fold_entries(entries: list) -> tuple[list, list]:
     """Fold a list of single-/multi-field dict entries into ordered key/value
     ``fields`` plus downloadable ``attachments`` (any ``Image ID for …`` key).
@@ -209,7 +229,7 @@ def fold_entries(entries: list) -> tuple[list, list]:
             if "Image ID" in k:
                 attachments.append({"label": _image_label(k), "image_id": str(v)})
             else:
-                fields.append({"label": k, "value": str(v)})
+                fields.append(spec_field(k, v))
     return fields, attachments
 
 

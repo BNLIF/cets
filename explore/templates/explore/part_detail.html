@@ -57,6 +57,22 @@
   .sd-kv td { padding: 5px 8px; border-top: 1px solid var(--rule); vertical-align: top; }
   .sd-kv tr:first-child td { border-top: none; }
   .sd-kv .k { color: var(--faint); width: 46%; }
+  /* Fold-away display for big spec cards / values. */
+  .sd-fold > summary { cursor: pointer; color: var(--accent-ink); font-size: 12px; padding: 6px 8px; }
+  .sd-fold[open] > summary { display: none; }
+  .sd-vfold > summary { cursor: pointer; }
+  .sd-vfold[open] > summary .sd-vprev { display: none; }
+  .sd-vfold[open] > summary::after { content: "collapse"; color: var(--accent-ink); font-size: 12px; }
+  .sd-vfull { white-space: pre-wrap; word-break: break-word; }
+  .sd-jview { color: var(--accent-ink); text-decoration: none; border-bottom: 1px dotted var(--accent-ink); word-break: break-word; }
+  .sd-copy { float: right; border: 1px solid var(--rule); border-radius: 6px; background: none; color: var(--faint); font-size: 11px; padding: 2px 8px; cursor: pointer; }
+  .sd-copy:hover { color: var(--accent-ink); border-color: var(--accent-ink); }
+  #sd-jmodal { border: 1px solid var(--rule); border-radius: 10px; padding: 0; max-width: min(720px, 90vw); width: max-content; }
+  #sd-jmodal::backdrop { background: rgba(0,0,0,.45); }
+  .sd-jmodal-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 14px; border-bottom: 1px solid var(--rule); font-weight: 600; }
+  #sd-jmodal-title { font-family: var(--font-mono); font-size: 13px; }
+  #sd-jmodal-close { border: none; background: none; font-size: 20px; line-height: 1; cursor: pointer; color: var(--faint); }
+  #sd-jmodal-body { margin: 0; padding: 12px 14px; max-height: 70vh; overflow: auto; font-family: var(--font-mono); font-size: 12px; }
   .sd-wf .k { color: var(--ink); font-weight: 600; }
   .sd-atts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   .sd-dl { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500;
@@ -368,11 +384,25 @@
 
       {% for sec in detail.sections %}
       <div class="sd-card">
-        <h2>{{ sec.title }}</h2>
+        <h2>{{ sec.title }}{% if sec.json %}<button type="button" class="sd-copy" title="Copy this card&#8217;s data as JSON">&#10697; Copy</button><template class="sd-copy-data">{{ sec.json }}</template>{% endif %}</h2>
         {% if sec.fields %}
+        {% if is_shipping %}
         <table class="sd-kv">
           {% for f in sec.fields %}<tr><td class="k">{{ f.label }}</td><td>{{ f.value }}</td></tr>{% endfor %}
         </table>
+        {% else %}
+        <table class="sd-kv">
+          {% for f in sec.fields|slice:":10" %}{% include "explore/_spec_row.html" %}{% endfor %}
+        </table>
+        {% if sec.fields|length > 10 %}
+        <details class="sd-fold">
+          <summary>Show {{ sec.fields|length|add:"-10" }} more…</summary>
+          <table class="sd-kv">
+            {% for f in sec.fields|slice:"10:" %}{% include "explore/_spec_row.html" %}{% endfor %}
+          </table>
+        </details>
+        {% endif %}
+        {% endif %}
         {% endif %}
         {# Documents move to the Shipping Workflows pane when it renders. #}
         {% if sec.attachments and not packing %}
@@ -435,6 +465,42 @@
   </div>
   {% endif %}
 </div>
+
+{# Shared viewer for object/array spec values — opened by the .sd-jview links. #}
+<dialog id="sd-jmodal">
+  <div class="sd-jmodal-head">
+    <span id="sd-jmodal-title"></span>
+    <button type="button" id="sd-jmodal-close" aria-label="Close">&times;</button>
+  </div>
+  <pre id="sd-jmodal-body"></pre>
+</dialog>
+<script>
+(function () {
+  var dlg = document.getElementById("sd-jmodal");
+  if (!dlg || !dlg.showModal) return;
+  document.addEventListener("click", function (e) {
+    var a = e.target.closest(".sd-jview");
+    if (!a) return;
+    e.preventDefault();
+    var tpl = a.nextElementSibling;
+    document.getElementById("sd-jmodal-title").textContent = tpl.dataset.label;
+    document.getElementById("sd-jmodal-body").textContent = tpl.content.textContent.trim();
+    dlg.showModal();
+  });
+  document.getElementById("sd-jmodal-close").addEventListener("click", function () { dlg.close(); });
+  dlg.addEventListener("click", function (e) { if (e.target === dlg) dlg.close(); });
+})();
+document.addEventListener("click", function (e) {
+  var b = e.target.closest(".sd-copy");
+  if (!b) return;
+  var text = b.nextElementSibling.content.textContent.trim();
+  navigator.clipboard.writeText(text).then(function () {
+    var old = b.textContent;
+    b.textContent = "Copied ✓";
+    setTimeout(function () { b.textContent = old; }, 1200);
+  });
+});
+</script>
 
 <script src="{% static 'explore/cable-diagram.js' %}" defer></script>
 <script>

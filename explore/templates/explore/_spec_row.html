@@ -1,0 +1,2 @@
+<tr><td class="k">{{ f.label }}</td>
+  <td>{% if f.json %}<a href="#" class="sd-jview" title="Click to view">{{ f.value|truncatechars:120 }}</a><template class="sd-jdata" data-label="{{ f.label }}">{{ f.json }}</template>{% elif f.value|length > 300 %}<details class="sd-vfold"><summary><span class="sd-vprev">{{ f.value|truncatechars:160 }}</span></summary><div class="sd-vfull">{{ f.value }}</div></details>{% else %}{{ f.value }}{% endif %}</td></tr>

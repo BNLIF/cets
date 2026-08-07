@@ -13,6 +13,7 @@ instead of the generic per-key sections.
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -20,7 +21,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from hwdb.api_client import FnalDbApiClient
 
 from .shipments import (
-    _is_image, _spec_data, current_manifest, fold_entries, shipment_details,
+    _is_image, _spec_block, current_manifest, fold_entries, shipment_details,
+    spec_field,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,35 +38,57 @@ def _safe_data(label, fn) -> list:
         return []
 
 
-def spec_sections(data_blob: dict | None) -> list[dict]:
-    """Render an item's ``specifications[0].DATA`` blob into generic cards.
+def spec_sections(spec_block: dict | None) -> list[dict]:
+    """Render an item's latest ``specifications`` entry into generic cards.
 
     Each top-level key becomes a card (a list/dict value folds into key/value
     fields + downloadable ``Image ID`` attachments); loose scalar keys collect
-    into one leading "Specifications" card. The shipping checklists are just the
-    special case of this where the keys are the three lifecycle stages (#0014).
+    into one leading "Specifications" card. The free-form ``DATA`` sub-dict
+    (where the shipping workflow keeps its checklists) is expanded in place so
+    its keys render like the datasheet-level ones the FNAL web UI writes;
+    ``_meta`` is HWDB bookkeeping and stays hidden. The shipping checklists are
+    just the special case of this where the keys are the three lifecycle
+    stages (#0014).
     """
-    if isinstance(data_blob, list):  # some specs are a bare list of entries
-        fields, attachments = fold_entries(data_blob)
+    if isinstance(spec_block, list):  # some specs are a bare list of entries
+        fields, attachments = fold_entries(spec_block)
         return [{"title": "Specifications", "fields": fields,
-                 "attachments": attachments}] if (fields or attachments) else []
-    if not isinstance(data_blob, dict):
+                 "attachments": attachments,
+                 "json": json.dumps(spec_block, indent=2, ensure_ascii=False)}
+                ] if (fields or attachments) else []
+    if not isinstance(spec_block, dict):
         return []
-    out, flat = [], []
-    for key, val in data_blob.items():
-        if isinstance(val, list):
+    items = []
+    for key, val in spec_block.items():
+        if key == "_meta":
+            continue
+        if key == "DATA" and isinstance(val, dict):
+            items.extend(val.items())
+        elif key == "DATA":  # bare-list DATA blobs keep their old card title
+            items.append(("Specifications", val))
+        else:
+            items.append((key, val))
+    out, flat, flat_raw = [], [], {}
+    for key, val in items:
+        if isinstance(val, list) and any(isinstance(e, dict) for e in val):
             fields, attachments = fold_entries(val)
         elif isinstance(val, dict):
             fields, attachments = fold_entries([val])
         elif val not in (None, "", [], {}):
-            flat.append({"label": key, "value": str(val)})
+            # Scalars AND bare arrays (e.g. a pasted list of numbers) — the
+            # latter get the click-to-view treatment via spec_field.
+            flat.append(spec_field(key, val))
+            flat_raw[key] = val
             continue
         else:
             continue
         if fields or attachments:
-            out.append({"title": key, "fields": fields, "attachments": attachments})
+            # "json" feeds the card's copy-to-clipboard button.
+            out.append({"title": key, "fields": fields, "attachments": attachments,
+                        "json": json.dumps(val, indent=2, ensure_ascii=False)})
     if flat:
-        out.insert(0, {"title": "Specifications", "fields": flat, "attachments": []})
+        out.insert(0, {"title": "Specifications", "fields": flat, "attachments": [],
+                       "json": json.dumps(flat_raw, indent=2, ensure_ascii=False)})
     return out
 
 
@@ -392,7 +416,8 @@ def part_detail(api, part_id: str, is_shipping: bool) -> dict:
     real filename + an image flag for thumbnailing."""
     comp_body = api.get_component(part_id)  # core record — a failure here 502s
     comp = comp_body.get("data") or {}
-    data_blob = _spec_data(comp_body)
+    spec_block = _spec_block(comp_body)
+    data_blob = (spec_block or {}).get("DATA")
 
     locs = _safe_data("locations", lambda: api.get_locations(part_id))
     timeline = sorted(
@@ -410,7 +435,7 @@ def part_detail(api, part_id: str, is_shipping: bool) -> dict:
 
     images = [i for i in _safe_data("images", lambda: api.get_images(part_id)) if i.get("image_id")]
     name_by_id = {str(i["image_id"]): i.get("image_name") for i in images}
-    sections = shipment_details(data_blob) if is_shipping else spec_sections(data_blob)
+    sections = shipment_details(data_blob) if is_shipping else spec_sections(spec_block)
     for sec in sections:
         for a in sec["attachments"]:
             a["filename"] = name_by_id.get(a["image_id"]) or a["label"]
