@@ -75,6 +75,10 @@
 <dialog id="cl-qr-modal">
   <div id="cl-qr-reader"></div>
   <div id="cl-qr-status">Point the camera at the QR code.</div>
+  <div id="cl-qr-zoomwrap" style="display:none; margin-top:8px;">
+    <label style="font-size:12px; color:var(--faint);">Zoom
+      <input type="range" id="cl-qr-zoom" style="width:100%; max-width:none;"></label>
+  </div>
   <div style="margin-top:10px; text-align:right;">
     <button type="button" class="es-btn" id="cl-qr-close">Close</button>
   </div>
@@ -128,9 +132,19 @@
       return;
     }
     // native BarcodeDetector when the browser has one — far better at 1D
-    // barcodes than the JS fallback
-    qr = new Html5Qrcode("cl-qr-reader",
-      { experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
+    // barcodes than the JS fallback; the explicit format list speeds the
+    // fallback up (fewer decoders per frame)
+    var cfg = { experimentalFeatures: { useBarCodeDetectorIfSupported: true } };
+    if (typeof Html5QrcodeSupportedFormats !== "undefined") {
+      cfg.formatsToSupport = [
+        Html5QrcodeSupportedFormats.QR_CODE,
+        Html5QrcodeSupportedFormats.DATA_MATRIX,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.CODE_93,
+      ];
+    }
+    qr = new Html5Qrcode("cl-qr-reader", cfg);
     qr.start({ facingMode: "environment" },
       { fps: 12,
         // a wide box, not a square — 1D barcodes need the width
@@ -140,8 +154,34 @@
         } },
       function (text) { if (target) { target.value = extractPid(text); } closeQr(); },
       function () {})
+      .then(setupFocusZoom)
       .catch(function (err) { status.textContent = "Camera start failed: " + err; });
   });
+
+  // continuous focus + zoom slider — the scan page's recipe; focus hunting
+  // is what usually stops 1D barcodes from registering
+  async function setupFocusZoom() {
+    try {
+      var video = document.querySelector("#cl-qr-reader video");
+      if (!video || !video.srcObject) return;
+      var track = video.srcObject.getVideoTracks()[0];
+      if (!track || !track.getCapabilities) return;
+      var caps = track.getCapabilities();
+      try {
+        if (caps.focusMode && caps.focusMode.includes("continuous"))
+          await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] });
+      } catch (e) {}
+      if (!caps.zoom) return;
+      var slider = document.getElementById("cl-qr-zoom");
+      document.getElementById("cl-qr-zoomwrap").style.display = "block";
+      slider.min = caps.zoom.min; slider.max = caps.zoom.max;
+      slider.step = caps.zoom.step || 0.1;
+      slider.oninput = function () {
+        track.applyConstraints({ advanced: [{ zoom: parseFloat(slider.value) }] })
+          .catch(function () {});
+      };
+    } catch (e) {}
+  }
   document.getElementById("cl-qr-close").addEventListener("click", closeQr);
   dlg.addEventListener("click", function (e) { if (e.target === dlg) closeQr(); });
 
