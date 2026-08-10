@@ -1,0 +1,44 @@
+{
+  "name": "PCB Segments Interface",
+  "test_type_name": "PCB Segments Interface",
+  "instructions": "Reception checks for a PCB segments batch — the iPad app's PCB Segments Interface scene.",
+  "sections": [
+    {
+      "title": "Identification",
+      "fields": [
+        {"type": "qr", "label": "PCB Batch PID"},
+        {"type": "datetime", "label": "Reception date"},
+        {"type": "select", "label": "Segment type",
+         "options": ["G", "J", "A", "D", "H", "K", "B", "E", "I", "L", "C", "F",
+                      "N", "Q", "O1", "P1", "M1", "R1", "O2", "P2", "M2", "R2"]}
+      ]
+    },
+    {
+      "title": "Measurements",
+      "fields": [
+        {"type": "row", "fields": [
+          {"type": "number", "label": "Enter dim 1", "units": "cm"},
+          {"type": "number", "label": "Enter dim 2", "units": "cm"}
+        ]},
+        {"type": "table", "label": "Thickness measurements", "units": "mm",
+         "columns": ["P1", "P2", "P3", "P4"], "nominal": 1.6, "tol": 0.1}
+      ]
+    },
+    {
+      "title": "Visual Inspection",
+      "fields": [
+        {"type": "row", "fields": [
+          {"type": "check", "label": "Visual inspection"},
+          {"type": "check", "label": "Planarity"},
+          {"type": "check", "label": "Surface condition"}
+        ]},
+        {"type": "text", "label": "Anomaly title"},
+        {"type": "textarea", "label": "Anomaly description (location, observations)"},
+        {"type": "row", "fields": [
+          {"type": "photo", "label": "Photo 1"},
+          {"type": "photo", "label": "Photo 2"}
+        ]}
+      ]
+    }
+  ]
+}

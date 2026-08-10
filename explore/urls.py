@@ -53,6 +53,8 @@ urlpatterns = [
          views.explore_es_plot_view, name="es_plot"),
     path("part/<str:part_id>/es-subtree/", views.explore_es_subtree_view,
          name="es_subtree"),
+    path("part/<str:part_id>/checklist/<str:name>/", views.explore_checklist_view,
+         name="checklist"),
     path("part/<str:part_id>/preship/", views.explore_preship_view, name="preship"),
     path("part/<str:part_id>/shipping/", views.explore_shipping_view, name="shipping"),
     path("part/<str:part_id>/receiving/", views.explore_receiving_view, name="receiving"),

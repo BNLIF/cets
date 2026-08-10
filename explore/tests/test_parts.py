@@ -774,6 +774,23 @@ class PartViewTest(TestCase):
         self.assertIn("Executive summary", html)
         self.assertIn("/hw/dev/part/D05700200099-00007/exec-summary/", html)
         self.assertNotIn("Consortium:", html)
+        self.assertNotIn(">Checklists</h2>", html)   # no checklist card either (#95)
+
+    def test_checklist_card_lists_the_types_checklists(self):
+        # #95: Checklist_{ptid}_{name}.json rows on the type's images become
+        # named fill-out links on the part page (write instances only).
+        api = self._api()
+        api.get_component_type_images.return_value = {"data": [
+            {"image_id": "cl1", "created": "2026-08-01T00:00:00",
+             "image_name": "Checklist_D05700200099_Reception.json"},
+            {"image_id": "cl2", "created": "2026-08-02T00:00:00",
+             "image_name": "Checklist_D05700200099_Assembly.json"}]}
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            html = self.client.get("/hw/dev/part/D05700200099-00007/").content.decode()
+        self.assertIn(">Checklists</h2>", html)
+        self.assertIn("/hw/dev/part/D05700200099-00007/checklist/Reception/", html)
+        self.assertIn("/hw/dev/part/D05700200099-00007/checklist/Assembly/", html)
 
 
 class TestDataDownloadTest(TestCase):

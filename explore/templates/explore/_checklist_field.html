@@ -1,0 +1,65 @@
+{# One checklist leaf field (#95) — dispatched on f.type, closed vocabulary. #}
+<div class="cl-field cl-{{ f.type }}">
+{% if f.type == "check" %}
+  <span class="cl-lab">{{ f.label }}</span>
+  <div class="cl-tri" role="radiogroup" aria-label="{{ f.label }}">
+    <label class="cl-tri-opt"><input type="radio" name="{{ f.key }}" value=""
+      {% if not f.value %}checked{% endif %}><span>&mdash;</span></label>
+    <label class="cl-tri-opt ok"><input type="radio" name="{{ f.key }}" value="pass"
+      {% if f.value == "pass" %}checked{% endif %}><span>&#10003;</span></label>
+    <label class="cl-tri-opt bad"><input type="radio" name="{{ f.key }}" value="fail"
+      {% if f.value == "fail" %}checked{% endif %}><span>&#10007;</span></label>
+  </div>
+{% elif f.type == "number" %}
+  <label class="cl-lab" for="{{ f.key }}">{{ f.label }}{% if f.units %} <span class="cl-units">({{ f.units }})</span>{% endif %}{% if f.range %} <span class="cl-hint">allowed {{ f.range }}</span>{% endif %}</label>
+  <input id="{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}" inputmode="decimal" autocomplete="off"
+    {% if f.min != None %}data-min="{{ f.min|stringformat:"g" }}"{% endif %}
+    {% if f.max != None %}data-max="{{ f.max|stringformat:"g" }}"{% endif %}>
+{% elif f.type == "table" %}
+  <span class="cl-lab">{{ f.label }}{% if f.units %} <span class="cl-units">({{ f.units }})</span>{% endif %}{% if f.range %} <span class="cl-hint">allowed {{ f.range }}</span>{% endif %}</span>
+  <div class="tbl-scroll"><table class="cl-table">
+    <thead><tr>{% for c in f.cells %}<th>{{ c.column }}</th>{% endfor %}</tr></thead>
+    <tbody><tr>{% for c in f.cells %}<td><input name="{{ c.name }}" value="{{ c.value }}" inputmode="decimal" autocomplete="off"
+      {% if f.min != None %}data-min="{{ f.min|stringformat:"g" }}"{% endif %}
+      {% if f.max != None %}data-max="{{ f.max|stringformat:"g" }}"{% endif %}></td>{% endfor %}</tr></tbody>
+  </table></div>
+{% elif f.type == "textarea" %}
+  <label class="cl-lab" for="{{ f.key }}">{{ f.label }}</label>
+  <textarea id="{{ f.key }}" name="{{ f.key }}" rows="3">{{ f.value }}</textarea>
+{% elif f.type == "datetime" %}
+  <label class="cl-lab" for="{{ f.key }}">{{ f.label }}</label>
+  <input id="{{ f.key }}" type="datetime-local" name="{{ f.key }}" value="{{ f.value }}">
+{% elif f.type == "select" %}
+  <label class="cl-lab" for="{{ f.key }}">{{ f.label }}</label>
+  <select id="{{ f.key }}" name="{{ f.key }}">
+    <option value="">&mdash;</option>
+    {% for o in f.options %}<option{% if o == f.value %} selected{% endif %}>{{ o }}</option>{% endfor %}
+  </select>
+{% elif f.type == "qr" %}
+  <label class="cl-lab" for="{{ f.key }}">{{ f.label }}</label>
+  <span style="display:inline-flex; gap:8px; align-items:center; max-width:100%;">
+    <input id="{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}" autocomplete="off"
+      autocapitalize="characters" spellcheck="false">
+    <button type="button" class="es-btn cl-scan" data-target="{{ f.key }}">&#9635; Scan</button>
+  </span>
+{% elif f.type == "photo" %}
+  <span class="cl-lab">{{ f.label }}</span>
+  {% if f.existing %}<div class="cl-hint" style="margin-bottom:4px;">current:
+    <a href="{% url 'explore:shipment_image' image_id=f.existing.image_id %}?name={{ f.existing.image_name|urlencode }}&amp;inline=1"
+       target="_blank" rel="noopener">{{ f.existing.image_name }}</a> &mdash; choose a file to replace it</div>{% endif %}
+  <input type="file" name="{{ f.key }}" accept="image/*">
+{% elif f.type == "steps" %}
+  <span class="cl-lab">{{ f.label }}</span>
+  <ol class="cl-steps">
+    {% for it in f.items %}<li><label><input type="checkbox" name="{{ it.name }}"{% if it.done %} checked{% endif %}> {{ it.label }}</label></li>{% endfor %}
+  </ol>
+{% elif f.type == "static" %}
+  {% if f.label %}<span class="cl-lab">{{ f.label }}</span>{% endif %}
+  {% if f.image %}<img class="cl-static-img" src="{{ f.image }}" alt="{{ f.label|default:'reference' }}">{% endif %}
+  {% if f.note %}<div class="cl-note">{{ f.note }}</div>{% endif %}
+  {% if f.url %}<div><a href="{{ f.url }}" target="_blank" rel="noopener">{{ f.url }} <span aria-hidden="true">&#x2197;</span></a></div>{% endif %}
+{% else %}
+  <label class="cl-lab" for="{{ f.key }}">{{ f.label }}</label>
+  <input id="{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}" autocomplete="off">
+{% endif %}
+</div>

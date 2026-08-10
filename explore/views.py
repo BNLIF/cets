@@ -28,8 +28,8 @@ from hwdb.fnal import flow
 from hwdb.fnal import session as fnal_session
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
 
-from . import (activity, charts, checklists, curation, events, execsummary,
-               navigation, parts, scanning, watches)
+from . import (activity, charts, checklistforms, checklists, curation, events,
+               execsummary, navigation, parts, scanning, watches)
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, sync_test_events
 from .hierarchy import sync_hierarchy, sync_system
@@ -911,9 +911,18 @@ def explore_part_view(request, part_id):
     can_update_location = is_shipping and inst in settings.HWDB_WRITE_INSTANCES
     # The type's ES config (consortium, description) for the Executive-summary
     # card. Any type carrying one is "marked" for an ES — the interim mark
-    # until the hierarchy-chart one exists.
-    es_cfg, es_cfg_msg = (execsummary.load_config(api, ptid)
+    # until the hierarchy-chart one exists. The images listing is fetched
+    # once and shared with the consortium-checklist card (#95).
+    type_img_rows = None
+    if inst in settings.HWDB_WRITE_INSTANCES:
+        try:
+            type_img_rows = api.get_component_type_images(ptid).get("data") or []
+        except Exception as e:
+            logger.warning("type images listing for %s failed: %s", ptid, e)
+    es_cfg, es_cfg_msg = (execsummary.load_config(api, ptid, rows=type_img_rows)
                           if inst in settings.HWDB_WRITE_INSTANCES else (None, ""))
+    part_checklists = (checklistforms.available(api, ptid, rows=type_img_rows)
+                       if type_img_rows is not None else [])
     # The ES card shows for EVERY item on a write instance (2026-07-30):
     # configless types run the ES page in DEFAULT mode, so any item can
     # carry a summary.
@@ -991,6 +1000,8 @@ def explore_part_view(request, part_id):
         "es_cfg": es_cfg,
         "es_cfg_msg": es_cfg_msg,
         "can_es": can_es,
+        # Consortium checklists defined on this type (#95), by name.
+        "part_checklists": part_checklists,
         # Ship/receive checklist runs on this box (issue #65), by workflow.
         "checklists": ({c.workflow: c for c in
                         BoxChecklist.for_instance(inst).filter(part_id=part_id)}
@@ -1984,32 +1995,38 @@ def _whoami_context(api) -> tuple[str, set, dict]:
     return full_name, role_ids, role_names
 
 
-def _ensure_es_test_type(api, ptid) -> str | None:
-    """The type must define an "ES" test type before the record can post —
-    the Dashboard has one created by hand per component type; auto-create it
-    on first use instead (Hajime's ES review, 2026-07-17). A failed listing
-    is non-fatal (proceed and let post_test surface the real error); a failed
-    creation is returned. Runs once per write — every ES post funnels through
-    ``_post_es``."""
+def _ensure_test_type(api, ptid, name: str, comments: str) -> str | None:
+    """The type must define the test type before a record can post — the
+    Dashboard has them created by hand per component type; auto-create on
+    first use instead (Hajime's ES review, 2026-07-17). A failed listing is
+    non-fatal (proceed and let post_test surface the real error); a failed
+    creation is returned."""
     try:
         rows = api.get_test_types(ptid).get("data") or []
-        if any(isinstance(r, dict) and r.get("name") == "ES" for r in rows):
+        if any(isinstance(r, dict) and r.get("name") == name for r in rows):
             return None
     except Exception as e:
-        logger.warning("ES test-type listing for %s failed: %s", ptid, e)
+        logger.warning("test-type listing for %s failed: %s", ptid, e)
         return None
     try:
         # TestTypeIn per the HWDB OpenAPI spec (v2.27.0RC): name +
         # specifications + component_type echo, nothing else allowed.
         body = api.post_test_type(ptid, {
-            "name": "ES",
-            "comments": "Executive Summary signatures (auto-created by HWDB Explorer)",
+            "name": name,
+            "comments": comments,
             "specifications": {},
             "component_type": {"part_type_id": ptid},
         })
     except requests.RequestException as e:
         return _hwdb_error_detail(e)
     return None if body.get("status") == "OK" else str(body.get("data") or body)
+
+
+def _ensure_es_test_type(api, ptid) -> str | None:
+    """Every ES post funnels through ``_post_es`` → here, once per write."""
+    return _ensure_test_type(
+        api, ptid, "ES",
+        "Executive Summary signatures (auto-created by HWDB Explorer)")
 
 
 def _post_es(api, part_id, es_list, todos, comments,
@@ -2116,6 +2133,124 @@ def explore_es_plot_view(request, part_id, index):
         "sidebar": navigation.sidebar_tree(inst, {}),
         "part_id": part_id,
         "b": blk,
+    })
+
+
+def _checklist_photos(request, api, part_id, name, schema, prev_td, data) -> str | None:
+    """Upload the form's photos ahead of the test record (the iPad's
+    ordering — the record references their image_ids); a slot without a new
+    file keeps the previous submission's reference. Returns an error string
+    or None; already-posted photos stay on the item either way (HWDB is
+    append-only)."""
+    prev = (prev_td or {}).get("DATA")
+    prev = prev if isinstance(prev, dict) else {}
+    for title, f in checklistforms.leaf_fields(schema):
+        if f["type"] != "photo":
+            continue
+        img = request.FILES.get(f["key"])
+        ref = None
+        if img:
+            ext = img.name.rsplit(".", 1)[-1].lower() if "." in img.name else ""
+            if ext not in ("png", "jpg", "jpeg", "gif"):
+                return f"“{f['label']}”: pick a PNG/JPG/GIF image."
+            if img.size > 10 * 1024 * 1024:
+                return f"“{f['label']}”: that image is over 10 MB."
+            fname = (f"CLPhoto_{part_id}_{name}_{f['key']}_"
+                     f"{timezone.now():{execsummary.FILENAME_TS_FMT}}.{ext}")
+            try:
+                body = api.post_component_image(
+                    part_id, img, fname,
+                    comments=f"Checklist “{schema['name']}”: {f['label']}")
+            except requests.RequestException as e:
+                return f"HWDB rejected “{f['label']}” — {_hwdb_error_detail(e)}"
+            if body.get("status") != "OK":
+                return f"HWDB rejected “{f['label']}” — {body.get('data') or body}"
+            ref = {"image_id": str(body.get("image_id") or ""),
+                   "image_name": fname}
+        else:
+            sec = prev.get(title)
+            old = sec.get(f["label"]) if isinstance(sec, dict) else None
+            if isinstance(old, dict) and old.get("image_id"):
+                ref = old
+        if ref:
+            data.setdefault(title, {})[f["label"]] = ref
+    return None
+
+
+@login_not_required
+@fnal_login_required
+def explore_checklist_view(request, part_id, name):
+    """One consortium checklist's fill-out page (#95): the type's
+    ``Checklist_{typeid}_{name}.json`` schema rendered as a mobile-friendly
+    form addressing this EXISTING item (creation is phase 3). A previous
+    submission pre-fills the form (the iPad's "revive"); submit posts photos
+    first, then one test record of the schema's test type. HWDB is the only
+    store — nothing lands locally."""
+    inst = instance_of(request)
+    page_url = _rev(request, "explore:checklist", args=[part_id, name])
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return HttpResponseForbidden("Checklists are not enabled here.")
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(_rev(request, "explore:part", args=[part_id]))
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    ptid = part_id.rsplit("-", 1)[0]
+    schema, msg = checklistforms.load(api, ptid, name)
+    if schema is None:
+        raise Http404(msg)
+    # This checklist's latest submission on the item pre-fills the form and
+    # keeps photo references alive across re-submissions.
+    rec, _err = (execsummary._test_record_at(
+        api, part_id, schema["test_type_name"], 0)
+        if schema["test_type_name"] else (None, None))
+    prev_td = (rec or {}).get("test_data") or {}
+
+    if request.method == "POST":
+        if not schema["test_type_name"]:
+            messages.error(request, "This checklist schema names no "
+                                    "test_type_name — fix the schema JSON.")
+            return redirect(page_url)
+        data = checklistforms.parse(schema, request.POST)
+        err = _checklist_photos(request, api, part_id, name, schema,
+                                prev_td, data)
+        if err is None:
+            err = _ensure_test_type(
+                api, ptid, schema["test_type_name"],
+                "Consortium checklist records (auto-created by HWDB Explorer)")
+            if err:
+                err = (f"couldn’t create the “{schema['test_type_name']}” "
+                       f"test type — {err}")
+        if err is None:
+            try:
+                body = api.post_test(part_id, checklistforms.test_payload(
+                    schema, data,
+                    f"Checklist “{schema['name']}” submitted via HWDB Explorer"))
+                if body.get("status") != "OK":
+                    err = f"HWDB rejected the checklist — {body.get('data') or body}"
+            except requests.RequestException as e:
+                err = f"HWDB rejected the checklist — {_hwdb_error_detail(e)}"
+        if err:
+            messages.error(request, err)
+        else:
+            messages.success(
+                request, f"Checklist “{schema['name']}” submitted — every "
+                         f"submission is a new version, old ones are preserved.")
+        return redirect(page_url)
+
+    return render(request, "explore/checklist_form.html", {
+        "active_nav": "hardware",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "part_id": part_id,
+        "cl_name": name,
+        "schema": checklistforms.bind(schema, prev_td),
+        "schema_msg": msg,
+        "prefilled": bool(rec),
+        "no_test_type": not schema["test_type_name"],
     })
 
 

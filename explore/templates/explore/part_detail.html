@@ -311,6 +311,19 @@
       </div>
       {% endif %}
 
+      {% if part_checklists %}
+      <div class="sd-card">
+        <h2>Checklists</h2>
+        <div style="display:flex; flex-wrap:wrap; gap:6px 18px; margin: 6px 0 8px;">
+          {% for c in part_checklists %}
+          <a class="pk-link" href="{% url 'explore:checklist' part_id=part_id name=c.name %}">{{ c.name }} &#8594;</a>
+          {% endfor %}
+        </div>
+        <span class="pk-hint">Consortium checklists defined on this component type — fill out on any
+          device; submissions post to HWDB as test records.</span>
+      </div>
+      {% endif %}
+
       {% if detail.has_location or can_update_location %}
       <div class="sd-card">
         <h2>Location timeline</h2>

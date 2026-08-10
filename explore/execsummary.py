@@ -106,11 +106,14 @@ def load_raw_config(api, part_type_id: str):
         return None, None
 
 
-def load_config(api, part_type_id: str):
+def load_config(api, part_type_id: str, rows=None):
     """The newest ``ES_{typeid}_*.json`` from the type's images, normalized.
-    Returns ``(cfg | None, message)`` — None means DEFAULT mode."""
+    Returns ``(cfg | None, message)`` — None means DEFAULT mode. ``rows``
+    lets a caller that already listed the type's images (the part page
+    shares the listing with the checklist card, #95) skip the fetch."""
     try:
-        rows = api.get_component_type_images(part_type_id).get("data") or []
+        if rows is None:
+            rows = api.get_component_type_images(part_type_id).get("data") or []
         newest = _newest_config_row(rows, part_type_id)
     except Exception as e:
         logger.warning("ES config listing for %s failed: %s", part_type_id, e)

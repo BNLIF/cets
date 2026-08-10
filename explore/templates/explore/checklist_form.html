@@ -1,0 +1,173 @@
+{% extends 'explore/base.html' %}
+{% load static %}
+{% block title %}{{ schema.name }} · Checklist · {{ part_id }} · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .es-page { padding: 22px 30px 56px; max-width: 860px; }
+  .es-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .es-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .es-crumbs a:hover { text-decoration: underline; }
+  .es-crumbs .sep { color: var(--faint); margin: 0 7px; }
+  .es-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 2px; }
+  .es-sub { color: var(--dim); font-size: 13px; margin: 0 0 12px; }
+  .es-sub .mono { font-family: var(--font-mono); }
+  .es-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
+  .es-flash.success { color: var(--good); background: var(--good-bg);
+    border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule)); }
+  .es-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
+    border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+  .es-card { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg);
+    padding: 12px 16px; margin-bottom: 12px; }
+  .es-card h2 { font-size: 12px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em;
+    margin: 0 0 8px; }
+  .es-hint { font-size: 11.5px; color: var(--faint); }
+  .es-btn { font: inherit; font-size: 13px; font-weight: 600; color: var(--accent-ink);
+    background: var(--accent-soft); border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--rule));
+    border-radius: var(--r-sm); padding: 8px 18px; cursor: pointer; }
+  .es-btn:hover { border-color: var(--accent); }
+
+  .cl-field { margin: 10px 0; min-width: 0; }
+  .cl-lab { display: block; font-size: 12.5px; color: var(--dim); margin-bottom: 3px; }
+  .cl-units, .cl-hint { color: var(--faint); font-size: 11.5px; }
+  .cl-row { display: flex; flex-wrap: wrap; gap: 0 22px; }
+  .cl-row > .cl-field { flex: 1 1 220px; }
+  .cl-field input:not([type=radio]):not([type=checkbox]):not([type=file]),
+  .cl-field select, .cl-field textarea { font: inherit; font-size: 13px; color: var(--ink);
+    background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm);
+    padding: 7px 9px; width: 100%; max-width: 360px; }
+  .cl-field textarea { max-width: 100%; }
+  .cl-qr input { font-family: var(--font-mono); max-width: 260px; }
+  .cl-ok { border-color: var(--good) !important; background: var(--good-bg) !important; }
+  .cl-bad { border-color: var(--bad, #a33) !important;
+    background: color-mix(in oklch, var(--bad, #a33) 10%, var(--surface)) !important; }
+  .cl-tri { display: inline-flex; border: 1px solid var(--rule); border-radius: var(--r-sm);
+    overflow: hidden; background: var(--surface); }
+  .cl-tri-opt { position: relative; }
+  .cl-tri-opt input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .cl-tri-opt span { display: block; padding: 7px 18px; font-size: 14px; color: var(--faint);
+    border-left: 1px solid var(--rule); }
+  .cl-tri-opt:first-child span { border-left: none; }
+  .cl-tri-opt input:checked + span { background: var(--accent-soft); color: var(--ink); font-weight: 700; }
+  .cl-tri-opt.ok input:checked + span { background: var(--good-bg); color: var(--good); }
+  .cl-tri-opt.bad input:checked + span {
+    background: color-mix(in oklch, var(--bad, #a33) 12%, var(--surface)); color: var(--bad, #a33); }
+  .tbl-scroll { overflow-x: auto; }
+  .cl-table { border-collapse: collapse; font-size: 13px; }
+  .cl-table th { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase;
+    padding: 2px 8px 4px; border-bottom: 1px solid var(--rule); text-align: center; }
+  .cl-table td { padding: 5px 4px; }
+  .cl-table td input { width: 86px; text-align: center; }
+  .cl-steps { margin: 4px 0 0; padding-left: 20px; font-size: 13.5px; color: var(--ink); }
+  .cl-steps li { margin: 5px 0; }
+  .cl-static-img { max-width: 100%; max-height: 320px; border: 1px solid var(--rule);
+    border-radius: var(--r-sm); }
+  .cl-note { font-size: 13px; color: var(--ink); }
+  .cl-field a { color: var(--accent-ink); }
+  #cl-qr-modal { border: 1px solid var(--rule); border-radius: var(--r-lg); background: var(--page);
+    color: var(--ink); padding: 14px; width: min(420px, 92vw); }
+  #cl-qr-modal::backdrop { background: rgba(0, 0, 0, .45); }
+  #cl-qr-reader { width: 100%; }
+  #cl-qr-status { font-size: 12px; color: var(--faint); margin-top: 6px; }
+  @media (pointer: coarse) {
+    .cl-tri-opt span { padding: 10px 20px; }
+    .cl-steps li { margin: 9px 0; }
+  }
+</style>
+
+<div class="es-page">
+  <div class="es-crumbs">
+    <a href="{% url 'explore:home' %}">Explorer</a>
+    <span class="sep">›</span><a href="{% url 'explore:part' part_id=part_id %}">{{ part_id }}</a>
+    <span class="sep">›</span>{{ schema.name }}
+  </div>
+
+  {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+
+  <h1>{{ schema.name }}</h1>
+  <p class="es-sub">Checklist on <span class="mono">{{ part_id }}</span> — submissions post straight
+    to HWDB as <span class="mono">{{ schema.test_type_name }}</span> test records; this page keeps no
+    local state.{% if prefilled %} Pre-filled from the latest submission — edit and re-submit to
+    supersede it.{% endif %}</p>
+  {% if schema.instructions %}<p class="es-sub">{{ schema.instructions }}</p>{% endif %}
+
+  {% if no_test_type %}
+  <div class="es-flash error">This checklist's schema names no <span class="mono">test_type_name</span>,
+    so it cannot be submitted — fix the schema JSON on the component type.</div>
+  {% endif %}
+
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    {% for sec in schema.sections %}
+    <div class="es-card">
+      <h2>{{ sec.title }}</h2>
+      {% for f in sec.fields %}
+        {% if f.type == "row" %}
+        <div class="cl-row">{% for k in f.fields %}{% include "explore/_checklist_field.html" with f=k %}{% endfor %}</div>
+        {% else %}{% include "explore/_checklist_field.html" %}{% endif %}
+      {% endfor %}
+    </div>
+    {% endfor %}
+    {% if not no_test_type %}
+    <button class="es-btn">Submit to HWDB</button>
+    <span class="es-hint" style="margin-left:10px;">Every submission is a new version — old ones are preserved.</span>
+    {% endif %}
+  </form>
+</div>
+
+<dialog id="cl-qr-modal">
+  <div id="cl-qr-reader"></div>
+  <div id="cl-qr-status">Point the camera at the QR code.</div>
+  <div style="margin-top:10px; text-align:right;">
+    <button type="button" class="es-btn" id="cl-qr-close">Close</button>
+  </div>
+</dialog>
+
+<script src="{% static 'explore/html5-qrcode.min.js' %}"></script>
+<script>
+(function () {
+  // --- live tolerance coloring on number/table inputs -----------------------
+  function paint(el) {
+    el.classList.remove("cl-bad", "cl-ok");
+    var v = parseFloat(el.value);
+    if (el.value.trim() === "" || isNaN(v)) return;
+    var lo = el.hasAttribute("data-min") ? parseFloat(el.getAttribute("data-min")) : -Infinity;
+    var hi = el.hasAttribute("data-max") ? parseFloat(el.getAttribute("data-max")) : Infinity;
+    el.classList.add(v >= lo && v <= hi ? "cl-ok" : "cl-bad");
+  }
+  document.addEventListener("input", function (e) {
+    if (e.target.matches && e.target.matches("input[data-min], input[data-max]")) paint(e.target);
+  });
+  document.querySelectorAll("input[data-min], input[data-max]").forEach(paint);
+
+  // --- QR scan into a PID field (the scan page's html5-qrcode recipe) -------
+  var dlg = document.getElementById("cl-qr-modal");
+  var status = document.getElementById("cl-qr-status");
+  var target = null, qr = null;
+
+  async function stopQr() {
+    if (qr) { try { await qr.stop(); } catch (e) {} try { qr.clear(); } catch (e) {} qr = null; }
+  }
+  async function closeQr() { await stopQr(); if (dlg.open) dlg.close(); }
+
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest(".cl-scan");
+    if (!b) return;
+    target = document.getElementById(b.getAttribute("data-target"));
+    status.textContent = "Point the camera at the QR code.";
+    dlg.showModal();
+    if (typeof Html5Qrcode === "undefined") {
+      status.textContent = "Scanner library did not load — type the PID instead.";
+      return;
+    }
+    qr = new Html5Qrcode("cl-qr-reader");
+    qr.start({ facingMode: "environment" }, { fps: 12, qrbox: { width: 250, height: 250 } },
+      function (text) { if (target) { target.value = text; } closeQr(); },
+      function () {})
+      .catch(function (err) { status.textContent = "Camera start failed: " + err; });
+  });
+  document.getElementById("cl-qr-close").addEventListener("click", closeQr);
+  dlg.addEventListener("click", function (e) { if (e.target === dlg) closeQr(); });
+})();
+</script>
+{% endblock %}
