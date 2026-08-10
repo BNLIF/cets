@@ -1,0 +1,68 @@
+{
+  "name": "PCB Panel Interface",
+  "test_type_name": "PCB Panel Interface",
+  "instructions": "Reception and preparation checks for a PCB panel — the iPad app's PCB Panel Interface scene.",
+  "sections": [
+    {
+      "title": "Identification",
+      "fields": [
+        {"type": "qr", "label": "Component ID"},
+        {"type": "datetime", "label": "Reception date"},
+        {"type": "qr", "label": "PCB Batch ID"}
+      ]
+    },
+    {
+      "title": "Preparation",
+      "fields": [
+        {"type": "row", "fields": [
+          {"type": "check", "label": "Edge rectification"},
+          {"type": "check", "label": "Electrical test"}
+        ]},
+        {"type": "row", "fields": [
+          {"type": "check", "label": "Copper bridge soldering"},
+          {"type": "check", "label": "Cleaning"}
+        ]}
+      ]
+    },
+    {
+      "title": "Measurements",
+      "fields": [
+        {"type": "row", "fields": [
+          {"type": "number", "label": "X dimension", "units": "cm"},
+          {"type": "number", "label": "Y dimension", "units": "cm"}
+        ]},
+        {"type": "table", "label": "Thickness (P1–P5)", "units": "mm",
+         "columns": ["P1", "P2", "P3", "P4", "P5"], "nominal": 1.6, "tol": 0.1},
+        {"type": "table", "label": "Thickness (P6–P10)", "units": "mm",
+         "columns": ["P6", "P7", "P8", "P9", "P10"], "nominal": 1.6, "tol": 0.1}
+      ]
+    },
+    {
+      "title": "Visual Inspection",
+      "fields": [
+        {"type": "row", "fields": [
+          {"type": "check", "label": "Edge inspection"},
+          {"type": "check", "label": "Planarity"},
+          {"type": "check", "label": "Surface condition"}
+        ]},
+        {"type": "text", "label": "Anomaly title"},
+        {"type": "textarea", "label": "Anomaly description (location, observations)"},
+        {"type": "row", "fields": [
+          {"type": "photo", "label": "Photo 1"},
+          {"type": "photo", "label": "Photo 2"}
+        ]}
+      ]
+    },
+    {
+      "title": "Automated Scan",
+      "fields": [
+        {"type": "row", "fields": [
+          {"type": "check", "label": "QC scan"},
+          {"type": "number", "label": "Hole diameter", "units": "mm"}
+        ]},
+        {"type": "table", "label": "Average hole pitch acceptance", "units": "mm",
+         "columns": ["0°", "60°", "90°", "120°"]}
+      ]
+    }
+  ]
+}

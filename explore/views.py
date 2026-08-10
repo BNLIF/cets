@@ -2177,6 +2177,73 @@ def _checklist_photos(request, api, part_id, name, schema, prev_td, data) -> str
     return None
 
 
+def _patch_spec_data(api, part_id, values: dict) -> str | None:
+    """Fold ``{label: value}`` into the item's latest specifications DATA
+    and PATCH — the shipping checklist's envelope (#96). Error or None."""
+    try:
+        item = api.get_component(part_id).get("data") or {}
+    except requests.RequestException as e:
+        return _hwdb_error_detail(e)
+    specs_list = item.get("specifications") or [{}]
+    specs = specs_list[-1] if isinstance(specs_list[-1], dict) else {}
+    if not isinstance(specs.get("DATA"), dict):
+        specs["DATA"] = {}
+    specs["DATA"].update(values)
+    manufacturer = item.get("manufacturer")
+    try:
+        body = api.patch_component(part_id, {
+            "part_id": part_id,
+            "comments": item.get("comments"),
+            "manufacturer": {"id": manufacturer["id"]} if manufacturer else None,
+            "serial_number": item.get("serial_number"),
+            "specifications": specs,
+        })
+    except requests.RequestException as e:
+        return _hwdb_error_detail(e)
+    return None if body.get("status") == "OK" else str(body.get("data") or body)
+
+
+def _checklist_link(api, part_id, pid: str, position: str) -> str | None:
+    """Link a scanned child into this item's subcomponents (#96): the named
+    functional position, or the first free one matching the child's type.
+    HWDB wants the COMPLETE positions dict. Error or None; a child already
+    sitting in the right place is a no-op success."""
+    ptid = part_id.rsplit("-", 1)[0]
+    try:
+        connectors = _box_connectors(api, ptid)
+        occupants = {(m.get("functional_position") or ""): m.get("part_id")
+                     for m in (api.get_subcomponents(part_id).get("data") or [])
+                     if isinstance(m, dict)}
+    except requests.RequestException as e:
+        return _hwdb_error_detail(e)
+    except Exception as e:
+        return f"couldn’t read the item’s positions — {e}"
+    current = {pos: occupants.get(pos) for pos in connectors}
+    if pid in current.values():
+        return None                      # already linked — nothing to do
+    ctid = pid.rsplit("-", 1)[0]
+    if position:
+        if position not in current:
+            return f"this type has no “{position}” position."
+        if current[position] and current[position] != pid:
+            return (f"position “{position}” already holds "
+                    f"{current[position]} — unlink it first.")
+        pos = position
+    else:
+        free = [p for p in sorted(current, key=str)
+                if current[p] is None and connectors.get(p) == ctid]
+        if not free:
+            return f"no free position for {ctid} items."
+        pos = free[0]
+    try:
+        body = api.patch_subcomponents(part_id, {
+            "component": {"part_id": part_id},
+            "subcomponents": {**current, pos: pid}})
+    except requests.RequestException as e:
+        return _hwdb_error_detail(e)
+    return None if body.get("status") == "OK" else str(body.get("data") or body)
+
+
 @login_not_required
 @fnal_login_required
 def explore_checklist_view(request, part_id, name):
@@ -2219,6 +2286,20 @@ def explore_checklist_view(request, part_id, name):
         err = _checklist_photos(request, api, part_id, name, schema,
                                 prev_td, data)
         if err is None:
+            # subcomponent links (#96) — before the record, like the iPad
+            for req in checklistforms.link_requests(schema, data):
+                lerr = _checklist_link(api, part_id, req["pid"], req["position"])
+                if lerr:
+                    err = f"“{req['label']}”: {req['pid']} not linked — {lerr}"
+                    break
+        if err is None:
+            # to_spec values (#96) also fold into the item's specifications
+            sv = checklistforms.spec_values(schema, data)
+            if sv:
+                serr = _patch_spec_data(api, part_id, sv)
+                if serr:
+                    err = f"item specifications not updated — {serr}"
+        if err is None:
             err = _ensure_test_type(
                 api, ptid, schema["test_type_name"],
                 "Consortium checklist records (auto-created by HWDB Explorer)")
@@ -2252,6 +2333,109 @@ def explore_checklist_view(request, part_id, name):
         "prefilled": bool(rec),
         "no_test_type": not schema["test_type_name"],
     })
+
+
+CHECKLIST_SKELETON = {
+    "name": "",
+    "test_type_name": "",
+    "instructions": "",
+    "sections": [{"title": "Section 1", "fields": []}],
+}
+
+
+@login_not_required
+@fnal_login_required
+def explore_checklist_config_view(request, part_type_id):
+    """Structured editor for a type's consortium checklists (#96): sections
+    and typed fields from the closed vocabulary, reordered with buttons —
+    order IS the layout. ``?name=X`` edits an existing checklist; without it
+    a new one starts blank or from a repo template. Saving uploads
+    ``Checklist_{ptid}_{name}.json`` onto the type (same filename every
+    time — HWDB keeps the versions, the newest wins)."""
+    inst = instance_of(request)
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return HttpResponseForbidden(
+            "Checklists can only be edited on a write instance.")
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        here = request.get_full_path()
+        return redirect(f"{link}?{urlencode({'next': here, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(_rev(request, "explore:home"))
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    page_url = _rev(request, "explore:checklist_config", args=[part_type_id])
+    next_url = request.POST.get("next") or request.GET.get("next") or ""
+
+    if request.method == "POST":
+        cl_name = (request.POST.get("cl_name") or "").strip()
+        if not cl_name or "/" in cl_name:
+            messages.error(request, "Give the checklist a name (no slashes) — "
+                                    "it becomes the link on the part page.")
+            return redirect(page_url)
+        back = f"{page_url}?{urlencode({'name': cl_name, 'next': next_url})}"
+        try:
+            cfg = json.loads(request.POST.get("config_json") or "")
+        except ValueError as e:
+            messages.error(request, f"The schema isn’t valid JSON — {e}")
+            return redirect(back)
+        if not isinstance(cfg, dict):
+            messages.error(request, "The schema must be a JSON object.")
+            return redirect(back)
+        fname = f"Checklist_{part_type_id}_{cl_name}.json"
+        try:
+            body = api.post_component_type_image(
+                part_type_id, io.BytesIO(json.dumps(cfg, indent=2).encode()),
+                fname, comments="Consortium checklist schema (Explorer editor)")
+        except requests.RequestException as e:
+            messages.error(request, f"HWDB rejected the schema — {_hwdb_error_detail(e)}")
+            return redirect(back)
+        if body.get("status") != "OK":
+            messages.error(request, f"HWDB rejected the schema — {body.get('data') or body}")
+            return redirect(back)
+        messages.success(request, f"Checklist posted as {fname} — it now shows "
+                                  f"on every {part_type_id} item.")
+        activity.log(inst, ActivityEvent.KIND_ES,
+                     f"Checklist “{cl_name}” updated for type {part_type_id}",
+                     part_type_id=part_type_id,
+                     actor=activity.actor_of(request))
+        return redirect(back)
+
+    cl_name = (request.GET.get("name") or "").strip()
+    raw, current_name = (checklistforms.raw_load(api, part_type_id, cl_name)
+                         if cl_name else (None, None))
+    return render(request, "explore/checklist_config.html", {
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "part_type_id": part_type_id,
+        "cl_name": cl_name,
+        "current_name": current_name,
+        "next": next_url,
+        "existing": checklistforms.available(api, part_type_id),
+        "templates": checklistforms.builtin_templates(),
+        "initial": raw if raw is not None else CHECKLIST_SKELETON,
+    })
+
+
+@login_not_required
+@fnal_login_required
+def explore_checklist_preview_view(request, part_type_id):
+    """The editor's live preview (#96): POST the schema JSON, get back the
+    fill-out form's sections rendered exactly as the runtime renders them
+    (same partial, bound empty)."""
+    inst = instance_of(request)
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return HttpResponseForbidden("Not a write instance.")
+    try:
+        cfg = json.loads(request.POST.get("config_json") or "")
+    except ValueError:
+        cfg = None
+    if not isinstance(cfg, dict):
+        return HttpResponse('<p class="es-hint">The schema isn’t valid JSON yet.</p>')
+    schema = checklistforms.normalize(cfg, request.POST.get("cl_name") or "…")
+    return render(request, "explore/_checklist_sections.html",
+                  {"schema": checklistforms.bind(schema, None)})
 
 
 def _patch_item_flags(api, part_id, status_id, certified, uploaded, comment) -> None:

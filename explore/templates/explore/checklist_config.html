@@ -1,0 +1,406 @@
+{% extends 'explore/base.html' %}
+{% block title %}Checklist editor · {{ part_type_id }} · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .ec-page { padding: 22px 30px 56px; max-width: 1360px; }
+  .ec-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .ec-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .ec-crumbs a:hover { text-decoration: underline; }
+  .ec-crumbs .sep { color: var(--faint); margin: 0 7px; }
+  .ec-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 2px; }
+  .ec-page h1 .mono, .ec-sub .mono { font-family: var(--font-mono); }
+  .ec-sub { color: var(--dim); font-size: 13px; margin: 0 0 12px; }
+  .ec-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
+  .ec-flash.success { color: var(--good); background: var(--good-bg);
+    border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule)); }
+  .ec-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
+    border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+  .ec-card { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg);
+    padding: 12px 16px; margin-bottom: 12px; }
+  .ec-card h2 { font-size: 12px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em;
+    margin: 0 0 8px; }
+  .ec-editor input, .ec-editor select, .ec-editor textarea { font: inherit; font-size: 13px;
+    color: var(--ink); background: var(--surface); border: 1px solid var(--rule);
+    border-radius: var(--r-sm); padding: 5px 8px; }
+  .ec-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 5px 0; }
+  .ec-row input { flex: 1 1 120px; min-width: 0; }
+  .ec-row input[type=checkbox] { flex: none; }
+  .ec-inline { display: inline-flex; align-items: center; gap: 5px; font-size: 12px;
+    color: var(--dim); white-space: nowrap; }
+  .ec-del { flex: none; font: inherit; font-size: 12px; color: var(--faint); background: none;
+    border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 4px 9px; cursor: pointer; }
+  .ec-del:hover { color: var(--bad, #a33); border-color: color-mix(in oklch, var(--bad, #a33) 40%, var(--rule)); }
+  .ec-add { font: inherit; font-size: 12.5px; color: var(--accent-ink); background: none;
+    border: 1px dashed color-mix(in oklch, var(--accent) 40%, var(--rule)); border-radius: var(--r-sm);
+    padding: 5px 12px; cursor: pointer; margin-top: 6px; }
+  .ec-add:hover { border-style: solid; }
+  .ec-hint { font-size: 11.5px; color: var(--faint); }
+  .ec-label { font-size: 11px; color: var(--faint); }
+  .ec-save { font: inherit; font-size: 13.5px; font-weight: 600; color: #fff;
+    background: var(--accent); border: 1px solid var(--accent); border-radius: var(--r-sm);
+    padding: 8px 22px; cursor: pointer; }
+  .clc-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 18px; align-items: start; }
+  @media (max-width: 1100px) { .clc-cols { grid-template-columns: minmax(0, 1fr); } }
+  .clc-preview-wrap { position: sticky; top: 12px; }
+  .clc-fld { border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 6px 9px; margin: 7px 0; }
+  /* the field header row must fit one desktop line: tighter gaps, slimmer
+     buttons, smaller checkbox labels */
+  .clc-fld .ec-row { gap: 6px; }
+  .clc-fld .ec-del { padding: 4px 6px; }
+  .clc-fld .ff-label { flex: 1 1 80px; }
+  .clc-fld .ec-inline { font-size: 11.5px; gap: 4px; }
+  .clc-sec > .ec-row .fs-title { font-weight: 600; }
+  #clc-json { width: 100%; min-height: 200px; font-family: var(--font-mono); font-size: 12px; }
+  .clc-chips { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; }
+  .clc-chips a { color: var(--accent-ink); text-decoration: none; }
+  .clc-chips a:hover { text-decoration: underline; }
+</style>
+{% include "explore/_checklist_style.html" %}
+
+<div class="ec-page">
+  <div class="ec-crumbs">
+    <a href="{% url 'explore:home' %}">Explorer</a>
+    {% if next %}<span class="sep">›</span><a href="{{ next }}">Back to the type</a>{% endif %}
+    <span class="sep">›</span>Checklist editor
+  </div>
+
+  {% for m in messages %}<div class="ec-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+
+  <h1>{% if current_name %}Edit{% else %}Create{% endif %} a checklist — <span class="mono">{{ part_type_id }}</span></h1>
+  <p class="ec-sub">{% if current_name %}Editing <span class="mono">{{ current_name }}</span>.{% else %}A new
+    checklist for this component type.{% endif %} Saving uploads
+    <span class="mono">Checklist_{{ part_type_id }}_&lt;name&gt;.json</span> onto the type — it shows on every
+    item's part page; HWDB keeps every version, the newest wins. Order is the layout: reorder with the
+    ▲▼ buttons; “pair &#8593;” puts a field beside the one above it (stacked on phones).</p>
+
+  {% if existing %}
+  <div class="ec-card"><h2>This type's checklists</h2>
+    <div class="clc-chips">
+      {% for c in existing %}<a href="?name={{ c.name|urlencode }}&amp;next={{ next|urlencode }}">{{ c.name }} ✎</a>{% endfor %}
+      {% if cl_name %}<a href="{% url 'explore:checklist_config' part_type_id=part_type_id %}?next={{ next|urlencode }}">+ new checklist</a>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="clc-cols">
+    <div class="ec-editor" id="clc-editor">
+      <div class="ec-card">
+        <h2>Checklist</h2>
+        <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Name</span>
+          <input id="f-name" value="{{ cl_name }}" placeholder="link name on the part page, e.g. Reception">
+        </div>
+        {% if templates and not current_name %}
+        <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Start from</span>
+          <select id="f-tpl" style="flex:0 0 260px;">
+            <option value="">blank</option>
+            {% for t in templates %}<option value="{{ forloop.counter0 }}">{{ t.title }}</option>{% endfor %}
+          </select>
+          <button type="button" class="ec-del" id="f-tpl-load">Load template</button>
+          <span class="ec-hint">replaces the editor contents</span>
+        </div>
+        {% endif %}
+        <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Title</span>
+          <input id="f-title" placeholder="display title, e.g. PCB Segments Interface"></div>
+        <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Test type</span>
+          <input id="f-ttn" placeholder="test type the submission posts to (required)"></div>
+        <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Instructions</span>
+          <input id="f-instr" placeholder="optional intro text shown under the title"></div>
+      </div>
+
+      <div id="clc-sections"></div>
+      <button type="button" class="ec-add" id="clc-addsec">+ add section</button>
+
+      <div class="ec-card" style="margin-top:12px;">
+        <h2>Schema JSON</h2>
+        <textarea id="clc-json" spellcheck="false"></textarea>
+        <div class="ec-row">
+          <button type="button" class="ec-del" id="clc-apply">Apply JSON to the editor</button>
+          <span class="ec-hint">for hand edits or pasting a schema</span>
+        </div>
+      </div>
+
+      <form method="post" id="clc-save">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ next }}">
+        <input type="hidden" name="cl_name" id="save-name">
+        <input type="hidden" name="config_json" id="save-json">
+        <button class="ec-save">Save to HWDB</button>
+        <span class="ec-hint" style="margin-left:10px;">posts the schema onto the component type</span>
+      </form>
+    </div>
+
+    <div class="clc-preview-wrap">
+      <div class="ec-card" style="background: var(--surface);">
+        <h2>Live preview — exactly what the fill-out page renders</h2>
+        <div id="clc-preview"><p class="es-hint">…</p></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<template id="t-sec">
+  <div class="clc-sec ec-card">
+    <div class="ec-row">
+      <button type="button" class="ec-del clc-up" title="Move up">&#9650;</button>
+      <button type="button" class="ec-del clc-dn" title="Move down">&#9660;</button>
+      <input class="fs-title" placeholder="section title">
+      <button type="button" class="ec-del clc-x" title="Remove section">&#x2715;</button>
+    </div>
+    <div class="clc-fields"></div>
+    <button type="button" class="ec-add clc-addf">+ add field</button>
+  </div>
+</template>
+
+<template id="t-fld">
+  <div class="clc-fld">
+    <div class="ec-row">
+      <button type="button" class="ec-del clc-up" title="Move up">&#9650;</button>
+      <button type="button" class="ec-del clc-dn" title="Move down">&#9660;</button>
+      <select class="ff-type" style="flex:0 0 112px;" title="field type — static is display-only; link scans a child PID into a sub-component position">
+        <option value="check">check &#10003;/&#10007;</option>
+        <option value="number">number</option>
+        <option value="table">table</option>
+        <option value="text">text</option>
+        <option value="textarea">textarea</option>
+        <option value="datetime">date/time</option>
+        <option value="select">select</option>
+        <option value="photo">photo</option>
+        <option value="qr">QR / PID</option>
+        <option value="link">link child</option>
+        <option value="steps">steps</option>
+        <option value="static">static</option>
+      </select>
+      <input class="ff-label" placeholder="label">
+      <label class="ec-inline" title="render beside the field above (side by side; stacked on phones)"><input type="checkbox" class="ff-sameline"> pair &#8593;</label>
+      <label class="ec-inline ff-tospec-w" title="value is also saved to the item's Specifications"><input type="checkbox" class="ff-tospec"> &#8594; Specs</label>
+      <button type="button" class="ec-del clc-x" title="Remove field">&#x2715;</button>
+    </div>
+    <div class="ec-row g-num" style="display:none;">
+      <input class="ff-units" placeholder="units" style="flex:0 0 76px;">
+      <input class="ff-nominal" placeholder="nominal" inputmode="decimal" style="flex:0 0 90px;">
+      <input class="ff-tol" placeholder="&#177; tol" inputmode="decimal" style="flex:0 0 76px;">
+      <input class="ff-min" placeholder="min" inputmode="decimal" style="flex:0 0 76px;">
+      <input class="ff-max" placeholder="max" inputmode="decimal" style="flex:0 0 76px;">
+      <input class="ff-columns" placeholder="columns, comma-separated — e.g. P1, P2, P3, P4">
+    </div>
+    <div class="ec-row g-select" style="display:none;">
+      <input class="ff-options" placeholder="options, comma-separated">
+    </div>
+    <div class="ec-row g-steps" style="display:none;">
+      <textarea class="ff-steps" rows="3" placeholder="one step per line" style="flex:1 1 100%;"></textarea>
+    </div>
+    <div class="ec-row g-static" style="display:none;">
+      <input class="ff-note" placeholder="note text">
+      <input class="ff-url" placeholder="reference URL (e.g. EDMS drawing)">
+      <input class="ff-image" placeholder="image URL">
+    </div>
+    <div class="ec-row g-link" style="display:none;">
+      <input class="ff-position" placeholder="functional position (blank = first free slot for the child&#8217;s type)">
+    </div>
+  </div>
+</template>
+
+{{ initial|json_script:"clc-initial" }}
+{{ templates|json_script:"clc-templates" }}
+<script>
+(function () {
+  var SPEC_OK = ["check", "number", "table", "text", "textarea", "datetime", "select", "qr"];
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var editor = document.getElementById("clc-editor");
+
+  function syncType(r) {
+    var t = $(".ff-type", r).value;
+    $(".g-num", r).style.display = (t === "number" || t === "table") ? "" : "none";
+    $(".ff-columns", r).style.display = t === "table" ? "" : "none";
+    $(".g-select", r).style.display = t === "select" ? "" : "none";
+    $(".g-steps", r).style.display = t === "steps" ? "" : "none";
+    $(".g-static", r).style.display = t === "static" ? "" : "none";
+    $(".g-link", r).style.display = t === "link" ? "" : "none";
+    $(".ff-tospec-w", r).style.display = SPEC_OK.indexOf(t) !== -1 ? "" : "none";
+    $(".ff-label", r).placeholder = t === "static" ? "label (optional)" : "label";
+  }
+
+  function addField(secNode, f, sameline) {
+    var r = document.getElementById("t-fld").content.firstElementChild.cloneNode(true);
+    $(".clc-fields", secNode).appendChild(r);
+    f = f || {};
+    $(".ff-type", r).value = f.type || "check";
+    $(".ff-label", r).value = f.label || "";
+    $(".ff-sameline", r).checked = !!sameline;
+    $(".ff-tospec", r).checked = !!f.to_spec;
+    ["units", "nominal", "tol", "min", "max", "options", "note", "url", "image", "position"]
+      .forEach(function (k) {
+        var el = $(".ff-" + k, r);
+        var v = f[k];
+        el.value = v === undefined || v === null ? ""
+          : (k === "options" ? (v || []).join(", ") : String(v));
+      });
+    $(".ff-columns", r).value = (f.columns || []).join(", ");
+    $(".ff-steps", r).value = (f.steps || []).join("\n");
+    syncType(r);
+    return r;
+  }
+
+  function addSection(s) {
+    var n = document.getElementById("t-sec").content.firstElementChild.cloneNode(true);
+    document.getElementById("clc-sections").appendChild(n);
+    s = s || {};
+    $(".fs-title", n).value = s.title || "";
+    (s.fields || []).forEach(function (f) {
+      if (f && f.type === "row") {
+        (f.fields || []).forEach(function (k, i) { addField(n, k, i > 0); });
+      } else if (f) {
+        addField(n, f, false);
+      }
+    });
+    return n;
+  }
+
+  function num(r, cls) {
+    var v = parseFloat($(cls, r).value);
+    return isNaN(v) ? null : v;
+  }
+  function list(raw, sep) {
+    return raw.split(sep).map(function (x) { return x.trim(); }).filter(Boolean);
+  }
+
+  function readField(r) {
+    var t = $(".ff-type", r).value, label = $(".ff-label", r).value.trim();
+    var f = { type: t };
+    if (label) f.label = label;
+    if (t === "static") {
+      var note = $(".ff-note", r).value.trim(), url = $(".ff-url", r).value.trim(),
+          image = $(".ff-image", r).value.trim();
+      if (note) f.note = note;
+      if (url) f.url = url;
+      if (image) f.image = image;
+      return (note || url || image) ? f : null;
+    }
+    if (!label) return null;
+    if (t === "number" || t === "table") {
+      var units = $(".ff-units", r).value.trim();
+      if (units) f.units = units;
+      [["nominal", ".ff-nominal"], ["tol", ".ff-tol"], ["min", ".ff-min"], ["max", ".ff-max"]]
+        .forEach(function (p) { var v = num(r, p[1]); if (v !== null) f[p[0]] = v; });
+    }
+    if (t === "table") f.columns = list($(".ff-columns", r).value, ",");
+    if (t === "select") f.options = list($(".ff-options", r).value, ",");
+    if (t === "steps") f.steps = list($(".ff-steps", r).value, "\n");
+    if (t === "link") {
+      var pos = $(".ff-position", r).value.trim();
+      if (pos) f.position = pos;
+    }
+    if ($(".ff-tospec", r).checked && SPEC_OK.indexOf(t) !== -1) f.to_spec = true;
+    return f;
+  }
+
+  function collect() {
+    var cfg = { name: $("#f-title").value.trim(),
+                test_type_name: $("#f-ttn").value.trim() };
+    var instr = $("#f-instr").value.trim();
+    if (instr) cfg.instructions = instr;
+    cfg.sections = $$("#clc-sections > .clc-sec").map(function (s) {
+      var fields = [];
+      $$(".clc-fields > .clc-fld", s).forEach(function (r) {
+        var f = readField(r);
+        if (!f) return;
+        if ($(".ff-sameline", r).checked && fields.length) {
+          var last = fields[fields.length - 1];
+          if (last.type === "row") last.fields.push(f);
+          else fields[fields.length - 1] = { type: "row", fields: [last, f] };
+        } else {
+          fields.push(f);
+        }
+      });
+      return { title: $(".fs-title", s).value.trim(), fields: fields };
+    }).filter(function (s) { return s.title || s.fields.length; });
+    return cfg;
+  }
+
+  function render(cfg) {
+    $("#f-title").value = cfg.name || "";
+    $("#f-ttn").value = cfg.test_type_name || "";
+    $("#f-instr").value = cfg.instructions || "";
+    document.getElementById("clc-sections").innerHTML = "";
+    (cfg.sections || []).forEach(addSection);
+    refresh();
+  }
+
+  // --- JSON mirror + debounced live preview (the runtime's own renderer) ---
+  var pTimer = null;
+  function refresh() {
+    $("#clc-json").value = JSON.stringify(collect(), null, 2);
+    clearTimeout(pTimer);
+    pTimer = setTimeout(preview, 350);
+  }
+  function paint(el) {
+    el.classList.remove("cl-bad", "cl-ok");
+    var v = parseFloat(el.value);
+    if (el.value.trim() === "" || isNaN(v)) return;
+    var lo = el.hasAttribute("data-min") ? parseFloat(el.getAttribute("data-min")) : -Infinity;
+    var hi = el.hasAttribute("data-max") ? parseFloat(el.getAttribute("data-max")) : Infinity;
+    el.classList.add(v >= lo && v <= hi ? "cl-ok" : "cl-bad");
+  }
+  function preview() {
+    var fd = new FormData();
+    fd.append("config_json", $("#clc-json").value);
+    fd.append("cl_name", $("#f-name").value);
+    fd.append("csrfmiddlewaretoken", $("#clc-save [name=csrfmiddlewaretoken]").value);
+    fetch("{% url 'explore:checklist_preview' part_type_id=part_type_id %}",
+          { method: "POST", body: fd })
+      .then(function (r) { return r.text(); })
+      .then(function (html) { $("#clc-preview").innerHTML = html; })
+      .catch(function () {});
+  }
+  // the preview's tolerance coloring works live, same as the real page
+  document.getElementById("clc-preview").addEventListener("input", function (e) {
+    if (e.target.matches && e.target.matches("input[data-min], input[data-max]")) paint(e.target);
+  });
+
+  editor.addEventListener("input", function (e) {
+    if (e.target.id !== "clc-json") refresh();
+  });
+  editor.addEventListener("change", function (e) {
+    var r = e.target.closest && e.target.closest(".clc-fld");
+    if (r && e.target.classList.contains("ff-type")) syncType(r);
+    if (e.target.id !== "clc-json") refresh();
+  });
+  editor.addEventListener("click", function (e) {
+    var t = e.target;
+    if (t.classList.contains("clc-addf")) { addField(t.closest(".clc-sec")); refresh(); return; }
+    var row = t.closest && (t.closest(".clc-fld") || t.closest(".clc-sec"));
+    if (!row) return;
+    if (t.classList.contains("clc-x")) { row.remove(); refresh(); return; }
+    if (t.classList.contains("clc-up") && row.previousElementSibling) {
+      row.parentNode.insertBefore(row, row.previousElementSibling); refresh();
+    }
+    if (t.classList.contains("clc-dn") && row.nextElementSibling) {
+      row.parentNode.insertBefore(row.nextElementSibling, row); refresh();
+    }
+  });
+  document.getElementById("clc-addsec").addEventListener("click", function () {
+    addSection({ title: "" }); refresh();
+  });
+  document.getElementById("clc-apply").addEventListener("click", function () {
+    try { render(JSON.parse($("#clc-json").value)); }
+    catch (e) { alert("That JSON doesn’t parse: " + e.message); }
+  });
+  var tplLoad = document.getElementById("f-tpl-load");
+  if (tplLoad) tplLoad.addEventListener("click", function () {
+    var tpls = JSON.parse(document.getElementById("clc-templates").textContent);
+    var i = $("#f-tpl").value;
+    render(i === "" ? {sections: [{title: "Section 1", fields: []}]} : tpls[parseInt(i, 10)].cfg);
+    if (!$("#f-name").value && i !== "") $("#f-name").value = tpls[parseInt(i, 10)].title;
+  });
+  document.getElementById("clc-save").addEventListener("submit", function () {
+    $("#save-name").value = $("#f-name").value.trim();
+    $("#save-json").value = JSON.stringify(collect());
+  });
+
+  render(JSON.parse(document.getElementById("clc-initial").textContent));
+})();
+</script>
+{% endblock %}

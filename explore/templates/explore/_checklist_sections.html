@@ -1,0 +1,12 @@
+{% for sec in schema.sections %}
+<div class="es-card">
+  <h2>{{ sec.title }}</h2>
+  {% for f in sec.fields %}
+    {% if f.type == "row" %}
+    <div class="cl-row">{% for k in f.fields %}{% include "explore/_checklist_field.html" with f=k %}{% endfor %}</div>
+    {% else %}{% include "explore/_checklist_field.html" %}{% endif %}
+  {% endfor %}
+</div>
+{% empty %}
+<p class="es-hint">No sections yet.</p>
+{% endfor %}

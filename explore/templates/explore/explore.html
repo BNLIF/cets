@@ -192,10 +192,11 @@
         <dt>{% if is_shipping %}Boxes in HWDB{% else %}Items in HWDB{% endif %}</dt><dd>{{ leaf.n_components }}</dd>
         <dt>Test events</dt><dd>{{ leaf.n_tests }}</dd>
         {% if can_edit_es %}
-        <dt>Exec summary</dt><dd><a href="{% url 'explore:es_config' part_type_id=leaf.part_type_id %}?next={{ request.path|urlencode }}" title="Create or edit the type’s executive-summary config (ES_{{ leaf.part_type_id }}_*.json in HWDB)">Add / edit the ES config…</a></dd>
+        <dt>Exec summary</dt><dd><a href="{% url 'explore:es_config' part_type_id=leaf.part_type_id %}?next={{ request.path|urlencode }}" target="_blank" rel="noopener" title="Create or edit the type’s executive-summary config (ES_{{ leaf.part_type_id }}_*.json in HWDB)">Add/Edit the ES config <span aria-hidden="true">&#x2197;</span></a></dd>
+        <dt>Checklists</dt><dd><a href="{% url 'explore:checklist_config' part_type_id=leaf.part_type_id %}?next={{ request.path|urlencode }}" target="_blank" rel="noopener" title="Create or edit the type’s consortium checklists (Checklist_{{ leaf.part_type_id }}_*.json in HWDB) — they render as fill-out forms on every item">Add/Edit checklists <span aria-hidden="true">&#x2197;</span></a></dd>
         {% endif %}
         {% if can_edit_type %}
-        <dt>Positions</dt><dd><a href="{% url 'explore:box_type' part_type_id=leaf.part_type_id %}" title="Add, edit or delete the type’s connector positions, or clone it into a new type (needs the HWDB architect role)">Edit the type’s positions…</a></dd>
+        <dt>Positions</dt><dd><a href="{% url 'explore:box_type' part_type_id=leaf.part_type_id %}" target="_blank" rel="noopener" title="Add, edit or delete the type’s connector positions, or clone it into a new type (needs the HWDB architect role)">Edit the type’s positions <span aria-hidden="true">&#x2197;</span></a></dd>
         {% endif %}
     </dl>
     <pre id="system-sync-log"></pre>

@@ -351,18 +351,23 @@ class NavigationTest(TestCase):
         self.assertIn("Part type ID", detail)        # leaf detail panel
         self.assertIn("node-sync-btn", detail)
 
-    def test_leaf_links_the_es_config_editor(self):
+    def test_leaf_links_the_es_config_and_checklist_editors(self):
         # Any leaf on a write instance links the ES-config editor — even types
-        # without a config yet (saving one there marks the type as needing an ES).
+        # without a config yet (saving one there marks the type as needing an
+        # ES) — and the checklist editor (#96: editing lives on the TYPE page).
         leaf_url = navigation.node_path("prod", "FD", "FD-VD", system_id=57,
                                         subsystem_id=2, part_type_id="D05700200001")
-        self.assertIn("/hw/es-config/D05700200001/", self._html(leaf_url))
+        html = self._html(leaf_url)
+        self.assertIn("/hw/es-config/D05700200001/", html)
+        self.assertIn("/hw/checklist-config/D05700200001/", html)
 
     @override_settings(HWDB_WRITE_INSTANCES=["dev"])
-    def test_es_config_link_absent_off_write_instances(self):
+    def test_editor_links_absent_off_write_instances(self):
         leaf_url = navigation.node_path("prod", "FD", "FD-VD", system_id=57,
                                         subsystem_id=2, part_type_id="D05700200001")
-        self.assertNotIn("es-config", self._html(leaf_url))
+        html = self._html(leaf_url)
+        self.assertNotIn("es-config", html)
+        self.assertNotIn("checklist-config", html)
 
     def test_legacy_node_query_redirects_to_path(self):
         resp = self.client.get(reverse("explore:home") + "?node=D05700200001")

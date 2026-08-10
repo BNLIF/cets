@@ -35,8 +35,8 @@
     <option value="">&mdash;</option>
     {% for o in f.options %}<option{% if o == f.value %} selected{% endif %}>{{ o }}</option>{% endfor %}
   </select>
-{% elif f.type == "qr" %}
-  <label class="cl-lab" for="{{ f.key }}">{{ f.label }}</label>
+{% elif f.type == "qr" or f.type == "link" %}
+  <label class="cl-lab" for="{{ f.key }}">{{ f.label }}{% if f.type == "link" %} <span class="cl-hint">links a sub-component{% if f.position %} into “{{ f.position }}”{% endif %}</span>{% endif %}</label>
   <span style="display:inline-flex; gap:8px; align-items:center; max-width:100%;">
     <input id="{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}" autocomplete="off"
       autocapitalize="characters" spellcheck="false">
@@ -62,4 +62,5 @@
   <label class="cl-lab" for="{{ f.key }}">{{ f.label }}</label>
   <input id="{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}" autocomplete="off">
 {% endif %}
+{% if f.to_spec %}<div class="cl-hint">&#8594; also saved to the item&#8217;s Specifications</div>{% endif %}
 </div>

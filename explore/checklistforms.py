@@ -26,7 +26,13 @@ import logging
 logger = logging.getLogger(__name__)
 
 FIELD_TYPES = {"check", "number", "table", "text", "textarea", "datetime",
-               "select", "photo", "qr", "steps", "static"}
+               "select", "photo", "qr", "steps", "static", "link"}
+
+# Field types whose value may ALSO be folded into the item's latest
+# specifications DATA (the ``to_spec`` flag, #96 — "sometimes they do store
+# in the Item Specifications as well", Hajime 2026-08-07).
+SPEC_CAPABLE = {"check", "number", "table", "text", "textarea", "datetime",
+                "select", "qr"}
 
 
 def available(api, part_type_id: str, rows=None) -> list[dict]:
@@ -92,7 +98,13 @@ def _norm_field(f: dict) -> dict | None:
         return out if (out["image"] or out["url"] or out["note"]) else None
     if t not in FIELD_TYPES or not label:
         return None
-    out = {"type": t, "label": label, "units": str(f.get("units") or "").strip()}
+    out = {"type": t, "label": label, "units": str(f.get("units") or "").strip(),
+           "to_spec": bool(f.get("to_spec")) and t in SPEC_CAPABLE}
+    if t == "link":
+        # subcomponent link (#96): the scanned child PID is linked into the
+        # named functional position — or the first free one matching the
+        # child's type when no position is pinned (the scan page's rule).
+        out["position"] = str(f.get("position") or "").strip()
     if t in ("number", "table"):
         # tolerance: explicit min/max, or nominal ± tol
         nominal, tol = _num(f.get("nominal")), _num(f.get("tol"))
@@ -263,3 +275,72 @@ def parse(schema: dict, post) -> dict:
 def test_payload(schema: dict, data: dict, comments: str) -> dict:
     return {"comments": comments, "test_type": schema["test_type_name"],
             "test_data": {"DATA": data}}
+
+
+def spec_values(schema: dict, data: dict) -> dict:
+    """The submitted values whose fields carry ``to_spec`` (#96), flat
+    ``{label: value}`` — these ALSO fold into the item's latest
+    specifications DATA (the test record keeps the full set regardless)."""
+    out = {}
+    for title, f in leaf_fields(schema):
+        if not f.get("to_spec"):
+            continue
+        sec = data.get(title)
+        if isinstance(sec, dict) and f["label"] in sec:
+            out[f["label"]] = sec[f["label"]]
+    return out
+
+
+def link_requests(schema: dict, data: dict) -> list[dict]:
+    """The submitted ``link`` fields with a PID:
+    ``[{label, pid, position}]`` — the view patches each into the item's
+    subcomponents ahead of the test record."""
+    out = []
+    for title, f in leaf_fields(schema):
+        if f["type"] != "link":
+            continue
+        sec = data.get(title)
+        pid = sec.get(f["label"]) if isinstance(sec, dict) else None
+        if isinstance(pid, str) and pid.strip():
+            out.append({"label": f["label"], "pid": pid.strip(),
+                        "position": f["position"]})
+    return out
+
+
+def raw_load(api, part_type_id: str, name: str):
+    """``(raw cfg dict | None, image_name | None)`` — unnormalized, unknown
+    keys preserved, for the editor page (#96)."""
+    row = next((r for r in available(api, part_type_id) if r["name"] == name),
+               None)
+    if row is None:
+        return None, None
+    try:
+        raw = json.loads(api.get_image_response(row["image_id"]).content)
+        return (raw if isinstance(raw, dict) else None), row["image_name"]
+    except Exception as e:
+        logger.warning("raw checklist %s/%s failed: %s", part_type_id, name, e)
+        return None, row["image_name"]
+
+
+def builtin_templates() -> list[dict]:
+    """``[{key, title, cfg}]`` — the repo's example schemas
+    (``docs/checklists/*.example.json``), offered by the editor as starting
+    points (#96 — Hajime: "we could even provide a few templates")."""
+    from django.conf import settings
+    out = []
+    root = settings.BASE_DIR / "docs" / "checklists"
+    try:
+        paths = sorted(root.glob("*.example.json"))
+    except OSError:
+        return []
+    for p in paths:
+        try:
+            cfg = json.loads(p.read_text())
+        except (OSError, ValueError) as e:
+            logger.warning("template %s unreadable: %s", p.name, e)
+            continue
+        if isinstance(cfg, dict):
+            key = p.name[:-len(".example.json")]
+            out.append({"key": key,
+                        "title": str(cfg.get("name") or key), "cfg": cfg})
+    return out

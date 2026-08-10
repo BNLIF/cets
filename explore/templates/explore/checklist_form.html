@@ -17,63 +17,13 @@
     border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule)); }
   .es-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
     border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
-  .es-card { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg);
-    padding: 12px 16px; margin-bottom: 12px; }
-  .es-card h2 { font-size: 12px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em;
-    margin: 0 0 8px; }
-  .es-hint { font-size: 11.5px; color: var(--faint); }
-  .es-btn { font: inherit; font-size: 13px; font-weight: 600; color: var(--accent-ink);
-    background: var(--accent-soft); border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--rule));
-    border-radius: var(--r-sm); padding: 8px 18px; cursor: pointer; }
-  .es-btn:hover { border-color: var(--accent); }
-
-  .cl-field { margin: 10px 0; min-width: 0; }
-  .cl-lab { display: block; font-size: 12.5px; color: var(--dim); margin-bottom: 3px; }
-  .cl-units, .cl-hint { color: var(--faint); font-size: 11.5px; }
-  .cl-row { display: flex; flex-wrap: wrap; gap: 0 22px; }
-  .cl-row > .cl-field { flex: 1 1 220px; }
-  .cl-field input:not([type=radio]):not([type=checkbox]):not([type=file]),
-  .cl-field select, .cl-field textarea { font: inherit; font-size: 13px; color: var(--ink);
-    background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm);
-    padding: 7px 9px; width: 100%; max-width: 360px; }
-  .cl-field textarea { max-width: 100%; }
-  .cl-qr input { font-family: var(--font-mono); max-width: 260px; }
-  .cl-ok { border-color: var(--good) !important; background: var(--good-bg) !important; }
-  .cl-bad { border-color: var(--bad, #a33) !important;
-    background: color-mix(in oklch, var(--bad, #a33) 10%, var(--surface)) !important; }
-  .cl-tri { display: inline-flex; border: 1px solid var(--rule); border-radius: var(--r-sm);
-    overflow: hidden; background: var(--surface); }
-  .cl-tri-opt { position: relative; }
-  .cl-tri-opt input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-  .cl-tri-opt span { display: block; padding: 7px 18px; font-size: 14px; color: var(--faint);
-    border-left: 1px solid var(--rule); }
-  .cl-tri-opt:first-child span { border-left: none; }
-  .cl-tri-opt input:checked + span { background: var(--accent-soft); color: var(--ink); font-weight: 700; }
-  .cl-tri-opt.ok input:checked + span { background: var(--good-bg); color: var(--good); }
-  .cl-tri-opt.bad input:checked + span {
-    background: color-mix(in oklch, var(--bad, #a33) 12%, var(--surface)); color: var(--bad, #a33); }
-  .tbl-scroll { overflow-x: auto; }
-  .cl-table { border-collapse: collapse; font-size: 13px; }
-  .cl-table th { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase;
-    padding: 2px 8px 4px; border-bottom: 1px solid var(--rule); text-align: center; }
-  .cl-table td { padding: 5px 4px; }
-  .cl-table td input { width: 86px; text-align: center; }
-  .cl-steps { margin: 4px 0 0; padding-left: 20px; font-size: 13.5px; color: var(--ink); }
-  .cl-steps li { margin: 5px 0; }
-  .cl-static-img { max-width: 100%; max-height: 320px; border: 1px solid var(--rule);
-    border-radius: var(--r-sm); }
-  .cl-note { font-size: 13px; color: var(--ink); }
-  .cl-field a { color: var(--accent-ink); }
   #cl-qr-modal { border: 1px solid var(--rule); border-radius: var(--r-lg); background: var(--page);
     color: var(--ink); padding: 14px; width: min(420px, 92vw); }
   #cl-qr-modal::backdrop { background: rgba(0, 0, 0, .45); }
   #cl-qr-reader { width: 100%; }
   #cl-qr-status { font-size: 12px; color: var(--faint); margin-top: 6px; }
-  @media (pointer: coarse) {
-    .cl-tri-opt span { padding: 10px 20px; }
-    .cl-steps li { margin: 9px 0; }
-  }
 </style>
+{% include "explore/_checklist_style.html" %}
 
 <div class="es-page">
   <div class="es-crumbs">
@@ -98,16 +48,7 @@
 
   <form method="post" enctype="multipart/form-data">
     {% csrf_token %}
-    {% for sec in schema.sections %}
-    <div class="es-card">
-      <h2>{{ sec.title }}</h2>
-      {% for f in sec.fields %}
-        {% if f.type == "row" %}
-        <div class="cl-row">{% for k in f.fields %}{% include "explore/_checklist_field.html" with f=k %}{% endfor %}</div>
-        {% else %}{% include "explore/_checklist_field.html" %}{% endif %}
-      {% endfor %}
-    </div>
-    {% endfor %}
+    {% include "explore/_checklist_sections.html" %}
     {% if not no_test_type %}
     <button class="es-btn">Submit to HWDB</button>
     <span class="es-hint" style="margin-left:10px;">Every submission is a new version — old ones are preserved.</span>
