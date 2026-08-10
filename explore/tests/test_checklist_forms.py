@@ -12,6 +12,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 
 from explore import checklistforms
+from explore.models import ChecklistDraft
 
 PART = "Z00100300041-00150"
 PTID = "Z00100300041"
@@ -475,3 +476,261 @@ class ChecklistEditorTest(TestCase):
             html = self.client.post(f"{CONFIG_PAGE}preview/",
                                     {"config_json": "{nope"}).content.decode()
         self.assertIn("isn’t valid JSON", html)
+
+    def test_editor_offers_roles(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(CONFIG_PAGE).content.decode()
+        self.assertIn('id="f-roles"', html)
+        self.assertIn("ff-imgfile", html)   # reference-image upload control
+
+    def test_asset_upload_posts_onto_the_type(self):
+        api = _api()
+        api.post_component_type_image.return_value = {"status": "OK",
+                                                      "image_id": "ref-9"}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.post(f"{CONFIG_PAGE}asset/", {
+                "image": SimpleUploadedFile("p1-p10.png", PNG,
+                                            content_type="image/png")})
+        self.assertEqual(resp.json()["image_id"], "ref-9")
+        args = api.post_component_type_image.call_args
+        self.assertEqual(args.args[0], PTID)
+        self.assertTrue(args.args[2].startswith(f"ChecklistImage_{PTID}_"))
+        self.assertIn("p1-p10.png", args.kwargs["comments"])
+
+    def test_asset_upload_rejects_non_images(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.post(f"{CONFIG_PAGE}asset/", {
+                "image": SimpleUploadedFile("notes.txt", b"hi",
+                                            content_type="text/plain")})
+        self.assertEqual(resp.status_code, 400)
+        api.post_component_type_image.assert_not_called()
+
+    def test_static_image_id_renders_through_the_proxy(self):
+        cfg = {**SCHEMA, "sections": [{"title": "Guide", "fields": [
+            {"type": "static", "label": "Where to measure",
+             "image_id": "ref-9"}]}]}
+        s = checklistforms.normalize(cfg, NAME)
+        self.assertEqual(s["sections"][0]["fields"][0]["image_id"], "ref-9")
+        api = _api(schema=cfg)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("/hw/dev/shipment-image/ref-9/", html)
+
+
+# ---- #97: drafts, CSV export, roles gate, new-item flow ----------------------
+
+class DraftAndExportTest(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("d", "d@d.io", "pw")
+        self.client.force_login(self.user)
+
+    def _actor(self):
+        # no FNAL link in the test session — actor_of falls back to the
+        # Django username
+        return self.user.get_username()
+
+    def test_save_draft_stores_parsed_data_and_posts_nothing(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"action": "draft",
+                                    "f0-0": "PCB0001", "f1-0-0": "1709.5"})
+        api.post_test.assert_not_called()
+        api.post_component_image.assert_not_called()
+        d = ChecklistDraft.objects.get()
+        self.assertEqual(d.part_id, PART)
+        self.assertEqual(d.name, NAME)
+        self.assertEqual(d.data["Identification"]["PCB Batch PID"], "PCB0001")
+        self.assertEqual(d.data["Measurements"]["Dim 1"], 1709.5)
+
+    def test_draft_prefills_and_wins_over_the_last_submission(self):
+        api = _api(prev={"DATA": {
+            "Identification": {"PCB Batch PID": "OLD"},
+            "Visual Inspection": {
+                "Photo 1": {"image_id": "img-1", "image_name": "p.jpg"}}}})
+        ChecklistDraft.objects.create(
+            instance="dev", part_id=PART, name=NAME, username=self._actor(),
+            data={"Identification": {"PCB Batch PID": "DRAFTED"}})
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('value="DRAFTED"', html)      # draft wins the field
+        self.assertNotIn('value="OLD"', html)
+        self.assertIn("p.jpg", html)                # photo reference survives
+        self.assertIn("Draft from", html)           # banner + discard control
+        self.assertIn("discard_draft", html)
+
+    def test_submit_deletes_the_draft(self):
+        api = _api(test_types=("ES", "PCB Segments Interface"))
+        ChecklistDraft.objects.create(
+            instance="dev", part_id=PART, name=NAME, username=self._actor(),
+            data={"Identification": {"PCB Batch PID": "DRAFTED"}})
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"f0-0": "PCB0001"})
+        api.post_test.assert_called_once()
+        self.assertEqual(ChecklistDraft.objects.count(), 0)
+
+    def test_discard_draft(self):
+        api = _api()
+        ChecklistDraft.objects.create(
+            instance="dev", part_id=PART, name=NAME, username=self._actor(),
+            data={})
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"action": "discard_draft"})
+        self.assertEqual(ChecklistDraft.objects.count(), 0)
+        api.post_test.assert_not_called()
+
+    def test_csv_export_of_the_latest_submission(self):
+        api = _api(prev={"DATA": {
+            "Identification": {"PCB Batch PID": "PCB0001", "Segment type": "C"},
+            "Measurements": {"Thickness": {"P1": 1.6}},
+            "Visual Inspection": {
+                "Photo 1": {"image_id": "img-1", "image_name": "p.jpg"}}}})
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.get(f"{PAGE}?export=csv")
+        self.assertEqual(resp["Content-Type"], "text/csv; charset=utf-8")
+        self.assertIn(f"Checklist_{PART}_{NAME}.csv", resp["Content-Disposition"])
+        body = resp.content.decode()
+        self.assertIn("PCB0001", body)
+        self.assertIn('"{""P1"": 1.6}"', body)              # dict → JSON cell
+        self.assertIn("p.jpg (image_id=img-1)", body)       # photo flattened
+        self.assertNotIn("Drawing", body)                   # static skipped
+
+    def test_csv_export_without_a_submission_redirects(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.get(f"{PAGE}?export=csv")
+        self.assertEqual(resp.status_code, 302)
+
+
+CFG_GATED = {**SCHEMA, "roles": [41]}
+
+
+class RolesGateTest(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("r", "r@r.io", "pw")
+        self.client.force_login(self.user)
+
+    def _whoami(self, api, role_ids):
+        api.whoami.return_value = {"data": {
+            "roles": [{"id": r, "name": f"role{r}"} for r in role_ids]}}
+
+    def test_submission_refused_without_the_role(self):
+        api = _api(schema=CFG_GATED, test_types=("PCB Segments Interface",))
+        self._whoami(api, [7])
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"f0-0": "PCB0001"})
+        api.post_test.assert_not_called()
+
+    def test_submission_allowed_with_the_role(self):
+        api = _api(schema=CFG_GATED, test_types=("PCB Segments Interface",))
+        self._whoami(api, [41, 7])
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"f0-0": "PCB0001"})
+        api.post_test.assert_called_once()
+
+    def test_form_names_the_required_roles(self):
+        api = _api(schema=CFG_GATED)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("requires HWDB role id", html)
+        self.assertIn("41", html)
+
+    def test_ungated_schema_never_calls_whoami(self):
+        api = _api(test_types=("PCB Segments Interface",))
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"f0-0": "PCB0001"})
+        api.whoami.assert_not_called()
+        api.post_test.assert_called_once()
+
+
+NEW_PAGE = f"/hw/dev/part-new/{PTID}/"
+NEW_PID = f"{PTID}-00777"
+
+
+class ItemCreateTest(TestCase):
+    """#97: the separate New-Item page — create first, then land in the
+    type's checklist (one continuous motion when there's exactly one)."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("n", "n@n.io", "pw")
+        self.client.force_login(self.user)
+
+    def _api_create(self, **kw):
+        api = _api(**kw)
+        api.get_institutions.return_value = {"data": [
+            {"id": 128, "name": "BNL", "country": {"code": "US"}}]}
+        api.get_component_type.return_value = {"data": {
+            "manufacturers": [{"id": 7}],
+            "properties": {"specifications": [{"datasheet": {"Note": ""}}]}}}
+        api.create_component.return_value = {"status": "OK", "part_id": NEW_PID}
+        return api
+
+    def test_form_renders_with_institutions_and_checklist_hint(self):
+        api = self._api_create()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(NEW_PAGE).content.decode()
+        self.assertIn('name="institution_id"', html)
+        self.assertIn("BNL", html)
+        self.assertIn("Create the item", html)
+        self.assertIn(NAME, html)      # tells the user which checklist is next
+
+    def test_create_lands_in_the_single_checklist(self):
+        api = self._api_create()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.post(NEW_PAGE, {
+                "institution_id": "128", "serial_number": "SN-9"})
+        payload = api.create_component.call_args.args[1]
+        self.assertEqual(payload["institution"], {"id": 128})
+        self.assertEqual(payload["country_code"], "US")
+        self.assertEqual(payload["serial_number"], "SN-9")
+        self.assertEqual(payload["manufacturer"], {"id": 7})
+        self.assertEqual(resp["Location"],
+                         f"/hw/dev/part/{NEW_PID}/checklist/{NAME}/")
+        api.post_test.assert_not_called()     # creation posts no record
+
+    def test_create_lands_on_the_part_page_with_several_checklists(self):
+        api = self._api_create()
+        api.get_component_type_images.return_value = {"data": [
+            {"image_id": "a", "created": "2026-08-01T00:00:00",
+             "image_name": f"Checklist_{PTID}_Reception.json"},
+            {"image_id": "b", "created": "2026-08-01T00:00:00",
+             "image_name": f"Checklist_{PTID}_Assembly.json"}]}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.post(NEW_PAGE, {"institution_id": "128"})
+        self.assertEqual(resp["Location"], f"/hw/dev/part/{NEW_PID}/")
+
+    def test_create_triggers_an_incremental_mirror_sync(self):
+        # #97 review: the fresh item must show in the mirror without a
+        # manual "sync new" on the type page.
+        api = self._api_create()
+        m1, m2 = _mocked(api)
+        with m1, m2, mock.patch("explore.views.sync_test_events",
+                                return_value=iter(["ok\n"])) as sync:
+            self.client.post(NEW_PAGE, {"institution_id": "128"})
+        self.assertEqual(sync.call_args.args[2], PTID)
+        self.assertEqual(sync.call_args.kwargs["mode"], "incremental")
+
+    def test_create_without_an_institution_is_refused(self):
+        api = self._api_create()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(NEW_PAGE, {"serial_number": "SN-9"})
+        api.create_component.assert_not_called()

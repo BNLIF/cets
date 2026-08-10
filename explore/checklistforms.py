@@ -91,11 +91,16 @@ def _norm_field(f: dict) -> dict | None:
     t = str(f.get("type") or "").strip().lower()
     label = str(f.get("label") or "").strip()
     if t == "static":
+        # image_id = a reference image uploaded onto the TYPE's images (#97
+        # review — the iPad scenes' P1–P10 measurement diagrams), served
+        # through the bearer image proxy; image = an external URL.
         out = {"type": t, "label": label,
                "image": str(f.get("image") or "").strip(),
+               "image_id": str(f.get("image_id") or "").strip(),
                "url": str(f.get("url") or "").strip(),
                "note": str(f.get("note") or "").strip()}
-        return out if (out["image"] or out["url"] or out["note"]) else None
+        return out if (out["image"] or out["image_id"] or out["url"]
+                       or out["note"]) else None
     if t not in FIELD_TYPES or not label:
         return None
     out = {"type": t, "label": label, "units": str(f.get("units") or "").strip(),
@@ -143,6 +148,10 @@ def normalize(cfg: dict, name: str) -> dict:
     schema = {"name": str(cfg.get("name") or "").strip() or name,
               "test_type_name": str(cfg.get("test_type_name") or "").strip(),
               "instructions": str(cfg.get("instructions") or "").strip(),
+              # #97: HWDB role ids allowed to submit; empty = anyone (the ES
+              # signee convention).
+              "roles": [r for r in (cfg.get("roles") or [])
+                        if isinstance(r, int) and not isinstance(r, bool)],
               "sections": []}
     for si, s in enumerate(cfg.get("sections") or []):
         if not isinstance(s, dict):
@@ -320,6 +329,48 @@ def raw_load(api, part_type_id: str, name: str):
     except Exception as e:
         logger.warning("raw checklist %s/%s failed: %s", part_type_id, name, e)
         return None, row["image_name"]
+
+
+def export_csv(schema: dict, part_id: str, test_data: dict | None) -> str:
+    """A submission as CSV text (#97 — the iPad's "send via email" payload):
+    section, label, value rows in schema order. Photos flatten to their HWDB
+    image name/id; dict/list values to JSON."""
+    import csv
+    import io as _io
+    buf = _io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Checklist", schema["name"]])
+    w.writerow(["Part ID", part_id])
+    w.writerow(["Test type", schema["test_type_name"]])
+    w.writerow([])
+    w.writerow(["Section", "Field", "Value"])
+    data = (test_data or {}).get("DATA")
+    data = data if isinstance(data, dict) else {}
+    for title, f in leaf_fields(schema):
+        if f["type"] == "static":
+            continue
+        sec = data.get(title)
+        v = sec.get(f["label"]) if isinstance(sec, dict) else None
+        if f["type"] == "photo" and isinstance(v, dict):
+            v = f"{v.get('image_name', '')} (image_id={v.get('image_id', '')})"
+        elif isinstance(v, (dict, list)):
+            v = json.dumps(v, ensure_ascii=False)
+        w.writerow([title, f["label"], "" if v is None else v])
+    return buf.getvalue()
+
+
+def merge_data(base: dict | None, over: dict) -> dict:
+    """``base`` DATA with ``over`` DATA folded in, section-wise (#97: a
+    draft's values win over the last submission's, but untouched sections —
+    photo references especially — survive)."""
+    out = {k: (dict(v) if isinstance(v, dict) else v)
+           for k, v in (base or {}).items()}
+    for k, v in (over or {}).items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k].update(v)
+        else:
+            out[k] = v
+    return out
 
 
 def builtin_templates() -> list[dict]:

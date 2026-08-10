@@ -776,22 +776,41 @@ class PartViewTest(TestCase):
         self.assertNotIn("Consortium:", html)
         self.assertNotIn(">Checklists</h2>", html)   # no checklist card (#95/#96)
 
-    def test_checklist_card_lists_the_types_checklists(self):
+    def test_checklist_card_lists_the_types_checklists_with_status(self):
         # #95: Checklist_{ptid}_{name}.json rows on the type's images become
         # named fill-out links on the part page (write instances only).
-        # Editing lives on the TYPE page, not here (#96 review).
+        # Editing lives on the TYPE page, not here (#96 review). Each link
+        # carries a status chip: filled / draft / not filled yet (#97 review).
+        from explore.models import ChecklistDraft
         api = self._api()
         api.get_component_type_images.return_value = {"data": [
             {"image_id": "cl1", "created": "2026-08-01T00:00:00",
              "image_name": "Checklist_D05700200099_Reception.json"},
             {"image_id": "cl2", "created": "2026-08-02T00:00:00",
-             "image_name": "Checklist_D05700200099_Assembly.json"}]}
+             "image_name": "Checklist_D05700200099_Assembly.json"},
+            {"image_id": "cl3", "created": "2026-08-03T00:00:00",
+             "image_name": "Checklist_D05700200099_Final.json"}]}
+        # Reception's test type matches the item's RoomT record → filled;
+        # Assembly's doesn't; Final has a draft by THIS user.
+        schemas = {
+            "cl1": {"test_type_name": "RoomT"},
+            "cl2": {"test_type_name": "Other QC"},
+            "cl3": {"test_type_name": "Final QC"},
+        }
+        api.get_image_response.side_effect = lambda iid: mock.Mock(
+            content=json.dumps(schemas[iid]).encode())
+        ChecklistDraft.objects.create(
+            instance="dev", part_id="D05700200099-00007", name="Final",
+            username="p", data={})   # actor falls back to the Django username
         with mock.patch("explore.views.mint_for", return_value="bearer"), \
              mock.patch("explore.views.FnalDbApiClient", return_value=api):
             html = self.client.get("/hw/dev/part/D05700200099-00007/").content.decode()
         self.assertIn(">Checklists</h2>", html)
         self.assertIn("/hw/dev/part/D05700200099-00007/checklist/Reception/", html)
         self.assertIn("/hw/dev/part/D05700200099-00007/checklist/Assembly/", html)
+        self.assertIn("&#10003; filled 2026-02-02", html)   # RoomT record date
+        self.assertIn("&#9998; draft", html)                # Final's draft chip
+        self.assertIn("not filled yet", html)               # Assembly untouched
 
 
 class TestDataDownloadTest(TestCase):

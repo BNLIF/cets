@@ -40,7 +40,7 @@ A `{"type": "row", "fields": [ … ]}` entry renders its children side by side
 | `qr` | — | scanned/typed string |
 | `photo` | — | `{image_id, image_name}` (posted to the item first) |
 | `steps` | `steps` (required) | `{step: bool}` |
-| `static` | `note`, `image` (URL), `url` | nothing — display only |
+| `static` | `note`, `url`, `image` (external URL) or `image_id` (reference image uploaded in the editor — e.g. a P1–P10 measurement diagram — stored on the type's HWDB images, served via the image proxy) | nothing — display only |
 | `link` | `position` (optional) | scanned child PID — also PATCHed into the item's subcomponents (#96) |
 
 Unknown types and malformed entries are dropped silently on render.
@@ -48,6 +48,50 @@ Unknown types and malformed entries are dropped silently on render.
 Any value-bearing field (not `photo`/`link`/`static`/`steps`) may carry
 `"to_spec": true` (#96): its value ALSO folds into the item's latest
 specifications `DATA` (flat `{label: value}`), alongside the test record.
+
+## Top-level schema keys (#97)
+
+- `roles: [41, …]` — HWDB role ids allowed to submit; empty/absent = anyone
+  (the ES signee convention). Checked live against `whoami` at submit; the
+  form names the required roles up front. The EDITOR stays open to every
+  write-instance user — schemas are versioned in HWDB, so a bad edit is
+  always recoverable, and dev culture favors low friction.
+
+## New items (#97)
+
+Item creation is a separate page, not a checklist mode: the type page's
+"New item" link (`/part-new/<typeid>/`) mints the item in HWDB
+(institution + optional serial/comments, the box-create payload). When the
+type has exactly one checklist you land straight in it on the fresh PID —
+receiving stays one continuous motion — otherwise on the item's part page,
+whose Checklists card lists the choices. The checklist page reached this
+way is the normal one: drafts, revive and CSV all work. The fresh item is
+mirrored immediately (an incremental type sync runs on creation), so it
+lists on the type page without a manual "sync new".
+
+## Drafts, exports (#97)
+
+- **Save draft** stores the parsed values server-side per (item, checklist,
+  user) — start on the shop floor, finish at a desk. Nothing goes to HWDB;
+  photos aren't drafted (attach them at submit). The draft pre-fills the
+  next visit (winning over the last submission) and is deleted the moment a
+  submission lands. **Discard draft** drops it.
+- **Download CSV** exports the latest submission as section/field/value
+  rows (the iPad's "send via email" payload); photos flatten to their HWDB
+  image name/id.
+
+## For consortium users (quickstart)
+
+1. On your component type's page, open **Add/Edit checklists** and build a
+   checklist — start from a template, add fields, watch the live preview.
+   Save; it now shows on every item of the type.
+2. On any item's part page, open the checklist, fill it out (phone, tablet
+   or desktop), and **Submit to HWDB** — values land as a test record
+   (plus Item Specifications for "→ Specs" fields). Scan QR codes with the
+   ⛶ buttons; out-of-tolerance numbers turn red as you type.
+3. Half done? **Save draft** and finish later from any browser.
+4. Receiving new hardware? Use the type page's **New item** link — the item
+   is minted first, then you land in its checklist.
 
 ## Where submissions go
 

@@ -372,6 +372,32 @@ class WatchSubscription(InstanceScoped):
         return f"WatchSubscription({self.username}, {self.display})"
 
 
+class ChecklistDraft(InstanceScoped):
+    """A partially-filled consortium checklist (#97).
+
+    ``data`` holds the PARSED submission shape (``{section: {label: value}}``
+    — the same thing the test record's DATA would carry), saved server-side
+    per (item, checklist, user) so a run started on the shop floor finishes
+    at a desk. Deleted the moment its submission lands in HWDB: HWDB owns
+    everything permanent, this table only in-progress state. Photos are NOT
+    drafted (files can't be); previous photo references survive via the
+    revive merge. ``username`` is the FNAL credkey (``activity.actor_of``)."""
+
+    part_id = models.CharField(max_length=50, db_index=True)
+    name = models.CharField(max_length=120)
+    username = models.CharField(max_length=150, db_index=True)
+    data = models.JSONField(default=dict, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=["instance", "part_id", "name", "username"],
+            name="uniq_checklist_draft")]
+
+    def __str__(self):
+        return f"ChecklistDraft({self.part_id}, {self.name}, {self.username})"
+
+
 class HierarchySyncState(models.Model):
     """One row per HWDB instance recording that instance's last hierarchy
     (skeleton) sync run.

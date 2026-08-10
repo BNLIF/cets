@@ -314,9 +314,14 @@
       {% if part_checklists %}
       <div class="sd-card">
         <h2>Checklists</h2>
-        <div style="display:flex; flex-wrap:wrap; gap:6px 18px; margin: 6px 0 8px;">
+        <div style="display:flex; flex-wrap:wrap; gap:6px 22px; margin: 6px 0 8px;">
           {% for c in part_checklists %}
-          <a class="pk-link" href="{% url 'explore:checklist' part_id=part_id name=c.name %}">{{ c.name }} &#8594;</a>
+          <span style="display:inline-flex; gap:8px; align-items:baseline;">
+            <a class="pk-link" href="{% url 'explore:checklist' part_id=part_id name=c.name %}">{{ c.name }} &#8594;</a>
+            {% if c.filled %}<span class="pk-hint" style="color:var(--good);">&#10003; filled{% if c.filled_on %} {{ c.filled_on }}{% endif %}</span>{% endif %}
+            {% if c.draft %}<span class="pk-hint">&#9998; draft</span>{% endif %}
+            {% if not c.filled and not c.draft %}<span class="pk-hint">not filled yet</span>{% endif %}
+          </span>
           {% endfor %}
         </div>
         <span class="pk-hint">Consortium checklists defined on this component type — fill out on any

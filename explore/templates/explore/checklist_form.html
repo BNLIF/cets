@@ -40,18 +40,34 @@
     local state.{% if prefilled %} Pre-filled from the latest submission — edit and re-submit to
     supersede it.{% endif %}</p>
   {% if schema.instructions %}<p class="es-sub">{{ schema.instructions }}</p>{% endif %}
+  {% if schema.roles %}<p class="es-sub">Submitting requires HWDB role id{{ schema.roles|pluralize }}
+    <span class="mono">{{ schema.roles|join:", " }}</span>.</p>{% endif %}
 
   {% if no_test_type %}
   <div class="es-flash error">This checklist's schema names no <span class="mono">test_type_name</span>,
     so it cannot be submitted — fix the schema JSON on the component type.</div>
   {% endif %}
 
+  {% if draft %}
+  <div class="es-flash success" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+    <span>Draft from {{ draft.updated_at|date:"Y-m-d H:i" }} loaded below — it lives on this server
+      only until you submit.</span>
+    <form method="post" style="margin:0;">{% csrf_token %}
+      <button class="es-btn quiet" name="action" value="discard_draft">Discard draft</button>
+    </form>
+  </div>
+  {% endif %}
+
   <form method="post" enctype="multipart/form-data">
     {% csrf_token %}
     {% include "explore/_checklist_sections.html" %}
     {% if not no_test_type %}
-    <button class="es-btn">Submit to HWDB</button>
-    <span class="es-hint" style="margin-left:10px;">Every submission is a new version — old ones are preserved.</span>
+    <div class="es-row" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <button class="es-btn">Submit to HWDB</button>
+      <button class="es-btn quiet" name="action" value="draft" formnovalidate>Save draft</button>
+      {% if prefilled %}<a class="es-btn quiet" style="text-decoration:none;" href="?export=csv">Download CSV</a>{% endif %}
+      <span class="es-hint">Every submission is a new version — old ones are preserved.</span>
+    </div>
     {% endif %}
   </form>
 </div>
