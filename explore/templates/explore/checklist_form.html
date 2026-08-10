@@ -97,10 +97,20 @@
   });
   document.querySelectorAll("input[data-min], input[data-max]").forEach(paint);
 
-  // --- QR scan into a PID field (the scan page's html5-qrcode recipe) -------
+  // --- QR/barcode scan into a PID field --------------------------------------
   var dlg = document.getElementById("cl-qr-modal");
   var status = document.getElementById("cl-qr-status");
   var target = null, qr = null;
+
+  // scanned text → PID: HWDB component URL first, then a bare PID, then a
+  // PID with a label suffix — the Dashboard's rules (scanning.py). Anything
+  // else stays verbatim so the user can see and fix it.
+  function extractPid(text) {
+    var m = /https?:\/\/[^\/\s]+\/(?:cdbdev|cdb)\/view\/component\/([A-Za-z]\d{11}-\d{5})/i.exec(text)
+         || /\b([A-Z]\d{11}-\d{5})\b/.exec(text)
+         || /\b([A-Z]\d{11}-\d{5})(?:-[A-Za-z0-9]+)*\b/.exec(text);
+    return m ? m[1].toUpperCase() : text.trim();
+  }
 
   async function stopQr() {
     if (qr) { try { await qr.stop(); } catch (e) {} try { qr.clear(); } catch (e) {} qr = null; }
@@ -111,20 +121,42 @@
     var b = e.target.closest && e.target.closest(".cl-scan");
     if (!b) return;
     target = document.getElementById(b.getAttribute("data-target"));
-    status.textContent = "Point the camera at the QR code.";
+    status.textContent = "Point the camera at the QR code or barcode.";
     dlg.showModal();
     if (typeof Html5Qrcode === "undefined") {
       status.textContent = "Scanner library did not load — type the PID instead.";
       return;
     }
-    qr = new Html5Qrcode("cl-qr-reader");
-    qr.start({ facingMode: "environment" }, { fps: 12, qrbox: { width: 250, height: 250 } },
-      function (text) { if (target) { target.value = text; } closeQr(); },
+    // native BarcodeDetector when the browser has one — far better at 1D
+    // barcodes than the JS fallback
+    qr = new Html5Qrcode("cl-qr-reader",
+      { experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
+    qr.start({ facingMode: "environment" },
+      { fps: 12,
+        // a wide box, not a square — 1D barcodes need the width
+        qrbox: function (w, h) {
+          return { width: Math.floor(w * 0.9),
+                   height: Math.floor(Math.min(h * 0.6, w * 0.55)) };
+        } },
+      function (text) { if (target) { target.value = extractPid(text); } closeQr(); },
       function () {})
       .catch(function (err) { status.textContent = "Camera start failed: " + err; });
   });
   document.getElementById("cl-qr-close").addEventListener("click", closeQr);
   dlg.addEventListener("click", function (e) { if (e.target === dlg) closeQr(); });
+
+  // --- photo fields: a real camera button next to the file picker ----------
+  // (capture=environment forces the camera app; it's set only for the
+  // button's click so the plain input keeps offering the gallery/files)
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest(".cl-photo-cam");
+    if (!b) return;
+    var inp = document.getElementById(b.getAttribute("data-target"));
+    if (!inp) return;
+    inp.setAttribute("capture", "environment");
+    inp.click();
+    setTimeout(function () { inp.removeAttribute("capture"); }, 1000);
+  });
 })();
 </script>
 {% endblock %}

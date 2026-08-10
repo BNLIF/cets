@@ -47,7 +47,10 @@
   {% if f.existing %}<div class="cl-hint" style="margin-bottom:4px;">current:
     <a href="{% url 'explore:shipment_image' image_id=f.existing.image_id %}?name={{ f.existing.image_name|urlencode }}&amp;inline=1"
        target="_blank" rel="noopener">{{ f.existing.image_name }}</a> &mdash; choose a file to replace it</div>{% endif %}
-  <input type="file" name="{{ f.key }}" accept="image/*">
+  <span style="display:inline-flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <input type="file" id="{{ f.key }}" name="{{ f.key }}" accept="image/*">
+    <button type="button" class="es-btn cl-photo-cam" data-target="{{ f.key }}">&#128247; Take photo</button>
+  </span>
 {% elif f.type == "steps" %}
   <span class="cl-lab">{{ f.label }}</span>
   <ol class="cl-steps">

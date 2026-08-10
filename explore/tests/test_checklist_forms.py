@@ -184,7 +184,8 @@ class ChecklistPageTest(TestCase):
         self.assertIn('data-max="1.7"', html)
         self.assertIn("allowed 1.5 – 1.7", html)
         self.assertIn('value="pass"', html)                   # tri-state radios
-        self.assertIn('type="file" name="f2-2"', html)        # photo
+        self.assertIn('type="file" id="f2-2" name="f2-2"', html)   # photo
+        self.assertIn('cl-photo-cam" data-target="f2-2"', html)   # camera button
         self.assertIn("Unwrap", html)                         # steps
         self.assertIn("https://edms.cern.ch/x", html)         # static link
         self.assertNotIn("Bogus", html)                       # unknown dropped
