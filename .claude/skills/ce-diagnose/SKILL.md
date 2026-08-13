@@ -45,7 +45,31 @@ Recurrence changes the recommendation: first failure → reseat/re-run; recurrin
 
 ### 4. Escalate to plots (only if the reports are ambiguous)
 
-Read the PNG plots in the test's subdirectory (`RMS/`, `CHK/`, `CALI*/`, `MON_*/`, `PWR_*/`) as images — baseline, noise, and pulse-shape anomalies are usually visible there. Raw `.bin` dumps have no parser wired up yet — don't attempt them; say so if the PNGs are insufficient.
+Read the PNG plots in the test's subdirectory (`RMS/`, `CHK/`, `CALI*/`, `MON_*/`, `PWR_*/`) as images — baseline, noise, and pulse-shape anomalies are usually visible there.
+
+### 4b. Escalate to raw waveforms (channel-level anomalies)
+
+For a channel-level anomaly, decode the raw acquisition and look at the waveform. **t1–t9 and t13–t16 all write a decodable spy-buffer `.bin`** (per-test paths and sizes: `docs/agents/diagnosis.md` § Raw data, which also has the pickle/frame format). **t10–t12 and t17 do not** — those bins hold per-chip scalar monitor readings, not waveforms, and `femb_wave.py` dies on them with a `TypeError`; for those items the report plots in `MON_*/` and `REG_MON/` are the deepest evidence available.
+
+What the waveform buys you depends on the test:
+
+- **t5 (pedestal, no injection)** — the case steps 2–3 below are written for. Only the waveform separates `high_noise` from `baseline_jump`; the RMS plots show just the elevated RMS.
+- **Pulse-injection tests (t3, t4, t6–t9, t13, t14)** — compare the suspect channel against a same-chip neighbour and read pulse **height, shape, and timing**. Skip `--scan` and the histogram: both assume a flat baseline, and the injected pulse dominates them (in a healthy t4, suspect and neighbour both report ~660 ADC max step — the metric is measuring the pulse, not a defect).
+- **t15/t16 (pattern tests)** — the waveform shows whether the channel tracks the expected pattern at all.
+
+1. Find the raw file: `$FEMB_RAW_DIR/Time_<YYYY>_<MM>/<run-name>/QC/<TEST>/*_t<N>.bin` (`FEMB_RAW_DIR` from `.env`; same run-name as the report dir; slot S`<n>` → `--femb <n>`). Use `--list-keys` to get the exact config key. On the laptop the raw root is a slow sshfs mount at ~3 MB/s — copy the `.bin` to local scratch first (t5 ≈ 520 MB ≈ 3 min, CALI1 ≈ 560 MB; loading the pickle straight off the mount takes minutes and can time out); on Twister read it in place.
+2. **t5 only:** `python3 tools/femb_wave.py --bin <file> --femb <slot> --scan <channel>` — ranks configs/events by baseline step size. Meaningless on pulse-injection tests (see above).
+3. Render the evidence plots into `analysis/waveforms/<run-date>_FEMB-<serial>/` (one directory per diagnosis) and Read each PNG before citing it. The two plots below are the t5 recipe; on a pulse test render the neighbour comparison only, without `--hist`, and cite pulse height/shape instead of the histogram:
+   - `wave_ch<N>_jump.png` — the step waveforms: the suspect channel across the top few events, `--event <a>,<b>,<c>` (one column per event). Steps that move in time event-to-event are the telegraph signature; the red per-frame-mean overlay makes the levels readable.
+   - `wave_ch<N>.png` — the neighbour comparison: `--ch <N-1>,<N>,<N+1> --hist`. The amplitude histogram is the decisive panel — a `baseline_jump` channel is **bimodal** while its neighbours are single Gaussians; `high_noise` stays unimodal but wide.
+
+   ```bash
+   python3 tools/femb_wave.py --bin <file> --femb <slot> --ch 16 --key <config> --event 6,3,4 \
+     --out analysis/waveforms/<run-date>_FEMB-<serial> --out-name wave_ch16_jump.png
+   python3 tools/femb_wave.py --bin <file> --femb <slot> --ch 15,16,17 --hist --key <config> --event 6 \
+     --out analysis/waveforms/<run-date>_FEMB-<serial> --out-name wave_ch16.png
+   ```
+4. Embed both plots in the conclusion (relative `![...](waveforms/<dir>/<file>.png)` links, so they render in the saved report and the PDF) together with the step/spread/RMS numbers the tool prints.
 
 ### 5. Conclude
 
@@ -80,6 +104,7 @@ Cost estimate — USD per million tokens, by model family; adjust here if prices
 
 | model | input | output | cache read | cache write |
 |---|---|---|---|---|
+| `claude-opus-5` | 5 | 25 | 0.50 | 6.25 |
 | `claude-opus-4-*` | 5 | 25 | 0.50 | 6.25 |
 | `claude-sonnet-4-*` | 3 | 15 | 0.30 | 3.75 |
 | `claude-haiku-4-*` | 1 | 5 | 0.10 | 1.25 |
@@ -95,5 +120,17 @@ Footer format (elapsed = now − §0 timestamp; $ = tokens × rate, rounded to c
 | tokens | <N> | <N> | <N> | <N> | |
 | cost | $<x.xx> | $<x.xx> | $<x.xx> | $<x.xx> | **$<x.xx>** |
 ```
+
+### 7. Render the PDF
+
+After the markdown is final (footer included), render it to `analysis/pdf/` under the same basename — this is the shareable copy, so the embedded plots must come through:
+
+```bash
+cd analysis && mkdir -p pdf && pandoc <report>.md -o pdf/<report>.pdf \
+  --pdf-engine=xelatex --resource-path=. \
+  -V geometry:margin=1in -V colorlinks=true -V linkcolor=blue -V urlcolor=blue
+```
+
+`--resource-path=.` is what resolves the relative `waveforms/...` image links. Check the result (`pdfinfo <pdf>` — page count and a file size in the hundreds of KB mean the PNGs embedded) and give the user both paths.
 
 Stay in the conversation — the user will ask follow-ups. Do not write diagnoses into the database or the run directories.

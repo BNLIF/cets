@@ -4,10 +4,10 @@ Where the evidence lives when diagnosing a FEMB QC failure. Used by the `/ce-dia
 
 ## Environments
 
-| | QC report root | Database |
-|---|---|---|
-| Laptop (dev) | `tmp/femb/` (full mirror, contains `bnl/`) | `db.sqlite3` at repo root |
-| Twister (production) | `/home/chao/mnt/femb/FEMB_QC` (SMB mount, fast) | `db.sqlite3` in the server's cets clone |
+| | QC report root | QC raw-data root | Database |
+|---|---|---|---|
+| Laptop (dev) | `tmp/femb/` (full mirror, contains `bnl/`) | `tmp/FEMB_QC/Data/` (sshfs mount — **slow**, copy files locally before decoding) | `db.sqlite3` at repo root |
+| Twister (production) | `/home/chao/mnt/femb/FEMB_QC` (SMB mount, fast) | `/home/chao/mnt/femb/FEMB_QC/Data` | `db.sqlite3` in the server's cets clone |
 
 `FembTest.report_filename` is relative and `bnl/`-prefixed — resolve it against the QC report root (`FEMB_QC_DIR` in `.env`).
 
@@ -25,7 +25,39 @@ bnl/Time_<YYYY>_<MM>/
 
 - Pass/fail is **in the filename** (`_P_` / `_F_`) — find failures with `ls <dir>/report_*_F_*.md`.
 - PNG plots are the richest evidence for waveform/noise questions — read them directly as images.
-- `.bin` files are raw waveform dumps; no parser wired up yet — stay PNG-first (see #28).
+
+## Raw data (waveform-level escalation)
+
+Raw acquisitions live under the **QC raw-data root** (`FEMB_RAW_DIR` in `.env`), in run directories parallel to the report mirror (no `bnl/` prefix, no per-slot subdir):
+
+```
+<raw-root>/Time_<YYYY>_<MM>/<run-name>/QC/
+  RMS/QC_femb_rms_t5.bin   CHK/femb_chk_pulse_t4.bin   CALI1/QC_Cali01_t6.bin   ...
+```
+
+Every test item writes a `.bin`, but only some are decodable waveforms:
+
+| Test | File | Size | Waveforms? |
+|---|---|---|---|
+| t1, t2 | `PWR_Meas/QC_PWR_t1.bin`, `PWR_Cycle/QC_PWR_Cycle_t2.bin` | 6 / 10 MB | yes (`PWR_*` keys; `MON_Regular_*` keys are scalars) |
+| t3 | `Leakage_Current/QC_femb_leakage_cur_t3.bin` | 20 MB | yes |
+| t4 | `CHK/femb_chk_pulse_t4.bin` | 50 MB | yes |
+| t5 | `RMS/QC_femb_rms_t5.bin` | 520 MB | yes |
+| t6–t9, t13, t14 | `CALI1..6/QC_Cali0*_t*.bin` | 80–560 MB | yes |
+| t15, t16 | `ADC_SYNC_PAT/`, `PLL_PAT/` | 30 / 8 MB | yes |
+| t10, t11, t12, t17 | `MON_FE/`, `MON_ADC/`, `REG_MON/` | < 1 MB | **no** — per-chip scalar monitor readings; `femb_wave.py` raises `TypeError` on them |
+
+Each `.bin` is a Python pickle: a dict keyed by config name (e.g. `RMS_SE_900mVBL_14_0mVfC_2_0us_0x00.bin`); `value[0]` is a list of ~10 acquisition events, each `([buf0..buf7], buf_end_addr, trigger_rec_ticks, trig_cmd)` where `bufs[femb*2 + cd]` are 256 KiB WIBEth spy-buffer dumps (2 COLDATA streams × 64 channels per FEMB slot; slot S0 → `femb=0`).
+
+Decode and plot with **`tools/femb_wave.py`** (pure numpy port of the WIBEth frame decode from `sgaobnl/BNL_CE_WIB_SW_QC`; needs numpy + matplotlib):
+
+```bash
+python3 tools/femb_wave.py --bin <raw>/QC/RMS/QC_femb_rms_t5.bin --list-keys
+python3 tools/femb_wave.py --bin <...>.bin --femb 0 --scan 16          # baseline-jump scan, one channel (t5 pedestal data only)
+python3 tools/femb_wave.py --bin <...>.bin --femb 0 --ch 16,15 --key RMS_SE_900mVBL_25_0mVfC_3_0us --event 3 --out analysis/waveforms
+```
+
+On the laptop the raw mount is slow sshfs (~3 MB/s) — `cp` the `.bin` to a local scratch dir first (t5 ≈ 520 MB ≈ 3 min).
 
 ## Test taxonomy
 
