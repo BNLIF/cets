@@ -910,9 +910,23 @@ def explore_part_view(request, part_id):
     mirror_parent = (HwdbComponentEvent.for_instance(inst)
                      .filter(part_id=part_id).exclude(parent_part_id="")
                      .values_list("parent_part_id", flat=True).first())
+    # #104: any FNAL-linked user on a write instance may edit the item's
+    # standard HWDB fields; the form (and its type-manufacturers fetch) only
+    # renders in ?edit=1 mode so the default render costs nothing extra.
+    can_edit_item = inst in settings.HWDB_WRITE_INSTANCES
+    editing = can_edit_item and request.GET.get("edit") == "1"
+    item_edit = None
+    if editing:
+        item_edit = checklistforms.item_card(
+            {"item_fields": [f for f in checklistforms.ITEM_FIELDS
+                             if f not in ("location", "test_comments")]},
+            detail["raw"], _checklist_item_opts(api, ptid, {"item_fields": ["manufacturer"]}))
     # First write feature (issue #61): boxes on a write-enabled instance get
     # the Update-location form; its dropdown needs the institution list.
+    # This flag also gates the box-only panes (packing, checklists) — so
+    # #104's edit-mode location form for non-shipping items has its own.
     can_update_location = is_shipping and inst in settings.HWDB_WRITE_INSTANCES
+    show_location_form = can_update_location or editing
     # The type's ES config (consortium, description) for the Executive-summary
     # card. Any type carrying one is "marked" for an ES — the interim mark
     # until the hierarchy-chart one exists. The images listing is fetched
@@ -1011,7 +1025,11 @@ def explore_part_view(request, part_id):
         "mirror_parent": mirror_parent,
         "hwdb_ui_base": settings.HWDB_PROFILES[inst]["ui"],
         "can_update_location": can_update_location,
-        "institutions": _institution_options(api) if can_update_location else [],
+        "show_location_form": show_location_form,
+        "can_edit_item": can_edit_item,
+        "editing": editing,
+        "item_edit": item_edit,
+        "institutions": _institution_options(api) if show_location_form else [],
         "arrived_default": timezone.localtime().strftime("%Y-%m-%dT%H:%M"),
         # Packing card (issue #63): the box's slot schema + occupants; the
         # item picker is its own page. None when writes are off or the
@@ -1077,7 +1095,7 @@ def explore_part_location_view(request, part_id):
     inst = instance_of(request)
     part_url = _rev(request, "explore:part", args=[part_id])
     ptid = part_id.rsplit("-", 1)[0]
-    if inst not in settings.HWDB_WRITE_INSTANCES or not curation.is_shipping_type(inst, ptid):
+    if inst not in settings.HWDB_WRITE_INSTANCES:   # any item since #104
         return HttpResponseForbidden("Location updates are not enabled here.")
 
     try:
@@ -1108,12 +1126,14 @@ def explore_part_location_view(request, part_id):
         messages.error(request, f"HWDB rejected the location update — {_hwdb_error_detail(e)}")
         return redirect(part_url)
 
-    try:  # targeted mirror refresh; the write itself already succeeded
-        refresh_box(api, inst, ptid, part_id)
-    except Exception as e:
-        logger.warning("refresh_box(%s) failed: %s", part_id, e)
+    row = None
+    if curation.is_shipping_type(inst, ptid):
+        try:  # targeted mirror refresh; the write itself already succeeded
+            refresh_box(api, inst, ptid, part_id)
+        except Exception as e:
+            logger.warning("refresh_box(%s) failed: %s", part_id, e)
+        row = ShipmentItem.for_instance(inst).filter(part_id=part_id).first()
     messages.success(request, "Location update posted to HWDB.")
-    row = ShipmentItem.for_instance(inst).filter(part_id=part_id).first()
     activity.log(
         inst, ActivityEvent.KIND_LOCATION,
         f"{part_id} location set to "
@@ -2853,6 +2873,55 @@ def explore_shipping_type_toggle_view(request, part_type_id):
     messages.success(request, f"{part_type_id} is now a shipping type — run its sync to "
                               f"mirror the boxes onto the Shipments tab.")
     return redirect(back)
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_part_edit_view(request, part_id):
+    """#104: save the item's standard HWDB fields from the part page — one
+    PATCH of exactly the fields that changed (same diff as the checklist's
+    Item card, #103). Any FNAL-linked user on a write instance; HWDB
+    enforces its own roles."""
+    inst = instance_of(request)
+    part_url = _rev(request, "explore:part", args=[part_id])
+    ptid = part_id.rsplit("-", 1)[0]
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return HttpResponseForbidden("Item edits are not enabled here.")
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': part_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(part_url)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    try:
+        item = api.get_component(part_id).get("data") or {}
+    except requests.RequestException as e:
+        messages.error(request, f"Couldn’t read the item — {_hwdb_error_detail(e)}")
+        return redirect(part_url)
+    fields = [f for f in checklistforms.ITEM_FIELDS if f not in ("location", "test_comments")]
+    iv = checklistforms.item_values({"item_fields": fields}, request.POST, item,
+                                    _checklist_item_opts(api, ptid, {"item_fields": ["manufacturer"]}))
+    if not iv or not iv["patch"]:
+        messages.info(request, "Nothing changed.")
+        return redirect(part_url)
+    try:
+        body = api.patch_component(part_id, {"part_id": part_id, **iv["patch"]})
+        ok, detail = body.get("status") == "OK", body.get("data")
+    except requests.RequestException as e:
+        ok, detail = False, _hwdb_error_detail(e)
+    if not ok:
+        messages.error(request, f"HWDB rejected the update — {detail}")
+        return redirect(f"{part_url}?edit=1")
+    changed = ", ".join(checklistforms.ITEM_FIELD_LABELS.get(
+        {"comments": "item_comments"}.get(k, k), k) for k in iv["patch"])
+    activity.log(inst, ActivityEvent.KIND_ITEM, f"{part_id}: {changed} updated",
+                 part_id=part_id, part_type_id=ptid, actor=activity.actor_of(request))
+    messages.success(request, f"Updated {changed}.")
+    return redirect(part_url)
 
 
 @login_not_required

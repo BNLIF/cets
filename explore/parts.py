@@ -497,6 +497,10 @@ def part_detail(api, part_id: str, is_shipping: bool) -> dict:
         "used_connectors": used,
         "status": normalize_status(comp.get("status")),
         "facts": part_facts(comp),
+        # #104: the raw standard fields for the part page's edit form
+        "raw": {k: comp.get(k) for k in ("status", "manufacturer", "is_installed",
+                                         "qaqc_uploaded", "certified_qaqc",
+                                         "serial_number", "comments", "location")},
         "tests": tests,
         "manifest": manifest,
         "timeline": timeline,

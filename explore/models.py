@@ -315,6 +315,7 @@ class ActivityEvent(InstanceScoped):
     KIND_CHECKLIST = "checklist"
     KIND_SPEC = "spec"
     KIND_CURATION = "curation"
+    KIND_ITEM = "item"
     KIND_LABELS = {
         KIND_SYNC: "Sync",
         KIND_MINTED: "New box",
@@ -324,6 +325,7 @@ class ActivityEvent(InstanceScoped):
         KIND_CHECKLIST: "Checklist",
         KIND_SPEC: "Item specs",
         KIND_CURATION: "Curation",
+        KIND_ITEM: "Item edit",
     }
 
     kind = models.CharField(max_length=12)

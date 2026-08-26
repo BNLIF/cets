@@ -104,14 +104,17 @@ class LocationPostTest(TestCase):
         self.assertEqual(resp.status_code, 403)
         api.post_location.assert_not_called()
 
-    def test_non_shipping_part_is_forbidden(self):
+    def test_non_shipping_part_can_post_a_location_too(self):
+        # #104: location updates aren't box-specific any more; only the box
+        # mirror refresh is skipped for non-shipping items
         api = _api()
         m1, m2 = _mocked(api)
-        with m1, m2:
+        with m1, m2, mock.patch("explore.views.refresh_box") as rb:
             resp = self.client.post("/hw/dev/part/D05700200099-00007/location/",
                                     {"location_id": "186", "arrived": "2026-07-10T09:00"})
-        self.assertEqual(resp.status_code, 403)
-        api.post_location.assert_not_called()
+        self.assertEqual(resp.status_code, 302)
+        api.post_location.assert_called_once()
+        rb.assert_not_called()
 
     def test_invalid_input_posts_nothing_and_surfaces_error(self):
         api = _api()

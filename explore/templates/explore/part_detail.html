@@ -115,6 +115,18 @@
   .sd-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
     border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
 
+  /* #104: edit link + form on the Item card (shares the location form's field look) */
+  .sd-edit { font-size: 12px; font-weight: 500; color: var(--accent-ink); text-decoration: none; margin-left: 8px; }
+  .sd-edit:hover { text-decoration: underline; }
+  .sd-editform { display: flex; flex-direction: column; gap: 9px; }
+  .sd-editform label { font-size: 12px; color: var(--faint); display: flex; flex-direction: column; gap: 3px; }
+  .sd-editform label.chk { flex-direction: row; align-items: center; gap: 8px; color: var(--ink); font-size: 13px; }
+  .sd-editform select, .sd-editform input:not([type=checkbox]), .sd-editform textarea { font: inherit; font-size: 13px;
+    color: var(--ink); background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 6px 8px; }
+  .sd-editform .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .sd-editform .hint { font-size: 11.5px; color: var(--faint); }
+  .sd-editform button { font: inherit; font-size: 13px; font-weight: 600; color: var(--accent-ink); background: var(--accent-soft);
+    border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--rule)); border-radius: var(--r-sm); padding: 7px 16px; cursor: pointer; }
   .sd-locform { margin-top: 12px; border-top: 1px solid var(--rule); padding-top: 10px; }
   .sd-locform summary { font-size: 12.5px; font-weight: 600; color: var(--accent-ink); cursor: pointer; }
   .sd-locform form { display: flex; flex-direction: column; gap: 9px; margin-top: 10px; }
@@ -214,7 +226,22 @@
     <div>
       {% if detail.facts or mirror_parent %}
       <div class="sd-card">
-        <h2>Item</h2>
+        <h2>Item{% if can_edit_item and not editing %} <a class="sd-edit" href="?edit=1" title="Edit the item’s HWDB fields: manufacturer, status, installed, QA/QC flags, serial number, comments, location">&#9998; Edit</a>{% endif %}</h2>
+        {% if editing %}
+        {# #104: edit form for the standard fields — same widgets/diff as the checklist Item card (#103) #}
+        <form method="post" action="{% url 'explore:part_edit' part_id=part_id %}" class="sd-editform">
+          {% csrf_token %}<input type="hidden" name="item-card" value="1">
+          {% for w in item_edit %}
+            {% if w.kind == "check" %}<label class="chk"><input type="checkbox" name="{{ w.key }}"{% if w.value %} checked{% endif %}> {{ w.label }}</label>
+            {% else %}<label>{{ w.label }}{% if w.hint %} <span class="hint">({{ w.hint }})</span>{% endif %}
+              {% if w.kind == "select" %}<select name="{{ w.key }}"><option value="">&mdash;</option>{% for o in w.options %}<option value="{{ o.value }}"{% if o.value == w.value %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>
+              {% elif w.kind == "textarea" %}<textarea name="{{ w.key }}" rows="2">{{ w.value }}</textarea>
+              {% else %}<input name="{{ w.key }}" value="{{ w.value }}" autocomplete="off">{% endif %}</label>{% endif %}
+          {% endfor %}
+          <div class="row"><button type="submit">Save to HWDB</button> <a class="sd-edit" href="{% url 'explore:part' part_id=part_id %}">Cancel</a>
+            <span class="hint">Only changed fields are written. Location is updated in the Location card below.</span></div>
+        </form>
+        {% else %}
         <table class="sd-kv">
           {% for f in detail.facts %}<tr><td class="k">{{ f.label }}</td><td>{{ f.value }}</td></tr>{% endfor %}
           {% if detail.container %}<tr><td class="k">Inside</td>
@@ -224,6 +251,7 @@
             <td><a class="mono" style="color:var(--accent-ink);text-decoration:none;" href="{% url 'explore:part' part_id=mirror_parent %}">{{ mirror_parent }}</a>
             <span style="color:var(--faint);font-size:11px;">(from the mirror)</span></td></tr>{% endif %}
         </table>
+        {% endif %}
       </div>
       {% endif %}
 
@@ -335,7 +363,7 @@
       </div>
       {% endif %}
 
-      {% if detail.has_location or can_update_location %}
+      {% if detail.has_location or show_location_form %}
       <div class="sd-card">
         <h2>Location timeline</h2>
         {% if detail.has_location %}
@@ -357,8 +385,8 @@
         {% else %}
         <div class="sd-empty">No location recorded yet.</div>
         {% endif %}
-        {% if can_update_location %}
-        <details class="sd-locform">
+        {% if show_location_form %}
+        <details class="sd-locform"{% if editing %} open{% endif %}>
           <summary>Update location</summary>
           {% if institutions %}
           <form method="post" action="{% url 'explore:part_location' part_id=part_id %}">

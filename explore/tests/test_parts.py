@@ -609,6 +609,51 @@ class PartViewTest(TestCase):
         self.assertEqual(d["tests"], [])
         self.assertEqual(d["facts"][0]["label"], "Serial number")  # rest still built
 
+    def test_item_edit_mode_renders_the_form_and_saves_changed_fields(self):
+        # #104: ✎ Edit → ?edit=1 form pre-filled from the record (manufacturers
+        # from the type); Save PATCHes only what changed
+        api = self._api()
+        api.get_component.return_value["data"].update({
+            "status": {"id": 120, "name": "QA/QC Tests - Passed All"},   # HWDB's real shape
+            "manufacturer": None, "is_installed": False, "qaqc_uploaded": True,
+            "certified_qaqc": False, "comments": "c"})
+        api.get_component_type.return_value = {"data": {
+            "manufacturers": [{"id": 7, "name": "Hajime Inc"}, {"id": 8, "name": "Acme"}]}}
+        api.patch_component.return_value = {"status": "OK"}
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            plain = self.client.get(self.url).content.decode()
+            html = self.client.get(self.url + "?edit=1").content.decode()
+            resp = self.client.post(self.url + "edit/", {
+                "item-card": "1", "item-manufacturer": "8", "item-status": "120",
+                "item-qaqc_uploaded": "on", "item-certified_qaqc": "on",
+                "item-serial_number": "SN-7", "item-item_comments": "c"})
+        self.assertIn('href="?edit=1"', plain)
+        self.assertNotIn('class="sd-editform"', plain)          # form only in edit mode
+        self.assertNotIn("Acme", plain)                         # …so no manufacturer list either
+        self.assertIn('class="sd-editform"', html)
+        self.assertIn('<option value="8">Acme</option>', html)
+        self.assertIn('name="item-qaqc_uploaded" checked', html)
+        self.assertIn("Update location", html)                  # location form opens in edit mode
+        self.assertNotIn("<h2>Packing</h2>", html)               # …but no box-only panes (review)
+        self.assertNotIn("<h2>Shipping Workflows</h2>", html)
+        self.assertEqual(resp["Location"], self.url)
+        self.assertEqual(api.patch_component.call_args.args[1],
+                         {"part_id": "D05700200099-00007", "manufacturer": {"id": 8},
+                          "certified_qaqc": True})
+        self.assertEqual(ActivityEvent.objects.filter(kind="item").count(), 1)
+
+    @mock.patch("django.conf.settings.HWDB_WRITE_INSTANCES", ["dev"])
+    def test_item_edit_absent_and_forbidden_off_write_instances(self):
+        api = self._api()
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            html = self.client.get(self.url).content.decode()
+            resp = self.client.post(self.url + "edit/", {"item-card": "1", "item-status": "130"})
+        self.assertNotIn("?edit=1", html)
+        self.assertEqual(resp.status_code, 403)
+        api.patch_component.assert_not_called()
+
     def test_spec_row_delete_control_is_architect_only(self):
         api = self._api()
         with mock.patch("explore.views.mint_for", return_value="bearer"), \
