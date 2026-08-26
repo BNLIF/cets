@@ -10,7 +10,8 @@
   .cl-sec h2 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .cl-fold { font: inherit; text-transform: inherit; letter-spacing: inherit; color: inherit;
     background: none; border: 0; padding: 0; cursor: pointer; }
-  .cl-fold::before { content: "\25BE"; display: inline-block; width: 14px; }
+  .cl-fold::before { content: "\25BE"; display: inline-block; width: 20px; font-size: 18px;
+    line-height: 1; vertical-align: -2px; color: var(--accent-ink); }
   .cl-folded .cl-fold::before { content: "\25B8"; }
   .cl-folded .cl-sec-body { display: none; }
   .cl-sec h2 .cl-hint { text-transform: none; letter-spacing: 0; }

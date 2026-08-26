@@ -65,7 +65,8 @@
     <div class="es-row" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
       <button class="es-btn">Submit to HWDB</button>
       <button class="es-btn quiet" name="action" value="draft" formnovalidate>Save draft</button>
-      {% if prefilled %}<a class="es-btn quiet" style="text-decoration:none;" href="?export=csv">Download CSV</a>{% endif %}
+      {% if prefilled %}<a class="es-btn quiet" style="text-decoration:none;" href="?export=csv">Download CSV</a>
+      <a class="es-btn quiet" style="text-decoration:none;" href="{{ email_href }}" title="opens your mail client with the latest submission as text — attach the CSV yourself if the full data is needed">&#9993; Email</a>{% endif %}
       <span class="es-hint">Every submission is a new version — old ones are preserved.</span>
     </div>
     {% endif %}

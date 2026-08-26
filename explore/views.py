@@ -2405,6 +2405,15 @@ def explore_checklist_view(request, part_id, name):
         # draft values win; untouched sections (photo references!) survive
         display_td = {"DATA": checklistforms.merge_data(
             (prev_td or {}).get("DATA"), draft.data)}
+    email_href = ""
+    if rec:
+        # #99: Hajime's EMAIL button — a mailto: draft in the user's own
+        # client (never sent by us); the CSV stays a download to attach
+        email_href = checklists.mailto_url(
+            "", f"Checklist {schema['name']} — {part_id}",
+            checklistforms.email_body(
+                schema, part_id, prev_td, request.build_absolute_uri(page_url),
+                str(rec.get("created") or "")[:16].replace("T", " ")))
     return render(request, "explore/checklist_form.html", {
         "active_nav": "hardware",
         "sidebar": navigation.sidebar_tree(inst, {}),
@@ -2413,6 +2422,7 @@ def explore_checklist_view(request, part_id, name):
         "schema": checklistforms.bind(schema, display_td),
         "schema_msg": msg,
         "prefilled": bool(rec),
+        "email_href": email_href,
         "draft": draft,
         "no_test_type": not schema["test_type_name"],
     })

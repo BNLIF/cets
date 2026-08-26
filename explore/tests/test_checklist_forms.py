@@ -643,6 +643,38 @@ class DraftAndExportTest(TestCase):
         self.assertIn("p.jpg (image_id=img-1)", body)       # photo flattened
         self.assertNotIn("Drawing", body)                   # static skipped
 
+    def test_email_button_carries_a_mailto_draft(self):
+        api = _api(prev={"DATA": {
+            "Identification": {"PCB Batch PID": "PCB0001"},
+            "Measurements": {"Thickness": {"P1": 1.6}}}})
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('href="mailto:?subject=Checklist%20PCB%20Segments%20Interface', html)
+        self.assertIn("Identification%20/%20PCB%20Batch%20PID%3A%20PCB0001", html)
+        self.assertIn(f"http%3A//testserver{PAGE}", html.replace("%2F", "/"))
+        self.assertIn("Email</a>", html)
+
+    def test_email_button_absent_without_a_submission(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertNotIn("mailto:", html)
+
+    def test_email_body_skips_blanks_and_truncates(self):
+        schema = checklistforms.normalize(SCHEMA, NAME)
+        body = checklistforms.email_body(schema, PART, {"DATA": {
+            "Identification": {"PCB Batch PID": "PCB0001"}}}, "http://x/p", "2026-08-26 10:00")
+        self.assertIn("Submitted: 2026-08-26 10:00", body)
+        self.assertIn("Identification / PCB Batch PID: PCB0001", body)
+        self.assertNotIn("Dim 1", body)                       # blank → skipped
+        self.assertNotIn("Drawing", body)                     # static → skipped
+        long = checklistforms.email_body(schema, PART, {"DATA": {
+            "Visual Inspection": {"Anomaly description": "x" * 5000}}}, "http://x/p")
+        self.assertLess(len(long), checklistforms.EMAIL_BODY_MAX + 100)
+        self.assertIn("truncated", long)
+
     def test_csv_export_without_a_submission_redirects(self):
         api = _api()
         m1, m2 = _mocked(api)

@@ -92,6 +92,11 @@ lists on the type page without a manual "sync new".
 - **Download CSV** exports the latest submission as section/field/value
   rows (the iPad's "send via email" payload); photos flatten to their HWDB
   image name/id.
+- **Email** (#99) opens your own mail client with a `mailto:` draft: a link
+  back to the checklist, the submission date, and `Section / Field: value`
+  lines for the filled fields. The dashboard never sends mail itself, and
+  `mailto:` can't attach files — so the body is cut at ~1.8 kB with a
+  pointer to the CSV, which you attach yourself when the full data matters.
 
 ## For consortium users (quickstart)
 

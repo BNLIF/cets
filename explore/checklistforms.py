@@ -369,6 +369,16 @@ def export_csv(schema: dict, part_id: str, test_data: dict | None) -> str:
     w.writerow(["Test type", schema["test_type_name"]])
     w.writerow([])
     w.writerow(["Section", "Field", "Value"])
+    for title, label, v in export_rows(schema, test_data):
+        w.writerow([title, label, v])
+    return buf.getvalue()
+
+
+def export_rows(schema: dict, test_data: dict | None):
+    """Yield ``(section, label, value)`` for every value-bearing leaf in
+    schema order — the CSV's and the email's shared row walk. Photos
+    flatten to their HWDB image name/id; dict/list values to JSON; missing
+    values to ""."""
     data = (test_data or {}).get("DATA")
     data = data if isinstance(data, dict) else {}
     for title, f in leaf_fields(schema):
@@ -380,8 +390,38 @@ def export_csv(schema: dict, part_id: str, test_data: dict | None) -> str:
             v = f"{v.get('image_name', '')} (image_id={v.get('image_id', '')})"
         elif isinstance(v, (dict, list)):
             v = json.dumps(v, ensure_ascii=False)
-        w.writerow([title, f["label"], "" if v is None else v])
-    return buf.getvalue()
+        yield title, f["label"], "" if v is None else _fmt(v)
+
+
+EMAIL_BODY_MAX = 1800   # mailto: bodies past ~2 kB get truncated by clients
+
+
+def email_body(schema: dict, part_id: str, test_data: dict | None,
+               page_url: str, submitted_on: str = "") -> str:
+    """The plain-text twin of the CSV for a ``mailto:`` draft (#99): a link
+    back to the checklist, then ``Section / Field: value`` lines for filled
+    fields only, cut off with a pointer to the CSV when the body would
+    exceed what mail clients accept in a URL."""
+    head = [f"Checklist: {schema['name']}", f"Part ID: {part_id}"]
+    if submitted_on:
+        head.append(f"Submitted: {submitted_on}")
+    head += [page_url, ""]
+    lines, n, cut = [], sum(len(h) + 1 for h in head), False
+    for title, label, v in export_rows(schema, test_data):
+        if v == "":
+            continue
+        line = f"{title} / {label}: {v}"
+        if n + len(line) + 1 > EMAIL_BODY_MAX:
+            cut = True
+            break
+        lines.append(line)
+        n += len(line) + 1
+    if cut:
+        lines.append("… (truncated — attach the CSV for the full data)")
+    else:
+        lines.append("")
+        lines.append("(mail can't be attached automatically — download the CSV and attach it if needed)")
+    return "\n".join(head + lines)
 
 
 def merge_data(base: dict | None, over: dict) -> dict:
