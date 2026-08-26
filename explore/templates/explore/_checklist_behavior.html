@@ -1,0 +1,27 @@
+<script>
+// shared checklist behavior (#98) — the fill-out page and the editor's live
+// preview both include this once: section fold/unfold, and sections that
+// show only while a select field holds a given value.
+(function () {
+  function applyWhen() {
+    document.querySelectorAll(".cl-sec[data-when-key]").forEach(function (sec) {
+      // the driving select lives among this section's siblings (same form /
+      // same preview), never in another checklist on the page
+      var sel = sec.parentNode.querySelector('select[name="' + sec.getAttribute("data-when-key") + '"]');
+      sec.hidden = !(sel && sel.value === sec.getAttribute("data-when-eq"));
+    });
+  }
+  window.clApplyWhen = applyWhen;
+  document.addEventListener("change", function (e) {
+    if (e.target.tagName === "SELECT" && e.target.closest(".cl-sec")) applyWhen();
+  });
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest(".cl-fold");
+    if (!b) return;
+    var sec = b.closest(".cl-sec");
+    sec.classList.toggle("cl-folded");
+    b.setAttribute("aria-expanded", sec.classList.contains("cl-folded") ? "false" : "true");
+  });
+  applyWhen();
+})();
+</script>

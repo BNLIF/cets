@@ -176,8 +176,33 @@ def normalize(cfg: dict, name: str) -> dict:
                     nf["key"] = f"f{si}-{fi}"
                     fields.append(nf)
         if title and fields:
-            schema["sections"].append({"title": title, "fields": fields})
+            sec = {"title": title, "fields": fields}
+            if s.get("collapsed") is True:
+                sec["collapsed"] = True            # #98: opens folded
+            if isinstance(s.get("when"), dict):
+                sec["when"] = s["when"]            # resolved below
+            schema["sections"].append(sec)
+    _resolve_when(schema)
     return schema
+
+
+def _resolve_when(schema: dict) -> None:
+    """#98: a section's ``when: {field, equals}`` names one of the schema's
+    ``select`` fields by label and one of its options; resolve it to the
+    select's input key (the runtime toggles on that input's value) or drop
+    it when nothing matches, so a typo shows the section rather than hiding
+    it forever."""
+    selects = {leaf["label"]: leaf for _, leaf in leaf_fields(schema)
+               if leaf["type"] == "select"}
+    for sec in schema["sections"]:
+        w = sec.pop("when", None)
+        if not w:
+            continue
+        label = str(w.get("field") or "").strip()
+        eq = str(w.get("equals") or "").strip()
+        sel = selects.get(label)
+        if sel and eq in sel["options"]:
+            sec["when"] = {"field": label, "key": sel["key"], "equals": eq}
 
 
 def leaf_fields(schema: dict):

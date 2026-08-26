@@ -1,0 +1,24 @@
+{
+  "name": "Variant-dependent sections (example)",
+  "test_type_name": "Variant Example",
+  "instructions": "Pick the variant first — its measurement table and reference figure appear below.",
+  "sections": [
+    {"title": "Identification", "fields": [
+      {"type": "qr", "label": "PID"},
+      {"type": "select", "label": "Variant", "options": ["H", "J"]}
+    ]},
+    {"title": "Measurements — H", "when": {"field": "Variant", "equals": "H"}, "fields": [
+      {"type": "static", "label": "Figure H", "note": "Replace with the H measurement diagram (upload a reference image)."},
+      {"type": "table", "label": "Thickness", "units": "mm",
+       "columns": ["P1", "P2", "P3", "P4", "P5"], "nominal": 1.6, "tol": 0.1}
+    ]},
+    {"title": "Measurements — J", "when": {"field": "Variant", "equals": "J"}, "fields": [
+      {"type": "static", "label": "Figure J", "note": "Replace with the J measurement diagram (upload a reference image)."},
+      {"type": "table", "label": "Thickness", "units": "mm",
+       "columns": ["P1", "P2", "P3"], "nominal": 2.0, "tol": 0.1}
+    ]},
+    {"title": "Notes", "collapsed": true, "fields": [
+      {"type": "textarea", "label": "Remarks"}
+    ]}
+  ]
+}

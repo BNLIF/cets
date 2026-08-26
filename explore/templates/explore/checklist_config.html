@@ -52,12 +52,16 @@
   .clc-fld .ff-label { flex: 1 1 80px; }
   .clc-fld .ec-inline { font-size: 11.5px; gap: 4px; }
   .clc-sec > .ec-row .fs-title { font-weight: 600; }
+  .clc-secopts { margin-top: 0; }
+  .clc-secopts select { font: inherit; font-size: 12px; color: var(--ink); background: var(--surface);
+    border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 2px 4px; max-width: 160px; }
   #clc-json { width: 100%; min-height: 200px; font-family: var(--font-mono); font-size: 12px; }
   .clc-chips { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; }
   .clc-chips a { color: var(--accent-ink); text-decoration: none; }
   .clc-chips a:hover { text-decoration: underline; }
 </style>
 {% include "explore/_checklist_style.html" %}
+{% include "explore/_checklist_behavior.html" %}
 
 <div class="ec-page">
   <div class="ec-crumbs">
@@ -149,6 +153,12 @@
       <button type="button" class="ec-del clc-dn" title="Move down">&#9660;</button>
       <input class="fs-title" placeholder="section title">
       <button type="button" class="ec-del clc-x" title="Remove section">&#x2715;</button>
+    </div>
+    <div class="ec-row clc-secopts">
+      <label class="ec-inline"><input type="checkbox" class="fs-collapsed"> start collapsed</label>
+      <label class="ec-inline" title="the section shows only while that select field holds this option">show only when
+        <select class="fs-whenf"><option value="">&mdash; always &mdash;</option></select>
+        <span class="fs-whenwrap">= <select class="fs-wheneq"></select></span></label>
     </div>
     <div class="clc-fields"></div>
     <button type="button" class="ec-add clc-addf">+ add field</button>
@@ -266,6 +276,10 @@
     document.getElementById("clc-sections").appendChild(n);
     s = s || {};
     $(".fs-title", n).value = s.title || "";
+    $(".fs-collapsed", n).checked = s.collapsed === true;
+    // the when-pickers fill in at refresh() once every select field exists
+    n.dataset.whenF = (s.when && s.when.field) || "";
+    n.dataset.whenEq = (s.when && s.when.equals) || "";
     (s.fields || []).forEach(function (f) {
       if (f && f.type === "row") {
         (f.fields || []).forEach(function (k, i) { addField(n, k, i > 0); });
@@ -337,9 +351,46 @@
           fields.push(f);
         }
       });
-      return { title: $(".fs-title", s).value.trim(), fields: fields };
+      var sec = { title: $(".fs-title", s).value.trim(), fields: fields };
+      if ($(".fs-collapsed", s).checked) sec.collapsed = true;
+      var wf = $(".fs-whenf", s).value, we = $(".fs-wheneq", s).value;
+      if (wf && we) sec.when = { field: wf, equals: we };
+      return sec;
     }).filter(function (s) { return s.title || s.fields.length; });
     return cfg;
+  }
+
+  // #98: each section's "show only when" pickers list the schema's current
+  // select fields and the chosen one's options; a value that no longer
+  // matches a field stays listed (so nothing is lost mid-edit) — the server
+  // drops it at save if it still doesn't resolve
+  function fillSelect(sel, values, current, blankLabel) {
+    var opts = blankLabel ? ['<option value="">' + blankLabel + '</option>'] : [];
+    if (current && values.indexOf(current) === -1) values = values.concat([current]);
+    values.forEach(function (v) {
+      var o = document.createElement("option"); o.textContent = v; o.value = v;
+      if (v === current) o.selected = true;
+      opts.push(o.outerHTML);
+    });
+    sel.innerHTML = opts.join("");
+    sel.value = current || "";
+  }
+  function syncWhenPickers() {
+    var selects = {};
+    $$(".clc-fld").forEach(function (r) {
+      if ($(".ff-type", r).value !== "select") return;
+      var label = $(".ff-label", r).value.trim();
+      if (label) selects[label] = list($(".ff-options", r).value, ",");
+    });
+    $$("#clc-sections > .clc-sec").forEach(function (s) {
+      var fsel = $(".fs-whenf", s), esel = $(".fs-wheneq", s);
+      var curF = fsel.value || s.dataset.whenF || "";
+      var curE = esel.value || s.dataset.whenEq || "";
+      s.dataset.whenF = s.dataset.whenEq = "";
+      fillSelect(fsel, Object.keys(selects), curF, "&mdash; always &mdash;");
+      fillSelect(esel, selects[curF] || [], curF ? curE : "", "");
+      $(".fs-whenwrap", s).style.display = curF ? "" : "none";
+    });
   }
 
   function render(cfg) {
@@ -355,6 +406,7 @@
   // --- JSON mirror + debounced live preview (the runtime's own renderer) ---
   var pTimer = null;
   function refresh() {
+    syncWhenPickers();
     $("#clc-json").value = JSON.stringify(collect(), null, 2);
     clearTimeout(pTimer);
     pTimer = setTimeout(preview, 350);
@@ -375,7 +427,7 @@
     fetch("{% url 'explore:checklist_preview' part_type_id=part_type_id %}",
           { method: "POST", body: fd })
       .then(function (r) { return r.text(); })
-      .then(function (html) { $("#clc-preview").innerHTML = html; })
+      .then(function (html) { $("#clc-preview").innerHTML = html; window.clApplyWhen(); })
       .catch(function () {});
   }
   // the preview's tolerance coloring works live, same as the real page

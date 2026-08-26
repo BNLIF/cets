@@ -92,6 +92,25 @@ class SchemaModuleTest(TestCase):
         self.assertEqual([(r["name"], r["image_id"]) for r in out],
                          [("Assembly", "c"), ("Reception", "b")])
 
+    def test_section_when_resolves_to_the_selects_key(self):
+        cfg = json.loads(json.dumps(SCHEMA))
+        cfg["sections"][1]["when"] = {"field": "Segment type", "equals": "J"}
+        cfg["sections"][1]["collapsed"] = True
+        cfg["sections"][2]["when"] = {"field": "Segment type", "equals": "X"}  # no such option
+        cfg["sections"].append({"title": "Typo", "when": {"field": "Segmnt", "equals": "G"},
+                                "fields": [{"type": "text", "label": "t"}]})
+        schema = checklistforms.normalize(cfg, NAME)
+        secs = {s["title"]: s for s in schema["sections"]}
+        self.assertEqual(secs["Measurements"]["when"],
+                         {"field": "Segment type", "key": "f0-2", "equals": "J"})
+        self.assertTrue(secs["Measurements"]["collapsed"])
+        self.assertNotIn("when", secs["Visual Inspection"])   # unmatched option → dropped
+        self.assertNotIn("when", secs["Typo"])                # unmatched field → dropped
+        self.assertNotIn("collapsed", secs["Identification"])
+        # bind/parse are unaffected — hidden sections just post blanks
+        bound = checklistforms.bind(schema, None)
+        self.assertEqual(bound["sections"][1]["when"]["key"], "f0-2")
+
     def test_available_swallows_failures(self):
         api = mock.MagicMock()
         api.get_component_type_images.side_effect = RuntimeError("boom")
@@ -190,6 +209,21 @@ class ChecklistPageTest(TestCase):
         self.assertIn("https://edms.cern.ch/x", html)         # static link
         self.assertNotIn("Bogus", html)                       # unknown dropped
         self.assertIn("Submit to HWDB", html)
+
+    def test_sections_fold_and_follow_a_select(self):
+        cfg = json.loads(json.dumps(SCHEMA))
+        cfg["sections"][1]["when"] = {"field": "Segment type", "equals": "J"}
+        cfg["sections"][2]["collapsed"] = True
+        api = _api(schema=cfg)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('data-when-key="f0-2" data-when-eq="J"', html)
+        self.assertIn("shown when Segment type = J", html)
+        self.assertIn('class="es-card cl-sec cl-folded"', html)       # opens folded
+        self.assertIn('class="cl-fold" aria-expanded="false">Visual Inspection', html)
+        self.assertIn('class="cl-fold" aria-expanded="true">Identification', html)
+        self.assertIn("clApplyWhen", html)                             # behavior script
 
     def test_prefills_from_the_latest_submission(self):
         api = _api(prev={"DATA": {
@@ -485,6 +519,9 @@ class ChecklistEditorTest(TestCase):
             html = self.client.get(CONFIG_PAGE).content.decode()
         self.assertIn('id="f-roles"', html)
         self.assertIn("ff-imgfile", html)   # reference-image upload control
+        self.assertIn("fs-whenf", html)     # #98 show-only-when pickers
+        self.assertIn("fs-collapsed", html)
+        self.assertIn("Variant-dependent sections", html)   # the H/J template
 
     def test_asset_upload_posts_onto_the_type(self):
         api = _api()

@@ -1,11 +1,13 @@
 {% for sec in schema.sections %}
-<div class="es-card">
-  <h2>{{ sec.title }}</h2>
+<div class="es-card cl-sec{% if sec.collapsed %} cl-folded{% endif %}"{% if sec.when %} data-when-key="{{ sec.when.key }}" data-when-eq="{{ sec.when.equals }}"{% endif %}>
+  <h2><button type="button" class="cl-fold" aria-expanded="{% if sec.collapsed %}false{% else %}true{% endif %}">{{ sec.title }}</button>{% if sec.when %}<span class="cl-hint">shown when {{ sec.when.field }} = {{ sec.when.equals }}</span>{% endif %}</h2>
+  <div class="cl-sec-body">
   {% for f in sec.fields %}
     {% if f.type == "row" %}
     <div class="cl-row">{% for k in f.fields %}{% include "explore/_checklist_field.html" with f=k %}{% endfor %}</div>
     {% else %}{% include "explore/_checklist_field.html" %}{% endif %}
   {% endfor %}
+  </div>
 </div>
 {% empty %}
 <p class="es-hint">No sections yet.</p>

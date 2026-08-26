@@ -27,6 +27,19 @@ Order is the layout — fields render top to bottom; there are no coordinates.
 A `{"type": "row", "fields": [ … ]}` entry renders its children side by side
 (stacked on phones).
 
+### Section keys (#98)
+
+- `"collapsed": true` — the section opens folded. Every section header is a
+  ▾/▸ toggle regardless, for long checklists.
+- `"when": {"field": "<select label>", "equals": "<option>"}` — the section
+  shows only while that `select` field holds that option (Hajime's
+  "pick H or J first, then see that variant's table and figure"). The select
+  may sit in any section; the rule is dropped when the label/option doesn't
+  match anything (a typo shows the section rather than hiding it). Hidden
+  sections' inputs are simply left blank, so they're omitted from the
+  submission; values typed before switching are kept in case you switch
+  back. See `variant-sections.example.json`.
+
 ## Field types (closed vocabulary)
 
 | type | extras | value stored |
