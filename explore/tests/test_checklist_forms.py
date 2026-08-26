@@ -65,7 +65,27 @@ def _api(schema=SCHEMA, prev=None, test_types=("ES",)):
     api.post_test.return_value = {"status": "OK"}
     api.post_test_type.return_value = {"status": "OK"}
     api.post_component_image.return_value = {"status": "OK", "image_id": "img-77"}
+    # #103: the Item card's prefill + option lists
+    api.get_component.return_value = {"data": {
+        "status": {"id": 120, "name": "QA/QC Tests - Passed All"},
+        "is_installed": False, "qaqc_uploaded": True, "certified_qaqc": False,
+        "manufacturer": None, "location": None,
+        "serial_number": "SN-1", "comments": "c",
+        "specifications": [{"DATA": {}}]}}
+    api.get_component_type.return_value = {"data": {
+        "manufacturers": [{"id": 7, "name": "Hajime Inc"}, {"id": 8, "name": "Acme"}],
+        "connectors": {}, "properties": {"specifications": [{"datasheet": {"DATA": {}}}]}}}
+    api.get_institutions.return_value = {"data": [
+        {"id": 128, "name": "BNL", "country": {"code": "US"}}]}
+    api.patch_component.return_value = {"status": "OK"}
+    api.post_location.return_value = {"status": "OK"}
     return api
+
+
+ITEM_POST = {"item-card": "1", "item-manufacturer": "8", "item-status": "130",
+             "item-qaqc_uploaded": "on", "item-serial_number": "SN-1",
+             "item-item_comments": "c", "item-location": "128",
+             "item-arrived": "2026-08-26T10:00", "item-test_comments": "looks fine"}
 
 
 def _mocked(api):
@@ -110,6 +130,40 @@ class SchemaModuleTest(TestCase):
         # bind/parse are unaffected — hidden sections just post blanks
         bound = checklistforms.bind(schema, None)
         self.assertEqual(bound["sections"][1]["when"]["key"], "f0-2")
+
+    def test_item_fields_default_to_all_and_accept_a_subset(self):
+        # #103: absent = every standard field; a list = that subset
+        self.assertEqual(checklistforms.normalize(SCHEMA, NAME)["item_fields"],
+                         checklistforms.ITEM_FIELDS)
+        cfg = {**SCHEMA, "item_fields": ["status", "bogus", "location"]}
+        self.assertEqual(checklistforms.normalize(cfg, NAME)["item_fields"],
+                         ["status", "location"])
+        self.assertEqual(checklistforms.normalize({**SCHEMA, "item_fields": []}, NAME)["item_fields"], [])
+
+    def test_item_values_diff_against_the_record(self):
+        schema = checklistforms.normalize(SCHEMA, NAME)
+        item = {"status": {"id": 120}, "is_installed": False, "qaqc_uploaded": True,
+                "certified_qaqc": False, "manufacturer": None, "location": {"id": 5, "name": "FNAL"},
+                "serial_number": "SN-1", "comments": "c"}
+        opts = {"manufacturers": [{"value": 8, "label": "Acme"}],
+                "institutions": [{"value": 128, "label": "BNL"}]}
+        iv = checklistforms.item_values(schema, ITEM_POST, item, opts)
+        self.assertEqual(iv["patch"], {"manufacturer": {"id": 8}, "status": {"id": 130}})
+        self.assertEqual(iv["location"], {"id": 128})               # changed from FNAL
+        self.assertEqual(iv["test_comments"], "looks fine")
+        self.assertEqual(iv["record"]["Manufacturer"], {"id": 8, "name": "Acme"})
+        self.assertEqual(iv["record"]["Component status"]["name"], "QA/QC Tests - Non-conforming")
+        self.assertEqual(iv["record"]["Location"], {"id": 128, "name": "BNL"})
+        self.assertTrue(iv["record"]["QA/QC uploaded"])
+        self.assertFalse(iv["record"]["Certified QA/QC"])
+        # no card in the POST (older drafts / tests) → nothing at all
+        self.assertIsNone(checklistforms.item_values(schema, {"f0-0": "x"}, item, opts))
+        # same values as the record → empty patch, no location
+        same = {"item-card": "1", "item-status": "120", "item-qaqc_uploaded": "on",
+                "item-serial_number": "SN-1", "item-item_comments": "c", "item-location": "5"}
+        iv2 = checklistforms.item_values(schema, same, item, opts)
+        self.assertEqual(iv2["patch"], {})
+        self.assertIsNone(iv2["location"])
 
     def test_available_swallows_failures(self):
         api = mock.MagicMock()
@@ -224,6 +278,60 @@ class ChecklistPageTest(TestCase):
         self.assertIn('class="cl-fold" aria-expanded="false">Visual Inspection', html)
         self.assertIn('class="cl-fold" aria-expanded="true">Identification', html)
         self.assertIn("clApplyWhen", html)                             # behavior script
+
+    def test_item_card_renders_prefilled_from_the_record(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('name="item-card" value="1"', html)
+        self.assertIn("<option value=\"8\">Acme</option>", html)          # type's manufacturers
+        self.assertIn('<option value="120" selected>QA/QC Tests - Passed All', html)
+        self.assertIn('name="item-qaqc_uploaded" checked', html)
+        self.assertIn('name="item-certified_qaqc">', html)                  # unchecked
+        self.assertIn('name="item-location"', html)
+        self.assertIn(">BNL</option>", html)
+        self.assertIn('name="item-serial_number" value="SN-1"', html)
+        self.assertIn("Test comments", html)
+
+    def test_no_item_card_when_the_schema_opts_out(self):
+        api = _api(schema={**SCHEMA, "item_fields": []})
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+            self.client.post(PAGE, {"f0-0": "x", **ITEM_POST})
+        self.assertNotIn("item-card", html)
+        api.patch_component.assert_not_called()
+        api.post_location.assert_not_called()
+
+    def test_submit_writes_item_fields_then_location_then_record(self):
+        api = _api(test_types=("PCB Segments Interface",))
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"f0-0": "PCB0001", **ITEM_POST})
+        self.assertEqual(api.patch_component.call_args.args[1],
+                         {"part_id": PART, "manufacturer": {"id": 8}, "status": {"id": 130}})
+        loc = api.post_location.call_args.args[1]
+        self.assertEqual(loc["location"], {"id": 128})
+        self.assertTrue(loc["arrived"].startswith("2026-08-26T10:00"))
+        payload = api.post_test.call_args.args[1]
+        self.assertEqual(payload["comments"], "looks fine")                 # test comments
+        self.assertEqual(payload["test_data"]["DATA"]["Item"]["Manufacturer"], {"id": 8, "name": "Acme"})
+        self.assertEqual(payload["test_data"]["DATA"]["Identification"]["PCB Batch PID"], "PCB0001")
+        calls = [c[0] for c in api.method_calls]
+        self.assertLess(calls.index("patch_component"), calls.index("post_location"))
+        self.assertLess(calls.index("post_location"), calls.index("post_test"))
+
+    def test_unchanged_item_fields_skip_the_writes(self):
+        api = _api(test_types=("PCB Segments Interface",))
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"f0-0": "PCB0001", "item-card": "1", "item-status": "120",
+                                    "item-qaqc_uploaded": "on", "item-serial_number": "SN-1",
+                                    "item-item_comments": "c"})
+        api.patch_component.assert_not_called()
+        api.post_location.assert_not_called()
+        api.post_test.assert_called_once()
 
     def test_prefills_from_the_latest_submission(self):
         api = _api(prev={"DATA": {
@@ -553,6 +661,7 @@ class ChecklistEditorTest(TestCase):
                 "config_json": json.dumps(SCHEMA), "cl_name": NAME,
             }).content.decode()
         self.assertIn("Identification", html)              # real section cards
+        self.assertIn('name="item-card"', html)            # #103 Item card previews too
         self.assertIn('data-min="1.5"', html)              # real tolerance attrs
         self.assertIn('value="pass"', html)                # real tri-state
         self.assertNotIn("<form", html)                    # fragment only
@@ -573,6 +682,7 @@ class ChecklistEditorTest(TestCase):
         self.assertIn('id="f-roles"', html)
         self.assertIn("ff-imgfile", html)   # reference-image upload control
         self.assertIn("fs-whenf", html)     # #98 show-only-when pickers
+        self.assertEqual(html.count('class="f-itemf"'), 9)   # #103 item-field strip
         self.assertIn("fs-collapsed", html)
         self.assertIn("Variant-dependent sections", html)   # the H/J template
 

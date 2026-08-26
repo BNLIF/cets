@@ -2294,14 +2294,78 @@ def _checklist_role_gate(api, schema) -> str | None:
             f"checklist (needs one of: {', '.join(map(str, schema['roles']))})")
 
 
-def _checklist_submit(request, api, part_id, name, schema, prev_td) -> str | None:
-    """The whole submit pipeline (#95/#96), shared by the existing-item and
-    new-item flows: photos → subcomponent links → to_spec fold → test
+def _checklist_item_opts(api, ptid, schema) -> dict:
+    """#103: option lists for the Item card — the type's manufacturers and
+    the institution list — fetched only for the fields the schema enables."""
+    fields = schema.get("item_fields") or []
+    opts = {}
+    if "manufacturer" in fields:
+        try:
+            t = api.get_component_type(ptid).get("data") or {}
+            opts["manufacturers"] = [{"value": m["id"], "label": m.get("name") or str(m["id"])}
+                                     for m in t.get("manufacturers") or []
+                                     if isinstance(m, dict) and m.get("id") is not None]
+        except Exception as e:
+            logger.warning("manufacturers for %s failed: %s", ptid, e)
+    if "location" in fields:
+        try:
+            opts["institutions"] = [{"value": o["id"], "label": o["name"]}
+                                    for o in _institution_options(api)]
+        except Exception as e:
+            logger.warning("institutions failed: %s", e)
+    return opts
+
+
+def _checklist_item(api, part_id, schema) -> dict:
+    """The item's current HWDB record for the Item card's prefill (#103) —
+    {} when the schema has no item fields or the read fails."""
+    if not schema.get("item_fields"):
+        return {}
+    try:
+        return api.get_component(part_id).get("data") or {}
+    except Exception as e:
+        logger.warning("item record for %s failed: %s", part_id, e)
+        return {}
+
+
+def _checklist_submit(request, api, part_id, name, schema, prev_td,
+                      item=None, opts=None) -> str | None:
+    """The whole submit pipeline (#95/#96/#103): photos → subcomponent links
+    → item PATCH + location (standard HWDB fields) → to_spec fold → test
     record. Returns an error string or None."""
     data = checklistforms.parse(schema, request.POST)
     err = _checklist_photos(request, api, part_id, name, schema, prev_td, data)
     if err:
         return err
+    # #103: the Item card — one PATCH for the changed standard fields, a
+    # location post only when the institution changed (iPad order: item,
+    # then location, then the test)
+    test_comments = ""
+    iv = checklistforms.item_values(schema, request.POST, item, opts)
+    if iv:
+        if iv["patch"]:
+            try:
+                body = api.patch_component(part_id, {"part_id": part_id, **iv["patch"]})
+                if body.get("status") != "OK":
+                    return f"item not updated — {body.get('data') or body}"
+            except requests.RequestException as e:
+                return f"item not updated — {_hwdb_error_detail(e)}"
+        if iv["location"]:
+            try:
+                arrived = datetime.fromisoformat(iv["arrived"]) if iv["arrived"] else timezone.localtime()
+            except ValueError:
+                arrived = timezone.localtime()
+            try:
+                body = api.post_location(part_id, {
+                    "location": iv["location"], "arrived": arrived.isoformat(),
+                    "comments": f"Checklist “{schema['name']}” via HWDB Explorer"})
+                if body.get("status") != "OK":
+                    return f"location not updated — {body.get('data') or body}"
+            except requests.RequestException as e:
+                return f"location not updated — {_hwdb_error_detail(e)}"
+        if iv["record"]:
+            data["Item"] = iv["record"]
+        test_comments = iv["test_comments"]
     # subcomponent links (#96) — before the record, like the iPad
     for req in checklistforms.link_requests(schema, data):
         lerr = _checklist_link(api, part_id, req["pid"], req["position"])
@@ -2330,7 +2394,7 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td) -> str | Non
     try:
         body = api.post_test(part_id, checklistforms.test_payload(
             schema, data,
-            f"Checklist “{schema['name']}” submitted via HWDB Explorer"))
+            test_comments or f"Checklist “{schema['name']}” submitted via HWDB Explorer"))
         if body.get("status") != "OK":
             return f"HWDB rejected the checklist — {body.get('data') or body}"
     except requests.RequestException as e:
@@ -2374,14 +2438,21 @@ def explore_checklist_view(request, part_id, name):
     actor = activity.actor_of(request)
     draft = ChecklistDraft.for_instance(inst).filter(
         part_id=part_id, name=name, username=actor).first()
+    # #103: the Item card's prefill + option lists (only what the schema asks for)
+    item = _checklist_item(api, part_id, schema)
+    item_opts = _checklist_item_opts(api, ptid, schema)
 
     if request.method == "POST":
         action = request.POST.get("action") or "submit"
         if action == "draft":
             # #97: server-side draft — parsed DATA only, nothing to HWDB.
+            ddata = checklistforms.parse(schema, request.POST)
+            iv = checklistforms.item_values(schema, request.POST, item, item_opts)
+            if iv and iv["record"]:
+                ddata["Item"] = iv["record"]
             ChecklistDraft.objects.update_or_create(
                 instance=inst, part_id=part_id, name=name, username=actor,
-                defaults={"data": checklistforms.parse(schema, request.POST)})
+                defaults={"data": ddata})
             messages.success(request, "Draft saved — nothing was posted to "
                                       "HWDB. Photos aren’t drafted; attach "
                                       "them when you submit.")
@@ -2398,7 +2469,7 @@ def explore_checklist_view(request, part_id, name):
         err = _checklist_role_gate(api, schema)
         if err is None:
             err = _checklist_submit(request, api, part_id, name, schema,
-                                    prev_td)
+                                    prev_td, item=item, opts=item_opts)
         if err:
             messages.error(request, err)
         else:
@@ -2440,6 +2511,10 @@ def explore_checklist_view(request, part_id, name):
         "part_id": part_id,
         "cl_name": name,
         "schema": checklistforms.bind(schema, display_td),
+        "item_card": checklistforms.item_card(
+            schema, item, item_opts, (display_td or {}).get("DATA", {}).get("Item")
+            if isinstance((display_td or {}).get("DATA"), dict) else None),
+        "arrived_default": timezone.localtime().strftime("%Y-%m-%dT%H:%M"),
         "schema_msg": msg,
         "prefilled": bool(rec),
         "email_href": email_href,
@@ -2520,6 +2595,8 @@ def explore_checklist_config_view(request, part_type_id):
     raw, current_name = (checklistforms.raw_load(api, part_type_id, cl_name)
                          if cl_name else (None, None))
     return render(request, "explore/checklist_config.html", {
+        "item_field_choices": [(n, checklistforms.ITEM_FIELD_LABELS[n])
+                               for n in checklistforms.ITEM_FIELDS],
         "sidebar": navigation.sidebar_tree(inst, {}),
         "part_type_id": part_type_id,
         "cl_name": cl_name,
@@ -2547,8 +2624,10 @@ def explore_checklist_preview_view(request, part_type_id):
     if not isinstance(cfg, dict):
         return HttpResponse('<p class="es-hint">The schema isn’t valid JSON yet.</p>')
     schema = checklistforms.normalize(cfg, request.POST.get("cl_name") or "…")
-    return render(request, "explore/_checklist_sections.html",
-                  {"schema": checklistforms.bind(schema, None)})
+    return render(request, "explore/_checklist_preview.html",
+                  {"schema": checklistforms.bind(schema, None),
+                   "item_card": checklistforms.item_card(schema, None, None),
+                   "arrived_default": ""})
 
 
 @login_not_required

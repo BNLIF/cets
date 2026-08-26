@@ -959,7 +959,7 @@ class LeafCableCardTest(TestCase):
         self.leaf.category = "generic"
         self.leaf.save()
         html = self._html()
-        self.assertIn("<dt>Category</dt><dd>generic</dd>", html)
+        self.assertIn("<dt>Category</dt><dd>generic", html)   # #101 appends the shipping-container tag
         self.assertNotIn("not mirrored — re-walk system", html)
 
     def test_unmirrored_category_offers_a_system_rewalk(self):

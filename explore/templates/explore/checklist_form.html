@@ -60,6 +60,7 @@
 
   <form method="post" enctype="multipart/form-data">
     {% csrf_token %}
+    {% include "explore/_checklist_item_card.html" %}
     {% include "explore/_checklist_sections.html" %}
     {% if not no_test_type %}
     <div class="es-row" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">

@@ -140,6 +140,36 @@ def _norm_field(f: dict) -> dict | None:
     return out
 
 
+# #103: HWDB's standard item fields a checklist can carry (Hajime's "default
+# fields" — the iPad app's fixed header). On by default; a schema lists the
+# subset it wants in ``item_fields`` (``[]`` = none).
+ITEM_FIELDS = ["manufacturer", "status", "is_installed", "qaqc_uploaded",
+               "certified_qaqc", "location", "serial_number", "item_comments",
+               "test_comments"]
+ITEM_FIELD_LABELS = {
+    "manufacturer": "Manufacturer", "status": "Component status",
+    "is_installed": "Is installed", "qaqc_uploaded": "QA/QC uploaded",
+    "certified_qaqc": "Certified QA/QC", "location": "Location",
+    "serial_number": "Serial number", "item_comments": "Item comments",
+    "test_comments": "Test comments",
+}
+# HWDB has no status-vocabulary endpoint (probed 2026-08-26) — the
+# Dashboard's list, shared with the exec summary.
+STATUS_OPTIONS = [
+    {"value": 0, "label": "Unknown"},
+    {"value": 100, "label": "In Fabrication"},
+    {"value": 110, "label": "Waiting on QA/QC Tests"},
+    {"value": 120, "label": "QA/QC Tests - Passed All"},
+    {"value": 130, "label": "QA/QC Tests - Non-conforming"},
+    {"value": 140, "label": "QA/QC Tests - Use As Is"},
+    {"value": 150, "label": "In Rework"},
+    {"value": 160, "label": "In Repair"},
+    {"value": 170, "label": "Permanently Unavailable"},
+    {"value": 180, "label": "Broken or Needs Repair"},
+]
+_ITEM_FLAGS = ("is_installed", "qaqc_uploaded", "certified_qaqc")
+
+
 def normalize(cfg: dict, name: str) -> dict:
     """A tolerant read of the schema JSON. Unknown field types and malformed
     entries are dropped; a ``row`` groups its (non-row) children side by
@@ -152,6 +182,10 @@ def normalize(cfg: dict, name: str) -> dict:
               # signee convention).
               "roles": [r for r in (cfg.get("roles") or [])
                         if isinstance(r, int) and not isinstance(r, bool)],
+              # #103: absent = every standard field; a list = that subset
+              "item_fields": ([f for f in cfg["item_fields"] if f in ITEM_FIELDS]
+                              if isinstance(cfg.get("item_fields"), list)
+                              else list(ITEM_FIELDS)),
               "sections": []}
     for si, s in enumerate(cfg.get("sections") or []):
         if not isinstance(s, dict):
@@ -306,6 +340,122 @@ def parse(schema: dict, post) -> dict:
     return data
 
 
+def _opt(options, value):
+    return next((o for o in options if o["value"] == value), None)
+
+
+def item_card(schema: dict, item: dict | None, opts: dict | None,
+              saved: dict | None = None) -> list[dict]:
+    """#103: the "Item" card's widgets — one per enabled standard field,
+    pre-filled from the item's current HWDB record (or a draft's saved
+    values, which win). ``opts``: ``manufacturers`` [{value,label}] from the
+    type record, ``institutions`` [{value,label}] for Location."""
+    item = item or {}
+    opts = opts or {}
+    saved = saved or {}
+    def cur(name, default=None):
+        s = saved.get(ITEM_FIELD_LABELS[name])
+        if isinstance(s, dict) and "id" in s:
+            return s["id"]
+        return s if s is not None else default
+    out = []
+    for name in schema.get("item_fields") or []:
+        w = {"name": name, "key": f"item-{name}", "label": ITEM_FIELD_LABELS[name]}
+        if name == "manufacturer":
+            m = item.get("manufacturer")
+            w.update(kind="select", options=opts.get("manufacturers") or [],
+                     value=cur(name, m.get("id") if isinstance(m, dict) else None),
+                     hint="from the type definition")
+        elif name == "status":
+            st = item.get("status")
+            w.update(kind="select", options=STATUS_OPTIONS,
+                     value=cur(name, st.get("id") if isinstance(st, dict) else None))
+        elif name in _ITEM_FLAGS:
+            w.update(kind="check", value=bool(cur(name, item.get(name))))
+        elif name == "location":
+            loc = item.get("location")
+            w.update(kind="location", options=opts.get("institutions") or [],
+                     value=cur(name, loc.get("id") if isinstance(loc, dict) else None),
+                     current=(loc.get("name") if isinstance(loc, dict) else "") or "",
+                     hint="posts a location update only when changed")
+        elif name == "serial_number":
+            w.update(kind="text", value=cur(name, item.get("serial_number") or ""))
+        elif name == "item_comments":
+            w.update(kind="textarea", value=cur(name, item.get("comments") or ""))
+        else:  # test_comments — per submission, never from the item
+            w.update(kind="textarea", value=saved.get(ITEM_FIELD_LABELS[name]) or "",
+                     hint="goes on the test record")
+        out.append(w)
+    return out
+
+
+def item_values(schema: dict, post, item: dict | None, opts: dict | None) -> dict | None:
+    """#103: what the Item card asks HWDB to change. None when the card
+    wasn't in the POST (older drafts, schemas without item fields).
+    Returns ``patch`` (only fields that differ from the item's record —
+    empty = skip the PATCH), ``location`` ({id} when changed, else None),
+    ``arrived`` (ISO string), ``test_comments`` and ``record`` — the
+    label→value dict stored in the test record's DATA["Item"]."""
+    if post.get("item-card") != "1":
+        return None
+    item = item or {}
+    opts = opts or {}
+    fields = schema.get("item_fields") or []
+    patch, record = {}, {}
+    def _int(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+    if "manufacturer" in fields:
+        mid = _int(post.get("item-manufacturer"))
+        cur = (item.get("manufacturer") or {}).get("id") if isinstance(item.get("manufacturer"), dict) else None
+        if mid is not None:
+            if mid != cur:
+                patch["manufacturer"] = {"id": mid}
+            o = _opt(opts.get("manufacturers") or [], mid)
+            record["Manufacturer"] = {"id": mid, "name": o["label"] if o else ""}
+    if "status" in fields:
+        sid = _int(post.get("item-status"))
+        cur = (item.get("status") or {}).get("id") if isinstance(item.get("status"), dict) else None
+        if sid is not None:
+            if sid != cur:
+                patch["status"] = {"id": sid}
+            o = _opt(STATUS_OPTIONS, sid)
+            record["Component status"] = {"id": sid, "name": o["label"] if o else ""}
+    for flag in _ITEM_FLAGS:
+        if flag in fields:
+            v = post.get(f"item-{flag}") == "on"
+            if v != bool(item.get(flag)):
+                patch[flag] = v
+            record[ITEM_FIELD_LABELS[flag]] = v
+    if "serial_number" in fields:
+        v = (post.get("item-serial_number") or "").strip()
+        if v != (item.get("serial_number") or ""):
+            patch["serial_number"] = v
+        record["Serial number"] = v
+    if "item_comments" in fields:
+        v = (post.get("item-item_comments") or "").strip()
+        if v != (item.get("comments") or ""):
+            patch["comments"] = v
+        record["Item comments"] = v
+    location = None
+    if "location" in fields:
+        lid = _int(post.get("item-location"))
+        cur = (item.get("location") or {}).get("id") if isinstance(item.get("location"), dict) else None
+        if lid is not None:
+            o = _opt(opts.get("institutions") or [], lid)
+            record["Location"] = {"id": lid, "name": o["label"] if o else ""}
+            if lid != cur:
+                location = {"id": lid}
+    test_comments = (post.get("item-test_comments") or "").strip() if "test_comments" in fields else ""
+    if "test_comments" in fields:
+        record["Test comments"] = test_comments
+    return {"patch": patch, "location": location,
+            "arrived": (post.get("item-arrived") or "").strip(),
+            "test_comments": test_comments, "record": record}
+
+
 def test_payload(schema: dict, data: dict, comments: str) -> dict:
     return {"comments": comments, "test_type": schema["test_type_name"],
             "test_data": {"DATA": data}}
@@ -384,6 +534,11 @@ def export_rows(schema: dict, test_data: dict | None):
     values to ""."""
     data = (test_data or {}).get("DATA")
     data = data if isinstance(data, dict) else {}
+    item = data.get("Item")
+    for label, v in (item.items() if isinstance(item, dict) else []):   # #103 card first
+        if isinstance(v, dict) and "name" in v:
+            v = f"{v.get('name', '')} (id={v.get('id', '')})"
+        yield "Item", label, _fmt(v)
     for title, f in leaf_fields(schema):
         if f["type"] == "static":
             continue

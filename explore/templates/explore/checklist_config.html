@@ -113,6 +113,12 @@
           <input id="f-instr" placeholder="optional intro text shown under the title"></div>
         <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Roles</span>
           <input id="f-roles" placeholder="HWDB role ids allowed to submit, comma-separated (blank = anyone)"></div>
+        {# #103: HWDB's standard item fields — on by default, untick to drop from this checklist #}
+        <div class="ec-row" style="align-items:flex-start;"><span class="ec-label" style="flex:0 0 90px;" title="HWDB’s own fields on the item — shown as an “Item” card at the top and written to the item record on submit">Item fields</span>
+          <div id="f-itemf" style="display:flex; flex-wrap:wrap; gap:4px 14px; flex:1;">
+            {% for name, label in item_field_choices %}<label class="ec-inline"><input type="checkbox" class="f-itemf" value="{{ name }}" checked> {{ label }}</label>{% endfor %}
+          </div>
+        </div>
       </div>
 
       <div id="clc-sections"></div>
@@ -338,6 +344,8 @@
     var roles = $("#f-roles").value.split(",").map(function (x) { return parseInt(x, 10); })
                   .filter(function (x) { return !isNaN(x); });
     if (roles.length) cfg.roles = roles;
+    cfg.item_fields = $$(".f-itemf").filter(function (c) { return c.checked; })
+                        .map(function (c) { return c.value; });
     cfg.sections = $$("#clc-sections > .clc-sec").map(function (s) {
       var fields = [];
       $$(".clc-fields > .clc-fld", s).forEach(function (r) {
@@ -398,6 +406,9 @@
     $("#f-ttn").value = cfg.test_type_name || "";
     $("#f-instr").value = cfg.instructions || "";
     $("#f-roles").value = (cfg.roles || []).join(", ");
+    $$(".f-itemf").forEach(function (c) {      // absent = every field on
+      c.checked = !Array.isArray(cfg.item_fields) || cfg.item_fields.indexOf(c.value) !== -1;
+    });
     document.getElementById("clc-sections").innerHTML = "";
     (cfg.sections || []).forEach(addSection);
     refresh();

@@ -72,7 +72,21 @@ get a ✕ per row there to remove a stale key (#102) — the FNAL UI has no
 key deletion, and datasheet-level keys stay untouchable (HWDB validates
 them against the type template).
 
-## Top-level schema keys (#97)
+## Top-level schema keys (#97, #103)
+
+- `item_fields: [...]` (#103) — which of HWDB's standard item fields the
+  checklist carries in an **Item** card above its sections: `manufacturer`
+  (select from the type definition's list), `status`, `is_installed`,
+  `qaqc_uploaded`, `certified_qaqc`, `location` (institution + arrival
+  time), `serial_number`, `item_comments`, `test_comments`. **Absent = all
+  of them** (the default; the editor shows nine ticked boxes), `[]` = none.
+  The card pre-fills from the item's current HWDB record; on submit the
+  changed fields go in ONE `PATCH components/{pid}`, a changed location in a
+  `POST …/locations` (iPad order: item → location → test), and Test comments
+  become the test record's `comments`. The values are also kept in the
+  record's `DATA["Item"]` (and in the CSV/email) so a submission stays
+  self-contained. HWDB has no status-vocabulary endpoint; the Dashboard's
+  list is hardcoded (`STATUS_OPTIONS`).
 
 - `roles: [41, …]` — HWDB role ids allowed to submit; empty/absent = anyone
   (the ES signee convention). Checked live against `whoami` at submit; the

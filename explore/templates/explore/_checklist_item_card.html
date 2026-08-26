@@ -1,0 +1,31 @@
+{# #103: HWDB's standard item fields as one card above the consortium sections — written to the item itself on submit. #}
+{% if item_card %}
+<div class="es-card cl-sec">
+  <h2><button type="button" class="cl-fold" aria-expanded="true">Item</button><span class="cl-hint">HWDB’s own fields on this item — saved to the item record, not just the checklist</span></h2>
+  <div class="cl-sec-body">
+    <input type="hidden" name="item-card" value="1">
+    <div class="cl-row">
+    {% for w in item_card %}
+      {% if w.kind == "check" %}
+      <div class="cl-field cl-check-item"><label class="cl-lab" style="display:inline-flex; gap:8px; align-items:center; cursor:pointer;"><input type="checkbox" name="{{ w.key }}"{% if w.value %} checked{% endif %}> {{ w.label }}</label></div>
+      {% else %}
+      <div class="cl-field">
+        <label class="cl-lab" for="{{ w.key }}">{{ w.label }}{% if w.hint %} <span class="cl-hint">({{ w.hint }})</span>{% endif %}</label>
+        {% if w.kind == "select" or w.kind == "location" %}
+        <select id="{{ w.key }}" name="{{ w.key }}">
+          <option value="">&mdash;{% if w.kind == "location" and w.current %} (now: {{ w.current }}){% endif %}</option>
+          {% for o in w.options %}<option value="{{ o.value }}"{% if o.value == w.value %} selected{% endif %}>{{ o.label }}</option>{% endfor %}
+        </select>
+        {% if w.kind == "location" %}<input type="datetime-local" name="item-arrived" value="{{ arrived_default }}" title="arrival time for the location update" style="margin-top:4px;">{% endif %}
+        {% elif w.kind == "textarea" %}
+        <textarea id="{{ w.key }}" name="{{ w.key }}" rows="2">{{ w.value }}</textarea>
+        {% else %}
+        <input id="{{ w.key }}" name="{{ w.key }}" value="{{ w.value }}" autocomplete="off">
+        {% endif %}
+      </div>
+      {% endif %}
+    {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
