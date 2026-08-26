@@ -2198,18 +2198,23 @@ def _checklist_photos(request, api, part_id, name, schema, prev_td, data) -> str
     return None
 
 
-def _patch_spec_data(api, part_id, values: dict) -> str | None:
-    """Fold ``{label: value}`` into the item's latest specifications DATA
-    and PATCH — the shipping checklist's envelope (#96). Error or None."""
+def _patch_spec_data(api, part_id, values: dict, owned=()) -> str | None:
+    """Write ``{section: {label: value}}`` into the item's latest
+    specifications DATA and PATCH — the shipping checklist's envelope (#96).
+    DATA keys in ``owned`` are replaced wholesale (stale labels/sections go),
+    the rest survive; a no-change outcome skips the PATCH. Error or None."""
     try:
         item = api.get_component(part_id).get("data") or {}
     except requests.RequestException as e:
         return _hwdb_error_detail(e)
     specs_list = item.get("specifications") or [{}]
     specs = specs_list[-1] if isinstance(specs_list[-1], dict) else {}
-    if not isinstance(specs.get("DATA"), dict):
-        specs["DATA"] = {}
-    specs["DATA"].update(values)
+    old = specs.get("DATA") if isinstance(specs.get("DATA"), dict) else {}
+    new = {k: v for k, v in old.items() if k not in owned}
+    new.update(values)
+    if new == old:
+        return None
+    specs["DATA"] = new
     manufacturer = item.get("manufacturer")
     try:
         body = api.patch_component(part_id, {
@@ -2295,10 +2300,18 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td) -> str | Non
         lerr = _checklist_link(api, part_id, req["pid"], req["position"])
         if lerr:
             return f"“{req['label']}”: {req['pid']} not linked — {lerr}"
-    # to_spec values (#96) also fold into the item's specifications
+    # to_spec values (#96) also fold into the item's specifications. A
+    # checklist OWNS the DATA sections named after its sections — this
+    # submission replaces them, and sections its previous submission wrote
+    # that the schema no longer has are dropped (#98 review: renamed or
+    # removed fields must not linger). Everything else in DATA is left alone.
     sv = checklistforms.spec_values(schema, data)
-    if sv:
-        serr = _patch_spec_data(api, part_id, sv)
+    prev_data = (prev_td or {}).get("DATA")
+    owned = ({s["title"] for s in schema["sections"]}
+             | set(prev_data.keys() if isinstance(prev_data, dict) else ()))
+    if sv or prev_data:
+        serr = ((_ensure_spec_data(request, api, part_id.rsplit("-", 1)[0]) if sv else None)
+                or _patch_spec_data(api, part_id, sv, owned))
         if serr:
             return f"item specifications not updated — {serr}"
     err = _ensure_test_type(
@@ -2590,6 +2603,17 @@ def explore_item_create_view(request, part_type_id):
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
     checklist_names = [r["name"] for r in
                        checklistforms.available(api, part_type_id)]
+    try:
+        type_record = api.get_component_type(part_type_id)
+    except requests.RequestException as e:
+        messages.error(request, f"Couldn’t read the type from HWDB — {_hwdb_error_detail(e)}")
+        return redirect(_rev(request, "explore:home"))
+    # #100 (Hajime): the type's Item Specs template. Checklists' "→ Specs"
+    # fields write into specifications.DATA, so a template without DATA gets
+    # it seeded on the new item; architects may also define it on the type.
+    template = _spec_template(type_record)
+    has_data = isinstance(template.get("DATA"), dict)
+    is_arch = _is_architect(request, inst, api)
 
     if request.method == "POST":
         institution = next(
@@ -2600,8 +2624,15 @@ def explore_item_create_view(request, part_type_id):
             messages.error(request, "Pick the institution the new item "
                                     "belongs to.")
             return redirect(page_url)
+        if not has_data and is_arch and request.POST.get("define_type_data"):
+            derr = _define_type_spec_data(api, part_type_id, type_record)
+            if derr:
+                messages.error(request, f"HWDB rejected the type update — {derr}")
+            else:
+                messages.success(request, f"Type {part_type_id}: Item Specs "
+                                          f"template now defines DATA.")
+                has_data = True
         try:
-            type_record = api.get_component_type(part_type_id)
             manufacturers = (type_record.get("data") or {}).get("manufacturers") or []
             payload = {
                 "component_type": {"part_type_id": part_type_id},
@@ -2609,7 +2640,10 @@ def explore_item_create_view(request, part_type_id):
                 "institution": {"id": institution["id"]},
                 "serial_number": (request.POST.get("serial_number") or "").strip(),
                 "comments": (request.POST.get("comments") or "").strip(),
-                "specifications": _spec_template(type_record),
+                # HWDB validates item spec keys against the template — DATA
+                # only when the type defines it (#100)
+                "specifications": {**template, "DATA": {}} if has_data and
+                                  "DATA" not in template else template,
             }
             if len(manufacturers) == 1 and manufacturers[0].get("id") is not None:
                 payload["manufacturer"] = {"id": manufacturers[0]["id"]}
@@ -2647,7 +2681,50 @@ def explore_item_create_view(request, part_type_id):
         "part_type_id": part_type_id,
         "institutions": _institution_options(api),
         "checklist_names": checklist_names,
+        "spec_template": json.dumps(template, indent=2, ensure_ascii=False),
+        "spec_has_data": has_data,
+        "can_define_type_data": (not has_data) and is_arch,
     })
+
+
+def _define_type_spec_data(api, part_type_id, type_record) -> str | None:
+    """#100: add ``"DATA": {}`` to the type's Item Specs template (its
+    datasheet) — merged, never replacing existing keys — via the architect
+    PATCH envelope. HWDB validates every item's specification keys against
+    this template, so DATA must exist HERE before any item can carry it.
+    Error string or None."""
+    record = type_record.get("data") or {}
+    payload = _type_patch_envelope(record, {})
+    # HWDB refuses ANY connectors echo once items occupy the positions ("The
+    # connectors are already in use! Cannot be modified!", dev 2026-08-26) —
+    # a datasheet-only change must leave them out of the body entirely
+    del payload["connectors"]
+    ds = payload["properties"]["specifications"]["datasheet"]
+    payload["properties"]["specifications"]["datasheet"] = {**ds, "DATA": {}}   # copy — the
+    # envelope shares the record's dict, which the caller's template also uses
+    try:
+        body = api.patch_component_type(part_type_id, payload)
+    except requests.RequestException as e:
+        return _hwdb_error_detail(e)
+    return None if body.get("status") == "OK" else str(body.get("data") or body)
+
+
+def _ensure_spec_data(request, api, part_type_id) -> str | None:
+    """#100: the Item-Specs twin of ``_ensure_test_type`` — before a checklist
+    writes "→ Specs" values, the type's template must define DATA. Architects
+    get it added on first use; anyone else gets told what's missing (HWDB
+    would otherwise refuse with "missing fields: {'DATA'}"). Error or None."""
+    try:
+        type_record = api.get_component_type(part_type_id)
+    except requests.RequestException as e:
+        return _hwdb_error_detail(e)
+    if isinstance(_spec_template(type_record).get("DATA"), dict):
+        return None
+    if not _is_architect(request, instance_of(request), api):
+        return (f"the type {part_type_id}'s Item Specs template has no DATA key, "
+                f"which “→ Specs” fields need — an HWDB architect must define it "
+                f"first (the type's New-item page offers this)")
+    return _define_type_spec_data(api, part_type_id, type_record)
 
 
 def _patch_item_flags(api, part_id, status_id, certified, uploaded, comment) -> None:

@@ -51,21 +51,28 @@ class SpecSectionsTest(TestCase):
     def test_non_dict_blob_is_ignored(self):
         self.assertEqual(parts.spec_sections("a string"), [])
 
-    def test_full_block_renders_datasheet_keys_and_expands_data_in_place(self):
+    def test_full_block_renders_datasheet_keys_and_one_data_card(self):
         # The FNAL web UI writes Item Specifications as datasheet-level keys
-        # next to _meta; the shipping/QC convention nests under DATA. Both
-        # must render — DATA's keys as cards like before, _meta hidden.
+        # next to _meta; checklists nest under DATA. Both render — DATA as ONE
+        # card (its hierarchy visible, #98 review), _meta hidden.
         block = {
             "Vendor": "Acme",
             "_meta": {"v": 2},
-            "DATA": {"Calibration": [{"gain": "1.2"}], "Channels": 64},
+            "DATA": {"Calibration": [{"gain": "1.2"}], "Channels": 64,
+                     "Measurements — H": {"Thickness": {"P1": 1.6}, "Image ID for shot": "img-3"},
+                     "Measurements — J": {"Thickness": {"P1": 2.0}}},
         }
         secs = {s["title"]: s for s in parts.spec_sections(block)}
         self.assertNotIn("_meta", secs)
-        self.assertNotIn("DATA", secs)
         self.assertEqual({f["label"]: f["value"] for f in secs["Specifications"]["fields"]},
-                         {"Vendor": "Acme", "Channels": "64"})
-        self.assertEqual(secs["Calibration"]["fields"], [{"label": "gain", "value": "1.2"}])
+                         {"Vendor": "Acme"})
+        rows = {f["label"]: f["value"] for f in secs["DATA"]["fields"]}
+        self.assertEqual(rows, {
+            "Calibration": '[{"gain": "1.2"}]', "Channels": "64",
+            "Measurements — H › Thickness": '{"P1": 1.6}',
+            "Measurements — J › Thickness": '{"P1": 2.0}'})       # H and J both kept
+        self.assertEqual(secs["DATA"]["attachments"], [{"label": "shot", "image_id": "img-3"}])
+        self.assertIn('"Channels": 64', secs["DATA"]["json"])
 
     def test_bare_list_data_keeps_its_specifications_card(self):
         secs = parts.spec_sections({"DATA": [{"a": "1"}]})
@@ -606,7 +613,8 @@ class PartViewTest(TestCase):
         self.assertIn("RoomT", body)            # test summary
         self.assertIn("/view/images/component_test/15023", body)  # per-test data link to FNAL
         self.assertIn("photo.jpg", body)        # downloadable attachment
-        self.assertIn("Specifications", body)   # generic spec card
+        self.assertIn("<h2>DATA", body)         # the DATA card (#98 review)
+        self.assertIn("Channels", body)
         self.assertNotIn("In Transit", body)    # no shipping framing for a normal part
 
     def test_shows_latest_spec_with_datasheet_level_fields(self):

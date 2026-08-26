@@ -312,16 +312,19 @@ def test_payload(schema: dict, data: dict, comments: str) -> dict:
 
 
 def spec_values(schema: dict, data: dict) -> dict:
-    """The submitted values whose fields carry ``to_spec`` (#96), flat
-    ``{label: value}`` — these ALSO fold into the item's latest
-    specifications DATA (the test record keeps the full set regardless)."""
+    """The submitted values whose fields carry ``to_spec`` (#96), nested
+    ``{section: {label: value}}`` exactly like the test record's DATA — so
+    same-labelled fields in different sections (variant H's and J's
+    "Thickness", #98 review) don't overwrite each other. These ALSO fold into
+    the item's latest specifications DATA (the test record keeps the full
+    set regardless)."""
     out = {}
     for title, f in leaf_fields(schema):
         if not f.get("to_spec"):
             continue
         sec = data.get(title)
         if isinstance(sec, dict) and f["label"] in sec:
-            out[f["label"]] = sec[f["label"]]
+            out.setdefault(title, {})[f["label"]] = sec[f["label"]]
     return out
 
 

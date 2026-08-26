@@ -346,13 +346,41 @@ class SpecAndLinkTest(TestCase):
             "serial_number": "SN-1", "comments": "c",
             "manufacturer": {"id": 7},
             "specifications": [{"Old": 1, "DATA": {"Kept": "yes"}}]}}
-        api.get_component_type.return_value = {"data": {"connectors": {
-            "FEB1": "D05700300001", "CBL1": "D08100100003"}}}
+        api.get_component_type.return_value = {"data": {
+            "connectors": {"FEB1": "D05700300001", "CBL1": "D08100100003"},
+            "properties": {"specifications": [{"datasheet": {"DATA": {}}}]}}}
         api.get_subcomponents.return_value = {"data": [
             {"functional_position": "CBL1", "part_id": None}]}
         api.patch_component.return_value = {"status": "OK"}
         api.patch_subcomponents.return_value = {"status": "OK"}
         return api
+
+    def test_spec_write_needs_data_on_the_type(self):
+        # #100: HWDB validates item spec keys against the type template —
+        # without DATA there, a non-architect gets told, not a cryptic 400
+        api = self._api96()
+        api.get_component_type.return_value["data"]["properties"] = {}
+        m1, m2 = _mocked(api)
+        with m1, m2, mock.patch("explore.views._is_architect", return_value=False):
+            self.client.post(PAGE, {"f0-0": "Acme"}, follow=True)
+        api.patch_component.assert_not_called()
+        api.patch_component_type.assert_not_called()
+        api.post_test.assert_not_called()
+
+    def test_architect_gets_data_defined_on_the_type_first(self):
+        api = self._api96()
+        api.get_component_type.return_value["data"]["properties"] = {
+            "specifications": [{"datasheet": {"Note": ""}}]}
+        api.patch_component_type.return_value = {"status": "OK"}
+        m1, m2 = _mocked(api)
+        with m1, m2, mock.patch("explore.views._is_architect", return_value=True):
+            self.client.post(PAGE, {"f0-0": "Acme"})
+        env = api.patch_component_type.call_args.args[1]
+        self.assertEqual(env["properties"]["specifications"]["datasheet"],
+                         {"Note": "", "DATA": {}})
+        calls = [c[0] for c in api.method_calls]
+        self.assertLess(calls.index("patch_component_type"), calls.index("patch_component"))
+        api.post_test.assert_called_once()
 
     def test_normalize_flags(self):
         s = checklistforms.normalize(SCHEMA96, NAME)
@@ -379,10 +407,35 @@ class SpecAndLinkTest(TestCase):
             "f0-0": "Acme", "f0-1": "3366", "f0-2": "cz",
             "f1-0": "D05700300001-00012"})
         self.assertEqual(checklistforms.spec_values(s, data),
-                         {"Vendor": "Acme", "X dimension": 3366.0})
+                         {"Facts": {"Vendor": "Acme", "X dimension": 3366.0}})
         self.assertEqual(checklistforms.link_requests(s, data), [
             {"label": "FEB board", "pid": "D05700300001-00012",
              "position": "FEB1"}])
+
+    def test_resubmission_replaces_the_sections_it_owns(self):
+        # #98 review: the item's DATA had this checklist's earlier sections
+        # (one since renamed, one with a since-removed label) plus a key
+        # someone else wrote — only the owned sections get replaced
+        api = self._api96(prev={"DATA": {"Old facts": {"Vendor": "Z"}}})
+        api.get_component.return_value["data"]["specifications"] = [{"DATA": {
+            "Kept": "yes",
+            "Old facts": {"Vendor": "Z"},                 # previous section name → dropped
+            "Facts": {"Vendor": "Z", "Stale": 1}}}]      # owned → replaced
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"f0-0": "Acme"})
+        spec = api.patch_component.call_args.args[1]["specifications"]
+        self.assertEqual(spec["DATA"], {"Kept": "yes", "Facts": {"Vendor": "Acme"}})
+
+    def test_unchanged_specs_skip_the_patch(self):
+        api = self._api96(prev={"DATA": {"Facts": {"Vendor": "Acme"}}})
+        api.get_component.return_value["data"]["specifications"] = [{"DATA": {
+            "Kept": "yes", "Facts": {"Vendor": "Acme"}}}]
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"f0-0": "Acme"})
+        api.patch_component.assert_not_called()
+        api.post_test.assert_called_once()
 
     def test_submit_patches_specs_and_links_before_the_record(self):
         api = self._api96(test_types=("Panel prep",))
@@ -400,7 +453,7 @@ class SpecAndLinkTest(TestCase):
                          "D08100100003-00226")
         # the spec patch folds to_spec values into the latest entry's DATA
         spec = api.patch_component.call_args.args[1]["specifications"]
-        self.assertEqual(spec["DATA"], {"Kept": "yes", "Vendor": "Acme"})
+        self.assertEqual(spec["DATA"], {"Kept": "yes", "Facts": {"Vendor": "Acme"}})
         self.assertEqual(spec["Old"], 1)            # datasheet keys ride through
         # …and the record still posts, carrying everything incl. the PIDs
         data = api.post_test.call_args.args[1]["test_data"]["DATA"]
@@ -797,6 +850,65 @@ class ItemCreateTest(TestCase):
             self.client.post(NEW_PAGE, {"institution_id": "128"})
         self.assertEqual(sync.call_args.args[2], PTID)
         self.assertEqual(sync.call_args.kwargs["mode"], "incremental")
+
+    def test_spec_template_shown_and_non_architect_warned(self):
+        # #100: the type's datasheet has no DATA → the page says "→ Specs"
+        # can't save yet; the item is created from the template AS IS (HWDB
+        # validates item spec keys against the type — no seeding)
+        api = self._api_create()
+        m1, m2 = _mocked(api)
+        with m1, m2, mock.patch("explore.views._is_architect", return_value=False):
+            html = self.client.get(NEW_PAGE).content.decode()
+            self.client.post(NEW_PAGE, {"institution_id": "128", "define_type_data": "1"})
+        self.assertIn("Item Specs template", html)
+        self.assertIn("&quot;Note&quot;: &quot;&quot;", html)          # pretty JSON shown
+        self.assertIn("can't save on this type until", html)
+        self.assertNotIn('name="define_type_data"', html)            # not an architect
+        payload = api.create_component.call_args.args[1]
+        self.assertEqual(payload["specifications"], {"Note": ""})
+        api.patch_component_type.assert_not_called()                 # gate holds on POST too
+
+    def test_architect_can_define_data_on_the_type(self):
+        api = self._api_create()
+        api.get_component_type.return_value["data"]["connectors"] = {"Slot 1": "Z001"}
+        api.get_component_type.return_value["data"]["full_name"] = "A.B.C"
+        api.patch_component_type.return_value = {"status": "OK"}
+        m1, m2 = _mocked(api)
+        with m1, m2, mock.patch("explore.views._is_architect", return_value=True):
+            html = self.client.get(NEW_PAGE).content.decode()
+            self.client.post(NEW_PAGE, {"institution_id": "128", "define_type_data": "1"})
+        self.assertIn('name="define_type_data" value="1" checked', html)
+        env = api.patch_component_type.call_args.args[1]
+        self.assertEqual(env["properties"]["specifications"]["datasheet"],
+                         {"Note": "", "DATA": {}})                   # merged, not replaced
+        self.assertNotIn("connectors", env)     # echoing them is refused once positions are in use
+        self.assertEqual(env["name"], "A.B.C")
+        # the type now defines DATA → the new item carries it from the start
+        self.assertEqual(api.create_component.call_args.args[1]["specifications"],
+                         {"Note": "", "DATA": {}})
+
+    def test_type_patch_failure_creates_the_item_without_data(self):
+        api = self._api_create()
+        api.patch_component_type.return_value = {"status": "Error", "data": "nope"}
+        m1, m2 = _mocked(api)
+        with m1, m2, mock.patch("explore.views._is_architect", return_value=True):
+            self.client.post(NEW_PAGE, {"institution_id": "128", "define_type_data": "1"})
+        self.assertEqual(api.create_component.call_args.args[1]["specifications"],
+                         {"Note": ""})
+
+    def test_existing_data_template_is_left_alone(self):
+        api = self._api_create()
+        api.get_component_type.return_value["data"]["properties"] = {
+            "specifications": [{"datasheet": {"DATA": {"x": 1}}}]}
+        m1, m2 = _mocked(api)
+        with m1, m2, mock.patch("explore.views._is_architect", return_value=True):
+            html = self.client.get(NEW_PAGE).content.decode()
+            self.client.post(NEW_PAGE, {"institution_id": "128", "define_type_data": "1"})
+        self.assertIn("Defines <code>DATA</code>", html)
+        self.assertNotIn('name="define_type_data"', html)
+        self.assertEqual(api.create_component.call_args.args[1]["specifications"],
+                         {"DATA": {"x": 1}})
+        api.patch_component_type.assert_not_called()
 
     def test_create_without_an_institution_is_refused(self):
         api = self._api_create()

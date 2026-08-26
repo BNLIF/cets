@@ -44,11 +44,11 @@ def spec_sections(spec_block: dict | None) -> list[dict]:
     Each top-level key becomes a card (a list/dict value folds into key/value
     fields + downloadable ``Image ID`` attachments); loose scalar keys collect
     into one leading "Specifications" card. The free-form ``DATA`` sub-dict
-    (where the shipping workflow keeps its checklists) is expanded in place so
-    its keys render like the datasheet-level ones the FNAL web UI writes;
-    ``_meta`` is HWDB bookkeeping and stays hidden. The shipping checklists are
-    just the special case of this where the keys are the three lifecycle
-    stages (#0014).
+    (where checklists write, nested ``{section: {label: value}}``) is ONE
+    "DATA" card, its rows labelled ``section › label`` — the hierarchy the
+    FNAL web UI shows (#98 review, amending ADR-0014's in-place expansion);
+    ``_meta`` is HWDB bookkeeping and stays hidden. Shipping types render
+    their DATA through ``shipment_details`` instead.
     """
     if isinstance(spec_block, list):  # some specs are a bare list of entries
         fields, attachments = fold_entries(spec_block)
@@ -63,13 +63,22 @@ def spec_sections(spec_block: dict | None) -> list[dict]:
         if key == "_meta":
             continue
         if key == "DATA" and isinstance(val, dict):
-            items.extend(val.items())
+            entries = [({f"{k} › {kk}": vv for kk, vv in v.items()}
+                        if isinstance(v, dict) else {k: v}) for k, v in val.items()]
+            fields, attachments = fold_entries(entries)
+            if fields or attachments:
+                out_data = {"title": "DATA", "fields": fields, "attachments": attachments,
+                            "json": json.dumps(val, indent=2, ensure_ascii=False)}
+                items.append(("DATA", out_data))
         elif key == "DATA":  # bare-list DATA blobs keep their old card title
             items.append(("Specifications", val))
         else:
             items.append((key, val))
     out, flat, flat_raw = [], [], {}
     for key, val in items:
+        if key == "DATA" and isinstance(val, dict) and "fields" in val:
+            out.append(val)          # the pre-built DATA card
+            continue
         if isinstance(val, list) and any(isinstance(e, dict) for e in val):
             fields, attachments = fold_entries(val)
         elif isinstance(val, dict):

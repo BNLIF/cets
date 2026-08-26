@@ -60,7 +60,14 @@ Unknown types and malformed entries are dropped silently on render.
 
 Any value-bearing field (not `photo`/`link`/`static`/`steps`) may carry
 `"to_spec": true` (#96): its value ALSO folds into the item's latest
-specifications `DATA` (flat `{label: value}`), alongside the test record.
+specifications `DATA`, nested `{section: {label: value}}` exactly like the
+test record (so variant H's and J's "Thickness" both survive), alongside the
+test record. A checklist OWNS the `DATA` sections named after its sections:
+each submission replaces them wholesale, and sections its previous
+submission wrote that the schema no longer has are dropped — so renaming or
+removing fields doesn't leave stale values behind. Keys written by anything
+else (other checklists, the FNAL UI) are left alone. The part page shows the
+whole blob as one "DATA" card with `section › label` rows.
 
 ## Top-level schema keys (#97)
 
@@ -81,6 +88,27 @@ whose Checklists card lists the choices. The checklist page reached this
 way is the normal one: drafts, revive and CSV all work. The fresh item is
 mirrored immediately (an incremental type sync runs on creation), so it
 lists on the type page without a manual "sync new".
+
+**Item Specs template (#100).** HWDB validates every item's specification
+keys against the type's datasheet ("The input specifications do not match
+the component type definition: missing fields: {'DATA'}" — seen on dev
+2026-08-26), so checklist "→ Specs" fields, which write into
+`specifications.DATA`, only work once the TYPE defines `DATA`. Two places
+take care of it, mirroring test-type auto-creation:
+
+- **Checklist submit** — `_ensure_spec_data` runs before the item PATCH: an
+  architect submitter gets `"DATA": {}` merged into the type's template on
+  first use; anyone else gets a clear error naming the missing key and who
+  can add it.
+- **New Item page** — shows the type's template; when it lacks `DATA`,
+  architects see a pre-checked "define `DATA: {}` in the type's template
+  now" box (merged into the existing keys, never replacing them), and the
+  new item is then created with `DATA` too. Non-architects are told the
+  "→ Specs" fields won't save on this type until an architect does that.
+
+Existing items created before `DATA` was defined need nothing:
+`_patch_spec_data` adds `DATA` to the item at its first "→ Specs" write,
+which HWDB accepts once the type has it.
 
 ## Drafts, exports (#97)
 

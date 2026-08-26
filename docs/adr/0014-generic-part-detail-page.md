@@ -39,6 +39,12 @@ any top-level DATA key into a card (scalars fold into one "Specifications"
 card), with the known shipping keys mapped to their display titles. The
 always-three-cards lifecycle is kept only for shipping types.
 
+*Amended 2026-08-26 (#98 review):* for non-shipping items the `DATA` sub-dict
+is no longer expanded in place into one card per key; it renders as a single
+"DATA" card whose rows are `section › label`, matching the nesting that
+consortium checklists write (`{section: {label: value}}`) and the hierarchy
+the FNAL web UI shows. Shipping types are unaffected (`shipment_details`).
+
 **Tests are summarized, not dumped.** Per test type, the latest record's status,
 date and comments — full payloads stay in HWDB. The generic test-data CSV/JSON
 exporter (the same "plot/dump anything" engine as the Plots tab) is **out of
