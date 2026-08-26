@@ -35,7 +35,7 @@ from .events import physics_date_field, sync_test_events
 from .hierarchy import sync_hierarchy, sync_system
 from .instances import instance_of, namespace_of
 from .models import (
-    ActivityEvent, BoxChecklist, ChecklistDraft, HierarchyNode,
+    ActivityEvent, BoxChecklist, ChecklistDraft, HierarchyNode, ShippingTypeOverride,
     HierarchySyncState, HwdbComponentEvent, PackScan, ShipmentItem,
 )
 from .queries import (
@@ -196,6 +196,9 @@ def explore_view(request, trail=None):
     # comes from a session-cached whoami, so the mirror-only render costs at
     # most one live call per session.
     can_edit_type = can_edit_es and _is_architect(request, inst)
+    # #101: "Add to Shipments" — an override row on top of curation.yaml;
+    # yaml-curated types can't be removed from the UI
+    shipping_override = bool(leaf) and leaf.part_type_id in curation.shipping_overrides(inst)
     empty_pids = []
     if is_shipping:
         # Shipping extras — boxes are regular components too (charts/breakdown
@@ -298,6 +301,7 @@ def explore_view(request, trail=None):
             "can_create_box": can_create_box,
             "can_edit_es": can_edit_es,
             "can_edit_type": can_edit_type,
+        "shipping_override": shipping_override,
             "empty_pids": empty_pids,
             # Deep-link the part type to this instance's FNAL web UI.
             "hwdb_ui_base": settings.HWDB_PROFILES[inst]["ui"],
@@ -1888,8 +1892,8 @@ def _clone_box_type(request, api, inst, part_type_id, record, connectors, page_u
     if curation.is_shipping_type(inst, new_ptid):
         return redirect(_rev(request, "explore:box_type", args=[new_ptid]))
     messages.warning(
-        request, f"{new_ptid} isn’t covered by the shipping-type curation yet — add it "
-                 "to curation.yaml’s shipping_types to enable box workflows on it.")
+        request, f"{new_ptid} isn’t a shipping type yet — use “Add to Shipments” on its "
+                 "type page (or curation.yaml’s shipping_types) to enable box workflows on it.")
     return redirect(page_url)
 
 
@@ -2728,6 +2732,48 @@ def _ensure_spec_data(request, api, part_type_id) -> str | None:
                 f"which “→ Specs” fields need — an HWDB architect must define it "
                 f"first (the type's New-item page offers this)")
     return _define_type_spec_data(api, part_type_id, type_record)
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_shipping_type_toggle_view(request, part_type_id):
+    """#101: promote a type to a shipping type (or undo that) from its type
+    page — an ``ShippingTypeOverride`` row over curation.yaml's baseline.
+    Architects on write instances (the same gate as the other type-level
+    edits). Yaml-curated types are read-only here."""
+    inst = instance_of(request)
+    nxt = request.POST.get("next") or ""
+    back = nxt if url_has_allowed_host_and_scheme(nxt, allowed_hosts={request.get_host()}) \
+        else _rev(request, "explore:home")
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return HttpResponseForbidden("Shipping-type curation is not enabled here.")
+    if not _is_architect(request, inst):
+        return HttpResponseForbidden("Curating shipping types needs the HWDB architect role.")
+    rows = ShippingTypeOverride.for_instance(inst).filter(part_type_id=part_type_id)
+    actor = activity.actor_of(request)
+    if request.POST.get("action") == "remove":
+        if not rows.exists():
+            messages.error(request, f"{part_type_id} is curated in curation.yaml — it can't be "
+                                    f"removed from Shipments here.")
+            return redirect(back)
+        rows.delete()
+        activity.log(inst, ActivityEvent.KIND_CURATION,
+                     f"{part_type_id} removed from the shipping types",
+                     part_type_id=part_type_id, actor=actor)
+        messages.success(request, f"{part_type_id} is no longer a shipping type.")
+        return redirect(back)
+    if curation.is_shipping_type(inst, part_type_id):
+        messages.info(request, f"{part_type_id} is already a shipping type.")
+        return redirect(back)
+    ShippingTypeOverride.objects.create(instance=inst, part_type_id=part_type_id,
+                                        added_by=actor)
+    activity.log(inst, ActivityEvent.KIND_CURATION,
+                 f"{part_type_id} added to the shipping types",
+                 part_type_id=part_type_id, actor=actor)
+    messages.success(request, f"{part_type_id} is now a shipping type — run its sync to "
+                              f"mirror the boxes onto the Shipments tab.")
+    return redirect(back)
 
 
 @login_not_required

@@ -93,6 +93,11 @@ particular use" — a contradiction to resolve before committing schema).
 - `shipping_types` is a new curated artifact in `curation.yaml`; a newly-relevant
   shipping type must be curated (after the audit surfaces it) before it appears —
   the same deliberate-human-edit gate as system curation.
+  *Amended 2026-08-26 (#101):* HWDB architects can also promote a type from its
+  type page ("Add to Shipments"), stored as a per-instance `ShippingTypeOverride`
+  row that `curation.shipping_types` unions with the yaml. The yaml stays the
+  audited baseline (its entries can't be removed from the UI); overrides are the
+  runtime additions and can be undone in place.
 - Status semantics are **unresolved until the spike**; the `status` field shape
   may change once real `/locations` data is seen. The narrow spike exists to de-risk
   exactly this before the schema lands.

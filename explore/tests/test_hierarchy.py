@@ -361,6 +361,43 @@ class NavigationTest(TestCase):
         self.assertIn("/hw/es-config/D05700200001/", html)
         self.assertIn("/hw/checklist-config/D05700200001/", html)
 
+    def test_architects_can_toggle_a_type_into_shipments(self):
+        # #101: the type page offers "Add to Shipments" to architects; the
+        # POST stores an override, after which the page renders the type as
+        # a shipping type with an undo; yaml-curated types show "(curated)".
+        from explore.models import ActivityEvent, ShippingTypeOverride
+        leaf_url = navigation.node_path("prod", "FD", "FD-VD", system_id=57,
+                                        subsystem_id=2, part_type_id="D05700200001")
+        toggle = "/hw/shipping-type/D05700200001/"
+        with mock.patch("explore.views._is_architect", return_value=True):
+            html = self._html(leaf_url)
+            self.assertIn("treat as shipping-container", html)
+            self.assertIn(toggle, html)
+            resp = self.client.post(toggle, {"next": leaf_url})
+            self.assertEqual(resp["Location"], leaf_url)
+            self.assertTrue(ShippingTypeOverride.objects.filter(
+                instance="prod", part_type_id="D05700200001").exists())
+            html = self._html(leaf_url)
+            self.assertIn(">shipping-container</span>", html)
+            self.assertIn('value="remove"', html)           # "undo" for a UI-added type
+            self.assertIn("Boxes in HWDB", html)          # renders as a shipping leaf now
+            self.client.post(toggle, {"next": leaf_url, "action": "remove"})
+            self.assertFalse(ShippingTypeOverride.objects.exists())
+        self.assertEqual(ActivityEvent.objects.filter(kind="curation").count(), 2)
+        with mock.patch("explore.views._is_architect", return_value=False):
+            html = self._html(leaf_url)
+            self.assertNotIn(toggle, html)                # no control for non-architects
+            resp = self.client.post(toggle, {"next": leaf_url})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_yaml_curated_shipping_type_cannot_be_removed(self):
+        from django.contrib.messages import get_messages
+        toggle = "/hw/shipping-type/D08120200001/"       # curated via "81.202"
+        with mock.patch("explore.views._is_architect", return_value=True):
+            resp = self.client.post(toggle, {"action": "remove"})
+        self.assertIn("curated in curation.yaml",
+                      " ".join(str(m) for m in get_messages(resp.wsgi_request)))
+
     @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_editor_links_absent_off_write_instances(self):
         leaf_url = navigation.node_path("prod", "FD", "FD-VD", system_id=57,

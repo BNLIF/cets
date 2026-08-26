@@ -314,6 +314,7 @@ class ActivityEvent(InstanceScoped):
     KIND_ES = "es"
     KIND_CHECKLIST = "checklist"
     KIND_SPEC = "spec"
+    KIND_CURATION = "curation"
     KIND_LABELS = {
         KIND_SYNC: "Sync",
         KIND_MINTED: "New box",
@@ -322,6 +323,7 @@ class ActivityEvent(InstanceScoped):
         KIND_ES: "Exec summary",
         KIND_CHECKLIST: "Checklist",
         KIND_SPEC: "Item specs",
+        KIND_CURATION: "Curation",
     }
 
     kind = models.CharField(max_length=12)
@@ -372,6 +374,24 @@ class WatchSubscription(InstanceScoped):
 
     def __str__(self):
         return f"WatchSubscription({self.username}, {self.display})"
+
+
+class ShippingTypeOverride(InstanceScoped):
+    """A component type promoted to "shipping type" from the UI (#101) — the
+    runtime overlay over ``curation.yaml``'s ``shipping_types``, which stays
+    the audited baseline. ``curation.shipping_types`` unions both; a yaml
+    entry can't be removed here, an override can."""
+
+    part_type_id = models.CharField(max_length=20, db_index=True)
+    added_by = models.CharField(max_length=150, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=["instance", "part_type_id"], name="uniq_shipping_type_override")]
+
+    def __str__(self):
+        return f"{self.instance}:{self.part_type_id}"
 
 
 class ChecklistDraft(InstanceScoped):

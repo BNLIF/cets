@@ -78,6 +78,10 @@
   .panel-meta dt { color: var(--faint); }
   .panel-meta dd { margin: 0; font-family: var(--font-mono); }
   .panel-meta a { color: var(--accent-ink); }
+  .panel-meta .linkish { font: inherit; color: var(--accent-ink); background: none; border: 0;
+    padding: 0; cursor: pointer; text-decoration: underline; }
+  .panel-meta dd.span { grid-column: 2 / -1; }
+  .panel-meta .sep { color: var(--faint); margin: 0 6px; }
   #sync-log, #node-sync-log { margin-top: 14px; background: #1c1812; color: #e7dfce; border-radius: 8px;
     padding: 12px; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap;
     max-height: 240px; overflow: auto; display: none; }
@@ -158,7 +162,8 @@
     <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;">
         <div class="page-subtitle">{{ leaf.system_name }} <span class="crumbs-sep">›</span> {{ leaf.subsystem_name }}</div>
         <div style="text-align: right; white-space: nowrap;">
-            <div style="display: flex; gap: 6px; justify-content: flex-end;">
+            <div style="display: flex; gap: 6px; justify-content: flex-end; align-items: center;">
+                <span class="cell-muted" style="font-size: 12px; margin-right: 6px;">{% if leaf.tests_synced_at %}synced {{ leaf.tests_synced_at|timesince }} ago{% else %}never synced{% endif %}</span>
                 <button class="btn btn-sm btn-primary node-sync-btn" type="button" data-mode="incremental"
                         data-sync-url="{% url 'explore:node_sync' part_type_id=leaf.part_type_id %}"
                         title="Fetch newly-added items only (cheap)">Sync new</button>
@@ -168,9 +173,6 @@
                 <button class="btn btn-sm btn-ghost node-sync-btn" type="button" data-mode="full"
                         data-sync-url="{% url 'explore:node_sync' part_type_id=leaf.part_type_id %}"
                         title="Re-fetch everything incl. all tests (slow)">Full re-sync</button>
-            </div>
-            <div class="cell-muted" style="font-size: 12px; margin-top: 6px;">
-                {% if leaf.tests_synced_at %}synced {{ leaf.tests_synced_at|timesince }} ago{% else %}never synced{% endif %}
             </div>
         </div>
     </div>
@@ -186,18 +188,24 @@
         <dt>Category</dt><dd>{{ leaf.category|default:"—" }}{% if not leaf.category %}
             <button id="system-walk-btn" class="btn btn-sm btn-ghost" type="button" style="margin-left: 8px;"
                     data-sync-url="{% url 'explore:system_sync' system_id=leaf.system_id %}?project={{ leaf.project }}"
-                    title="Not mirrored yet — re-walk this system’s structure from HWDB">not mirrored — re-walk system</button>{% endif %}</dd>
+                    title="Not mirrored yet — re-walk this system’s structure from HWDB">not mirrored — re-walk system</button>{% endif %}
+            {# Shipping-container classification (#101): items of such types are boxes — Shipments tab, packing, ship/receive checklists. Architects flip it here. #}
+            {% if is_shipping %}<span class="sep">|</span><span title="{% if shipping_override %}Treated as shipping containers — set from this page{% else %}Listed in curation.yaml’s shipping_types — edit the yaml to change{% endif %}">shipping-container</span>{% if can_edit_type and shipping_override %} <form method="post" action="{% url 'explore:shipping_type_toggle' part_type_id=leaf.part_type_id %}" style="display:inline; margin:0;">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><input type="hidden" name="action" value="remove"><button class="linkish" title="Stop treating this type’s items as shipping containers">undo</button></form>{% endif %}
+            {% elif can_edit_type %}<span class="sep">|</span><form method="post" action="{% url 'explore:shipping_type_toggle' part_type_id=leaf.part_type_id %}" style="display:inline; margin:0;">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><button class="linkish" title="Treat this type’s items as shipping containers: Shipments tab, packing, ship/receive checklists (needs the HWDB architect role)">treat as shipping-container</button></form>{% endif %}</dd>
         <dt>System</dt><dd>{{ leaf.system_name }} ({{ leaf.system_id }})</dd>
         <dt>Subsystem</dt><dd>{{ leaf.subsystem_name }} ({{ leaf.subsystem_id }})</dd>
         <dt>{% if is_shipping %}Boxes in HWDB{% else %}Items in HWDB{% endif %}</dt><dd>{{ leaf.n_components }}</dd>
         <dt>Test events</dt><dd>{{ leaf.n_tests }}</dd>
         {% if can_edit_es %}
-        <dt>Exec summary</dt><dd><a href="{% url 'explore:es_config' part_type_id=leaf.part_type_id %}?next={{ request.path|urlencode }}" target="_blank" rel="noopener" title="Create or edit the type’s executive-summary config (ES_{{ leaf.part_type_id }}_*.json in HWDB)">Add/Edit the ES config <span aria-hidden="true">&#x2197;</span></a></dd>
-        <dt>Checklists</dt><dd><a href="{% url 'explore:checklist_config' part_type_id=leaf.part_type_id %}?next={{ request.path|urlencode }}" target="_blank" rel="noopener" title="Create or edit the type’s consortium checklists (Checklist_{{ leaf.part_type_id }}_*.json in HWDB) — they render as fill-out forms on every item">Add/Edit checklists <span aria-hidden="true">&#x2197;</span></a></dd>
-        <dt>New item</dt><dd><a href="{% url 'explore:item_create' part_type_id=leaf.part_type_id %}" target="_blank" rel="noopener" title="Mint a new item of this type in HWDB (institution + optional serial), then fill its checklist">Create an item <span aria-hidden="true">&#x2197;</span></a></dd>
-        {% endif %}
-        {% if can_edit_type %}
-        <dt>Positions</dt><dd><a href="{% url 'explore:box_type' part_type_id=leaf.part_type_id %}" target="_blank" rel="noopener" title="Add, edit or delete the type’s connector positions, or clone it into a new type (needs the HWDB architect role)">Edit the type’s positions <span aria-hidden="true">&#x2197;</span></a></dd>
+        {# One compact "Manage" row for every type-level editing action (review of #101): the pane must not grow a line per link. #}
+        <dt>Manage</dt><dd class="span">
+          <a href="{% url 'explore:es_config' part_type_id=leaf.part_type_id %}?next={{ request.path|urlencode }}" target="_blank" rel="noopener" title="Create or edit the type’s executive-summary config (ES_{{ leaf.part_type_id }}_*.json in HWDB)">ES config <span aria-hidden="true">&#x2197;</span></a>
+          <span class="sep">·</span><a href="{% url 'explore:checklist_config' part_type_id=leaf.part_type_id %}?next={{ request.path|urlencode }}" target="_blank" rel="noopener" title="Create or edit the type’s consortium checklists (Checklist_{{ leaf.part_type_id }}_*.json in HWDB) — they render as fill-out forms on every item">Checklists <span aria-hidden="true">&#x2197;</span></a>
+          <span class="sep">·</span><a href="{% url 'explore:item_create' part_type_id=leaf.part_type_id %}" target="_blank" rel="noopener" title="Mint a new item of this type in HWDB (institution + optional serial), then fill its checklist">New item <span aria-hidden="true">&#x2197;</span></a>
+          {% if can_edit_type %}
+          <span class="sep">·</span><a href="{% url 'explore:box_type' part_type_id=leaf.part_type_id %}" target="_blank" rel="noopener" title="Add, edit or delete the type’s connector positions, or clone it into a new type (needs the HWDB architect role)">Positions <span aria-hidden="true">&#x2197;</span></a>
+          {% endif %}
+        </dd>
         {% endif %}
     </dl>
     <pre id="system-sync-log"></pre>

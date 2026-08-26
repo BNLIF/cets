@@ -28,6 +28,8 @@ urlpatterns = [
     path("scan/feed/", views.explore_scan_feed_view, name="scan_feed"),
     path("box-create/<str:part_type_id>/", views.explore_box_create_view,
          name="box_create"),
+    path("shipping-type/<str:part_type_id>/", views.explore_shipping_type_toggle_view,
+         name="shipping_type_toggle"),
     path("box-type/<str:part_type_id>/", views.explore_box_type_view,
          name="box_type"),
     path("es-config/<str:part_type_id>/", views.explore_es_config_view,

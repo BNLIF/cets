@@ -54,6 +54,16 @@ class CurationInstanceTest(TestCase):
         self.assertNotIn(DEV_PTID, curation.shipping_types("prod"))
         self.assertFalse(curation.is_shipping_type("prod", DEV_PTID))
 
+    def test_ui_override_adds_a_shipping_type_per_instance(self):
+        # #101: an "Add to Shipments" row unions with the yaml, on its own
+        # instance only
+        from explore.models import ShippingTypeOverride
+        ShippingTypeOverride.objects.create(instance="dev", part_type_id="D00599800026")
+        self.assertTrue(curation.is_shipping_type("dev", "D00599800026"))
+        self.assertIn("D00599800026", curation.shipping_types("dev"))
+        self.assertFalse(curation.is_shipping_type("prod", "D00599800026"))
+        self.assertIn(DEV_PTID, curation.shipping_types("dev"))       # yaml entries still there
+
     def test_shipping_subsystem_selector(self):
         # "86.990": every type under FD Installation › Shipping Box/Container
         # is a shipping box, present and future.

@@ -122,9 +122,17 @@ def _split_shipping(instance: str) -> tuple[set[str], set[tuple[int, int]]]:
 
 def shipping_types(instance: str) -> set[str]:
     """Explicitly-listed component-type ids whose items are shipping boxes
-    (ADR-0013). Whole-subsystem selectors are separate — see
-    ``shipping_subsystems``."""
-    return _split_shipping(instance)[0]
+    (ADR-0013): the yaml entries plus the UI-added overrides (#101,
+    ``ShippingTypeOverride`` rows). Whole-subsystem selectors are separate —
+    see ``shipping_subsystems``."""
+    return _split_shipping(instance)[0] | shipping_overrides(instance)
+
+
+def shipping_overrides(instance: str) -> set[str]:
+    """Part-type ids promoted to shipping types from the type page (#101)."""
+    from .models import ShippingTypeOverride   # lazy: curation loads before apps
+    return set(ShippingTypeOverride.for_instance(instance)
+               .values_list("part_type_id", flat=True))
 
 
 def shipping_subsystems(instance: str) -> set[tuple[int, int]]:
