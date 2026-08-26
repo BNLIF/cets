@@ -57,6 +57,12 @@
   .sd-kv td { padding: 5px 8px; border-top: 1px solid var(--rule); vertical-align: top; }
   .sd-kv tr:first-child td { border-top: none; }
   .sd-kv .k { color: var(--faint); width: 46%; }
+  /* #102: per-row spec delete (architects) */
+  .sd-kv .sd-delc { width: 28px; padding: 3px 4px; text-align: right; }
+  .sd-kv .sd-delc form { margin: 0; }
+  .sd-del { font: inherit; font-size: 11px; color: var(--faint); background: none;
+    border: 1px solid transparent; border-radius: var(--r-sm); padding: 2px 5px; cursor: pointer; }
+  .sd-del:hover { color: var(--bad, #a33); border-color: var(--rule); }
   /* Fold-away display for big spec cards / values. */
   .sd-fold > summary { cursor: pointer; color: var(--accent-ink); font-size: 12px; padding: 6px 8px; }
   .sd-fold[open] > summary { display: none; }

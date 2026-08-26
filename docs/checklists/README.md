@@ -67,7 +67,10 @@ each submission replaces them wholesale, and sections its previous
 submission wrote that the schema no longer has are dropped — so renaming or
 removing fields doesn't leave stale values behind. Keys written by anything
 else (other checklists, the FNAL UI) are left alone. The part page shows the
-whole blob as one "DATA" card with `section › label` rows.
+whole blob as one "DATA" card with `section › label` rows; HWDB architects
+get a ✕ per row there to remove a stale key (#102) — the FNAL UI has no
+key deletion, and datasheet-level keys stay untouchable (HWDB validates
+them against the type template).
 
 ## Top-level schema keys (#97)
 

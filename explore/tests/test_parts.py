@@ -17,7 +17,7 @@ from django.utils import timezone
 
 from explore import navigation, parts, shipments
 from explore.models import HierarchyNode as H
-from explore.models import HwdbComponentEvent
+from explore.models import ActivityEvent, HwdbComponentEvent
 from hwdb.fnal.bearer import FnalLinkRequired
 
 
@@ -73,6 +73,12 @@ class SpecSectionsTest(TestCase):
             "Measurements — J › Thickness": '{"P1": 2.0}'})       # H and J both kept
         self.assertEqual(secs["DATA"]["attachments"], [{"label": "shot", "image_id": "img-3"}])
         self.assertIn('"Channels": 64', secs["DATA"]["json"])
+        # #102: rows know their origin for the delete control
+        by = {f["label"]: f["spec_del"] for f in secs["DATA"]["fields"]}
+        self.assertEqual(by["Channels"], {"section": "", "label": "Channels"})
+        self.assertEqual(by["Measurements — H › Thickness"],
+                         {"section": "Measurements — H", "label": "Thickness"})
+        self.assertNotIn("spec_del", secs["Specifications"]["fields"][0])   # datasheet keys: no
 
     def test_bare_list_data_keeps_its_specifications_card(self):
         secs = parts.spec_sections({"DATA": [{"a": "1"}]})
@@ -602,6 +608,52 @@ class PartViewTest(TestCase):
         d = parts.part_detail(api, "X-1", is_shipping=False)
         self.assertEqual(d["tests"], [])
         self.assertEqual(d["facts"][0]["label"], "Serial number")  # rest still built
+
+    def test_spec_row_delete_control_is_architect_only(self):
+        api = self._api()
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api), \
+             mock.patch("explore.views._is_architect", return_value=True):
+            body = self.client.get(self.url).content.decode()
+        self.assertIn('class="sd-del"', body)
+        self.assertIn('name="label" value="Channels"', body)
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api), \
+             mock.patch("explore.views._is_architect", return_value=False):
+            body = self.client.get(self.url).content.decode()
+        self.assertNotIn('class="sd-del"', body)
+
+    def test_spec_row_delete_patches_the_item(self):
+        api = self._api()
+        api.get_component.return_value["data"]["specifications"] = [{"Note": "", "DATA": {
+            "Channels": 64, "Measurements — H": {"Thickness": {"P1": 1.6}},
+            "Measurements — J": {"Thickness": {"P1": 2.0}, "Other": 1}}}]
+        api.patch_component.return_value = {"status": "OK"}
+        url = self.url + "spec-delete/"
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api), \
+             mock.patch("explore.views._is_architect", return_value=True):
+            r1 = self.client.post(url, {"section": "Measurements — H", "label": "Thickness"})
+            spec1 = api.patch_component.call_args.args[1]["specifications"]
+            self.client.post(url, {"section": "", "label": "Channels"})
+            spec2 = api.patch_component.call_args.args[1]["specifications"]
+            self.client.post(url, {"section": "Nope", "label": "x"})
+        self.assertEqual(r1.status_code, 302)
+        self.assertNotIn("Measurements — H", spec1["DATA"])           # emptied section dropped
+        self.assertEqual(spec1["DATA"]["Measurements — J"], {"Thickness": {"P1": 2.0}, "Other": 1})
+        self.assertEqual(spec1["Note"], "")                          # datasheet key rides through
+        self.assertNotIn("Channels", spec2["DATA"])
+        self.assertEqual(api.patch_component.call_count, 2)          # unknown key → no PATCH
+        self.assertEqual(ActivityEvent.objects.filter(kind="spec").count(), 2)
+
+    def test_spec_row_delete_refused_for_non_architects(self):
+        api = self._api()
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api), \
+             mock.patch("explore.views._is_architect", return_value=False):
+            resp = self.client.post(self.url + "spec-delete/", {"label": "Channels"})
+        self.assertEqual(resp.status_code, 403)
+        api.patch_component.assert_not_called()
 
     def test_renders_generic_part(self):
         with mock.patch("explore.views.mint_for", return_value="bearer"), \

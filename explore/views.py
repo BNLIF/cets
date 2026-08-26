@@ -1021,6 +1021,9 @@ def explore_part_view(request, part_id):
         "es_cfg": es_cfg,
         "es_cfg_msg": es_cfg_msg,
         "can_es": can_es,
+        # #102: architects may delete a row from the DATA card (non-shipping
+        # items on write instances — HWDB itself offers no key deletion)
+        "can_delete_spec": can_es and not is_shipping and _is_architect(request, inst, api),
         # Consortium checklists defined on this type (#95), by name.
         "part_checklists": part_checklists,
         # Ship/receive checklist runs on this box (issue #65), by workflow.
@@ -2725,6 +2728,72 @@ def _ensure_spec_data(request, api, part_type_id) -> str | None:
                 f"which “→ Specs” fields need — an HWDB architect must define it "
                 f"first (the type's New-item page offers this)")
     return _define_type_spec_data(api, part_type_id, type_record)
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_spec_delete_view(request, part_id):
+    """#102: remove one key from the item's latest specifications DATA —
+    ``label`` at the top level, or ``section`` + ``label`` for a nested
+    checklist row (an emptied section goes too). Architects on write
+    instances, non-shipping items only; datasheet-level keys are never
+    touched (HWDB validates those against the type template)."""
+    inst = instance_of(request)
+    part_url = _rev(request, "explore:part", args=[part_id])
+    ptid = part_id.rsplit("-", 1)[0]
+    if inst not in settings.HWDB_WRITE_INSTANCES or curation.is_shipping_type(inst, ptid):
+        return HttpResponseForbidden("Specification edits are not enabled here.")
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': part_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(part_url)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    if not _is_architect(request, inst, api):
+        return HttpResponseForbidden("Deleting specification rows needs the HWDB architect role.")
+    section = (request.POST.get("section") or "").strip()
+    label = (request.POST.get("label") or "").strip()
+    shown = f"{section} › {label}" if section else label
+    try:
+        item = api.get_component(part_id).get("data") or {}
+    except requests.RequestException as e:
+        messages.error(request, f"Couldn’t read the item — {_hwdb_error_detail(e)}")
+        return redirect(part_url)
+    specs_list = item.get("specifications") or [{}]
+    specs = specs_list[-1] if isinstance(specs_list[-1], dict) else {}
+    data = specs.get("DATA") if isinstance(specs.get("DATA"), dict) else {}
+    holder = data.get(section) if section else data
+    if not (label and isinstance(holder, dict) and label in holder):
+        messages.error(request, f"“{shown}” is not in this item's specifications DATA.")
+        return redirect(part_url)
+    del holder[label]
+    if section and not holder:
+        del data[section]
+    specs["DATA"] = data
+    manufacturer = item.get("manufacturer")
+    try:
+        body = api.patch_component(part_id, {
+            "part_id": part_id,
+            "comments": item.get("comments"),
+            "manufacturer": {"id": manufacturer["id"]} if manufacturer else None,
+            "serial_number": item.get("serial_number"),
+            "specifications": specs,
+        })
+        ok, detail = body.get("status") == "OK", body.get("data")
+    except requests.RequestException as e:
+        ok, detail = False, _hwdb_error_detail(e)
+    if not ok:
+        messages.error(request, f"HWDB rejected the update — {detail}")
+        return redirect(part_url)
+    activity.log(inst, ActivityEvent.KIND_SPEC,
+                 f"Removed “{shown}” from {part_id}'s specifications",
+                 part_id=part_id, part_type_id=ptid, actor=activity.actor_of(request))
+    messages.success(request, f"Removed “{shown}” from the item's specifications.")
+    return redirect(part_url)
 
 
 def _patch_item_flags(api, part_id, status_id, certified, uploaded, comment) -> None:

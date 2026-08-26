@@ -313,6 +313,7 @@ class ActivityEvent(InstanceScoped):
     KIND_PACK = "pack"
     KIND_ES = "es"
     KIND_CHECKLIST = "checklist"
+    KIND_SPEC = "spec"
     KIND_LABELS = {
         KIND_SYNC: "Sync",
         KIND_MINTED: "New box",
@@ -320,6 +321,7 @@ class ActivityEvent(InstanceScoped):
         KIND_PACK: "Packing",
         KIND_ES: "Exec summary",
         KIND_CHECKLIST: "Checklist",
+        KIND_SPEC: "Item specs",
     }
 
     kind = models.CharField(max_length=12)

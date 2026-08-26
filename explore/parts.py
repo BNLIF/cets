@@ -63,9 +63,17 @@ def spec_sections(spec_block: dict | None) -> list[dict]:
         if key == "_meta":
             continue
         if key == "DATA" and isinstance(val, dict):
-            entries = [({f"{k} › {kk}": vv for kk, vv in v.items()}
-                        if isinstance(v, dict) else {k: v}) for k, v in val.items()]
-            fields, attachments = fold_entries(entries)
+            # rows remember where they came from so the part page can offer
+            # architects a per-row delete (#102)
+            fields, attachments = [], []
+            for k, v in val.items():
+                rows = v.items() if isinstance(v, dict) else [(k, v)]
+                for kk, vv in rows:
+                    f, a = fold_entries([{(f"{k} › {kk}" if isinstance(v, dict) else k): vv}])
+                    for row in f:
+                        row["spec_del"] = {"section": k if isinstance(v, dict) else "", "label": kk}
+                    fields += f
+                    attachments += a
             if fields or attachments:
                 out_data = {"title": "DATA", "fields": fields, "attachments": attachments,
                             "json": json.dumps(val, indent=2, ensure_ascii=False)}
