@@ -94,6 +94,25 @@ them against the type template).
   write-instance user — schemas are versioned in HWDB, so a bad edit is
   always recoverable, and dev culture favors low friction.
 
+## Reaching a checklist from the type page (#110)
+
+The type page's meta panel lists the type's checklists (filled in lazily —
+the mirror-only page never waits on HWDB; no checklists or no FNAL link =
+no row). Each opens the checklist's **PID chooser** — Hajime's tablet
+flow: reach the checklist first, pick the item there.
+
+- **Scan or type a PID** (must belong to this type), or **click a row** in
+  the items table — the type view's mirror-backed paginated table, plus a
+  column showing when THIS checklist was last submitted on each item (from
+  the mirrored test events, so it reflects the last sync).
+- **+ New item** goes through the #97 create page and, once minted,
+  continues straight into this checklist (`?checklist=<name>` on the
+  New-item URL).
+
+Every path lands on the item's own checklist page — the familiar form,
+pre-filled when a submission already exists. The chooser itself never
+submits anything.
+
 ## New items (#97)
 
 Item creation is a separate page, not a checklist mode: the type page's

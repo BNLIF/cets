@@ -10,7 +10,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_not_required
 from django.core.paginator import Paginator
-from django.db.models import F, Q
+from django.db.models import F, Max, Q
 from django.http import (
     Http404, HttpResponse, HttpResponseBadRequest, HttpResponseForbidden,
     JsonResponse,
@@ -31,12 +31,12 @@ from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
 from . import (activity, charts, checklistforms, checklists, curation, events,
                execsummary, navigation, parts, scanning, watches)
 from .auth import fnal_login_required, provision_and_login
-from .events import physics_date_field, sync_test_events
+from .events import physics_date_field, refresh_component_row, sync_test_events
 from .hierarchy import sync_hierarchy, sync_system
 from .instances import instance_of, namespace_of
 from .models import (
     ActivityEvent, BoxChecklist, ChecklistDraft, HierarchyNode, ShippingTypeOverride,
-    HierarchySyncState, HwdbComponentEvent, PackScan, ShipmentItem,
+    HierarchySyncState, HwdbComponentEvent, HwdbTestEvent, PackScan, ShipmentItem,
 )
 from .queries import (
     component_breakdowns, component_qc_flags, component_type_progress,
@@ -1133,6 +1133,7 @@ def explore_part_location_view(request, part_id):
         except Exception as e:
             logger.warning("refresh_box(%s) failed: %s", part_id, e)
         row = ShipmentItem.for_instance(inst).filter(part_id=part_id).first()
+    refresh_component_row(api, inst, part_id)   # institution/updated (#110 review)
     messages.success(request, "Location update posted to HWDB.")
     activity.log(
         inst, ActivityEvent.KIND_LOCATION,
@@ -2495,6 +2496,20 @@ def explore_checklist_view(request, part_id, name):
         else:
             if draft:
                 draft.delete()   # the submission owns the state now
+            try:
+                # #110 review: append the fresh test event to the mirror right
+                # away so the PID chooser's "Last checklist" column (and the
+                # test plots) see it without waiting for a re-sync, which
+                # rewrites these rows from HWDB anyway.
+                HwdbTestEvent.objects.create(
+                    instance=inst, part_type_id=ptid, part_id=part_id,
+                    test_type_name=schema["test_type_name"],
+                    created=timezone.now())
+            except Exception as e:
+                logger.warning("mirror append for %s failed: %s", part_id, e)
+            # the Item card may have changed status/flags/serial/location —
+            # pull the item's mirror row current too
+            refresh_component_row(api, inst, part_id)
             messages.success(
                 request, f"Checklist “{schema['name']}” submitted — every "
                          f"submission is a new version, old ones are preserved.")
@@ -2541,6 +2556,96 @@ def explore_checklist_view(request, part_id, name):
         "draft": draft,
         "no_test_type": not schema["test_type_name"],
     })
+
+
+@login_not_required
+@fnal_login_required
+def explore_type_checklist_view(request, part_type_id, name):
+    """#110 (Hajime): the checklist's PID chooser, reached from the type
+    page. Scan/type a PID or pick one from the items table (the type view's
+    mirror-backed table, plus a column showing when THIS checklist was last
+    submitted on each item) and you land on that item's own checklist page —
+    the familiar form, pre-filled when a submission exists. "New item" goes
+    through the #97 create page and continues straight into this checklist."""
+    inst = instance_of(request)
+    page_url = _rev(request, "explore:type_checklist", args=[part_type_id, name])
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return HttpResponseForbidden("Checklists are not enabled here.")
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(_rev(request, "explore:home"))
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    schema, msg = checklistforms.load(api, part_type_id, name)
+    if schema is None:
+        raise Http404(msg)
+
+    pid = (request.GET.get("pid") or "").strip().upper()
+    if pid:
+        if re.fullmatch(re.escape(part_type_id) + r"-\d{5}", pid):
+            return redirect(_rev(request, "explore:checklist", args=[pid, name]))
+        messages.error(
+            request, f"\u201c{pid}\u201d is not an item of this type \u2014 its PIDs "
+                     f"look like {part_type_id}-00001. Scan again, or pick "
+                     f"one from the table.")
+        return redirect(page_url)
+
+    # The type view's items table (mirror-backed, same ordering/page size),
+    # plus per row the date THIS checklist's test type was last recorded —
+    # mirror data, so it reflects the last sync, not this minute.
+    rows = (HwdbComponentEvent.for_instance(inst)
+            .filter(part_type_id=part_type_id)
+            .order_by(F("updated").desc(nulls_last=True),
+                      F("created").desc(nulls_last=True), "part_id"))
+    parts_page = Paginator(rows, 50).get_page(request.GET.get("page"))
+    filled = {}
+    if schema["test_type_name"]:
+        filled = dict(
+            HwdbTestEvent.for_instance(inst)
+            .filter(part_type_id=part_type_id,
+                    test_type_name=schema["test_type_name"],
+                    part_id__in=[p.part_id for p in parts_page])
+            .values("part_id").annotate(last=Max("created"))
+            .values_list("part_id", "last"))
+    for p in parts_page:
+        p.filled = filled.get(p.part_id)
+
+    ctx = {
+        "active_nav": "hardware",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "part_type_id": part_type_id,
+        "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
+        "cl_name": name,
+        "schema": schema,
+        "schema_msg": msg,
+        "parts_page": parts_page,
+    }
+    if getattr(request, "htmx", False) and request.htmx.target == "clp-pane":
+        return render(request, "explore/_checklist_pids_table.html", ctx)
+    return render(request, "explore/checklist_entry.html", ctx)
+
+
+
+@login_not_required
+def explore_checklist_names_view(request, part_type_id):
+    """#110: the type's checklist names as JSON. The type page fills its
+    Checklists row lazily from this (the leaf stays mirror-only on render,
+    like the institutions endpoint) — unlinked users or any failure get an
+    empty list and the row simply doesn't show."""
+    inst = instance_of(request)
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return JsonResponse({"checklists": []})
+    try:
+        bearer = mint_for(request)
+    except (FnalLinkRequired, FnalUnavailable):
+        return JsonResponse({"checklists": []})
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    return JsonResponse({"checklists": [
+        r["name"] for r in checklistforms.available(api, part_type_id)]})
 
 
 CHECKLIST_SKELETON = {
@@ -2777,16 +2882,24 @@ def explore_item_create_view(request, part_type_id):
             logger.warning("post-create sync for %s failed: %s",
                            part_type_id, e)
         messages.success(request, f"Item {part_id} minted in the {inst} HWDB.")
+        # #110: arrived via a checklist's PID chooser — continue into THAT
+        # checklist; else the #97 rule (single checklist, or the part page).
+        via = request.POST.get("checklist") or ""
+        if via in checklist_names:
+            return redirect(_rev(request, "explore:checklist",
+                                 args=[part_id, via]))
         if len(checklist_names) == 1:
             return redirect(_rev(request, "explore:checklist",
                                  args=[part_id, checklist_names[0]]))
         return redirect(_rev(request, "explore:part", args=[part_id]))
 
+    via = request.GET.get("checklist") or ""
     return render(request, "explore/item_create.html", {
         "sidebar": navigation.sidebar_tree(inst, {}),
         "part_type_id": part_type_id,
         "institutions": _institution_options(api),
         "checklist_names": checklist_names,
+        "via_checklist": via if via in checklist_names else "",
         "spec_template": json.dumps(template, indent=2, ensure_ascii=False),
         "spec_has_data": has_data,
         "can_define_type_data": (not has_data) and is_arch,
@@ -2920,6 +3033,7 @@ def explore_part_edit_view(request, part_id):
         {"comments": "item_comments"}.get(k, k), k) for k in iv["patch"])
     activity.log(inst, ActivityEvent.KIND_ITEM, f"{part_id}: {changed} updated",
                  part_id=part_id, part_type_id=ptid, actor=activity.actor_of(request))
+    refresh_component_row(api, inst, part_id)   # keep the mirror row current (#110 review)
     messages.success(request, f"Updated {changed}.")
     return redirect(part_url)
 

@@ -196,11 +196,15 @@
         <dt>Subsystem</dt><dd>{{ leaf.subsystem_name }} ({{ leaf.subsystem_id }})</dd>
         <dt>{% if is_shipping %}Boxes in HWDB{% else %}Items in HWDB{% endif %}</dt><dd>{{ leaf.n_components }}</dd>
         <dt>Test events</dt><dd>{{ leaf.n_tests }}</dd>
+        {# #110: fill-out links for the type's consortium checklists — each opens the PID chooser (scan / items table / new item). Filled lazily so the mirror-only render never waits on HWDB; no checklists = no row. #}
+        <dt id="cl-names-dt" hidden>Checklists</dt><dd id="cl-names-dd" class="span" hidden
+            data-names-url="{% url 'explore:checklist_names' part_type_id=leaf.part_type_id %}"
+            data-open-url="{% url 'explore:type_checklist' part_type_id=leaf.part_type_id name='__N__' %}"></dd>
         {% if can_edit_es %}
         {# One compact "Manage" row for every type-level editing action (review of #101): the pane must not grow a line per link. #}
         <dt>Manage</dt><dd class="span">
           <a href="{% url 'explore:es_config' part_type_id=leaf.part_type_id %}?next={{ request.path|urlencode }}" target="_blank" rel="noopener" title="Create or edit the type’s executive-summary config (ES_{{ leaf.part_type_id }}_*.json in HWDB)">ES config <span aria-hidden="true">&#x2197;</span></a>
-          <span class="sep">·</span><a href="{% url 'explore:checklist_config' part_type_id=leaf.part_type_id %}?next={{ request.path|urlencode }}" target="_blank" rel="noopener" title="Create or edit the type’s consortium checklists (Checklist_{{ leaf.part_type_id }}_*.json in HWDB) — they render as fill-out forms on every item">Checklists <span aria-hidden="true">&#x2197;</span></a>
+          <span class="sep">·</span><a href="{% url 'explore:checklist_config' part_type_id=leaf.part_type_id %}?next={{ request.path|urlencode }}" target="_blank" rel="noopener" title="Create or edit the type’s consortium checklists (Checklist_{{ leaf.part_type_id }}_*.json in HWDB) — they render as fill-out forms on every item">Edit checklists <span aria-hidden="true">&#x2197;</span></a>
           <span class="sep">·</span><a href="{% url 'explore:item_create' part_type_id=leaf.part_type_id %}" target="_blank" rel="noopener" title="Mint a new item of this type in HWDB (institution + optional serial), then fill its checklist">New item <span aria-hidden="true">&#x2197;</span></a>
           {% if can_edit_type %}
           <span class="sep">·</span><a href="{% url 'explore:box_type' part_type_id=leaf.part_type_id %}" target="_blank" rel="noopener" title="Add, edit or delete the type’s connector positions, or clone it into a new type (needs the HWDB architect role)">Positions <span aria-hidden="true">&#x2197;</span></a>
@@ -500,6 +504,25 @@
         var ok = await stream("{% url 'explore:sync' %}", document.getElementById("sync-log"), "Refreshing hierarchy…\n");
         if (ok) { window.location.reload(); } else { rb.disabled = false; }
     });
+    // #110: the Checklists row — filled after render so the page never waits
+    // on HWDB; an empty list (no checklists, or FNAL not linked) keeps it hidden
+    var clDd = document.getElementById("cl-names-dd");
+    if (clDd) fetch(clDd.getAttribute("data-names-url"))
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+            var names = j.checklists || [];
+            if (!names.length) return;
+            var open = clDd.getAttribute("data-open-url");
+            clDd.innerHTML = names.map(function (n) {
+                return '<a href="' + open.replace("__N__", encodeURIComponent(n)) +
+                       '" title="fill this checklist out — scan or pick the item’s PID there, or mint a new item">' +
+                       n.replace(/&/g, "&amp;").replace(/</g, "&lt;") + '</a>';
+            }).join('<span class="sep">·</span>');
+            clDd.hidden = false;
+            document.getElementById("cl-names-dt").hidden = false;
+        })
+        .catch(function () {});
+
     var nodeLog = document.getElementById("node-sync-log");
     var syncBtns = document.querySelectorAll(".node-sync-btn");
     async function nodeSync(url, mode) {

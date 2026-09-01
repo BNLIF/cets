@@ -1,7 +1,7 @@
 {
   "name": "PCB Panel Interface",
   "test_type_name": "PCB Panel Interface",
-  "instructions": "Reception and preparation checks for a PCB panel — the iPad app's PCB Panel Interface scene.",
+  "instructions": "",
   "sections": [
     {
       "title": "Identification",

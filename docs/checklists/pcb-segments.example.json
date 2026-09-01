@@ -1,7 +1,7 @@
 {
   "name": "PCB Segments Interface",
   "test_type_name": "PCB Segments Interface",
-  "instructions": "Reception checks for a PCB segments batch — the iPad app's PCB Segments Interface scene.",
+  "instructions": "",
   "sections": [
     {
       "title": "Identification",

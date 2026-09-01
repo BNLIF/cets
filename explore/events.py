@@ -241,6 +241,26 @@ def sweep_enabled(api, instance: str, part_type_id: str) -> int | None:
     return len(disabled)
 
 
+def refresh_component_row(api, instance: str, part_id: str) -> None:
+    """One ``components/{pid}`` fetch → the item's mirror row updated in
+    place (#110 review: a checklist's Item card and the part page's ✎ Edit
+    change status, QC flags, serial, manufacturer and location, and the
+    mirror must not wait for a type re-sync to show them). Best-effort: a
+    failure just leaves the row stale until the next sync."""
+    try:
+        d = _fetch_component(api, part_id, None, {},
+                             need_detail=True, need_tests=False)
+        HwdbComponentEvent.objects.update_or_create(
+            instance=instance, part_type_id=part_id.rsplit("-", 1)[0],
+            part_id=part_id,
+            defaults={k: d[k] for k in (
+                "created", "updated", "serial_number", "created_by", "status",
+                "status_id", "manufacturer", "institution", "is_installed",
+                "qaqc_uploaded", "certified_qaqc", "parent_part_id")})
+    except Exception as e:
+        logger.warning("component row refresh for %s failed: %s", part_id, e)
+
+
 def _flag(v) -> bool | None:
     """A raw boolean flag off the detail record; ``None`` when absent."""
     return bool(v) if v is not None else None

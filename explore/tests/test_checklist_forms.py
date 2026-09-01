@@ -1026,3 +1026,156 @@ class ItemCreateTest(TestCase):
         with m1, m2:
             self.client.post(NEW_PAGE, {"serial_number": "SN-9"})
         api.create_component.assert_not_called()
+
+
+class TypeChecklistTest(TestCase):
+    """#110: the checklist's PID chooser — scan/pick an item (or mint one)
+    and land on its own checklist page; the chooser never submits."""
+
+    TYPE_PAGE = f"/hw/dev/checklist/{PTID}/{NAME}/"
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("n", "n@n.io", "pw")
+        self.client.force_login(self.user)
+
+    def test_chooser_renders_table_with_submitted_column(self):
+        from django.utils import timezone as tz
+        from explore.models import HwdbComponentEvent, HwdbTestEvent
+        HwdbComponentEvent.objects.create(
+            instance="dev", part_type_id=PTID, part_id=PART,
+            serial_number="SN-1")
+        HwdbComponentEvent.objects.create(
+            instance="dev", part_type_id=PTID, part_id=f"{PTID}-00151")
+        HwdbComponentEvent.objects.create(          # other type — not listed
+            instance="dev", part_type_id="X001", part_id="X001-00001")
+        HwdbTestEvent.objects.create(               # PART has this checklist
+            instance="dev", part_type_id=PTID, part_id=PART,
+            test_type_name=SCHEMA["test_type_name"],
+            created=tz.make_aware(tz.datetime(2026, 8, 20)))
+        m1, m2 = _mocked(_api())
+        with m1, m2:
+            html = self.client.get(self.TYPE_PAGE).content.decode()
+        self.assertIn('id="clp-pid"', html)                       # scan box
+        self.assertIn(f"/hw/dev/part/{PART}/checklist/{NAME}/", html)
+        self.assertIn(f"/hw/dev/part/{PTID}-00151/checklist/{NAME}/", html)
+        self.assertNotIn("X001-00001", html)
+        self.assertIn("&#10003; 2026-08-20", html)                # submitted col
+        self.assertIn(f"/hw/dev/part-new/{PTID}/?checklist={NAME}", html)
+
+    def test_valid_pid_redirects_to_that_items_checklist(self):
+        m1, m2 = _mocked(_api())
+        with m1, m2:
+            resp = self.client.get(self.TYPE_PAGE, {"pid": PART.lower()})
+        self.assertEqual(resp["Location"],
+                         f"/hw/dev/part/{PART}/checklist/{NAME}/")
+
+    def test_wrong_type_pid_is_refused(self):
+        m1, m2 = _mocked(_api())
+        with m1, m2:
+            resp = self.client.get(self.TYPE_PAGE,
+                                   {"pid": "X99999999999-00001"}, follow=True)
+        self.assertIn("not an item of this type", resp.content.decode())
+
+    def test_htmx_pager_returns_just_the_table_pane(self):
+        from explore.models import HwdbComponentEvent
+        for i in range(60):
+            HwdbComponentEvent.objects.create(
+                instance="dev", part_type_id=PTID, part_id=f"{PTID}-{i:05d}")
+        m1, m2 = _mocked(_api())
+        with m1, m2:
+            html = self.client.get(self.TYPE_PAGE, {"page": "2"},
+                                   HTTP_HX_REQUEST="true",
+                                   HTTP_HX_TARGET="clp-pane").content.decode()
+        self.assertIn('id="clp-pane"', html)
+        self.assertNotIn("<html", html)                # the pane only
+        self.assertIn("Page 2 of 2", html)
+
+    def test_submit_appends_the_test_event_to_the_mirror(self):
+        # the "Last checklist" column must see a submission without waiting
+        # for a type re-sync
+        from explore.models import HwdbTestEvent
+        m1, m2 = _mocked(_api())
+        with m1, m2:
+            self.client.post(PAGE, {"f0-0": "PCB0001"})
+        row = HwdbTestEvent.objects.get(instance="dev", part_id=PART)
+        self.assertEqual(row.part_type_id, PTID)
+        self.assertEqual(row.test_type_name, SCHEMA["test_type_name"])
+
+    def test_submit_refreshes_the_items_mirror_row(self):
+        # the Item card can change status/flags/serial — the mirrored
+        # component row must not stay stale until a type re-sync
+        from explore.models import HwdbComponentEvent
+        api = _api()
+        api._make_request.return_value = {"data": {
+            "created": "2026-08-01T00:00:00", "updated": "2026-08-27T09:00:00",
+            "serial_number": "SN-2", "creator": {"name": "chao"},
+            "status": {"id": 130, "name": "QA/QC Tests - Failed"},
+            "manufacturer": {"name": "Acme"}, "institution": {"name": "BNL"},
+            "is_installed": False, "qaqc_uploaded": True,
+            "certified_qaqc": False}}
+        HwdbComponentEvent.objects.create(     # the stale pre-submit row
+            instance="dev", part_type_id=PTID, part_id=PART,
+            serial_number="SN-1", status="Waiting on QA/QC Tests",
+            status_id=110)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"f0-0": "PCB0001", **ITEM_POST})
+        row = HwdbComponentEvent.objects.get(instance="dev", part_id=PART)
+        self.assertEqual(row.serial_number, "SN-2")
+        self.assertEqual(row.status_id, 130)
+        self.assertEqual(row.institution, "BNL")
+        self.assertTrue(row.qaqc_uploaded)
+
+    def test_new_item_continues_into_the_named_checklist(self):
+        # several checklists on the type — ?checklist= must win over the
+        # part-page fallback
+        api = _api()
+        api.get_component_type_images.return_value = {"data": [
+            {"image_id": "a", "created": "2026-08-01T00:00:00",
+             "image_name": f"Checklist_{PTID}_{NAME}.json"},
+            {"image_id": "b", "created": "2026-08-01T00:00:00",
+             "image_name": f"Checklist_{PTID}_Assembly.json"}]}
+        api.get_institutions.return_value = {"data": [
+            {"id": 128, "name": "BNL", "country": {"code": "US"}}]}
+        api.get_component_type.return_value = {"data": {
+            "manufacturers": [{"id": 7}],
+            "properties": {"specifications": [{"datasheet": {"DATA": {}}}]}}}
+        api.create_component.return_value = {"status": "OK", "part_id": NEW_PID}
+        m1, m2 = _mocked(api)
+        with m1, m2, mock.patch("explore.views.sync_test_events",
+                                return_value=iter(["ok\n"])):
+            html = self.client.get(f"{NEW_PAGE}?checklist={NAME}").content.decode()
+            resp = self.client.post(NEW_PAGE, {
+                "institution_id": "128", "checklist": NAME})
+        self.assertIn(f'name="checklist" value="{NAME}"', html)
+        self.assertEqual(resp["Location"],
+                         f"/hw/dev/part/{NEW_PID}/checklist/{NAME}/")
+
+
+class ChecklistNamesTest(TestCase):
+    """#110: the JSON endpoint behind the type page's lazy Checklists row."""
+
+    URL = f"/hw/dev/checklist-names/{PTID}/"
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("n", "n@n.io", "pw")
+        self.client.force_login(self.user)
+
+    def test_names_are_listed(self):
+        m1, m2 = _mocked(_api())
+        with m1, m2:
+            body = self.client.get(self.URL).json()
+        self.assertEqual(body, {"checklists": [NAME]})
+
+    def test_unlinked_user_gets_an_empty_list(self):
+        from hwdb.fnal.bearer import FnalLinkRequired
+        api = _api()
+        with mock.patch("explore.views.mint_for", side_effect=FnalLinkRequired), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            body = self.client.get(self.URL).json()
+        self.assertEqual(body, {"checklists": []})
+
+    def test_read_only_instance_gets_an_empty_list(self):
+        with override_settings(HWDB_WRITE_INSTANCES=["prod"]):
+            body = self.client.get(self.URL).json()
+        self.assertEqual(body, {"checklists": []})
