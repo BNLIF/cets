@@ -1231,6 +1231,16 @@ class PrintTest(TestCase):
         # folded sections open on paper
         self.assertIn(".cl-folded .cl-sec-body { display: block; }", html)
 
+    def test_form_page_has_the_lightbox(self):
+        # #107: reference figures open in a fullscreen viewer; PDFs fall
+        # back to the browser's own viewer in an iframe
+        m1, m2 = _mocked(_api())
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("cl-lightbox", html)
+        self.assertIn("cl-lb-pdfbtn", html)
+        self.assertIn("cursor: zoom-in", html)
+
 
 class ChecklistBookmarkTest(TestCase):
     """#111: bookmark a checklist → quick link under My checklists on the

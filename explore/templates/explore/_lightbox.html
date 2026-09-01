@@ -1,0 +1,87 @@
+{# #107: fullscreen viewer for figures. Self-contained — include once per page; any element with a data-lightbox attribute opens it on click (URL from data-lb-src, href or src). Wheel/± zooms, drag pans, double-click toggles, Esc/backdrop/✕ closes. A file the browser can't show in <img> (a PDF drawing) falls back to an <iframe>, where the browser's own viewer zooms and prints. #}
+<style>
+  [data-lightbox] { cursor: zoom-in; }
+  #cl-lightbox { position: fixed; inset: 0; width: 100vw; height: 100vh; max-width: none;
+    max-height: none; margin: 0; padding: 0; border: 0; background: rgba(10, 10, 12, .88);
+    display: none; align-items: center; justify-content: center; overflow: hidden; }
+  #cl-lightbox[open] { display: flex; }
+  #cl-lightbox::backdrop { background: none; }
+  #cl-lightbox img { max-width: 94vw; max-height: 92vh; cursor: grab; user-select: none;
+    touch-action: none; background: #fff; }
+  #cl-lightbox img:active { cursor: grabbing; }
+  #cl-lightbox iframe { width: 94vw; height: 92vh; border: 0; background: #fff; }
+  .cl-lb-bar { position: fixed; top: 10px; right: 14px; display: flex; gap: 8px; z-index: 1; }
+  .cl-lb-bar button, .cl-lb-bar a { font: inherit; font-size: 15px; line-height: 1;
+    color: #eee; background: rgba(0, 0, 0, .55); border: 1px solid rgba(255, 255, 255, .35);
+    border-radius: var(--r-sm); padding: 7px 12px; cursor: pointer; text-decoration: none; }
+  .cl-lb-bar button:hover, .cl-lb-bar a:hover { border-color: #fff; }
+  @media print { #cl-lightbox { display: none !important; } }
+</style>
+<script>
+(function () {
+  if (window.clLightbox) return;   // once per page, however many includes
+  window.clLightbox = true;
+  var lb, lbImg, lbFrame, lbOpen, scale, tx, ty;
+  // the image proxy defaults to Content-Disposition: attachment — a new tab
+  // or iframe needs ?inline=1 to VIEW rather than download (external
+  // reference URLs pass through untouched)
+  function lbInlineUrl(u) {
+    if (new URL(u, location.href).origin !== location.origin || u.indexOf("inline=") !== -1) return u;
+    return u + (u.indexOf("?") === -1 ? "?" : "&") + "inline=1";
+  }
+  function lbApply() { lbImg.style.transform = "translate(" + tx + "px," + ty + "px) scale(" + scale + ")"; }
+  function lbZoom(f) { scale = Math.min(8, Math.max(1, scale * f)); if (scale === 1) { tx = ty = 0; } lbApply(); }
+  function ensureLb() {
+    if (lb) return;
+    lb = document.createElement("dialog");
+    lb.id = "cl-lightbox";
+    lb.innerHTML = '<div class="cl-lb-bar">' +
+      '<button type="button" data-lb="-" title="zoom out">&minus;</button>' +
+      '<button type="button" data-lb="+" title="zoom in">+</button>' +
+      '<a target="_blank" rel="noopener" title="open in its own tab (print from there)">open &#x2197;</a>' +
+      '<button type="button" data-lb="x" title="close">&#x2715;</button></div>' +
+      '<img alt="" draggable="false"><iframe hidden title="figure"></iframe>';
+    document.body.appendChild(lb);
+    lbImg = lb.querySelector("img");
+    lbFrame = lb.querySelector("iframe");
+    lbOpen = lb.querySelector("a");
+    lbImg.addEventListener("error", function () {   // not an image → PDF viewer
+      if (lb.open && !lbImg.hidden) { lbImg.hidden = true; lbFrame.hidden = false; lbFrame.src = lbOpen.href; }
+    });
+    lb.addEventListener("wheel", function (e) {
+      if (lbImg.hidden) return;
+      e.preventDefault();
+      lbZoom(e.deltaY < 0 ? 1.15 : 1 / 1.15);
+    }, { passive: false });
+    lbImg.addEventListener("dblclick", function () { scale = scale > 1 ? 0 : 2.5; lbZoom(1); });
+    var drag = null;
+    lbImg.addEventListener("pointerdown", function (e) {
+      if (scale === 1) return;
+      drag = { x: e.clientX - tx, y: e.clientY - ty };
+      lbImg.setPointerCapture(e.pointerId);
+    });
+    lbImg.addEventListener("pointermove", function (e) {
+      if (!drag) return;
+      tx = e.clientX - drag.x; ty = e.clientY - drag.y; lbApply();
+    });
+    lbImg.addEventListener("pointerup", function () { drag = null; });
+    lb.addEventListener("click", function (e) {
+      var z = e.target.getAttribute && e.target.getAttribute("data-lb");
+      if (z === "+") return lbZoom(1.4);
+      if (z === "-") return lbZoom(1 / 1.4);
+      if (z === "x" || e.target === lb) lb.close();   // backdrop or ✕; Esc is native
+    });
+  }
+  document.addEventListener("click", function (e) {
+    var im = e.target.closest && e.target.closest("[data-lightbox]");
+    if (!im) return;
+    if (im.tagName === "A") e.preventDefault();
+    ensureLb();
+    scale = 1; tx = ty = 0; lbApply();
+    lbFrame.hidden = true; lbFrame.removeAttribute("src");
+    lbOpen.href = lbInlineUrl(im.getAttribute("data-lb-src") || im.href || im.src);
+    lbImg.hidden = false; lbImg.src = lbOpen.href;   // errors → iframe fallback
+    lb.showModal();
+  });
+})();
+</script>

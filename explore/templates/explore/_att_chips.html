@@ -2,7 +2,7 @@
 <div class="sd-atts">
   {% for a in atts %}
     {% if a.is_image %}
-    <a class="sd-thumb" href="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.filename|urlencode }}&amp;inline=1" target="_blank" rel="noopener" title="{{ a.filename }}"><img src="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.filename|urlencode }}" alt="{{ a.label }}" loading="lazy"><span class="sd-thumb-l">{{ a.label }}</span></a>
+    <a class="sd-thumb" data-lightbox href="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.filename|urlencode }}&amp;inline=1" target="_blank" rel="noopener" title="{{ a.filename }}"><img src="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.filename|urlencode }}" alt="{{ a.label }}" loading="lazy"><span class="sd-thumb-l">{{ a.label }}</span></a>
     {% else %}
     <a class="sd-dl" href="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.filename|urlencode }}" title="{{ a.filename }}"><span aria-hidden="true">&#x2913;</span> {{ a.label }}</a>
     {% endif %}

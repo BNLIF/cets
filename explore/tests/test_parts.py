@@ -858,6 +858,9 @@ class PartViewTest(TestCase):
                          ["es9"])
         self.assertEqual([a["image_id"] for a in resp.context["other_attachments"]],
                          ["i9"])
+        # #107: image attachments open in the fullscreen viewer
+        self.assertIn('class="sd-thumb" data-lightbox', html)
+        self.assertIn("cl-lightbox", html)
         self.assertIn("Executive summary", html)
         # Dashboard-style header lines, from the config JSON
         self.assertIn("Consortium:", html)

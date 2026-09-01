@@ -488,7 +488,7 @@
         <div class="sd-atts">
           {% for a in other_attachments %}
             {% if a.is_image %}
-            <a class="sd-thumb" href="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.image_name|urlencode }}&amp;inline=1" target="_blank" rel="noopener" title="{{ a.image_name }}"><img src="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.image_name|urlencode }}" alt="{{ a.image_name }}" loading="lazy"><span class="sd-thumb-l">{{ a.image_name }}</span></a>
+            <a class="sd-thumb" data-lightbox href="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.image_name|urlencode }}&amp;inline=1" target="_blank" rel="noopener" title="{{ a.image_name }}"><img src="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.image_name|urlencode }}" alt="{{ a.image_name }}" loading="lazy"><span class="sd-thumb-l">{{ a.image_name }}</span></a>
             {% else %}
             <a class="sd-dl" href="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.image_name|urlencode }}" title="{{ a.image_name }}"><span aria-hidden="true">&#x2913;</span> {{ a.image_name|default:a.image_id }}</a>
             {% endif %}
@@ -639,4 +639,5 @@ document.addEventListener("click", function (e) {
   });
 })();
 </script>
+{% include "explore/_lightbox.html" %}
 {% endblock %}

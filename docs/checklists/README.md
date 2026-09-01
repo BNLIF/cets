@@ -58,6 +58,11 @@ A `{"type": "row", "fields": [ … ]}` entry renders its children side by side
 
 Unknown types and malformed entries are dropped silently on render.
 
+Reference figures open in a fullscreen viewer on click (#107): wheel/±
+zooms, drag pans, Esc closes. A reference stored as a PDF (mechanical
+drawings usually are) falls back to the browser's own PDF viewer inline —
+zoom and print come with it; inline it shows as a "view drawing" button.
+
 Any value-bearing field (not `photo`/`link`/`static`/`steps`) may carry
 `"to_spec": true` (#96): its value ALSO folds into the item's latest
 specifications `DATA`, nested `{section: {label: value}}` exactly like the

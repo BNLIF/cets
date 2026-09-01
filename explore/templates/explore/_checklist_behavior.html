@@ -23,5 +23,20 @@
     b.setAttribute("aria-expanded", sec.classList.contains("cl-folded") ? "false" : "true");
   });
   applyWhen();
+
+  // #107: an inline reference that isn't a browser-renderable image (a PDF
+  // drawing) shows as a broken <img> — swap it for a view button that opens
+  // the lightbox (_lightbox.html) instead
+  document.addEventListener("error", function (e) {
+    var im = e.target;
+    if (!im.classList || !im.classList.contains("cl-static-img")) return;
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "cl-lb-pdfbtn";
+    b.setAttribute("data-lightbox", "");
+    b.setAttribute("data-lb-src", im.src);
+    b.textContent = "📄 view drawing";
+    im.replaceWith(b);
+  }, true);
 })();
 </script>
