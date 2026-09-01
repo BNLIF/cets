@@ -71,6 +71,19 @@ class MintForTest(TestCase):
             with self.assertRaises(FnalLinkRequired):
                 mint_for(req)
 
+    def test_vault_creds_gone_requires_relink(self):
+        # 404 on the creds path = htvault expired/removed the stored OIDC
+        # credentials; only re-linking recreates them (seen on prod 2026-09-01).
+        resp = requests.Response()
+        resp.status_code = 404
+        req = _req({LINK_KEY: _link()})
+        with mock.patch(
+            "hwdb.fnal.bearer.flow.mint_bearer",
+            side_effect=requests.HTTPError(response=resp),
+        ):
+            with self.assertRaises(FnalLinkRequired):
+                mint_for(req)
+
     def test_vault_5xx_is_unavailable(self):
         resp = requests.Response()
         resp.status_code = 503

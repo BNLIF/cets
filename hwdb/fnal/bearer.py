@@ -9,7 +9,7 @@ records is 1 mint, N inserts).
 Two failure modes, mapped to the Q9 surface by the @with_fnal_bearer
 decorator:
 - ``FnalLinkRequired`` — no token, expired, undecryptable, or rejected by
-  vault (401/403). Re-linking fixes it.
+  vault (401/403, or 404 = creds path gone). Re-linking fixes it.
 - ``FnalUnavailable`` — vault unreachable / transient. Re-linking won't help.
 """
 
@@ -57,7 +57,10 @@ def mint_for(request) -> str:
         return flow.mint_bearer(vault_token, data["credkey"])
     except requests.HTTPError as e:
         status = e.response.status_code if e.response is not None else None
-        if status in (401, 403):
+        # 404 = the vault creds path is gone (htvault expired/cleaned the
+        # stored OIDC credentials) — the vault token may still look valid,
+        # but only re-linking recreates the creds (seen on prod 2026-09-01).
+        if status in (401, 403, 404):
             logger.warning("FNAL bearer mint rejected (%s); relink", status)
             raise FnalLinkRequired("vault token rejected")
         logger.warning("FNAL bearer mint failed (HTTP %s)", status)
