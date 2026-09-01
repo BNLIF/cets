@@ -113,6 +113,11 @@ Every path lands on the item's own checklist page — the familiar form,
 pre-filled when a submission already exists. The chooser itself never
 submits anything.
 
+**Bookmarks (#111).** ☆ on the chooser (or on the part page's Checklists
+card) lists the checklist under **My checklists** on the profile page,
+grouped by the type's System › Subsystem, each linking back to its
+chooser. Local-only, per user, like watches.
+
 ## New items (#97)
 
 Item creation is a separate page, not a checklist mode: the type page's

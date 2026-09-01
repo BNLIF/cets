@@ -422,6 +422,27 @@ class ChecklistDraft(InstanceScoped):
         return f"ChecklistDraft({self.part_id}, {self.name}, {self.username})"
 
 
+class ChecklistBookmark(InstanceScoped):
+    """One user's bookmarked checklist (#111) — a quick link on the profile
+    page to the type's PID chooser (#110), grouped there by System/Subsystem.
+    Local-only, like watches; ``username`` is the FNAL credkey
+    (``activity.actor_of``). ``name`` is the checklist's (file)name."""
+
+    username = models.CharField(max_length=150, db_index=True)
+    part_type_id = models.CharField(max_length=20)
+    name = models.CharField(max_length=120)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["part_type_id", "name"]
+        constraints = [models.UniqueConstraint(
+            fields=["instance", "username", "part_type_id", "name"],
+            name="uniq_checklist_bookmark")]
+
+    def __str__(self):
+        return f"ChecklistBookmark({self.username}, {self.part_type_id}, {self.name})"
+
+
 class HierarchySyncState(models.Model):
     """One row per HWDB instance recording that instance's last hierarchy
     (skeleton) sync run.

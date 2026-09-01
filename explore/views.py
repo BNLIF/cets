@@ -35,7 +35,8 @@ from .events import physics_date_field, refresh_component_row, sync_test_events
 from .hierarchy import sync_hierarchy, sync_system
 from .instances import instance_of, namespace_of
 from .models import (
-    ActivityEvent, BoxChecklist, ChecklistDraft, HierarchyNode, ShippingTypeOverride,
+    ActivityEvent, BoxChecklist, ChecklistBookmark, ChecklistDraft, HierarchyNode,
+    ShippingTypeOverride,
     HierarchySyncState, HwdbComponentEvent, HwdbTestEvent, PackScan, ShipmentItem,
 )
 from .queries import (
@@ -951,6 +952,9 @@ def explore_part_view(request, part_id):
         my_drafts = set(ChecklistDraft.for_instance(inst).filter(
             part_id=part_id, username=activity.actor_of(request)
         ).values_list("name", flat=True))
+        my_bookmarks = set(ChecklistBookmark.for_instance(inst).filter(
+            part_type_id=ptid, username=activity.actor_of(request)
+        ).values_list("name", flat=True))
         for c in part_checklists:
             ttn = ""
             try:
@@ -962,6 +966,7 @@ def explore_part_view(request, part_id):
             c["filled"] = bool(ttn) and ttn in latest_by_type
             c["filled_on"] = latest_by_type.get(ttn, "")[:10] if c["filled"] else ""
             c["draft"] = c["name"] in my_drafts
+            c["bookmarked"] = c["name"] in my_bookmarks
     # The ES card shows for EVERY item on a write instance (2026-07-30):
     # configless types run the ES page in DEFAULT mode, so any item can
     # carry a summary.
@@ -2623,11 +2628,37 @@ def explore_type_checklist_view(request, part_type_id, name):
         "schema": schema,
         "schema_msg": msg,
         "parts_page": parts_page,
+        "bookmarked": ChecklistBookmark.for_instance(inst).filter(
+            username=activity.actor_of(request), part_type_id=part_type_id,
+            name=name).exists(),
     }
     if getattr(request, "htmx", False) and request.htmx.target == "clp-pane":
         return render(request, "explore/_checklist_pids_table.html", ctx)
     return render(request, "explore/checklist_entry.html", ctx)
 
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_checklist_bookmark_view(request):
+    """#111: bookmark/unbookmark a checklist — a quick link on the profile
+    page to its PID chooser. Local-only, like watches."""
+    inst = instance_of(request)
+    ptid = (request.POST.get("part_type_id") or "").strip()
+    name = (request.POST.get("name") or "").strip()
+    if not ptid or not name:
+        return HttpResponseBadRequest("Nothing to bookmark.")
+    actor = activity.actor_of(request)
+    row, created = ChecklistBookmark.objects.get_or_create(
+        instance=inst, username=actor, part_type_id=ptid, name=name)
+    if created:
+        messages.success(request, f"Bookmarked “{name}” — it's listed on "
+                                  f"your profile page.")
+    else:
+        row.delete()
+        messages.success(request, f"Removed the “{name}” bookmark.")
+    return redirect(_safe_next(request, _rev(request, "explore:profile")))
 
 
 @login_not_required
@@ -4502,6 +4533,20 @@ def explore_profile_view(request):
                  else navigation.leaf_path_for(inst, s.part_type_id))
     unread_ids = set(watches.unread_events(inst, actor)
                      .values_list("id", flat=True))
+    # Bookmarked checklists (#111): quick links to their PID choosers,
+    # grouped by the type's System › Subsystem (from the hierarchy mirror).
+    bms = list(ChecklistBookmark.for_instance(inst).filter(username=actor))
+    nodes = {n.part_type_id: n for n in HierarchyNode.for_instance(inst).filter(
+        level=HierarchyNode.LEVEL_TYPE,
+        part_type_id__in={b.part_type_id for b in bms})}
+    bm_groups: dict[str, list] = {}
+    for b in bms:
+        n = nodes.get(b.part_type_id)
+        b.url = _rev(request, "explore:type_checklist",
+                     args=[b.part_type_id, b.name])
+        key = (f"{n.system_name} › {n.subsystem_name}" if n and n.subsystem_name
+               else (n.system_name if n else ""))
+        bm_groups.setdefault(key, []).append(b)
     return render(request, "explore/profile.html", {
         "active_nav": "profile",
         "sidebar": navigation.sidebar_tree(inst, {}),
@@ -4510,6 +4555,7 @@ def explore_profile_view(request):
         "roles": roles,
         "initials": initials,
         "watch_subs": subs,
+        "bookmark_groups": sorted(bm_groups.items()),
         "watch_events": list(watches.watched_events(inst, actor)[:20]),
         "unread_ids": unread_ids,
         "unread_total": len(unread_ids),

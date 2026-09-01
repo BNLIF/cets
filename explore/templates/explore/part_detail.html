@@ -355,6 +355,15 @@
             {% if c.filled %}<span class="pk-hint" style="color:var(--good);">&#10003; filled{% if c.filled_on %} {{ c.filled_on }}{% endif %}</span>{% endif %}
             {% if c.draft %}<span class="pk-hint">&#9998; draft</span>{% endif %}
             {% if not c.filled and not c.draft %}<span class="pk-hint">not filled yet</span>{% endif %}
+            {# #111: bookmark toggle — lists the checklist under My checklists on the profile page #}
+            <form method="post" action="{% url 'explore:checklist_bookmark' %}" style="margin:0; display:inline;">
+              {% csrf_token %}
+              <input type="hidden" name="part_type_id" value="{{ ptid }}">
+              <input type="hidden" name="name" value="{{ c.name }}">
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <button type="submit" style="font:inherit; background:none; border:0; cursor:pointer; padding:0; color:{% if c.bookmarked %}var(--good){% else %}var(--faint){% endif %};"
+                      title="{% if c.bookmarked %}Remove from My checklists on your profile{% else %}Add to My checklists on your profile{% endif %}">{% if c.bookmarked %}&#9733;{% else %}&#9734;{% endif %}</button>
+            </form>
           </span>
           {% endfor %}
         </div>

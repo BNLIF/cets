@@ -151,6 +151,33 @@
     {% endif %}
   </div>
 
+  {# #111: bookmarked checklists, grouped by the type's System › Subsystem #}
+  <div class="pf-group">
+    <h2>My checklists</h2>
+    {% if bookmark_groups %}
+    <div class="pf-card">
+      {% for group, marks in bookmark_groups %}
+      {% if group %}<div class="pf-watch-meta" style="padding-top:10px;">{{ group }}</div>{% endif %}
+      {% for b in marks %}
+      <div class="pf-watch-row">
+        <a class="pf-watch-name" href="{{ b.url }}">{{ b.name }}</a>
+        <span class="pf-watch-meta mono">{{ b.part_type_id }}</span>
+        <form method="post" action="{% url 'explore:checklist_bookmark' %}" class="pf-unwatch-form" style="margin-left:auto;">
+          {% csrf_token %}
+          <input type="hidden" name="part_type_id" value="{{ b.part_type_id }}">
+          <input type="hidden" name="name" value="{{ b.name }}">
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <button class="pf-unwatch" type="submit" title="Remove this bookmark">remove</button>
+        </form>
+      </div>
+      {% endfor %}
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="pf-nowatch">Nothing yet — hit “☆ Bookmark” on a checklist page.</p>
+    {% endif %}
+  </div>
+
   </div>
 
   <div>

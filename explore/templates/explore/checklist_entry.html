@@ -45,7 +45,19 @@
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
 
   {# the schema's display title and the checklist's (file)name can differ — show both so the type page's link text is recognizable #}
-  <h1>{{ schema.name }}{% if cl_name != schema.name %} <span class="mono" style="font-size:.7em; font-weight:400; color:var(--dim);">· {{ cl_name }}</span>{% endif %}</h1>
+  <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+    <h1>{{ schema.name }}{% if cl_name != schema.name %} <span class="mono" style="font-size:.7em; font-weight:400; color:var(--dim);">· {{ cl_name }}</span>{% endif %}</h1>
+    <form method="post" action="{% url 'explore:checklist_bookmark' %}" style="margin:0 0 0 auto;">
+      {% csrf_token %}
+      <input type="hidden" name="part_type_id" value="{{ part_type_id }}">
+      <input type="hidden" name="name" value="{{ cl_name }}">
+      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+      <button class="es-btn quiet" type="submit"
+              {% if bookmarked %}style="color:var(--good); border-color:var(--good); background:var(--good-bg);"{% endif %}
+              title="{% if bookmarked %}Remove from My checklists on your profile{% else %}Add to My checklists on your profile{% endif %}">
+        {% if bookmarked %}&#9733; Bookmarked{% else %}&#9734; Bookmark{% endif %}</button>
+    </form>
+  </div>
   <p class="es-sub">Scan, type or pick the item's PID — the checklist opens on that item.</p>
 
   <div class="es-card cl-sec">

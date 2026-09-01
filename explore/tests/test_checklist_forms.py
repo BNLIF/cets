@@ -1179,3 +1179,59 @@ class ChecklistNamesTest(TestCase):
         with override_settings(HWDB_WRITE_INSTANCES=["prod"]):
             body = self.client.get(self.URL).json()
         self.assertEqual(body, {"checklists": []})
+
+
+class ChecklistBookmarkTest(TestCase):
+    """#111: bookmark a checklist → quick link under My checklists on the
+    profile page, grouped by System › Subsystem."""
+
+    URL = "/hw/dev/checklist-bookmark/"
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("n", "n@n.io", "pw")
+        self.client.force_login(self.user)
+
+    def test_toggle_creates_then_removes(self):
+        from explore.models import ChecklistBookmark
+        self.client.post(self.URL, {"part_type_id": PTID, "name": NAME})
+        row = ChecklistBookmark.objects.get(instance="dev", username="n")
+        self.assertEqual((row.part_type_id, row.name), (PTID, NAME))
+        self.client.post(self.URL, {"part_type_id": PTID, "name": NAME})
+        self.assertFalse(ChecklistBookmark.objects.exists())
+
+    def test_missing_fields_are_refused(self):
+        self.assertEqual(
+            self.client.post(self.URL, {"part_type_id": PTID}).status_code, 400)
+
+    def test_chooser_shows_the_toggle_state(self):
+        from explore.models import ChecklistBookmark
+        page = f"/hw/dev/checklist/{PTID}/{NAME}/"
+        m1, m2 = _mocked(_api())
+        with m1, m2:
+            html = self.client.get(page).content.decode()
+            self.assertIn("&#9734; Bookmark", html)            # ☆ off
+            ChecklistBookmark.objects.create(
+                instance="dev", username="n", part_type_id=PTID, name=NAME)
+            html = self.client.get(page).content.decode()
+        self.assertIn("&#9733; Bookmarked", html)              # ★ on
+
+    def test_profile_lists_bookmarks_grouped_by_system(self):
+        from explore.models import ChecklistBookmark, HierarchyNode
+        from explore.tests.test_profile import _api as profile_api
+        from explore.tests.test_profile import _mocked as profile_mocked
+        HierarchyNode.objects.create(
+            instance="dev", level=HierarchyNode.LEVEL_TYPE, project="Z",
+            system_id=10, system_name="Photon Detector",
+            subsystem_id=1, subsystem_name="PCB",
+            name="Segments", part_type_id=PTID)
+        ChecklistBookmark.objects.create(     # actor "n" == the Django user
+            instance="dev", username="n", part_type_id=PTID, name=NAME)
+        ChecklistBookmark.objects.create(     # someone else's — not listed
+            instance="dev", username="other", part_type_id=PTID, name="X")
+        m1, m2 = profile_mocked(profile_api())
+        with m1, m2:
+            html = self.client.get("/hw/dev/profile/").content.decode()
+        self.assertIn("My checklists", html)
+        self.assertIn("Photon Detector › PCB", html)
+        self.assertIn(f"/hw/dev/checklist/{PTID}/{NAME}/", html)
+        self.assertNotIn(">X<", html)
