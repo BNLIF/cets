@@ -54,7 +54,7 @@
 {% elif f.type == "steps" %}
   <span class="cl-lab">{{ f.label }}</span>
   <ol class="cl-steps">
-    {% for it in f.items %}<li><label><input type="checkbox" name="{{ it.name }}"{% if it.done %} checked{% endif %}> {{ it.label }}</label></li>{% endfor %}
+    {% for it in f.items %}<li{% if it.level %} class="cl-step-l{{ it.level }}"{% endif %}><label><input type="checkbox" name="{{ it.name }}"{% if it.done %} checked{% endif %}> {{ it.label }}</label></li>{% endfor %}
   </ol>
 {% elif f.type == "static" %}
   {% if f.label %}<span class="cl-lab">{{ f.label }}</span>{% endif %}

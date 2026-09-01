@@ -1181,6 +1181,40 @@ class ChecklistNamesTest(TestCase):
         self.assertEqual(body, {"checklists": []})
 
 
+class IndentedStepsTest(TestCase):
+    """#106: leading spaces in a steps list indent sub-steps; value keys
+    stay the stripped text so old submissions keep matching."""
+
+    FIELD = {"type": "steps", "label": "Procedure",
+             "steps": ["Unwrap", "  check seal ", "    note lot no", "Inspect"]}
+
+    def _schema(self):
+        return checklistforms.normalize(
+            {"name": "t", "test_type_name": "T",
+             "sections": [{"title": "S", "fields": [dict(self.FIELD)]}]}, "t")
+
+    def test_normalize_keeps_the_indent_and_strips_the_right(self):
+        f = self._schema()["sections"][0]["fields"][0]
+        self.assertEqual(f["steps"],
+                         ["Unwrap", "  check seal", "    note lot no", "Inspect"])
+
+    def test_bind_computes_levels_and_matches_stripped_keys(self):
+        schema = checklistforms.bind(
+            self._schema(), {"DATA": {"S": {"Procedure": {"check seal": True}}}})
+        items = schema["sections"][0]["fields"][0]["items"]
+        self.assertEqual([(i["label"], i["level"], i["done"]) for i in items],
+                         [("Unwrap", 0, False), ("check seal", 1, True),
+                          ("note lot no", 2, False), ("Inspect", 0, False)])
+
+    def test_parse_keys_are_stripped(self):
+        schema = self._schema()
+        key = schema["sections"][0]["fields"][0]["key"]
+        data = checklistforms.parse(schema, {f"{key}-s1": "on"})
+        self.assertEqual(data["S"]["Procedure"],
+                         {"Unwrap": False, "check seal": True,
+                          "note lot no": False, "Inspect": False})
+
+
 class PrintTest(TestCase):
     """#105: print / save-as-PDF via the browser print dialog."""
 

@@ -52,7 +52,7 @@ A `{"type": "row", "fields": [ … ]}` entry renders its children side by side
 | `select` | `options` (required) | chosen option |
 | `qr` | — | scanned/typed string |
 | `photo` | — | `{image_id, image_name}` (posted to the item first) |
-| `steps` | `steps` (required) | `{step: bool}` |
+| `steps` | `steps` (required) | `{step: bool}` — leading spaces indent a step (2 per level, #106); the stored key is the stripped text |
 | `static` | `note`, `url`, `image` (external URL) or `image_id` (reference image uploaded in the editor — e.g. a P1–P10 measurement diagram — stored on the type's HWDB images, served via the image proxy; an id of a picture already in HWDB can also be typed in directly, #108) | nothing — display only |
 | `link` | `position` (optional) | scanned child PID — also PATCHed into the item's subcomponents (#96) |
 

@@ -133,7 +133,10 @@ def _norm_field(f: dict) -> dict | None:
         if not out["options"]:
             return None
     if t == "steps":
-        out["steps"] = [str(s).strip() for s in f.get("steps") or []
+        # #106: leading spaces indent a step under the previous one (2 spaces
+        # per level, editor convention); the stored value key is the stripped
+        # text either way, so indenting later never orphans old submissions.
+        out["steps"] = [str(s).rstrip() for s in f.get("steps") or []
                         if str(s).strip()]
         if not out["steps"]:
             return None
@@ -284,8 +287,9 @@ def _bind_leaf(f: dict, v) -> None:
                       for i, c in enumerate(f["columns"])]
     elif t == "steps":
         done = v if isinstance(v, dict) else {}
-        f["items"] = [{"label": s, "name": f"{f['key']}-s{i}",
-                       "done": bool(done.get(s))}
+        f["items"] = [{"label": s.strip(), "name": f"{f['key']}-s{i}",
+                       "level": min((len(s) - len(s.lstrip(" "))) // 2, 4),
+                       "done": bool(done.get(s.strip()))}
                       for i, s in enumerate(f["steps"])]
     elif t == "photo":
         f["existing"] = v if isinstance(v, dict) and v.get("image_id") else None
@@ -329,7 +333,7 @@ def parse(schema: dict, post) -> dict:
                 continue
             value = cells
         elif t == "steps":
-            value = {s: bool(post.get(f"{key}-s{i}"))
+            value = {s.strip(): bool(post.get(f"{key}-s{i}"))
                      for i, s in enumerate(f["steps"])}
         else:   # text, textarea, datetime, select, qr
             raw = (post.get(key) or "").strip()
