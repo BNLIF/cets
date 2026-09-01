@@ -69,4 +69,22 @@
     .cl-steps li { margin: 9px 0; }
     .cl-photo-cam { display: inline-block; }
   }
+  /* #105: print / save-as-PDF — the browser's print dialog is the PDF
+     engine. Folded sections open, app chrome and buttons vanish; the
+     pre-filled values print inside their boxes (a blank checklist prints
+     as a blank procedure sheet). */
+  @media print {
+    .eh-header, .ex-side, .ex-scrim, .es-btn, .cl-photo-cam, .es-flash,
+    .es-crumbs, .es-hint, input[type=file] { display: none !important; }
+    .ex-layout { display: block; }
+    .es-page { padding: 0; max-width: none; }
+    .cl-folded .cl-sec-body { display: block; }
+    .cl-sec[data-when-key][hidden] { display: block; }  /* every variant prints */
+    .cl-fold::before { content: ""; width: 0; }
+    .es-card { border-color: #bbb; }
+    .cl-field { break-inside: avoid; }
+    .cl-field input:not([type=radio]):not([type=checkbox]):not([type=file]),
+    .cl-field select, .cl-field textarea, .cl-tri { background: none; border-color: #bbb; }
+    .cl-static-img { max-height: none; border: none; }
+  }
 </style>

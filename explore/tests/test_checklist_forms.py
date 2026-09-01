@@ -1181,6 +1181,23 @@ class ChecklistNamesTest(TestCase):
         self.assertEqual(body, {"checklists": []})
 
 
+class PrintTest(TestCase):
+    """#105: print / save-as-PDF via the browser print dialog."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("n", "n@n.io", "pw")
+        self.client.force_login(self.user)
+
+    def test_form_page_has_print_button_and_print_styles(self):
+        m1, m2 = _mocked(_api())
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('onclick="window.print()"', html)
+        self.assertIn("@media print", html)
+        # folded sections open on paper
+        self.assertIn(".cl-folded .cl-sec-body { display: block; }", html)
+
+
 class ChecklistBookmarkTest(TestCase):
     """#111: bookmark a checklist → quick link under My checklists on the
     profile page, grouped by System › Subsystem."""

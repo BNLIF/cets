@@ -161,6 +161,10 @@ which HWDB accepts once the type has it.
 - **Download CSV** exports the latest submission as section/field/value
   rows (the iPad's "send via email" payload); photos flatten to their HWDB
   image name/id.
+- **Print** (#105) opens the browser's print dialog — save as PDF from
+  there. Folded sections open, buttons and app chrome drop out; values
+  print inside their boxes, so a blank checklist doubles as a printable
+  procedure sheet.
 - **Email** (#99) opens your own mail client with a `mailto:` draft: a link
   back to the checklist, the submission date, and `Section / Field: value`
   lines for the filled fields. The dashboard never sends mail itself, and
