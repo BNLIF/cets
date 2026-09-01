@@ -46,7 +46,7 @@ A `{"type": "row", "fields": [ … ]}` entry renders its children side by side
 |---|---|---|
 | `check` | — | `true` / `false`; untouched = omitted |
 | `number` | `units`, `nominal`+`tol` or `min`/`max` | number (string if unparseable) |
-| `table` | `columns` (required), `units`, tolerance as above | `{column: number}` |
+| `table` | `columns` (required), `units`, tolerance as above | `{column: number}` — a column may be `{"label": …, "formula": "C1 + C2*(C3/C4)"}` (#109): computed from the row's other cells (`C<n>` = 1-based column), read-only in the form, recomputed server-side at submit; in the editor write it as `Total = C1 + C2`. A formula may reference computed columns to its left; unresolvable = the cell stays empty. A dict column may also carry its own `nominal`/`tol` or `min`/`max`, replacing the table-wide range for that cell — editor syntax `Total = C1 + C2 [11 ± 1]` or `P1 [1.4..1.6]` |
 | `text` / `textarea` | — | string |
 | `datetime` | — | `YYYY-MM-DDTHH:MM` string |
 | `select` | `options` (required) | chosen option |

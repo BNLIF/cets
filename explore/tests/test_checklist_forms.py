@@ -1242,6 +1242,86 @@ class PrintTest(TestCase):
         self.assertIn("cursor: zoom-in", html)
 
 
+class FormulaCellsTest(TestCase):
+    """#109 (Hajime): computed table cells — C<n> arithmetic over one row."""
+
+    def _schema(self, columns):
+        return checklistforms.normalize(
+            {"name": "t", "test_type_name": "T",
+             "sections": [{"title": "S", "fields": [
+                 {"type": "table", "label": "M", "columns": columns}]}]}, "t")
+
+    def test_normalize_keeps_labels_and_formulas(self):
+        f = self._schema(["A", "B", {"label": "Sum", "formula": "C1 + C2"},
+                          {"label": "bad; import os", "formula": "os.x"},
+                          {"label": ""}])["sections"][0]["fields"][0]
+        self.assertEqual(f["columns"], ["A", "B", "Sum", "bad; import os"])
+        self.assertEqual(f["formulas"], {"Sum": "C1 + C2"})  # bad chars dropped
+
+    def test_eval_hajimes_example(self):
+        # C11 = C01 + C02 * (C03/C04)
+        vals = [2.0, 3.0, 8.0, 4.0] + [None] * 6
+        self.assertEqual(checklistforms._eval_formula(
+            "C01 + C02 * (C03/C04)", vals), 8.0)
+
+    def test_eval_rejects_bad_input(self):
+        ev = checklistforms._eval_formula
+        self.assertIsNone(ev("C1 / C2", [1, 0]))          # division by zero
+        self.assertIsNone(ev("C1 + C3", [1, 2]))          # ref out of range
+        self.assertIsNone(ev("C1 + C2", [1, "x"]))        # non-numeric cell
+        self.assertIsNone(ev("C1 +", [1]))                # syntax
+        self.assertIsNone(ev("1 2", []))                  # leftover tokens
+        self.assertEqual(ev("-C1 + 2", [0.5]), 1.5)       # unary minus ok
+
+    def test_parse_computes_the_cell_and_ignores_posted_overrides(self):
+        schema = self._schema(["A", "B", {"label": "Sum", "formula": "C1 + C2"},
+                               {"label": "Double", "formula": "C3 * 2"}])
+        key = schema["sections"][0]["fields"][0]["key"]
+        data = checklistforms.parse(schema, {
+            f"{key}-c0": "1.5", f"{key}-c1": "2", f"{key}-c2": "999"})
+        self.assertEqual(data["S"]["M"],
+                         {"A": 1.5, "B": 2, "Sum": 3.5, "Double": 7.0})
+
+    def test_unresolvable_formula_leaves_the_cell_out(self):
+        schema = self._schema(["A", {"label": "Sum", "formula": "C1 + C9"}])
+        key = schema["sections"][0]["fields"][0]["key"]
+        data = checklistforms.parse(schema, {f"{key}-c0": "1"})
+        self.assertEqual(data["S"]["M"], {"A": 1})
+
+    def test_per_column_tolerance_overrides_the_table_range(self):
+        schema = self._schema([
+            {"label": "A", "min": 1, "max": 2},
+            "B",
+            {"label": "Total", "formula": "C1 + C2", "nominal": 11, "tol": 1}])
+        f = schema["sections"][0]["fields"][0]
+        self.assertEqual(f["col_tol"], {
+            "A": {"min": 1.0, "max": 2.0, "range": "1 – 2"},
+            "Total": {"min": 10.0, "max": 12.0, "range": "10 – 12"}})
+        # bind: own tolerance replaces the table-wide one wholesale; plain
+        # columns keep the table's
+        f["min"], f["max"] = 0.0, 5.0
+        bound = checklistforms.bind(schema, {})["sections"][0]["fields"][0]
+        cells = {c["column"]: c for c in bound["cells"]}
+        self.assertEqual((cells["A"]["min"], cells["A"]["max"]), (1.0, 2.0))
+        self.assertEqual((cells["B"]["min"], cells["B"]["max"]), (0.0, 5.0))
+        self.assertEqual((cells["Total"]["min"], cells["Total"]["max"]),
+                         (10.0, 12.0))
+        self.assertEqual(cells["Total"]["range"], "10 – 12")
+
+    def test_form_renders_computed_cells_readonly(self):
+        user = get_user_model().objects.create_user("n", "n@n.io", "pw")
+        self.client.force_login(user)
+        schema = dict(SCHEMA)
+        schema["sections"] = [{"title": "Measurements", "fields": [
+            {"type": "table", "label": "M", "columns":
+             ["A", {"label": "Sum", "formula": "C1 + 1"}]}]}]
+        m1, m2 = _mocked(_api(schema=schema))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('readonly tabindex="-1" data-formula="C1 + 1"', html)
+        self.assertIn('data-ci="0"', html)
+
+
 class ChecklistBookmarkTest(TestCase):
     """#111: bookmark a checklist → quick link under My checklists on the
     profile page, grouped by System › Subsystem."""

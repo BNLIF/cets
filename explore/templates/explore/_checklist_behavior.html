@@ -24,6 +24,69 @@
   });
   applyWhen();
 
+  // #109: computed table cells — the JS twin of checklistforms._eval_formula
+  // (+ - * / parens, C<n> = the row's 1-based column value; NaN on any
+  // problem). The server recomputes authoritatively at submit.
+  function evalFormula(expr, get) {
+    var tokens = expr.match(/[Cc]\d+|\d+\.?\d*|\.\d+|[()+\-*/]|\S/g) || [];
+    var pos = 0;
+    function factor() {
+      var t = tokens[pos];
+      if (t === "-") { pos++; return -factor(); }
+      if (t === "(") {
+        pos++;
+        var v = e();
+        if (tokens[pos] !== ")") return NaN;
+        pos++; return v;
+      }
+      pos++;
+      if (t === undefined) return NaN;
+      if (/^[Cc]/.test(t)) return get(parseInt(t.slice(1), 10) - 1);
+      return /^[\d.]/.test(t) ? parseFloat(t) : NaN;
+    }
+    function term() {
+      var v = factor();
+      while (tokens[pos] === "*" || tokens[pos] === "/") {
+        var op = tokens[pos++]; var r = factor();
+        v = op === "*" ? v * r : (r === 0 ? NaN : v / r);
+      }
+      return v;
+    }
+    function e() {
+      var v = term();
+      while (tokens[pos] === "+" || tokens[pos] === "-") {
+        var op = tokens[pos++]; v = op === "+" ? v + term() : v - term();
+      }
+      return v;
+    }
+    var out = e();
+    return pos === tokens.length ? out : NaN;
+  }
+  function recomputeTable(tbl) {
+    tbl.querySelectorAll("input[data-formula]").forEach(function (inp) {
+      var v = evalFormula(inp.getAttribute("data-formula"), function (i) {
+        var el = tbl.querySelector('input[data-ci="' + i + '"]');
+        return el ? parseFloat(el.value) : NaN;
+      });
+      inp.value = isFinite(v) ? String(+v.toFixed(6)) : "";
+      // re-fires the tolerance coloring on the computed value
+      inp.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+  document.addEventListener("input", function (e) {
+    if (!e.target.matches || !e.target.matches("input[data-ci]")
+        || e.target.hasAttribute("data-formula")) return;
+    var tbl = e.target.closest("table");
+    if (tbl) recomputeTable(tbl);
+  });
+  window.clRecompute = function () {   // initial pass + editor preview refresh
+    document.querySelectorAll(".cl-table input[data-formula]").forEach(function (inp) {
+      var tbl = inp.closest("table");
+      if (tbl && !tbl.clDone) { tbl.clDone = true; recomputeTable(tbl); }
+    });
+  };
+  window.clRecompute();
+
   // #107: an inline reference that isn't a browser-renderable image (a PDF
   // drawing) shows as a broken <img> — swap it for a view button that opens
   // the lightbox (_lightbox.html) instead

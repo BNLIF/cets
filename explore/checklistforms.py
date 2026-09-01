@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,98 @@ def _num(v):
         return None
 
 
+def _tol_range(f: dict):
+    """``(min, max, display range)`` from a tolerance spec: explicit min/max,
+    or nominal ± tol — the field-level vocabulary, reused per table column
+    (#109 review)."""
+    nominal, tol = _num(f.get("nominal")), _num(f.get("tol"))
+    lo, hi = _num(f.get("min")), _num(f.get("max"))
+    if nominal is not None and tol is not None:
+        # round: 1.6 + 0.1 must be 1.7, not 1.7000000000000002
+        lo = round(nominal - tol, 9) if lo is None else lo
+        hi = round(nominal + tol, 9) if hi is None else hi
+    rng = (f"{lo:g} – {hi:g}" if lo is not None and hi is not None
+           else f"≥ {lo:g}" if lo is not None
+           else f"≤ {hi:g}" if hi is not None else "")
+    return lo, hi, rng
+
+
+# #109: computed table cells — only digits, cell refs and + - * / ( ) ever
+# reach the evaluator.
+_FORMULA_CHARS = re.compile(r"^[0-9.\s()+\-*/Cc]+$")
+_FORMULA_TOKEN = re.compile(r"[Cc]\d+|\d+\.?\d*|\.\d+|[()+\-*/]|\S")
+
+
+def _eval_formula(expr: str, values: list) -> float | None:
+    """Hajime's cell arithmetic (#109): ``C1 + C2*(C3/C4)`` over one table
+    row, ``C<n>`` = the 1-based column's value. A tiny recursive-descent
+    parser over + - * / ( ) and numbers — deliberately NOT a general
+    evaluator. None on any problem: bad syntax, a missing or non-numeric
+    referenced cell, division by zero."""
+    tokens = _FORMULA_TOKEN.findall(expr)
+    pos = 0
+
+    def peek():
+        return tokens[pos] if pos < len(tokens) else None
+
+    def factor():
+        nonlocal pos
+        t = peek()
+        if t is None:
+            raise ValueError
+        if t == "-":
+            pos += 1
+            return -factor()
+        if t == "(":
+            pos += 1
+            v = exprn()
+            if peek() != ")":
+                raise ValueError
+            pos += 1
+            return v
+        if t[0] in "Cc":
+            pos += 1
+            i = int(t[1:]) - 1
+            if not 0 <= i < len(values) or not isinstance(values[i], (int, float)) \
+                    or isinstance(values[i], bool):
+                raise ValueError
+            return float(values[i])
+        pos += 1
+        return float(t)   # ValueError on anything else
+
+    def term():
+        nonlocal pos
+        v = factor()
+        while peek() in ("*", "/"):
+            op = tokens[pos]
+            pos += 1
+            rhs = factor()
+            if op == "/":
+                if rhs == 0:
+                    raise ValueError
+                v /= rhs
+            else:
+                v *= rhs
+        return v
+
+    def exprn():
+        nonlocal pos
+        v = term()
+        while peek() in ("+", "-"):
+            op = tokens[pos]
+            pos += 1
+            v = v + term() if op == "+" else v - term()
+        return v
+
+    try:
+        result = exprn()
+        if pos != len(tokens):
+            return None
+        return result
+    except (ValueError, ZeroDivisionError, RecursionError):
+        return None
+
+
 def _norm_field(f: dict) -> dict | None:
     """One field off the schema, or None to drop it (unknown type, blank
     label, or a widget missing what defines it)."""
@@ -111,20 +204,31 @@ def _norm_field(f: dict) -> dict | None:
         # child's type when no position is pinned (the scan page's rule).
         out["position"] = str(f.get("position") or "").strip()
     if t in ("number", "table"):
-        # tolerance: explicit min/max, or nominal ± tol
-        nominal, tol = _num(f.get("nominal")), _num(f.get("tol"))
-        lo, hi = _num(f.get("min")), _num(f.get("max"))
-        if nominal is not None and tol is not None:
-            # round: 1.6 + 0.1 must be 1.7, not 1.7000000000000002
-            lo = round(nominal - tol, 9) if lo is None else lo
-            hi = round(nominal + tol, 9) if hi is None else hi
-        out["min"], out["max"] = lo, hi
-        out["range"] = (f"{lo:g} – {hi:g}" if lo is not None and hi is not None
-                        else f"≥ {lo:g}" if lo is not None
-                        else f"≤ {hi:g}" if hi is not None else "")
+        out["min"], out["max"], out["range"] = _tol_range(f)
     if t == "table":
-        out["columns"] = [str(c).strip() for c in f.get("columns") or []
-                          if str(c).strip()]
+        # #109 (Hajime): a column may be {"label": …, "formula": "C1 + C2*(C3/C4)"}
+        # — computed from the row's other cells, C<n> = 1-based column index —
+        # and may carry its OWN tolerance (nominal/tol or min/max), overriding
+        # the table-wide one (a computed Total has a different range).
+        cols, formulas, col_tol = [], {}, {}
+        for c in f.get("columns") or []:
+            if isinstance(c, dict):
+                label = str(c.get("label") or "").strip()
+                fx = str(c.get("formula") or "").strip()
+                if label and fx and _FORMULA_CHARS.match(fx):
+                    formulas[label] = fx
+                lo, hi, rng = _tol_range(c)
+                if label and (lo is not None or hi is not None):
+                    col_tol[label] = {"min": lo, "max": hi, "range": rng}
+            else:
+                label = str(c).strip()
+            if label:
+                cols.append(label)
+        out["columns"] = cols
+        if formulas:
+            out["formulas"] = formulas
+        if col_tol:
+            out["col_tol"] = col_tol
         if not out["columns"]:
             return None
     if t == "select":
@@ -282,8 +386,14 @@ def _bind_leaf(f: dict, v) -> None:
         f["value"] = "pass" if v is True else ("fail" if v is False else "")
     elif t == "table":
         cells = v if isinstance(v, dict) else {}
+        ct = f.get("col_tol") or {}
+        # a column's own tolerance replaces the table-wide one wholesale
         f["cells"] = [{"column": c, "name": f"{f['key']}-c{i}",
-                       "value": _fmt(cells.get(c))}
+                       "value": _fmt(cells.get(c)),
+                       "formula": (f.get("formulas") or {}).get(c, ""),
+                       "min": ct[c]["min"] if c in ct else f["min"],
+                       "max": ct[c]["max"] if c in ct else f["max"],
+                       "range": ct[c]["range"] if c in ct else ""}
                       for i, c in enumerate(f["columns"])]
     elif t == "steps":
         done = v if isinstance(v, dict) else {}
@@ -325,10 +435,22 @@ def parse(schema: dict, post) -> dict:
             value = _num_or_str(raw)
         elif t == "table":
             cells = {}
+            formulas = f.get("formulas") or {}
             for i, c in enumerate(f["columns"]):
+                if c in formulas:
+                    continue   # computed below, whatever was posted
                 raw = (post.get(f"{key}-c{i}") or "").strip()
                 if raw:
                     cells[c] = _num_or_str(raw)
+            # #109: computed columns, left to right — a formula may reference
+            # plain cells and computed ones to its LEFT; anything unresolvable
+            # leaves the cell out.
+            for c in f["columns"]:
+                if c in formulas:
+                    v = _eval_formula(formulas[c],
+                                      [cells.get(col) for col in f["columns"]])
+                    if v is not None:
+                        cells[c] = round(v, 9)
             if not cells:
                 continue
             value = cells
