@@ -217,9 +217,9 @@
     <div class="ec-row g-static" style="display:none;">
       <span class="ec-label" style="flex:0 0 auto;">Reference image</span>
       <input type="file" class="ff-imgfile" accept="image/*" title="upload a diagram (e.g. where P1–P10 are measured) — stored on the component type in HWDB">
-      <input type="hidden" class="ff-imageid">
+      <input class="ff-imageid" placeholder="or existing image_id" style="flex:0 0 150px;" title="reference a picture already stored in HWDB by its image_id — the preview shows it (a broken image means a wrong id)">
       <span class="ec-hint ff-imgstatus"></span>
-      <button type="button" class="ec-del ff-imgclear" style="display:none;" title="Detach the uploaded image">&#x2715; image</button>
+      <button type="button" class="ec-del ff-imgclear" style="display:none;" title="Detach the image">&#x2715; image</button>
     </div>
     <div class="ec-row g-link" style="display:none;">
       <input class="ff-position" placeholder="functional position (blank = first free slot for the child&#8217;s type)">
@@ -272,9 +272,10 @@
   }
 
   function syncImgStatus(r) {
-    var has = !!$(".ff-imageid", r).value;
-    $(".ff-imgstatus", r).textContent = has ? "attached ✓" : "";
-    $(".ff-imgclear", r).style.display = has ? "" : "none";
+    // the id is visible in the ff-imageid box itself; the hint only carries
+    // upload progress/errors (uploadRef), cleared here once an id is set
+    $(".ff-imgstatus", r).textContent = "";
+    $(".ff-imgclear", r).style.display = $(".ff-imageid", r).value.trim() ? "" : "none";
   }
 
   function addSection(s) {
@@ -447,6 +448,8 @@
   });
 
   editor.addEventListener("input", function (e) {
+    if (e.target.classList && e.target.classList.contains("ff-imageid"))
+      syncImgStatus(e.target.closest(".clc-fld"));
     if (e.target.id !== "clc-json") refresh();
   });
   editor.addEventListener("change", function (e) {

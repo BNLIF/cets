@@ -53,7 +53,7 @@ A `{"type": "row", "fields": [ … ]}` entry renders its children side by side
 | `qr` | — | scanned/typed string |
 | `photo` | — | `{image_id, image_name}` (posted to the item first) |
 | `steps` | `steps` (required) | `{step: bool}` |
-| `static` | `note`, `url`, `image` (external URL) or `image_id` (reference image uploaded in the editor — e.g. a P1–P10 measurement diagram — stored on the type's HWDB images, served via the image proxy) | nothing — display only |
+| `static` | `note`, `url`, `image` (external URL) or `image_id` (reference image uploaded in the editor — e.g. a P1–P10 measurement diagram — stored on the type's HWDB images, served via the image proxy; an id of a picture already in HWDB can also be typed in directly, #108) | nothing — display only |
 | `link` | `position` (optional) | scanned child PID — also PATCHed into the item's subcomponents (#96) |
 
 Unknown types and malformed entries are dropped silently on render.
