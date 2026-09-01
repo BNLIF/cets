@@ -489,6 +489,8 @@
           {% for a in other_attachments %}
             {% if a.is_image %}
             <a class="sd-thumb" data-lightbox href="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.image_name|urlencode }}&amp;inline=1" target="_blank" rel="noopener" title="{{ a.image_name }}"><img src="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.image_name|urlencode }}" alt="{{ a.image_name }}" loading="lazy"><span class="sd-thumb-l">{{ a.image_name }}</span></a>
+            {% elif a.is_pdf %}
+            <a class="sd-dl" data-lightbox href="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.image_name|urlencode }}&amp;inline=1" title="{{ a.image_name }}">&#128196; {{ a.image_name|default:a.image_id }}</a>
             {% else %}
             <a class="sd-dl" href="{% url 'explore:shipment_image' image_id=a.image_id %}?name={{ a.image_name|urlencode }}" title="{{ a.image_name }}"><span aria-hidden="true">&#x2913;</span> {{ a.image_name|default:a.image_id }}</a>
             {% endif %}

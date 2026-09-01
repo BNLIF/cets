@@ -21,8 +21,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from hwdb.api_client import FnalDbApiClient
 
 from .shipments import (
-    _is_image, _spec_block, current_manifest, fold_entries, shipment_details,
-    spec_field,
+    _is_image, _is_pdf, _spec_block, current_manifest, fold_entries,
+    shipment_details, spec_field,
 )
 
 logger = logging.getLogger(__name__)
@@ -457,9 +457,11 @@ def part_detail(api, part_id: str, is_shipping: bool) -> dict:
         for a in sec["attachments"]:
             a["filename"] = name_by_id.get(a["image_id"]) or a["label"]
             a["is_image"] = _is_image(a["filename"])
+            a["is_pdf"] = _is_pdf(a["filename"])
     attachments = [{"image_id": str(i["image_id"]), "image_name": i.get("image_name"),
                     "created": i.get("created"),
-                    "is_image": _is_image(i.get("image_name"))}
+                    "is_image": _is_image(i.get("image_name")),
+                    "is_pdf": _is_pdf(i.get("image_name"))}
                    for i in images]
 
     # The item record's category tells a cable from a generic part (#72); a

@@ -15,6 +15,8 @@
     color: #eee; background: rgba(0, 0, 0, .55); border: 1px solid rgba(255, 255, 255, .35);
     border-radius: var(--r-sm); padding: 7px 12px; cursor: pointer; text-decoration: none; }
   .cl-lb-bar button:hover, .cl-lb-bar a:hover { border-color: #fff; }
+  /* PDF mode: the browser's viewer zooms itself — ours would do nothing */
+  #cl-lightbox.lb-pdf [data-lb="+"], #cl-lightbox.lb-pdf [data-lb="-"] { display: none; }
   @media print { #cl-lightbox { display: none !important; } }
 </style>
 <script>
@@ -46,7 +48,10 @@
     lbFrame = lb.querySelector("iframe");
     lbOpen = lb.querySelector("a");
     lbImg.addEventListener("error", function () {   // not an image → PDF viewer
-      if (lb.open && !lbImg.hidden) { lbImg.hidden = true; lbFrame.hidden = false; lbFrame.src = lbOpen.href; }
+      if (lb.open && !lbImg.hidden) {
+        lbImg.hidden = true; lbFrame.hidden = false; lbFrame.src = lbOpen.href;
+        lb.classList.add("lb-pdf");
+      }
     });
     lb.addEventListener("wheel", function (e) {
       if (lbImg.hidden) return;
@@ -78,6 +83,7 @@
     if (im.tagName === "A") e.preventDefault();
     ensureLb();
     scale = 1; tx = ty = 0; lbApply();
+    lb.classList.remove("lb-pdf");
     lbFrame.hidden = true; lbFrame.removeAttribute("src");
     lbOpen.href = lbInlineUrl(im.getAttribute("data-lb-src") || im.href || im.src);
     lbImg.hidden = false; lbImg.src = lbOpen.href;   // errors → iframe fallback

@@ -840,6 +840,7 @@ class PartViewTest(TestCase):
         api = self._api()
         api.get_images.return_value = {"data": [
             {"image_id": "i9", "image_name": "photo.jpg"},
+            {"image_id": "p9", "image_name": "drawing.pdf"},
             {"image_id": "es9", "image_name":
              "ExecutiveSummary_D05700200099-00007_20260701_000000.pdf"}]}
         api.get_component_type_images.return_value = {"data": [
@@ -857,10 +858,22 @@ class PartViewTest(TestCase):
         self.assertEqual([a["image_id"] for a in resp.context["exec_summaries"]],
                          ["es9"])
         self.assertEqual([a["image_id"] for a in resp.context["other_attachments"]],
-                         ["i9"])
+                         ["i9", "p9"])
         # #107: image attachments open in the fullscreen viewer
         self.assertIn('class="sd-thumb" data-lightbox', html)
         self.assertIn("cl-lightbox", html)
+        # …and PDFs open there too (browser's own viewer), not as a download
+        self.assertIn('class="sd-dl" data-lightbox', html)
+        self.assertIn("drawing.pdf&amp;inline=1", html)
+        # the proxy must allow same-origin framing or the viewer's iframe
+        # shows "refused to connect" (X-Frame-Options defaults to DENY)
+        api.get_image_response.return_value = mock.Mock(
+            headers={"Content-Type": "application/pdf"},
+            iter_content=mock.Mock(return_value=iter([b"%PDF"])))
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            img_resp = self.client.get("/hw/dev/shipment-image/p9/?inline=1")
+        self.assertEqual(img_resp["X-Frame-Options"], "SAMEORIGIN")
         self.assertIn("Executive summary", html)
         # Dashboard-style header lines, from the config JSON
         self.assertIn("Consortium:", html)

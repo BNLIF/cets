@@ -175,6 +175,12 @@ def _is_image(name: str | None) -> bool:
     return bool(name) and name.lower().endswith(_IMAGE_EXTS)
 
 
+def _is_pdf(name: str | None) -> bool:
+    """PDF attachments open in the fullscreen viewer (#107) — the browser's
+    own PDF renderer — rather than downloading like other non-image files."""
+    return bool(name) and name.lower().endswith(".pdf")
+
+
 def _image_label(key: str) -> str:
     """A clean button label from an ``Image ID for the/this X`` key."""
     label = key.split("Image ID for", 1)[-1].strip()

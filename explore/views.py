@@ -20,6 +20,7 @@ from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.http import require_POST
 
 from core.queries import chart_config
@@ -801,6 +802,7 @@ def explore_shipment_sync_view(request, part_type_id):
 
 @login_not_required
 @fnal_login_required
+@xframe_options_sameorigin
 def explore_shipment_image_view(request, image_id):
     """Proxy one box attachment — shipping label, bill of lading, proforma
     invoice — straight from HWDB (ADR-0013).
