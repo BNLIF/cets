@@ -620,7 +620,8 @@ class ChecklistEditorTest(TestCase):
         self.assertIn("PCB Segments Interface", html)      # repo templates offered
         self.assertIn("PCB Panel Interface", html)
         self.assertIn(f"?name=Reception", html)            # existing listed
-        self.assertIn("pair &#8593;", html)                # row pairing control
+        self.assertIn('class="ff-place"', html)            # placement control (#117)
+        self.assertIn("&#8595; same cell", html)
         self.assertIn("&#8594; Specs", html)               # to_spec control
 
     def test_editing_an_existing_checklist_loads_its_raw_json(self):
@@ -1532,6 +1533,61 @@ class ConstantCellsTest(TestCase):
             html = self.client.get(PAGE).content.decode()
         self.assertIn('value="3.1+-0.1"', html)
         self.assertIn("data-const", html)
+
+
+class StackedCellTest(TestCase):
+    """#117 (HVS): a "column" inside a row stacks several fields in one cell
+    — one field on the left, three stacked on the right."""
+
+    CFG = {"name": "t", "test_type_name": "T", "sections": [
+        {"title": "S", "fields": [
+            {"type": "row", "fields": [
+                {"type": "textarea", "label": "Step 3"},
+                {"type": "column", "fields": [
+                    {"type": "check", "label": "20-A405"},
+                    {"type": "check", "label": "20-A502"},
+                    {"type": "check", "label": "20-G202"}]}]}]}]}
+
+    def test_normalize_keeps_the_column_and_keys_every_leaf(self):
+        row = checklistforms.normalize(dict(self.CFG), "t")["sections"][0]["fields"][0]
+        self.assertEqual([k.get("type") for k in row["fields"]],
+                         ["textarea", "column"])
+        keys = [leaf["key"] for _, leaf in checklistforms.leaf_fields(
+            checklistforms.normalize(dict(self.CFG), "t"))]
+        self.assertEqual(len(keys), len(set(keys)), keys)   # unique
+        self.assertEqual(len(keys), 4)
+
+    def test_single_field_column_collapses_to_the_field(self):
+        cfg = {"name": "t", "test_type_name": "T", "sections": [
+            {"title": "S", "fields": [{"type": "row", "fields": [
+                {"type": "text", "label": "A"},
+                {"type": "column", "fields": [{"type": "text", "label": "B"}]}]}]}]}
+        row = checklistforms.normalize(cfg, "t")["sections"][0]["fields"][0]
+        self.assertEqual([k["type"] for k in row["fields"]], ["text", "text"])
+
+    def test_parse_and_bind_reach_stacked_fields(self):
+        schema = checklistforms.normalize(dict(self.CFG), "t")
+        keys = {leaf["label"]: leaf["key"]
+                for _, leaf in checklistforms.leaf_fields(schema)}
+        data = checklistforms.parse(schema, {keys["Step 3"]: "done",
+                                             keys["20-A502"]: "pass"})
+        self.assertEqual(data["S"],
+                         {"Step 3": "done", "20-A502": True})
+        bound = checklistforms.bind(schema, {"DATA": data})
+        vals = {leaf["label"]: leaf.get("value")
+                for _, leaf in checklistforms.leaf_fields(bound)}
+        self.assertEqual(vals["20-A502"], "pass")
+
+    def test_form_renders_the_stacked_cell(self):
+        user = get_user_model().objects.create_user("n", "n@n.io", "pw")
+        self.client.force_login(user)
+        schema = dict(SCHEMA)
+        schema["sections"] = dict(self.CFG)["sections"]
+        m1, m2 = _mocked(_api(schema=schema))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('class="cl-col"', html)
+        self.assertIn("20-G202", html)
 
 
 class ChecklistBookmarkTest(TestCase):

@@ -4,7 +4,7 @@
   <div class="cl-sec-body">
   {% for f in sec.fields %}
     {% if f.type == "row" %}
-    <div class="cl-row">{% for k in f.fields %}{% include "explore/_checklist_field.html" with f=k %}{% endfor %}</div>
+    <div class="cl-row">{% for k in f.fields %}{% if k.type == "column" %}<div class="cl-col">{% for j in k.fields %}{% include "explore/_checklist_field.html" with f=j %}{% endfor %}</div>{% else %}{% include "explore/_checklist_field.html" with f=k %}{% endif %}{% endfor %}</div>
     {% else %}{% include "explore/_checklist_field.html" %}{% endif %}
   {% endfor %}
   </div>

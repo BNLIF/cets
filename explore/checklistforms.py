@@ -357,7 +357,24 @@ def normalize(cfg: dict, name: str) -> dict:
             if str(f.get("type") or "").strip().lower() == "row":
                 kids = []
                 for ki, k in enumerate(f.get("fields") or []):
-                    nk = _norm_field(k) if isinstance(k, dict) else None
+                    if not isinstance(k, dict):
+                        continue
+                    # #117: a "column" inside a row stacks several fields in
+                    # ONE cell (one field left, three stacked right). A
+                    # single-field column is just that field.
+                    if str(k.get("type") or "").strip().lower() == "column":
+                        stack = []
+                        for ji, kk in enumerate(k.get("fields") or []):
+                            nk = _norm_field(kk) if isinstance(kk, dict) else None
+                            if nk:
+                                nk["key"] = f"f{si}-{fi}-{ki}-{ji}"
+                                stack.append(nk)
+                        if len(stack) == 1:
+                            kids.append(stack[0])
+                        elif stack:
+                            kids.append({"type": "column", "fields": stack})
+                        continue
+                    nk = _norm_field(k)
                     if nk:
                         nk["key"] = f"f{si}-{fi}-{ki}"
                         kids.append(nk)
@@ -398,11 +415,22 @@ def _resolve_when(schema: dict) -> None:
             sec["when"] = {"field": label, "key": sel["key"], "equals": eq}
 
 
+def _row_leaves(f: dict) -> list[dict]:
+    """Flat leaves of one top-level field — a row's cells, with any stacked
+    ``column`` cells (#117) unwrapped."""
+    if f["type"] != "row":
+        return [f]
+    out = []
+    for k in f["fields"]:
+        out.extend(k["fields"] if k.get("type") == "column" else [k])
+    return out
+
+
 def leaf_fields(schema: dict):
     """Yield ``(section title, field)`` for every leaf (rows flattened)."""
     for sec in schema["sections"]:
         for f in sec["fields"]:
-            for leaf in (f["fields"] if f["type"] == "row" else [f]):
+            for leaf in _row_leaves(f):
                 yield sec["title"], leaf
 
 
@@ -427,7 +455,7 @@ def bind(schema: dict, test_data: dict | None) -> dict:
         sdata = data.get(sec["title"])
         sdata = sdata if isinstance(sdata, dict) else {}
         for f in sec["fields"]:
-            for leaf in (f["fields"] if f["type"] == "row" else [f]):
+            for leaf in _row_leaves(f):
                 _bind_leaf(leaf, sdata.get(leaf["label"]))
     return bound
 

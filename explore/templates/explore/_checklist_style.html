@@ -28,6 +28,8 @@
   .cl-units, .cl-hint { color: var(--faint); font-size: 11.5px; }
   .cl-row { display: flex; flex-wrap: wrap; gap: 0 22px; }
   .cl-row > .cl-field { flex: 1 1 220px; }
+  /* #117: several fields stacked in ONE cell of a row ("stack ↑") */
+  .cl-row > .cl-col { flex: 1 1 220px; min-width: 0; }
   .cl-field input:not([type=radio]):not([type=checkbox]):not([type=file]),
   .cl-field select, .cl-field textarea { font: inherit; font-size: 13px; color: var(--ink);
     background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm);

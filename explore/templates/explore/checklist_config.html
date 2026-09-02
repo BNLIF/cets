@@ -44,6 +44,12 @@
     gap: 18px; align-items: start; }
   @media (max-width: 1100px) { .clc-cols { grid-template-columns: minmax(0, 1fr); } }
   .clc-preview-wrap { position: sticky; top: 12px; }
+  /* the preview pane is narrow — on the real page rows only wrap on phones,
+     so keep cells beside each other here (squeezed) instead of wrapping,
+     or "→ beside" would look like a new line (#117 review) */
+  #clc-preview .cl-row { flex-wrap: nowrap; gap: 0 10px; }
+  #clc-preview .cl-row > .cl-field,
+  #clc-preview .cl-row > .cl-col { flex: 1 1 0; min-width: 0; }
   .clc-fld { border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 6px 9px; margin: 7px 0; }
   /* the field header row must fit one desktop line: tighter gaps, slimmer
      buttons, smaller checkbox labels */
@@ -89,7 +95,8 @@
     checklist for this component type.{% endif %} Saving uploads
     <span class="mono">Checklist_{{ part_type_id }}_&lt;name&gt;.json</span> onto the type — it shows on every
     item's part page; HWDB keeps every version, the newest wins. Order is the layout: reorder with the
-    ▲▼ buttons; “pair &#8593;” puts a field beside the one above it (stacked on phones).</p>
+    ▲▼ buttons; “&#8594; beside” puts a field next to the one above it (stacked on phones),
+    “&#8595; same cell” below it inside its cell.</p>
 
   {% if existing %}
   <div class="ec-card"><h2>This type's checklists</h2>
@@ -204,7 +211,12 @@
         <option value="imagemap">image map</option>
       </select>
       <input class="ff-label" placeholder="label">
-      <label class="ec-inline" title="render beside the field above (side by side; stacked on phones)"><input type="checkbox" class="ff-sameline"> pair &#8593;</label>
+      <select class="ff-place" style="flex:0 0 108px;"
+        title="placement relative to the field above — beside opens a new cell to its right (rows stack on phones); same cell goes below it, inside its cell (e.g. one field left, three stacked right)">
+        <option value="">&#8626; new line</option>
+        <option value="pair">&#8594; beside</option>
+        <option value="stack">&#8595; same cell</option>
+      </select>
       <label class="ec-inline ff-tospec-w" title="value is also saved to the item's Specifications"><input type="checkbox" class="ff-tospec"> &#8594; Specs</label>
       <button type="button" class="ec-del clc-x" title="Remove field">&#x2715;</button>
     </div>
@@ -297,13 +309,13 @@
     $(".ff-label", r).placeholder = t === "static" ? "label (optional)" : "label";
   }
 
-  function addField(secNode, f, sameline) {
+  function addField(secNode, f, place) {
     var r = document.getElementById("t-fld").content.firstElementChild.cloneNode(true);
     $(".clc-fields", secNode).appendChild(r);
     f = f || {};
     $(".ff-type", r).value = f.type || "check";
     $(".ff-label", r).value = f.label || "";
-    $(".ff-sameline", r).checked = !!sameline;
+    $(".ff-place", r).value = place || "";
     $(".ff-tospec", r).checked = !!f.to_spec;
     ["units", "nominal", "tol", "min", "max", "options", "note", "url", "image", "position"]
       .forEach(function (k) {
@@ -413,9 +425,17 @@
     n.dataset.whenEq = (s.when && s.when.equals) || "";
     (s.fields || []).forEach(function (f) {
       if (f && f.type === "row") {
-        (f.fields || []).forEach(function (k, i) { addField(n, k, i > 0); });
+        (f.fields || []).forEach(function (k, i) {
+          if (k && k.type === "column") {   // #117: stacked cell
+            (k.fields || []).forEach(function (kk, j) {
+              addField(n, kk, j > 0 ? "stack" : (i > 0 ? "pair" : ""));
+            });
+          } else {
+            addField(n, k, i > 0 ? "pair" : "");
+          }
+        });
       } else if (f) {
-        addField(n, f, false);
+        addField(n, f, "");
       }
     });
     return n;
@@ -517,7 +537,18 @@
       $$(".clc-fields > .clc-fld", s).forEach(function (r) {
         var f = readField(r);
         if (!f) return;
-        if ($(".ff-sameline", r).checked && fields.length) {
+        var place = $(".ff-place", r).value;
+        if (place === "stack" && fields.length) {
+          // #117: join the previous field's CELL vertically
+          var last = fields[fields.length - 1];
+          if (last.type === "row") {
+            var cell = last.fields[last.fields.length - 1];
+            if (cell.type === "column") cell.fields.push(f);
+            else last.fields[last.fields.length - 1] = { type: "column", fields: [cell, f] };
+          } else {
+            fields[fields.length - 1] = { type: "row", fields: [{ type: "column", fields: [last, f] }] };
+          }
+        } else if (place === "pair" && fields.length) {
           var last = fields[fields.length - 1];
           if (last.type === "row") last.fields.push(f);
           else fields[fields.length - 1] = { type: "row", fields: [last, f] };
@@ -588,6 +619,14 @@
     $$(".clc-fld").forEach(function (r) {
       $(".ff-label", r).classList.toggle(
         "miss", !$(".ff-label", r).value.trim() && $(".ff-type", r).value !== "static");
+    });
+    // a section's first field has nothing to place itself against
+    $$(".clc-sec").forEach(function (s) {
+      $$(".clc-fields > .clc-fld", s).forEach(function (r, i) {
+        var p = $(".ff-place", r);
+        p.style.visibility = i ? "" : "hidden";
+        if (!i) p.value = "";
+      });
     });
     $("#clc-json").value = JSON.stringify(collect(), null, 2);
     clearTimeout(pTimer);

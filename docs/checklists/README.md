@@ -25,7 +25,12 @@ app's two scenes (Hajime, 2026-08-07) and are the format reference.
 
 Order is the layout — fields render top to bottom; there are no coordinates.
 A `{"type": "row", "fields": [ … ]}` entry renders its children side by side
-(stacked on phones).
+(stacked on phones). Inside a row, `{"type": "column", "fields": [ … ]}`
+stacks several fields in ONE cell (#117) — e.g. a step's text on the left
+with three figure links stacked on the right. In the editor each field has
+a placement select: "↵ new line" (default), "→ beside" (a new cell to the
+right of the field above), "↓ same cell" (below the field above, inside
+its cell); a section's first field has no select.
 
 ### Section keys (#98)
 
