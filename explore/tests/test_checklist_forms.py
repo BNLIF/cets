@@ -1056,6 +1056,7 @@ class TypeChecklistTest(TestCase):
         with m1, m2:
             html = self.client.get(self.TYPE_PAGE).content.decode()
         self.assertIn('id="clp-pid"', html)                       # scan box
+        self.assertIn(f'data-type-id="{PTID}"', html)  # #112: scan type-guard
         self.assertIn(f"/hw/dev/part/{PART}/checklist/{NAME}/", html)
         self.assertIn(f"/hw/dev/part/{PTID}-00151/checklist/{NAME}/", html)
         self.assertNotIn("X001-00001", html)
@@ -1320,6 +1321,55 @@ class FormulaCellsTest(TestCase):
             html = self.client.get(PAGE).content.decode()
         self.assertIn('readonly tabindex="-1" data-formula="C1 + 1"', html)
         self.assertIn('data-ci="0"', html)
+
+
+class TypeGuardTest(TestCase):
+    """#112 (Hajime): a qr/link box may require a Type ID — a wrong-type
+    code doesn't register (scanner keeps scanning, typed input paints red,
+    parse drops it)."""
+
+    def _schema(self, **extra):
+        return checklistforms.normalize(
+            {"name": "t", "test_type_name": "T",
+             "sections": [{"title": "S", "fields": [
+                 {"type": "qr", "label": "Board", **extra}]}]}, "t")
+
+    def test_normalize_keeps_and_uppercases_a_valid_type_id(self):
+        f = self._schema(type_id="d00300100002")["sections"][0]["fields"][0]
+        self.assertEqual(f["type_id"], "D00300100002")
+
+    def test_normalize_drops_a_malformed_type_id(self):
+        for bad in ("D003001", "D00300100002-00014", "hello", ""):
+            f = self._schema(type_id=bad)["sections"][0]["fields"][0]
+            self.assertNotIn("type_id", f, bad)
+
+    def test_parse_drops_a_wrong_type_pid_and_keeps_a_matching_one(self):
+        schema = self._schema(type_id="D00300100002")
+        key = schema["sections"][0]["fields"][0]["key"]
+        self.assertEqual(checklistforms.parse(
+            schema, {key: "D00300100001-00014"}), {})       # wrong type
+        self.assertEqual(checklistforms.parse(
+            schema, {key: "d00300100002-00014-UK106"}),     # suffixed ok
+            {"S": {"Board": "d00300100002-00014-UK106"}})
+
+    def test_unguarded_box_keeps_anything(self):
+        schema = self._schema()
+        key = schema["sections"][0]["fields"][0]["key"]
+        self.assertEqual(checklistforms.parse(schema, {key: "whatever"}),
+                         {"S": {"Board": "whatever"}})
+
+    def test_form_renders_the_guard_attribute_and_hint(self):
+        user = get_user_model().objects.create_user("n", "n@n.io", "pw")
+        self.client.force_login(user)
+        schema = dict(SCHEMA)
+        schema["sections"] = [{"title": "S", "fields": [
+            {"type": "qr", "label": "Board", "type_id": "D00300100002"}]}]
+        m1, m2 = _mocked(_api(schema=schema))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('data-type-id="D00300100002"', html)
+        self.assertIn("type D00300100002", html)
+        self.assertIn("expected type", html)   # the scan modal's refusal
 
 
 class ChecklistBookmarkTest(TestCase):

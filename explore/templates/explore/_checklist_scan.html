@@ -73,7 +73,21 @@
           return { width: Math.floor(w * 0.9),
                    height: Math.floor(Math.min(h * 0.6, w * 0.55)) };
         } },
-      function (text) { if (target) { target.value = extractPid(text); } closeQr(); },
+      function (text) {
+        if (target) {
+          var pid = extractPid(text);
+          // #112: a type-guarded box refuses a wrong-type code — the modal
+          // stays open and keeps scanning (the callback fires per frame)
+          var tid = target.getAttribute("data-type-id");
+          if (tid && pid.toUpperCase().indexOf(tid + "-") !== 0) {
+            status.textContent = "Scanned " + pid + " — expected type " + tid + ".";
+            return;
+          }
+          target.value = pid;
+          target.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        closeQr();
+      },
       function () {})
       .then(setupFocusZoom)
       .catch(function (err) { status.textContent = "Camera start failed: " + err; });

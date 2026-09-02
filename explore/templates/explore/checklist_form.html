@@ -87,8 +87,18 @@
   }
   document.addEventListener("input", function (e) {
     if (e.target.matches && e.target.matches("input[data-min], input[data-max]")) paint(e.target);
+    if (e.target.matches && e.target.matches("input[data-type-id]")) paintPid(e.target);
   });
   document.querySelectorAll("input[data-min], input[data-max]").forEach(paint);
+
+  // #112: type-guarded PID boxes — red when the value isn't of the required type
+  function paintPid(el) {
+    el.classList.remove("cl-bad", "cl-ok");
+    var v = el.value.trim().toUpperCase();
+    if (!v) return;
+    el.classList.add(v.indexOf(el.getAttribute("data-type-id") + "-") === 0 ? "cl-ok" : "cl-bad");
+  }
+  document.querySelectorAll("input[data-type-id]").forEach(paintPid);
 
   // (QR/barcode scanning into PID fields lives in _checklist_scan.html)
 

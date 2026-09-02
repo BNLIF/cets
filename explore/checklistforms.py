@@ -203,6 +203,13 @@ def _norm_field(f: dict) -> dict | None:
         # named functional position — or the first free one matching the
         # child's type when no position is pinned (the scan page's rule).
         out["position"] = str(f.get("position") or "").strip()
+    if t in ("qr", "link"):
+        # #112 (Hajime): the box may require a Type ID — a scan of any other
+        # type won't fill it (checked in the scan modal, painted on typed
+        # input, and dropped here at parse). Malformed ids are ignored.
+        tid = str(f.get("type_id") or "").strip().upper()
+        if re.fullmatch(r"[A-Z]\d{11}", tid):
+            out["type_id"] = tid
     if t in ("number", "table"):
         out["min"], out["max"], out["range"] = _tol_range(f)
     if t == "table":
@@ -457,9 +464,14 @@ def parse(schema: dict, post) -> dict:
         elif t == "steps":
             value = {s.strip(): bool(post.get(f"{key}-s{i}"))
                      for i, s in enumerate(f["steps"])}
-        else:   # text, textarea, datetime, select, qr
+        else:   # text, textarea, datetime, select, qr, link
             raw = (post.get(key) or "").strip()
             if not raw:
+                continue
+            # #112: a type-guarded qr/link box drops a wrong-type PID —
+            # the server backstop behind the scan modal's refusal.
+            tid = f.get("type_id")
+            if tid and not raw.upper().startswith(tid + "-"):
                 continue
             value = raw
         data.setdefault(title, {})[f["label"]] = value
