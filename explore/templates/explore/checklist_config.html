@@ -50,6 +50,15 @@
   .clc-fld .ec-row { gap: 6px; }
   .clc-fld .ec-del { padding: 4px 6px; }
   .clc-fld .ff-label { flex: 1 1 80px; }
+  /* a non-static field without a label is dropped from the schema/preview */
+  .clc-fld .ff-label.miss { border-color: var(--bad, #a33); }
+  /* #113: zoomed slot placement — the drawing at full resolution */
+  #clc-mapzoom { border: 1px solid var(--rule); border-radius: var(--r-sm);
+    padding: 10px; background: var(--surface); color: var(--ink); }
+  #clc-mapzoom::backdrop { background: rgba(0, 0, 0, .45); }
+  .clc-mz-scroll { overflow: auto; max-width: 90vw; max-height: 80vh; }
+  .clc-mz-wrap { position: relative; width: fit-content; cursor: crosshair; }
+  .clc-mz-wrap img { display: block; }
   .clc-fld .ec-inline { font-size: 11.5px; gap: 4px; }
   /* #106: monospace so the indent spaces align by eye; Tab indents */
   .clc-fld .ff-steps { font-family: var(--font-mono); font-size: 12px; tab-size: 2; }
@@ -192,6 +201,7 @@
         <option value="link">link child</option>
         <option value="steps">steps</option>
         <option value="static">static</option>
+        <option value="imagemap">image map</option>
       </select>
       <input class="ff-label" placeholder="label">
       <label class="ec-inline" title="render beside the field above (side by side; stacked on phones)"><input type="checkbox" class="ff-sameline"> pair &#8593;</label>
@@ -218,7 +228,7 @@
       <input class="ff-url" placeholder="reference URL (e.g. EDMS drawing)">
       <input class="ff-image" placeholder="image URL (external)">
     </div>
-    <div class="ec-row g-static" style="display:none;">
+    <div class="ec-row g-static g-img" style="display:none;">
       <span class="ec-label" style="flex:0 0 auto;">Reference image</span>
       <input type="file" class="ff-imgfile" accept="image/*" title="upload a diagram (e.g. where P1–P10 are measured) — stored on the component type in HWDB">
       <input class="ff-imageid" placeholder="or existing image_id" style="flex:0 0 150px;" title="reference a picture already stored in HWDB by its image_id — the preview shows it (a broken image means a wrong id)">
@@ -232,8 +242,24 @@
       <input class="ff-typeid" placeholder="required Type ID (blank = any)" style="flex:0 0 220px;"
         title="e.g. D00300100002 — a scan of any other type won&#8217;t fill this box">
     </div>
+    <div class="ec-row g-map" style="display:none;">
+      <span class="ec-hint" style="flex:1 1 100%;">Click the image to add a slot &mdash; one per line: label @ x, y (% of image size).</span>
+      <textarea class="ff-slots" rows="3" placeholder="Board 1 @ 4.5, 8" style="flex:1 1 100%;"></textarea>
+      <button type="button" class="es-btn quiet ff-mapzoom" style="display:none; align-self:flex-start;" title="place slots on the full-size drawing">&#x26F6; Zoom</button>
+      <div class="clc-mapwrap" style="position:relative; display:none; max-width:100%;">
+        <img class="ff-mapimg" alt="" style="display:block; max-width:100%; max-height:300px; cursor:crosshair;">
+      </div>
+    </div>
   </div>
 </template>
+
+<dialog id="clc-mapzoom">
+  <div style="display:flex; justify-content:space-between; gap:10px; align-items:center; margin-bottom:8px;">
+    <span class="ec-hint">Click the drawing to add a slot.</span>
+    <button type="button" class="ec-del clc-mz-x" title="Close">&#x2715;</button>
+  </div>
+  <div class="clc-mz-scroll"><div class="clc-mz-wrap"><img class="clc-mz-img" alt=""></div></div>
+</dialog>
 
 {{ initial|json_script:"clc-initial" }}
 {{ templates|json_script:"clc-templates" }}
@@ -251,8 +277,10 @@
     $(".g-select", r).style.display = t === "select" ? "" : "none";
     $(".g-steps", r).style.display = t === "steps" ? "" : "none";
     $$(".g-static", r).forEach(function (g) { g.style.display = t === "static" ? "" : "none"; });
+    $(".g-img", r).style.display = (t === "static" || t === "imagemap") ? "" : "none";
     $(".g-link", r).style.display = t === "link" ? "" : "none";
-    $(".g-pid", r).style.display = (t === "qr" || t === "link") ? "" : "none";
+    $(".g-pid", r).style.display = (t === "qr" || t === "link" || t === "imagemap") ? "" : "none";
+    $(".g-map", r).style.display = t === "imagemap" ? "" : "none";
     $(".ff-tospec-w", r).style.display = SPEC_OK.indexOf(t) !== -1 ? "" : "none";
     $(".ff-label", r).placeholder = t === "static" ? "label (optional)" : "label";
   }
@@ -284,10 +312,68 @@
     $(".ff-steps", r).value = (f.steps || []).join("\n");
     $(".ff-typeid", r).value = f.type_id || "";
     $(".ff-imageid", r).value = f.image_id || "";
+    $(".ff-slots", r).value = (f.slots || []).map(function (s) {   // #113
+      return s.label + " @ " + s.x + ", " + s.y;
+    }).join("\n");
     syncImgStatus(r);
     syncType(r);
+    syncMap(r);
     return r;
   }
+
+  // #113: image-map slots — "label @ x, y" lines ⇄ the schema's slot dicts,
+  // drawn as numbered dots on the placement image (same look as the form)
+  function readSlots(r) {
+    return $(".ff-slots", r).value.split("\n").map(function (l) {
+      var m = /^(.+?)\s*@\s*(-?[\d.]+)\s*[,;]\s*(-?[\d.]+)\s*$/.exec(l.trim());
+      return m ? { label: m[1].trim(), x: parseFloat(m[2]), y: parseFloat(m[3]) } : null;
+    }).filter(Boolean);
+  }
+  var IMG_PROXY = "{% url 'explore:shipment_image' image_id='IMGID000' %}";
+  function syncMap(r) {
+    var wrap = $(".clc-mapwrap", r);
+    if (!wrap) return;
+    var id = $(".ff-imageid", r).value.trim();
+    if ($(".ff-type", r).value !== "imagemap" || !id) {
+      wrap.style.display = "none";
+      $(".ff-mapzoom", r).style.display = "none";
+      return;
+    }
+    wrap.style.display = "";
+    $(".ff-mapzoom", r).style.display = "";
+    var img = $(".ff-mapimg", r), want = IMG_PROXY.replace("IMGID000", encodeURIComponent(id));
+    if (img.getAttribute("src") !== want) img.setAttribute("src", want);
+    drawDots(wrap, r);
+    if (mzRow === r && mz.open) drawDots($(".clc-mz-wrap", mz), r);
+  }
+  function drawDots(wrap, r) {
+    $$(".cl-map-dot", wrap).forEach(function (d) { d.remove(); });
+    readSlots(r).forEach(function (s, i) {
+      var d = document.createElement("span");
+      d.className = "cl-map-dot";
+      d.style.left = s.x + "%"; d.style.top = s.y + "%";
+      d.title = s.label; d.textContent = i + 1;
+      wrap.appendChild(d);
+    });
+  }
+  // click a placement image (inline or zoomed) → drop a slot at that spot
+  function addSlotAt(r, img, e) {
+    var rect = img.getBoundingClientRect();
+    var x = ((e.clientX - rect.left) / rect.width * 100).toFixed(1);
+    var y = ((e.clientY - rect.top) / rect.height * 100).toFixed(1);
+    var ta = $(".ff-slots", r), n = readSlots(r).length + 1;
+    var lab = prompt("Slot label", "Slot " + n);
+    if (lab === null) return;
+    ta.value = (ta.value.trim() ? ta.value.replace(/\s+$/, "") + "\n" : "")
+               + ((lab.trim() || "Slot " + n) + " @ " + x + ", " + y);
+    syncMap(r); refresh();
+  }
+  // the zoomed placement dialog — full-resolution drawing, slots shown live
+  var mz = document.getElementById("clc-mapzoom"), mzRow = null;
+  mz.addEventListener("click", function (e) {
+    if (e.target === mz || e.target.classList.contains("clc-mz-x")) { mz.close(); return; }
+    if (e.target.classList.contains("clc-mz-img") && mzRow) addSlotAt(mzRow, e.target, e);
+  });
 
   function syncImgStatus(r) {
     // the id is visible in the ff-imageid box itself; the hint only carries
@@ -373,9 +459,14 @@
       var pos = $(".ff-position", r).value.trim();
       if (pos) f.position = pos;
     }
-    if (t === "qr" || t === "link") {
+    if (t === "qr" || t === "link" || t === "imagemap") {
       var tid = $(".ff-typeid", r).value.trim().toUpperCase();
       if (tid) f.type_id = tid;
+    }
+    if (t === "imagemap") {
+      var mid = $(".ff-imageid", r).value.trim();
+      if (mid) f.image_id = mid;
+      f.slots = readSlots(r);
     }
     if ($(".ff-tospec", r).checked && SPEC_OK.indexOf(t) !== -1) f.to_spec = true;
     return f;
@@ -463,6 +554,11 @@
   var pTimer = null;
   function refresh() {
     syncWhenPickers();
+    // a label-less field silently vanishes from the preview — show why
+    $$(".clc-fld").forEach(function (r) {
+      $(".ff-label", r).classList.toggle(
+        "miss", !$(".ff-label", r).value.trim() && $(".ff-type", r).value !== "static");
+    });
     $("#clc-json").value = JSON.stringify(collect(), null, 2);
     clearTimeout(pTimer);
     pTimer = setTimeout(preview, 350);
@@ -492,8 +588,12 @@
   });
 
   editor.addEventListener("input", function (e) {
-    if (e.target.classList && e.target.classList.contains("ff-imageid"))
+    if (e.target.classList && e.target.classList.contains("ff-imageid")) {
       syncImgStatus(e.target.closest(".clc-fld"));
+      syncMap(e.target.closest(".clc-fld"));
+    }
+    if (e.target.classList && e.target.classList.contains("ff-slots"))
+      syncMap(e.target.closest(".clc-fld"));
     if (e.target.id !== "clc-json") refresh();
   });
 
@@ -516,7 +616,7 @@
   editor.addEventListener("change", function (e) {
     var r = e.target.closest && e.target.closest(".clc-fld");
     if (r && e.target.classList.contains("ff-imgfile")) { uploadRef(r, e.target); return; }
-    if (r && e.target.classList.contains("ff-type")) syncType(r);
+    if (r && e.target.classList.contains("ff-type")) { syncType(r); syncMap(r); }
     if (e.target.id !== "clc-json") refresh();
   });
 
@@ -537,6 +637,7 @@
         if (j.image_id) {
           $(".ff-imageid", r).value = j.image_id;
           syncImgStatus(r);
+          syncMap(r);
           refresh();
         } else {
           st.textContent = j.error || "upload failed";
@@ -550,7 +651,18 @@
     if (t.classList.contains("ff-imgclear")) {
       var fr = t.closest(".clc-fld");
       $(".ff-imageid", fr).value = "";
-      syncImgStatus(fr); refresh(); return;
+      syncImgStatus(fr); syncMap(fr); refresh(); return;
+    }
+    // #113: click the placement image to drop a slot at that spot
+    if (t.classList.contains("ff-mapimg")) {
+      addSlotAt(t.closest(".clc-fld"), t, e); return;
+    }
+    if (t.classList.contains("ff-mapzoom")) {
+      mzRow = t.closest(".clc-fld");
+      $(".clc-mz-img", mz).src = $(".ff-mapimg", mzRow).getAttribute("src");
+      drawDots($(".clc-mz-wrap", mz), mzRow);
+      mz.showModal();
+      return;
     }
     if (t.classList.contains("clc-addf")) { addField(t.closest(".clc-sec")); refresh(); return; }
     var row = t.closest && (t.closest(".clc-fld") || t.closest(".clc-sec"));

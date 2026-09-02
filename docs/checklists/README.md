@@ -55,6 +55,7 @@ A `{"type": "row", "fields": [ … ]}` entry renders its children side by side
 | `steps` | `steps` (required) | `{step: bool}` — leading spaces indent a step (2 per level, #106); the stored key is the stripped text |
 | `static` | `note`, `url`, `image` (external URL) or `image_id` (reference image uploaded in the editor — e.g. a P1–P10 measurement diagram — stored on the type's HWDB images, served via the image proxy; an id of a picture already in HWDB can also be typed in directly, #108) | nothing — display only |
 | `link` | `position` (optional), `type_id` (optional, #112 — as `qr`) | scanned child PID — also PATCHed into the item's subcomponents (#96) |
+| `imagemap` | `image_id` (required), `slots` (required: `[{label, x, y}]`, percent coords), `type_id` (optional — guards every slot) | `{slot label: PID}` (#113, Top CRP) — the drawing renders with a numbered dot per slot; tapping a dot scans into that slot (green once filled), and a compact list below takes typed input. Values go to the test record only (no subcomponent linking). In the editor: pick the image, then click it to drop slots — or edit the `label @ x, y` lines directly |
 
 Unknown types and malformed entries are dropped silently on render.
 

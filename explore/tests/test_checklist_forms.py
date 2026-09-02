@@ -1372,6 +1372,72 @@ class TypeGuardTest(TestCase):
         self.assertIn("expected type", html)   # the scan modal's refusal
 
 
+class ImageMapTest(TestCase):
+    """#113 (Top CRP): clickable image map — a drawing with tappable slots,
+    each scanning one board's PID; values store {slot label: PID}."""
+
+    SLOTS = [{"label": "Board 1", "x": 3.5, "y": 8.0},
+             {"label": "Board 2", "x": 3.5, "y": 24.0}]
+
+    def _schema(self, **extra):
+        f = {"type": "imagemap", "label": "Boards", "image_id": "img-1",
+             "slots": list(self.SLOTS), **extra}
+        return checklistforms.normalize(
+            {"name": "t", "test_type_name": "T",
+             "sections": [{"title": "S", "fields": [f]}]}, "t")
+
+    def test_normalize_keeps_slots_and_drops_malformed_ones(self):
+        f = self._schema(slots=self.SLOTS + [
+            {"label": "", "x": 1, "y": 1},          # unnamed
+            {"label": "Board 1", "x": 9, "y": 9},   # duplicate label
+            {"label": "Off", "x": 101, "y": 1},     # outside the image
+            {"label": "NoY", "x": 1},               # missing coord
+            "Board 9"])["sections"][0]["fields"][0]
+        self.assertEqual(f["slots"], self.SLOTS)
+
+    def test_normalize_drops_a_map_without_image_or_slots(self):
+        for extra in ({"image_id": ""}, {"slots": []}):
+            schema = self._schema(**extra)
+            self.assertEqual(schema["sections"], [], extra)
+
+    def test_bind_fills_slot_values(self):
+        bound = checklistforms.bind(
+            self._schema(),
+            {"DATA": {"S": {"Boards": {"Board 2": "D00300100002-00014"}}}})
+        items = bound["sections"][0]["fields"][0]["items"]
+        self.assertEqual([(i["label"], i["value"]) for i in items],
+                         [("Board 1", ""), ("Board 2", "D00300100002-00014")])
+        self.assertTrue(all(i["name"].endswith(f"-m{n}")
+                            for n, i in enumerate(items)))
+
+    def test_parse_collects_filled_slots_and_applies_the_type_guard(self):
+        schema = self._schema(type_id="D00300100002")
+        key = schema["sections"][0]["fields"][0]["key"]
+        data = checklistforms.parse(schema, {
+            f"{key}-m0": "D00300100001-00014",   # wrong type — dropped (#112)
+            f"{key}-m1": "D00300100002-00014"})
+        self.assertEqual(data["S"]["Boards"],
+                         {"Board 2": "D00300100002-00014"})
+        self.assertEqual(checklistforms.parse(schema, {}), {})  # empty omitted
+
+    def test_form_renders_dots_and_slot_inputs(self):
+        user = get_user_model().objects.create_user("n", "n@n.io", "pw")
+        self.client.force_login(user)
+        schema = dict(SCHEMA)
+        schema["sections"] = [{"title": "S", "fields": [
+            {"type": "imagemap", "label": "Boards", "image_id": "img-1",
+             "slots": self.SLOTS, "type_id": "D00300100002"}]}]
+        m1, m2 = _mocked(_api(schema=schema))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('class="cl-scan cl-map-dot"', html)          # tappable dot
+        self.assertIn("left:3.5%; top:8%;", html)
+        self.assertIn('title="Board 2"', html)
+        self.assertEqual(html.count('data-type-id="D00300100002"'), 2)
+        self.assertIn("/shipment-image/img-1/", html)              # the drawing
+        self.assertIn("cl-mapzoom", html)          # tap-to-zoom view with dots
+
+
 class ChecklistBookmarkTest(TestCase):
     """#111: bookmark a checklist → quick link under My checklists on the
     profile page, grouped by System › Subsystem."""

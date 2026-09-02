@@ -9,7 +9,7 @@ checklist scenes as schema-driven web forms (Hajime/Greg, 2026-08-07).
   a CLOSED vocabulary mirroring the iPad widgets: ``check`` (tri-state),
   ``number`` (units + tolerance), ``table`` (point-measurement grid),
   ``text``, ``textarea``, ``datetime``, ``select``, ``photo``, ``qr``,
-  ``steps``, ``static`` — plus a ``row`` grouping that renders its child
+  ``steps``, ``static``, ``imagemap`` — plus a ``row`` grouping that renders its child
   fields side by side (stacked on phones). Order IS the layout; there are
   no coordinates.
 - **Data** — submissions land in HWDB only: photos post first (for their
@@ -27,7 +27,7 @@ import re
 logger = logging.getLogger(__name__)
 
 FIELD_TYPES = {"check", "number", "table", "text", "textarea", "datetime",
-               "select", "photo", "qr", "steps", "static", "link"}
+               "select", "photo", "qr", "steps", "static", "link", "imagemap"}
 
 # Field types whose value may ALSO be folded into the item's latest
 # specifications DATA (the ``to_spec`` flag, #96 — "sometimes they do store
@@ -203,13 +203,35 @@ def _norm_field(f: dict) -> dict | None:
         # named functional position — or the first free one matching the
         # child's type when no position is pinned (the scan page's rule).
         out["position"] = str(f.get("position") or "").strip()
-    if t in ("qr", "link"):
+    if t in ("qr", "link", "imagemap"):
         # #112 (Hajime): the box may require a Type ID — a scan of any other
         # type won't fill it (checked in the scan modal, painted on typed
         # input, and dropped here at parse). Malformed ids are ignored.
+        # On an imagemap (#113) the guard applies to every slot.
         tid = str(f.get("type_id") or "").strip().upper()
         if re.fullmatch(r"[A-Z]\d{11}", tid):
             out["type_id"] = tid
+    if t == "imagemap":
+        # #113 (Top CRP): a background drawing with tappable slots — tap a
+        # slot to scan the board mounted there. Slots are percent coordinates
+        # on the image; values store ``{slot label: PID}``. The image is a
+        # reference picture on the TYPE's HWDB images (as ``static``'s
+        # image_id); slots outside the image or unnamed are dropped.
+        out["image_id"] = str(f.get("image_id") or "").strip()
+        slots, seen = [], set()
+        for s in f.get("slots") or []:
+            if not isinstance(s, dict):
+                continue
+            lab = str(s.get("label") or "").strip()
+            x, y = _num(s.get("x")), _num(s.get("y"))
+            if not lab or lab in seen or x is None or y is None \
+                    or not (0 <= x <= 100 and 0 <= y <= 100):
+                continue
+            seen.add(lab)
+            slots.append({"label": lab, "x": round(x, 2), "y": round(y, 2)})
+        out["slots"] = slots
+        if not out["image_id"] or not slots:
+            return None
     if t in ("number", "table"):
         out["min"], out["max"], out["range"] = _tol_range(f)
     if t == "table":
@@ -408,6 +430,12 @@ def _bind_leaf(f: dict, v) -> None:
                        "level": min((len(s) - len(s.lstrip(" "))) // 2, 4),
                        "done": bool(done.get(s.strip()))}
                       for i, s in enumerate(f["steps"])]
+    elif t == "imagemap":
+        vals = v if isinstance(v, dict) else {}
+        f["items"] = [{"label": s["label"], "x": s["x"], "y": s["y"],
+                       "name": f"{f['key']}-m{i}",
+                       "value": _fmt(vals.get(s["label"]))}
+                      for i, s in enumerate(f["slots"])]
     elif t == "photo":
         f["existing"] = v if isinstance(v, dict) and v.get("image_id") else None
     elif t != "static":   # number, text, textarea, datetime, select, qr
@@ -464,6 +492,19 @@ def parse(schema: dict, post) -> dict:
         elif t == "steps":
             value = {s.strip(): bool(post.get(f"{key}-s{i}"))
                      for i, s in enumerate(f["steps"])}
+        elif t == "imagemap":
+            # #113: one PID per filled slot; the #112 type guard applies to
+            # every slot. Empty maps are omitted like any blank field.
+            tid = f.get("type_id")
+            vals = {}
+            for i, s in enumerate(f["slots"]):
+                raw = (post.get(f"{key}-m{i}") or "").strip()
+                if not raw or (tid and not raw.upper().startswith(tid + "-")):
+                    continue
+                vals[s["label"]] = raw
+            if not vals:
+                continue
+            value = vals
         else:   # text, textarea, datetime, select, qr, link
             raw = (post.get(key) or "").strip()
             if not raw:

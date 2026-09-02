@@ -77,6 +77,33 @@
   .cl-lb-pdfbtn { font: inherit; font-size: 13px; color: var(--accent-ink);
     background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm);
     padding: 7px 12px; cursor: pointer; }
+  /* #113: clickable image map — numbered dots over the drawing, one slot each */
+  .cl-map { position: relative; display: inline-block; max-width: 100%; }
+  .cl-map img { display: block; max-width: 100%; max-height: 440px;
+    border: 1px solid var(--rule); border-radius: var(--r-sm); cursor: zoom-in; }
+  /* zoomed map view (tap the drawing): full resolution, slots still tappable */
+  .cl-mapzoom { border: 1px solid var(--rule); border-radius: var(--r-sm);
+    padding: 10px; background: var(--surface); color: var(--ink); }
+  .cl-mapzoom::backdrop { background: rgba(0, 0, 0, .45); }
+  .cl-mz-bar { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+  .cl-mz-scroll { overflow: auto; max-width: 90vw; max-height: 80vh; }
+  .cl-mz-wrap { position: relative; width: fit-content; }
+  .cl-mz-wrap img { display: block; max-width: none; max-height: none; }
+  .cl-map-dot { position: absolute; transform: translate(-50%, -50%);
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 22px; height: 22px; padding: 0 4px; border-radius: 11px;
+    font: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer;
+    color: var(--accent-ink); background: transparent;
+    border: 2px solid var(--accent-ink);
+    text-shadow: 0 0 3px var(--surface), 0 0 3px var(--surface); }
+  .cl-map-dot.on { color: var(--good); border-color: var(--good); }
+  .cl-map-list { display: grid; gap: 6px 14px; margin-top: 8px;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+  .cl-map-slot { display: flex; gap: 6px; align-items: center; font-size: 13px; }
+  .cl-map-slot label { flex: 0 1 auto; white-space: nowrap; }
+  .cl-map-slot input { flex: 1 1 90px; min-width: 0; font-family: var(--font-mono); }
+  .cl-map-n { flex: 0 0 auto; color: var(--faint); font-size: 11.5px; min-width: 16px;
+    text-align: right; }
   .cl-note { font-size: 13px; color: var(--ink); }
   .cl-field a { color: var(--accent-ink); }
   /* the Take-photo button only works where capture= opens a camera app —

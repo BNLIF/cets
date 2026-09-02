@@ -57,6 +57,23 @@
   <ol class="cl-steps">
     {% for it in f.items %}<li{% if it.level %} class="cl-step-l{{ it.level }}"{% endif %}><label><input type="checkbox" name="{{ it.name }}"{% if it.done %} checked{% endif %}> {{ it.label }}</label></li>{% endfor %}
   </ol>
+{% elif f.type == "imagemap" %}
+  <span class="cl-lab">{{ f.label }}{% if f.type_id %} <span class="cl-hint">type {{ f.type_id }}</span>{% endif %}</span>
+  <div class="cl-map">
+    <img src="{% url 'explore:shipment_image' image_id=f.image_id %}" alt="{{ f.label }}">
+    {% for s in f.items %}<button type="button" class="cl-scan cl-map-dot{% if s.value %} on{% endif %}"
+      data-target="{{ s.name }}" style="left:{{ s.x|stringformat:"g" }}%; top:{{ s.y|stringformat:"g" }}%;"
+      title="{{ s.label }}">{{ forloop.counter }}</button>{% endfor %}
+  </div>
+  <div class="cl-map-list">
+    {% for s in f.items %}
+    <span class="cl-map-slot"><span class="cl-map-n">{{ forloop.counter }}</span>
+      <label for="{{ s.name }}">{{ s.label }}</label>
+      <input id="{{ s.name }}" name="{{ s.name }}" value="{{ s.value }}" autocomplete="off"
+        autocapitalize="characters" spellcheck="false"{% if f.type_id %} data-type-id="{{ f.type_id }}"{% endif %}>
+      <button type="button" class="es-btn cl-scan" data-target="{{ s.name }}" title="Scan">&#9635;</button></span>
+    {% endfor %}
+  </div>
 {% elif f.type == "static" %}
   {% if f.label %}<span class="cl-lab">{{ f.label }}</span>{% endif %}
   {% if f.image_id %}<img class="cl-static-img" data-lightbox src="{% url 'explore:shipment_image' image_id=f.image_id %}" alt="{{ f.label|default:'reference' }}">

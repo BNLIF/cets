@@ -87,6 +87,44 @@
   };
   window.clRecompute();
 
+  // #113: an image map's dot goes green once its slot holds a value (typing
+  // or a scan — the scan modal dispatches an input event on fill). The
+  // selector catches the zoomed view's cloned dots too.
+  document.addEventListener("input", function (e) {
+    var el = e.target;
+    if (!el.id || !el.closest || !el.closest(".cl-map-list")) return;
+    document.querySelectorAll('.cl-map-dot[data-target="' + el.id + '"]')
+      .forEach(function (d) { d.classList.toggle("on", el.value.trim() !== ""); });
+  });
+
+  // #113: tap the map drawing → zoomed view at full resolution with the
+  // slot circles; the cloned dots keep cl-scan + data-target, so tapping
+  // one there opens the scanner on top (where the scan modal is included)
+  var mapDlg = null;
+  document.addEventListener("click", function (e) {
+    var im = e.target.closest && e.target.closest(".cl-map > img");
+    if (!im) return;
+    if (!mapDlg) {
+      mapDlg = document.createElement("dialog");
+      mapDlg.className = "cl-mapzoom";
+      mapDlg.innerHTML = '<div class="cl-mz-bar"><button type="button" class="cl-mz-x es-btn quiet">✕</button></div>'
+        + '<div class="cl-mz-scroll"><div class="cl-mz-wrap"></div></div>';
+      document.body.appendChild(mapDlg);
+      mapDlg.addEventListener("click", function (ev) {
+        if (ev.target === mapDlg || ev.target.classList.contains("cl-mz-x")) mapDlg.close();
+      });
+    }
+    var wrap = mapDlg.querySelector(".cl-mz-wrap");
+    wrap.innerHTML = "";
+    var big = document.createElement("img");
+    big.src = im.src;
+    wrap.appendChild(big);
+    im.closest(".cl-map").querySelectorAll(".cl-map-dot").forEach(function (d) {
+      wrap.appendChild(d.cloneNode(true));
+    });
+    mapDlg.showModal();
+  });
+
   // #107: an inline reference that isn't a browser-renderable image (a PDF
   // drawing) shows as a broken <img> — swap it for a view button that opens
   // the lightbox (_lightbox.html) instead

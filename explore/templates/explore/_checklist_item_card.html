@@ -1,7 +1,7 @@
 {# #103: HWDB's standard item fields as one card above the consortium sections — written to the item itself on submit. #}
 {% if item_card %}
-<div class="es-card cl-sec">
-  <h2><button type="button" class="cl-fold" aria-expanded="true">Item</button><span class="cl-hint">HWDB’s own fields on this item — saved to the item record, not just the checklist</span></h2>
+<div class="es-card cl-sec cl-folded">
+  <h2><button type="button" class="cl-fold" aria-expanded="false">Item</button><span class="cl-hint">HWDB’s own fields on this item — saved to the item record, not just the checklist</span></h2>
   <div class="cl-sec-body">
     <input type="hidden" name="item-card" value="1">
     <div class="cl-row">
