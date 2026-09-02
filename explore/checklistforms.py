@@ -239,12 +239,18 @@ def _norm_field(f: dict) -> dict | None:
         # — computed from the row's other cells, C<n> = 1-based column index —
         # and may carry its OWN tolerance (nominal/tol or min/max), overriding
         # the table-wide one (a computed Total has a different range).
-        cols, formulas, col_tol = [], {}, {}
+        cols, formulas, texts, col_tol = [], {}, {}, {}
         for c in f.get("columns") or []:
             if isinstance(c, dict):
                 label = str(c.get("label") or "").strip()
                 fx = str(c.get("formula") or "").strip()
-                if label and fx and _FORMULA_CHARS.match(fx):
+                # #114 (HVS): "text" makes a constant cell (the Expected
+                # column) — fixed display, not editable, referenceable by
+                # formulas when it's a plain number. Text beats formula.
+                tx = str(c.get("text") or "").strip()
+                if label and tx:
+                    texts[label] = tx
+                elif label and fx and _FORMULA_CHARS.match(fx):
                     formulas[label] = fx
                 lo, hi, rng = _tol_range(c)
                 if label and (lo is not None or hi is not None):
@@ -254,6 +260,8 @@ def _norm_field(f: dict) -> dict | None:
             if label:
                 cols.append(label)
         out["columns"] = cols
+        if texts:
+            out["texts"] = texts
         if formulas:
             out["formulas"] = formulas
         if col_tol:
@@ -416,13 +424,18 @@ def _bind_leaf(f: dict, v) -> None:
     elif t == "table":
         cells = v if isinstance(v, dict) else {}
         ct = f.get("col_tol") or {}
-        # a column's own tolerance replaces the table-wide one wholesale
+        tx = f.get("texts") or {}
+        # a column's own tolerance replaces the table-wide one wholesale;
+        # a constant cell (#114) always shows its fixed text, never paints
         f["cells"] = [{"column": c, "name": f"{f['key']}-c{i}",
-                       "value": _fmt(cells.get(c)),
+                       "value": tx[c] if c in tx else _fmt(cells.get(c)),
                        "formula": (f.get("formulas") or {}).get(c, ""),
-                       "min": ct[c]["min"] if c in ct else f["min"],
-                       "max": ct[c]["max"] if c in ct else f["max"],
-                       "range": ct[c]["range"] if c in ct else ""}
+                       "text": tx.get(c, ""),
+                       "min": None if c in tx else
+                              (ct[c]["min"] if c in ct else f["min"]),
+                       "max": None if c in tx else
+                              (ct[c]["max"] if c in ct else f["max"]),
+                       "range": ct[c]["range"] if c in ct and c not in tx else ""}
                       for i, c in enumerate(f["columns"])]
     elif t == "steps":
         done = v if isinstance(v, dict) else {}
@@ -469,14 +482,23 @@ def parse(schema: dict, post) -> dict:
                 continue
             value = _num_or_str(raw)
         elif t == "table":
-            cells = {}
             formulas = f.get("formulas") or {}
+            texts = f.get("texts") or {}
+            # #114: constant cells first, so formulas can reference a numeric
+            # one; posted overrides for them are ignored like formulas'.
+            cells = {c: _num_or_str(tx) for c, tx in texts.items()}
+            typed = False
             for i, c in enumerate(f["columns"]):
-                if c in formulas:
-                    continue   # computed below, whatever was posted
+                if c in formulas or c in texts:
+                    continue   # computed/fixed below, whatever was posted
                 raw = (post.get(f"{key}-c{i}") or "").strip()
                 if raw:
                     cells[c] = _num_or_str(raw)
+                    typed = True
+            # an untouched table stays omitted — constants alone (and what
+            # they'd compute) aren't a submission
+            if not typed:
+                continue
             # #109: computed columns, left to right — a formula may reference
             # plain cells and computed ones to its LEFT; anything unresolvable
             # leaves the cell out.
@@ -486,8 +508,6 @@ def parse(schema: dict, post) -> dict:
                                       [cells.get(col) for col in f["columns"]])
                     if v is not None:
                         cells[c] = round(v, 9)
-            if not cells:
-                continue
             value = cells
         elif t == "steps":
             value = {s.strip(): bool(post.get(f"{key}-s{i}"))

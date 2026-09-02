@@ -66,7 +66,9 @@
     tbl.querySelectorAll("input[data-formula]").forEach(function (inp) {
       var v = evalFormula(inp.getAttribute("data-formula"), function (i) {
         var el = tbl.querySelector('input[data-ci="' + i + '"]');
-        return el ? parseFloat(el.value) : NaN;
+        // strict, like the server: "3.1+-0.1" (a #114 constant) is NOT 3.1
+        if (!el || el.value.trim() === "") return NaN;
+        return Number(el.value);
       });
       inp.value = isFinite(v) ? String(+v.toFixed(6)) : "";
       // re-fires the tolerance coloring on the computed value

@@ -214,7 +214,7 @@
       <input class="ff-tol" placeholder="&#177; tol" inputmode="decimal" style="flex:0 0 76px;">
       <input class="ff-min" placeholder="min" inputmode="decimal" style="flex:0 0 76px;">
       <input class="ff-max" placeholder="max" inputmode="decimal" style="flex:0 0 76px;">
-      <input class="ff-columns" placeholder="columns, comma-separated — computed: Total = C1 + C2*(C3/C4) [11 ± 1]" title="label = formula makes a computed column (C1 = first column's value); [nominal ± tol] or [min..max] gives that column its own accepted range">
+      <textarea class="ff-columns" rows="2" style="flex:1 1 100%;" placeholder="columns — comma- or line-separated; computed: Total = C1 + C2*(C3/C4) [11 ± 1]; fixed: Expected = &quot;3.1+-0.1&quot;" title="label = formula makes a computed column (C1 = first column's value, formula/fixed cells count too); label = &quot;text&quot; makes a fixed non-editable cell (no commas in the text); [nominal ± tol] or [min..max] gives that column its own accepted range"></textarea>
     </div>
     <div class="ec-row g-select" style="display:none;">
       <input class="ff-options" placeholder="options, comma-separated">
@@ -300,15 +300,19 @@
         el.value = v === undefined || v === null ? ""
           : (k === "options" ? (v || []).join(", ") : String(v));
       });
-    $(".ff-columns", r).value = (f.columns || []).map(function (c) {   // #109:
+    var colParts = (f.columns || []).map(function (c) {                // #109:
       if (!c || !c.label) return c;                    // computed / own-tolerance
       var tol = c.nominal != null && c.tol != null ? c.nominal + " ± " + c.tol
               : c.min != null || c.max != null
                 ? (c.min != null ? c.min : "") + ".." + (c.max != null ? c.max : "")
                 : "";
-      return c.label + (c.formula ? " = " + c.formula : "")
+      return c.label + (c.text ? ' = "' + c.text + '"'                 // #114
+                        : (c.formula ? " = " + c.formula : ""))
                      + (tol ? " [" + tol + "]" : "");
-    }).join(", ");                                                     // columns
+    });                                                                // columns
+    // long column lists read better one per line (the box parses both)
+    $(".ff-columns", r).value =
+      colParts.join(", ").length > 60 ? colParts.join("\n") : colParts.join(", ");
     $(".ff-steps", r).value = (f.steps || []).join("\n");
     $(".ff-typeid", r).value = f.type_id || "";
     $(".ff-imageid", r).value = f.image_id || "";
@@ -430,7 +434,7 @@
       [["nominal", ".ff-nominal"], ["tol", ".ff-tol"], ["min", ".ff-min"], ["max", ".ff-max"]]
         .forEach(function (p) { var v = num(r, p[1]); if (v !== null) f[p[0]] = v; });
     }
-    if (t === "table") f.columns = list($(".ff-columns", r).value, ",")
+    if (t === "table") f.columns = list($(".ff-columns", r).value, /[,\n]/)
       .map(function (c) {
         // #109: "label = C1 + C2 [11 ± 1]" — optional formula, optional own
         // tolerance in brackets (nominal ± tol, nominal +- tol, or min..max)
@@ -446,7 +450,13 @@
           }
         }
         var i = c.indexOf("=");
-        if (i !== -1) { out.formula = c.slice(i + 1).trim(); c = c.slice(0, i); }
+        if (i !== -1) {
+          var rhs = c.slice(i + 1).trim(), q = /^"(.*)"$/.exec(rhs);
+          // #114: a quoted right side is a fixed (non-editable) cell
+          if (q) out.text = q[1];
+          else out.formula = rhs;
+          c = c.slice(0, i);
+        }
         if (!Object.keys(out).length) return c.trim();
         out.label = c.trim();
         return out;

@@ -1438,6 +1438,71 @@ class ImageMapTest(TestCase):
         self.assertIn("cl-mapzoom", html)          # tap-to-zoom view with dots
 
 
+class ConstantCellsTest(TestCase):
+    """#114 (HVS): fixed-string table cells — the "Expected" column shows a
+    constant, is not editable, and formulas can reference numeric ones."""
+
+    def _schema(self, columns):
+        return checklistforms.normalize(
+            {"name": "t", "test_type_name": "T",
+             "sections": [{"title": "S", "fields": [
+                 {"type": "table", "label": "M", "columns": columns}]}]}, "t")
+
+    COLS = [{"label": "Expected", "text": "3.1+-0.1"}, "Measurement",
+            {"label": "Diff", "formula": "3.1 - C2"}]
+
+    def test_normalize_keeps_texts_and_text_beats_formula(self):
+        f = self._schema(self.COLS + [
+            {"label": "Both", "text": "x", "formula": "C1"}]
+        )["sections"][0]["fields"][0]
+        self.assertEqual(f["texts"], {"Expected": "3.1+-0.1", "Both": "x"})
+        self.assertEqual(f["formulas"], {"Diff": "3.1 - C2"})
+
+    def test_parse_stores_the_constant_and_ignores_posted_overrides(self):
+        schema = self._schema(self.COLS)
+        key = schema["sections"][0]["fields"][0]["key"]
+        data = checklistforms.parse(schema, {
+            f"{key}-c0": "999", f"{key}-c1": "3.0"})
+        self.assertEqual(data["S"]["M"],
+                         {"Expected": "3.1+-0.1", "Measurement": 3.0,
+                          "Diff": 0.1})
+
+    def test_numeric_constant_is_referenceable_by_a_formula(self):
+        schema = self._schema([{"label": "Expected", "text": "3.1"},
+                               "Measurement",
+                               {"label": "Diff", "formula": "C1 - C2"}])
+        key = schema["sections"][0]["fields"][0]["key"]
+        data = checklistforms.parse(schema, {f"{key}-c1": "3.0"})
+        self.assertEqual(data["S"]["M"],
+                         {"Expected": 3.1, "Measurement": 3.0, "Diff": 0.1})
+
+    def test_untouched_table_is_omitted_despite_constants(self):
+        schema = self._schema(self.COLS)
+        self.assertEqual(checklistforms.parse(schema, {}), {})
+
+    def test_bind_shows_the_constant_without_tolerance_paint(self):
+        schema = self._schema(self.COLS)
+        schema["sections"][0]["fields"][0]["min"] = 0.0
+        schema["sections"][0]["fields"][0]["max"] = 5.0
+        cells = {c["column"]: c for c in checklistforms.bind(
+            schema, {})["sections"][0]["fields"][0]["cells"]}
+        self.assertEqual(cells["Expected"]["value"], "3.1+-0.1")
+        self.assertIsNone(cells["Expected"]["min"])
+        self.assertEqual(cells["Measurement"]["min"], 0.0)
+
+    def test_form_renders_the_constant_readonly(self):
+        user = get_user_model().objects.create_user("n", "n@n.io", "pw")
+        self.client.force_login(user)
+        schema = dict(SCHEMA)
+        schema["sections"] = [{"title": "S", "fields": [
+            {"type": "table", "label": "M", "columns": self.COLS}]}]
+        m1, m2 = _mocked(_api(schema=schema))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('value="3.1+-0.1"', html)
+        self.assertIn("data-const", html)
+
+
 class ChecklistBookmarkTest(TestCase):
     """#111: bookmark a checklist → quick link under My checklists on the
     profile page, grouped by System › Subsystem."""
