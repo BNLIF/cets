@@ -1590,6 +1590,50 @@ class StackedCellTest(TestCase):
         self.assertIn("20-G202", html)
 
 
+class ChecklistLinkTest(TestCase):
+    """#118 (HVS): a static field can jump to another checklist — this
+    item's by name, or another type's PID chooser."""
+
+    def _norm(self, **extra):
+        return checklistforms.normalize(
+            {"name": "t", "test_type_name": "T", "sections": [
+                {"title": "S", "fields": [{"type": "static", **extra}]}]}, "t")
+
+    def test_normalize_keeps_the_link_and_validates_the_type(self):
+        f = self._norm(checklist="Frame Dimensional")["sections"][0]["fields"][0]
+        self.assertEqual(f["checklist"], "Frame Dimensional")
+        self.assertEqual(f["checklist_type"], "")
+        f = self._norm(checklist="Frame", part_type_id="d00300100002"
+                       )["sections"][0]["fields"][0]
+        self.assertEqual(f["checklist_type"], "D00300100002")
+        f = self._norm(checklist="Frame", part_type_id="junk"
+                       )["sections"][0]["fields"][0]
+        self.assertEqual(f["checklist_type"], "")   # malformed → item link
+
+    def test_checklist_alone_keeps_the_static_field(self):
+        self.assertEqual(
+            len(self._norm(checklist="Frame")["sections"][0]["fields"]), 1)
+        self.assertEqual(self._norm()["sections"], [])   # still all-empty drop
+
+    def _render(self, field):
+        user = get_user_model().objects.create_user("n", "n@n.io", "pw")
+        self.client.force_login(user)
+        schema = dict(SCHEMA)
+        schema["sections"] = [{"title": "S", "fields": [field]}]
+        m1, m2 = _mocked(_api(schema=schema))
+        with m1, m2:
+            return self.client.get(PAGE).content.decode()
+
+    def test_fill_page_links_to_this_items_checklist(self):
+        html = self._render({"type": "static", "checklist": "Frame Dim"})
+        self.assertIn(f"/hw/dev/part/{PART}/checklist/Frame%20Dim/", html)
+
+    def test_with_a_type_id_links_to_that_types_chooser(self):
+        html = self._render({"type": "static", "checklist": "Frame Dim",
+                             "part_type_id": "D00300100002"})
+        self.assertIn("/hw/dev/checklist/D00300100002/Frame%20Dim/", html)
+
+
 class ChecklistBookmarkTest(TestCase):
     """#111: bookmark a checklist → quick link under My checklists on the
     profile page, grouped by System › Subsystem."""

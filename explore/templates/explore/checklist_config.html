@@ -243,6 +243,12 @@
       <input class="ff-url" placeholder="reference URL (e.g. EDMS drawing)">
       <input class="ff-image" placeholder="image URL (external)">
     </div>
+    <div class="ec-row g-static" style="display:none;">
+      <input class="ff-checklist" placeholder="link to checklist (name)"
+        title="a jump link to another checklist — blank type = the same item&#8217;s">
+      <input class="ff-checklisttype" placeholder="its Type ID (blank = this item)" style="flex:0 0 200px;"
+        title="set when the target checklist belongs to a different component type — the link opens that type&#8217;s PID chooser">
+    </div>
     <div class="ec-row g-static g-img" style="display:none;">
       <span class="ec-label" style="flex:0 0 auto;">Reference image</span>
       <input type="file" class="ff-imgfile" accept="image/*" title="upload a diagram (e.g. where P1–P10 are measured) — stored on the component type in HWDB">
@@ -343,6 +349,8 @@
       $(".ff-color", r).dataset.on = "1";
     }
     $(".ff-typeid", r).value = f.type_id || "";
+    $(".ff-checklist", r).value = f.checklist || "";                   // #118
+    $(".ff-checklisttype", r).value = f.part_type_id || "";
     $(".ff-imageid", r).value = f.image_id || "";
     $(".ff-slots", r).value = (f.slots || []).map(function (s) {   // #113
       return s.label + " @ " + s.x + ", " + s.y;
@@ -456,12 +464,16 @@
     if (t === "static") {
       var note = $(".ff-note", r).value.trim(), url = $(".ff-url", r).value.trim(),
           image = $(".ff-image", r).value.trim(),
-          imageId = $(".ff-imageid", r).value.trim();
+          imageId = $(".ff-imageid", r).value.trim(),
+          cl = $(".ff-checklist", r).value.trim(),                     // #118
+          clType = $(".ff-checklisttype", r).value.trim().toUpperCase();
       if (note) f.note = note;
       if (url) f.url = url;
       if (image) f.image = image;
       if (imageId) f.image_id = imageId;
-      return (note || url || image || imageId) ? f : null;
+      if (cl) f.checklist = cl;
+      if (cl && clType) f.part_type_id = clType;
+      return (note || url || image || imageId || cl) ? f : null;
     }
     if (!label) return null;
     if (t === "number" || t === "table") {

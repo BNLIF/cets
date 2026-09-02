@@ -2785,6 +2785,9 @@ def explore_checklist_preview_view(request, part_type_id):
     return render(request, "explore/_checklist_preview.html",
                   {"schema": checklistforms.bind(schema, None),
                    "item_card": checklistforms.item_card(schema, None, None),
+                   # #118: a checklist jump link without an item resolves to
+                   # this type's PID chooser in the preview
+                   "part_type_id": part_type_id,
                    "arrived_default": ""})
 
 

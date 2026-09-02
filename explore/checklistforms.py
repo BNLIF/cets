@@ -193,13 +193,19 @@ def _norm_field(f: dict) -> dict | None:
         # image_id = a reference image uploaded onto the TYPE's images (#97
         # review — the iPad scenes' P1–P10 measurement diagrams), served
         # through the bearer image proxy; image = an external URL.
+        # checklist = a jump link to another checklist (#118): name only →
+        # this item's checklist of that name; with a part_type_id → that
+        # type's PID chooser (a malformed type id falls back to name-only).
+        ctid = str(f.get("part_type_id") or "").strip().upper()
         out = {"type": t, "label": label,
                "image": str(f.get("image") or "").strip(),
                "image_id": str(f.get("image_id") or "").strip(),
                "url": str(f.get("url") or "").strip(),
-               "note": str(f.get("note") or "").strip()}
+               "note": str(f.get("note") or "").strip(),
+               "checklist": str(f.get("checklist") or "").strip(),
+               "checklist_type": ctid if re.fullmatch(r"[A-Z]\d{11}", ctid) else ""}
         return out if (out["image"] or out["image_id"] or out["url"]
-                       or out["note"]) else None
+                       or out["note"] or out["checklist"]) else None
     if t not in FIELD_TYPES or not label:
         return None
     out = {"type": t, "label": label, "units": str(f.get("units") or "").strip(),

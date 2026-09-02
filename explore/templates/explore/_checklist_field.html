@@ -81,6 +81,9 @@
   {% elif f.image %}<img class="cl-static-img" data-lightbox src="{{ f.image }}" alt="{{ f.label|default:'reference' }}">{% endif %}
   {% if f.note %}<div class="cl-note">{{ f.note }}</div>{% endif %}
   {% if f.url %}<div><a href="{{ f.url }}" target="_blank" rel="noopener">{{ f.url }} <span aria-hidden="true">&#x2197;</span></a></div>{% endif %}
+  {% if f.checklist %}{# #118: jump to another checklist — this item's, or another type's chooser #}
+  <div><a href="{% if f.checklist_type %}{% url 'explore:type_checklist' part_type_id=f.checklist_type name=f.checklist %}{% elif part_id %}{% url 'explore:checklist' part_id=part_id name=f.checklist %}{% else %}{% url 'explore:type_checklist' part_type_id=part_type_id name=f.checklist %}{% endif %}"
+    target="_blank" rel="noopener">&#9745; {{ f.checklist }} <span aria-hidden="true">&#x2197;</span></a></div>{% endif %}
 {% else %}
   <label class="cl-lab" for="{{ f.key }}">{{ f.label }}</label>
   <input id="{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}" autocomplete="off">
