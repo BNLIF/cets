@@ -71,9 +71,10 @@
   .cl-table th { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase;
     padding: 2px 8px 4px; border-bottom: 1px solid var(--rule); text-align: center; }
   .cl-table td { padding: 5px 4px; }
-  /* no padding below the last row — a neighbour's bottom-aligned control
-     (#120 review) should sit flush with the table's inputs */
-  .cl-table tbody tr:last-child td { padding-bottom: 0; }
+  /* beside other fields, align neighbours to the table's INPUT row, not to
+     the 5px of cell padding (tint band) below it — the extra -5px shifts
+     the alignment box up while the paint stays put (#120 review) */
+  .cl-row .tbl-scroll, .cl-grid .tbl-scroll { margin-bottom: -8px; }
   .cl-table td input { width: 86px; text-align: center; }
   .cl-table td input[readonly] { background: var(--page); border-style: dashed; }  /* computed (#109) */
   .cl-table td input[data-const] { background: none; border-color: transparent; }  /* fixed text (#114) */
