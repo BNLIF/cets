@@ -1490,6 +1490,37 @@ class ConstantCellsTest(TestCase):
         self.assertIsNone(cells["Expected"]["min"])
         self.assertEqual(cells["Measurement"]["min"], 0.0)
 
+    def test_normalize_maps_named_tints_and_drops_junk(self):
+        # #115: table background color — named palette or #rrggbb
+        f = self._schema(self.COLS)
+        for given, want in (("yellow", "#d4a72c"), ("#AbCdEf", "#abcdef")):
+            g = checklistforms.normalize(
+                {"name": "t", "test_type_name": "T", "sections": [
+                    {"title": "S", "fields": [{"type": "table", "label": "M",
+                                               "columns": ["A"], "color": given}]}]},
+                "t")["sections"][0]["fields"][0]
+            self.assertEqual(g["color"], want, given)
+        for bad in ("purpleish", "url(x)", "#abc", ""):
+            g = checklistforms.normalize(
+                {"name": "t", "test_type_name": "T", "sections": [
+                    {"title": "S", "fields": [{"type": "table", "label": "M",
+                                               "columns": ["A"], "color": bad}]}]},
+                "t")["sections"][0]["fields"][0]
+            self.assertNotIn("color", g, bad)
+
+    def test_form_renders_the_tint(self):
+        user = get_user_model().objects.create_user("t", "t@t.io", "pw")
+        self.client.force_login(user)
+        schema = dict(SCHEMA)
+        schema["sections"] = [{"title": "S", "fields": [
+            {"type": "table", "label": "M", "columns": ["A"],
+             "color": "yellow"}]}]
+        m1, m2 = _mocked(_api(schema=schema))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("cl-tint", html)
+        self.assertIn("color-mix(in oklch, #d4a72c 26%, var(--surface))", html)
+
     def test_form_renders_the_constant_readonly(self):
         user = get_user_model().objects.create_user("n", "n@n.io", "pw")
         self.client.force_login(user)

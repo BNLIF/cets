@@ -178,6 +178,12 @@ def _eval_formula(expr: str, values: list) -> float | None:
         return None
 
 
+# #115: named table tints → base colors (mixed into the theme surface at
+# render). Chosen to echo the iPad scenes' row colors.
+_TINTS = {"yellow": "#d4a72c", "green": "#6aa84f", "blue": "#6d87c2",
+          "red": "#cc4125", "gray": "#999999", "grey": "#999999"}
+
+
 def _norm_field(f: dict) -> dict | None:
     """One field off the schema, or None to drop it (unknown type, blank
     label, or a widget missing what defines it)."""
@@ -260,6 +266,15 @@ def _norm_field(f: dict) -> dict | None:
             if label:
                 cols.append(label)
         out["columns"] = cols
+        # #115 (HVS): a table-wide background tint keyed to the reference
+        # drawing (one iPad row = one Dashboard table). Named colors map to
+        # base hexes; anything else must be #rrggbb or it's dropped. The
+        # template mixes the base into the theme surface, so tints stay
+        # legible in dark mode.
+        color = str(f.get("color") or "").strip().lower()
+        color = _TINTS.get(color, color)
+        if re.fullmatch(r"#[0-9a-f]{6}", color):
+            out["color"] = color
         if texts:
             out["texts"] = texts
         if formulas:

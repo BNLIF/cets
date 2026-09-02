@@ -35,8 +35,13 @@
   .cl-field textarea { max-width: 100%; }
   .cl-qr input, .cl-link input { font-family: var(--font-mono); max-width: 260px; }
   .cl-ok { border-color: var(--good) !important; background: var(--good-bg) !important; }
+  /* an outline ring (offset shows the ground through) reads on any #115
+     tint — a red border on a red-tinted cell doesn't; bold digits add a
+     non-color cue */
   .cl-bad { border-color: var(--bad, #a33) !important;
-    background: color-mix(in oklch, var(--bad, #a33) 10%, var(--surface)) !important; }
+    background: var(--surface) !important;
+    outline: 2px solid var(--bad, #a33); outline-offset: 1px;
+    color: var(--bad, #a33); font-weight: 600; }
   .cl-tri { display: inline-flex; border: 1px solid var(--rule); border-radius: var(--r-sm);
     overflow: hidden; background: var(--surface); }
   .cl-tri-opt { position: relative; }
@@ -56,6 +61,10 @@
   .cl-table td input { width: 86px; text-align: center; }
   .cl-table td input[readonly] { background: var(--page); border-style: dashed; }  /* computed (#109) */
   .cl-table td input[data-const] { background: none; border-color: transparent; }  /* fixed text (#114) */
+  /* #115: table tint keyed to the reference drawing (cells only, not the
+     header); inputs keep their own ground so ok/bad paint stays readable */
+  .cl-tint td { background: var(--cl-tint); print-color-adjust: exact;
+    -webkit-print-color-adjust: exact; }
   .cl-steps { margin: 4px 0 0; padding-left: 4px; font-size: 13.5px; color: var(--ink);
     list-style: none; counter-reset: clstep; }
   .cl-steps li { margin: 5px 0; }

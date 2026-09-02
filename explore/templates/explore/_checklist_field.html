@@ -17,7 +17,7 @@
     {% if f.max != None %}data-max="{{ f.max|stringformat:"g" }}"{% endif %}>
 {% elif f.type == "table" %}
   <span class="cl-lab">{{ f.label }}{% if f.units %} <span class="cl-units">({{ f.units }})</span>{% endif %}{% if f.range %} <span class="cl-hint">allowed {{ f.range }}</span>{% endif %}</span>
-  <div class="tbl-scroll"><table class="cl-table">
+  <div class="tbl-scroll"><table class="cl-table{% if f.color %} cl-tint{% endif %}"{% if f.color %} style="--cl-tint: color-mix(in oklch, {{ f.color }} 26%, var(--surface));"{% endif %}>
     <thead><tr>{% for c in f.cells %}<th title="{% if c.formula %}= {{ c.formula }}{% endif %}{% if c.formula and c.range %} · {% endif %}{% if c.range %}allowed {{ c.range }}{% endif %}">{{ c.column }}{% if c.formula %} <span aria-hidden="true">&fnof;</span>{% endif %}{% if c.range %} <span class="cl-hint">{{ c.range }}</span>{% endif %}</th>{% endfor %}</tr></thead>
     <tbody><tr>{% for c in f.cells %}<td><input name="{{ c.name }}" value="{{ c.value }}" inputmode="decimal" autocomplete="off" data-ci="{{ forloop.counter0 }}"
       {% if c.formula %}readonly tabindex="-1" data-formula="{{ c.formula }}" title="= {{ c.formula }}"{% endif %}

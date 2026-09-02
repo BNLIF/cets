@@ -214,6 +214,9 @@
       <input class="ff-tol" placeholder="&#177; tol" inputmode="decimal" style="flex:0 0 76px;">
       <input class="ff-min" placeholder="min" inputmode="decimal" style="flex:0 0 76px;">
       <input class="ff-max" placeholder="max" inputmode="decimal" style="flex:0 0 76px;">
+      <label class="ec-inline ff-color-w" title="cell background tint keyed to the reference drawing">tint
+        <input type="color" class="ff-color" list="clc-tints"></label>
+      <button type="button" class="ec-del ff-colorclear" style="display:none;" title="Remove the tint">&#x2715; tint</button>
       <textarea class="ff-columns" rows="2" style="flex:1 1 100%;" placeholder="columns — comma- or line-separated; computed: Total = C1 + C2*(C3/C4) [11 ± 1]; fixed: Expected = &quot;3.1+-0.1&quot;" title="label = formula makes a computed column (C1 = first column's value, formula/fixed cells count too); label = &quot;text&quot; makes a fixed non-editable cell (no commas in the text); [nominal ± tol] or [min..max] gives that column its own accepted range"></textarea>
     </div>
     <div class="ec-row g-select" style="display:none;">
@@ -253,6 +256,12 @@
   </div>
 </template>
 
+<datalist id="clc-tints">{# #115: the predefined swatches in the color picker #}
+  <option value="#d4a72c"></option><option value="#6aa84f"></option>
+  <option value="#6d87c2"></option><option value="#cc4125"></option>
+  <option value="#999999"></option>
+</datalist>
+
 <dialog id="clc-mapzoom">
   <div style="display:flex; justify-content:space-between; gap:10px; align-items:center; margin-bottom:8px;">
     <span class="ec-hint">Click the drawing to add a slot.</span>
@@ -274,6 +283,9 @@
     var t = $(".ff-type", r).value;
     $(".g-num", r).style.display = (t === "number" || t === "table") ? "" : "none";
     $(".ff-columns", r).style.display = t === "table" ? "" : "none";
+    $(".ff-color-w", r).style.display = t === "table" ? "" : "none";
+    $(".ff-colorclear", r).style.display =
+      (t === "table" && $(".ff-color", r).dataset.on) ? "" : "none";
     $(".g-select", r).style.display = t === "select" ? "" : "none";
     $(".g-steps", r).style.display = t === "steps" ? "" : "none";
     $$(".g-static", r).forEach(function (g) { g.style.display = t === "static" ? "" : "none"; });
@@ -314,6 +326,10 @@
     $(".ff-columns", r).value =
       colParts.join(", ").length > 60 ? colParts.join("\n") : colParts.join(", ");
     $(".ff-steps", r).value = (f.steps || []).join("\n");
+    if (f.color) {                        // #115: the picker can't be empty —
+      $(".ff-color", r).value = f.color;  // "no tint" is tracked on data-on
+      $(".ff-color", r).dataset.on = "1";
+    }
     $(".ff-typeid", r).value = f.type_id || "";
     $(".ff-imageid", r).value = f.image_id || "";
     $(".ff-slots", r).value = (f.slots || []).map(function (s) {   // #113
@@ -461,6 +477,10 @@
         out.label = c.trim();
         return out;
       });
+    if (t === "table") {
+      var ci = $(".ff-color", r);
+      if (ci.dataset.on) f.color = ci.value;
+    }
     if (t === "select") f.options = list($(".ff-options", r).value, ",");
     if (t === "steps") f.steps = $(".ff-steps", r).value.split("\n")   // keep the
       .map(function (s) { return s.replace(/\s+$/, ""); })             // indent (#106)
@@ -598,6 +618,10 @@
   });
 
   editor.addEventListener("input", function (e) {
+    if (e.target.classList && e.target.classList.contains("ff-color")) {
+      e.target.dataset.on = "1";     // picking a color turns the tint on
+      $(".ff-colorclear", e.target.closest(".clc-fld")).style.display = "";
+    }
     if (e.target.classList && e.target.classList.contains("ff-imageid")) {
       syncImgStatus(e.target.closest(".clc-fld"));
       syncMap(e.target.closest(".clc-fld"));
@@ -658,6 +682,11 @@
   }
   editor.addEventListener("click", function (e) {
     var t = e.target;
+    if (t.classList.contains("ff-colorclear")) {
+      var cr = t.closest(".clc-fld");
+      delete $(".ff-color", cr).dataset.on;
+      t.style.display = "none"; refresh(); return;
+    }
     if (t.classList.contains("ff-imgclear")) {
       var fr = t.closest(".clc-fld");
       $(".ff-imageid", fr).value = "";
