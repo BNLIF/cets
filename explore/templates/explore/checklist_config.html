@@ -184,6 +184,8 @@
       <button type="button" class="ec-del clc-x" title="Remove section">&#x2715;</button>
     </div>
     <div class="ec-row clc-secopts">
+      <label class="ec-inline" title="lay this section's fields on a column grid — each field then picks its column and width">columns
+        <select class="fs-grid"><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
       <label class="ec-inline"><input type="checkbox" class="fs-collapsed"> start collapsed</label>
       <label class="ec-inline" title="the section shows only while that select field holds this option">show only when
         <select class="fs-whenf"><option value="">&mdash; always &mdash;</option></select>
@@ -266,6 +268,13 @@
     <div class="ec-row g-pid" style="display:none;">
       <input class="ff-typeid" placeholder="required Type ID (blank = any)" style="flex:0 0 220px;"
         title="e.g. D00300100002 — a scan of any other type won&#8217;t fill this box">
+    </div>
+    <div class="ec-row g-grid" style="display:none;">
+      <label class="ec-inline" title="start column (auto = next free slot)">col
+        <select class="ff-gcol"><option>auto</option><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
+      <label class="ec-inline" title="how many columns this field occupies">span
+        <select class="ff-gspan"><option>1</option><option>2</option><option>3</option><option>4</option><option>full</option></select></label>
+      <label class="ec-inline" title="start on a fresh line (col still applies)"><input type="checkbox" class="ff-gnl"> new line</label>
     </div>
     <div class="ec-row g-map" style="display:none;">
       <span class="ec-hint" style="flex:1 1 100%;">Click the image to add a slot &mdash; one per line: label @ x, y (% of image size).</span>
@@ -353,6 +362,9 @@
       $(".ff-color", r).dataset.on = "1";
     }
     $(".ff-typeid", r).value = f.type_id || "";
+    $(".ff-gcol", r).value = f.col ? String(f.col) : "auto";           // #120
+    $(".ff-gspan", r).value = f.span ? String(f.span) : "1";
+    $(".ff-gnl", r).checked = !!f.newline;
     $(".ff-checklist", r).value = f.checklist || "";                   // #118
     $(".ff-checklisttype", r).value = f.part_type_id || "";
     $(".ff-imageid", r).value = f.image_id || "";
@@ -431,6 +443,7 @@
     document.getElementById("clc-sections").appendChild(n);
     s = s || {};
     $(".fs-title", n).value = s.title || "";
+    $(".fs-grid", n).value = s.grid ? String(s.grid) : "1";            // #120
     $(".fs-collapsed", n).checked = s.collapsed === true;
     // the when-pickers fill in at refresh() once every select field exists
     n.dataset.whenF = (s.when && s.when.field) || "";
@@ -555,10 +568,20 @@
                         .map(function (c) { return c.value; });
     cfg.sections = $$("#clc-sections > .clc-sec").map(function (s) {
       var fields = [];
+      var gridN = parseInt($(".fs-grid", s).value, 10) || 1;   // #120
       $$(".clc-fields > .clc-fld", s).forEach(function (r) {
         var f = readField(r);
         if (!f) return;
         fldRow.set(f, r);
+        if (gridN > 1) {           // grid placement — no row/column trees
+          var gc = $(".ff-gcol", r).value, gs = $(".ff-gspan", r).value;
+          if (gc !== "auto") f.col = parseInt(gc, 10);
+          if (gs === "full") f.span = "full";
+          else if (parseInt(gs, 10) > 1) f.span = parseInt(gs, 10);
+          if ($(".ff-gnl", r).checked) f.newline = true;
+          fields.push(f);
+          return;
+        }
         var place = $(".ff-place", r).value;
         if (place === "stack" && fields.length) {
           // #117: join the previous field's CELL vertically
@@ -579,6 +602,7 @@
         }
       });
       var sec = { title: $(".fs-title", s).value.trim(), fields: fields };
+      if (gridN > 1) sec.grid = gridN;                                 // #120
       if ($(".fs-collapsed", s).checked) sec.collapsed = true;
       var wf = $(".fs-whenf", s).value, we = $(".fs-wheneq", s).value;
       if (wf && we) sec.when = { field: wf, equals: we };
@@ -657,17 +681,36 @@
       $(".ff-label", r).classList.toggle(
         "miss", !$(".ff-label", r).value.trim() && $(".ff-type", r).value !== "static");
     });
-    // a section's first field has nothing to place itself against
+    // placement controls: in a grid section (#120) each field gets col/span/
+    // new-line and the flow select hides; in a 1-column section the flow
+    // select shows (except on the first field — nothing above to place
+    // against) and the grid controls hide
     $$(".clc-sec").forEach(function (s) {
+      var n = parseInt($(".fs-grid", s).value, 10) || 1;
       $$(".clc-fields > .clc-fld", s).forEach(function (r, i) {
         var p = $(".ff-place", r);
-        p.style.visibility = i ? "" : "hidden";
-        if (!i) p.value = "";
+        p.style.visibility = (i && n === 1) ? "" : "hidden";
+        if (!i || n > 1) p.value = "";
+        $(".g-grid", r).style.display = n > 1 ? "" : "none";
+        if (n > 1) {
+          trimOpts($(".ff-gcol", r), n, "auto");
+          trimOpts($(".ff-gspan", r), n, "full");
+        }
       });
     });
     $("#clc-json").value = JSON.stringify(collect(), null, 2);
     clearTimeout(pTimer);
     pTimer = setTimeout(preview, 350);
+  }
+  // #120: numeric options beyond the section's column count make no sense —
+  // hide them (values are clamped server-side anyway)
+  function trimOpts(sel, n, keep) {
+    $$("option", sel).forEach(function (o) {
+      var v = parseInt(o.value, 10);
+      o.hidden = !isNaN(v) && v > n;
+    });
+    var cur = parseInt(sel.value, 10);
+    if (!isNaN(cur) && cur > n) sel.value = keep === "auto" ? "auto" : String(n);
   }
   function paint(el) {
     el.classList.remove("cl-bad", "cl-ok");

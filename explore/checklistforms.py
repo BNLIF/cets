@@ -204,12 +204,20 @@ def _norm_field(f: dict) -> dict | None:
                "note": str(f.get("note") or "").strip(),
                "checklist": str(f.get("checklist") or "").strip(),
                "checklist_type": ctid if re.fullmatch(r"[A-Z]\d{11}", ctid) else ""}
+        for k in ("col", "span", "newline"):   # #120: grid placement hints
+            if f.get(k) is not None:
+                out[k] = f[k]
         return out if (out["image"] or out["image_id"] or out["url"]
                        or out["note"] or out["checklist"]) else None
     if t not in FIELD_TYPES or not label:
         return None
     out = {"type": t, "label": label, "units": str(f.get("units") or "").strip(),
            "to_spec": bool(f.get("to_spec")) and t in SPEC_CAPABLE}
+    # #120: grid placement hints — only consumed in a section that declares
+    # ``grid``; popped (or dropped) by normalize either way.
+    for k in ("col", "span", "newline"):
+        if f.get(k) is not None:
+            out[k] = f[k]
     if t == "link":
         # subcomponent link (#96): the scanned child PID is linked into the
         # named functional position — or the first free one matching the
@@ -335,6 +343,34 @@ STATUS_OPTIONS = [
 _ITEM_FLAGS = ("is_installed", "qaqc_uploaded", "certified_qaqc")
 
 
+def _grid_place(leaves: list, n: int) -> list:
+    """#120: deterministic cursor placement on an ``n``-column grid. Each
+    leaf's optional ``col`` (start column), ``span`` (columns occupied, or
+    "full") and ``newline`` are consumed into ``g = {r, c, s}`` — explicit
+    coordinates, so gaps are expressible and overlaps impossible. A ``col``
+    already passed on the current line wraps to the next line; a span that
+    doesn't fit in the remainder wraps too."""
+    r, c = 1, 1
+    for f in leaves:
+        span, col, nl = f.pop("span", None), f.pop("col", None), f.pop("newline", None)
+        s = n if span == "full" else max(1, min(int(_num(span) or 1), n))
+        if nl and c > 1:
+            r, c = r + 1, 1
+        tgt = _num(col)
+        if tgt is not None:
+            tgt = max(1, min(int(tgt), n - s + 1))
+            if tgt < c:
+                r += 1
+            c = tgt
+        elif c + s - 1 > n:
+            r, c = r + 1, 1
+        f["g"] = {"r": r, "c": c, "s": s}
+        c += s
+        if c > n:
+            r, c = r + 1, 1
+    return leaves
+
+
 def normalize(cfg: dict, name: str) -> dict:
     """A tolerant read of the schema JSON. Unknown field types and malformed
     entries are dropped; a ``row`` groups its (non-row) children side by
@@ -393,6 +429,21 @@ def normalize(cfg: dict, name: str) -> dict:
                     fields.append(nf)
         if title and fields:
             sec = {"title": title, "fields": fields}
+            # #120: a section may declare a column grid; its fields are then
+            # flattened (row/column trees don't mix with a grid) and placed
+            # by the cursor algorithm. Absent/1 = today's vertical flow.
+            g = _num(s.get("grid"))
+            if g is not None and 2 <= int(g) <= 4:
+                flat = []
+                for f in fields:
+                    flat.extend(_row_leaves(f))
+                sec["grid"] = int(g)
+                sec["fields"] = _grid_place(flat, int(g))
+            else:
+                for f in fields:
+                    for leaf in _row_leaves(f):
+                        for k in ("col", "span", "newline"):
+                            leaf.pop(k, None)
             if s.get("collapsed") is True:
                 sec["collapsed"] = True            # #98: opens folded
             if isinstance(s.get("when"), dict):

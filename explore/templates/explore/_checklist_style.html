@@ -26,10 +26,18 @@
   .cl-field { margin: 10px 0; min-width: 0; }
   .cl-lab { display: block; font-size: 12.5px; color: var(--dim); margin-bottom: 3px; }
   .cl-units, .cl-hint { color: var(--faint); font-size: 11.5px; }
-  .cl-row { display: flex; flex-wrap: wrap; gap: 0 22px; }
+  /* cells bottom-align so inputs share a line — a table's header row would
+     otherwise push its inputs below a neighbour's (#120 review) */
+  .cl-row { display: flex; flex-wrap: wrap; gap: 0 22px; align-items: end; }
   .cl-row > .cl-field { flex: 1 1 220px; }
   /* #117: several fields stacked in ONE cell of a row ("stack ↑") */
   .cl-row > .cl-col { flex: 1 1 220px; min-width: 0; }
+  /* #120: a section's column grid — fields carry explicit grid-area */
+  .cl-grid { display: grid; gap: 0 22px; align-items: end; }
+  @media (max-width: 560px) {
+    .cl-grid { grid-template-columns: 1fr !important; }
+    .cl-grid > .cl-field { grid-area: auto !important; }
+  }
   .cl-field input:not([type=radio]):not([type=checkbox]):not([type=file]),
   .cl-field select, .cl-field textarea { font: inherit; font-size: 13px; color: var(--ink);
     background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm);
@@ -55,11 +63,17 @@
   .cl-tri-opt.ok input:checked + span { background: var(--good-bg); color: var(--good); }
   .cl-tri-opt.bad input:checked + span {
     background: color-mix(in oklch, var(--bad, #a33) 12%, var(--surface)); color: var(--bad, #a33); }
-  .tbl-scroll { overflow-x: auto; }
+  /* the 3px padding/negative-margin pair leaves paint room for the cl-bad
+     outline ring (2px + 1px offset) — overflow-x clips vertically too —
+     without moving the table's outer bottom edge */
+  .tbl-scroll { overflow-x: auto; padding: 3px; margin: -3px; }
   .cl-table { border-collapse: collapse; font-size: 13px; }
   .cl-table th { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase;
     padding: 2px 8px 4px; border-bottom: 1px solid var(--rule); text-align: center; }
   .cl-table td { padding: 5px 4px; }
+  /* no padding below the last row — a neighbour's bottom-aligned control
+     (#120 review) should sit flush with the table's inputs */
+  .cl-table tbody tr:last-child td { padding-bottom: 0; }
   .cl-table td input { width: 86px; text-align: center; }
   .cl-table td input[readonly] { background: var(--page); border-style: dashed; }  /* computed (#109) */
   .cl-table td input[data-const] { background: none; border-color: transparent; }  /* fixed text (#114) */

@@ -32,6 +32,21 @@ a placement select: "↵ new line" (default), "→ beside" (a new cell to the
 right of the field above), "↓ same cell" (below the field above, inside
 its cell); a section's first field has no select.
 
+### Section grid (#120)
+
+A section may instead declare `"grid": N` (2–4): its fields lay out on an
+N-column grid, and each field takes an optional `"col"` (start column),
+`"span"` (columns occupied, or `"full"`) and `"newline": true` (start a
+fresh line — `col` still applies, so "new line, columns 2–3" is
+`{"newline": true, "col": 2, "span": 2}`). Fields flow left-to-right into
+the next free slot by default; a `col` already passed, or a span that
+doesn't fit the remainder, wraps to the next line. Placement is computed
+server-side into explicit grid coordinates, so gaps are expressible and
+overlaps impossible; on phones the grid collapses to one column in field
+order. `row`/`column` trees don't mix with a grid — inside a grid section
+they're flattened. In the editor, pick "columns" on the section header;
+each field then shows col/span/new-line instead of the placement select.
+
 ### Section keys (#98)
 
 - `"collapsed": true` — the section opens folded. Every section header is a

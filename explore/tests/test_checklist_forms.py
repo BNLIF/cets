@@ -1634,6 +1634,78 @@ class ChecklistLinkTest(TestCase):
         self.assertIn("/hw/dev/checklist/D00300100002/Frame%20Dim/", html)
 
 
+class SectionGridTest(TestCase):
+    """#120: a section's column grid — col/span/newline per field, placed
+    server-side into explicit coordinates."""
+
+    def _norm(self, grid, fields):
+        return checklistforms.normalize(
+            {"name": "t", "test_type_name": "T", "sections": [
+                {"title": "S", "grid": grid, "fields": fields}]}, "t")
+
+    def _g(self, schema):
+        return [(f["label"], f["g"]["r"], f["g"]["c"], f["g"]["s"])
+                for f in schema["sections"][0]["fields"]]
+
+    def test_auto_flow_wraps_at_the_grid_edge(self):
+        s = self._norm(2, [{"type": "text", "label": l} for l in "ABC"])
+        self.assertEqual(s["sections"][0]["grid"], 2)
+        self.assertEqual(self._g(s), [("A", 1, 1, 1), ("B", 1, 2, 1),
+                                      ("C", 2, 1, 1)])
+
+    def test_col_span_newline_and_full(self):
+        s = self._norm(3, [
+            {"type": "text", "label": "A"},
+            # Chao's example: two columns starting at column 2
+            {"type": "text", "label": "B", "col": 2, "span": 2},
+            {"type": "text", "label": "C", "newline": True, "col": 2},
+            {"type": "text", "label": "D", "span": "full"},
+            {"type": "text", "label": "E", "col": 9, "span": 7}])  # clamped
+        self.assertEqual(self._g(s), [
+            ("A", 1, 1, 1), ("B", 1, 2, 2),   # fills the line beside A
+            ("C", 2, 2, 1),                    # fresh line, column 2 (gap at 1)
+            ("D", 3, 1, 3),                    # full width
+            ("E", 4, 1, 3)])                   # clamped to the grid
+
+    def test_col_already_passed_wraps_to_the_next_line(self):
+        s = self._norm(3, [{"type": "text", "label": "A", "col": 2},
+                           {"type": "text", "label": "B", "col": 1}])
+        self.assertEqual(self._g(s), [("A", 1, 2, 1), ("B", 2, 1, 1)])
+
+    def test_without_grid_the_hints_are_dropped(self):
+        s = checklistforms.normalize(
+            {"name": "t", "test_type_name": "T", "sections": [
+                {"title": "S", "fields": [
+                    {"type": "text", "label": "A", "col": 2, "span": 2,
+                     "newline": True}]}]}, "t")
+        f = s["sections"][0]["fields"][0]
+        for k in ("col", "span", "newline", "g"):
+            self.assertNotIn(k, f)
+
+    def test_grid_flattens_row_trees_and_parse_still_reaches_leaves(self):
+        s = self._norm(2, [{"type": "row", "fields": [
+            {"type": "text", "label": "A"}, {"type": "text", "label": "B"}]}])
+        self.assertEqual([f["type"] for f in s["sections"][0]["fields"]],
+                         ["text", "text"])
+        keys = {leaf["label"]: leaf["key"]
+                for _, leaf in checklistforms.leaf_fields(s)}
+        data = checklistforms.parse(s, {keys["B"]: "x"})
+        self.assertEqual(data, {"S": {"B": "x"}})
+
+    def test_form_renders_the_grid_and_areas(self):
+        user = get_user_model().objects.create_user("n", "n@n.io", "pw")
+        self.client.force_login(user)
+        schema = dict(SCHEMA)
+        schema["sections"] = [{"title": "S", "grid": 3, "fields": [
+            {"type": "text", "label": "A"},
+            {"type": "text", "label": "B", "col": 2, "span": 2}]}]
+        m1, m2 = _mocked(_api(schema=schema))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("repeat(3, minmax(0, 1fr))", html)
+        self.assertIn("grid-area: 1 / 2 / auto / span 2;", html)
+
+
 class ChecklistBookmarkTest(TestCase):
     """#111: bookmark a checklist → quick link under My checklists on the
     profile page, grouped by System › Subsystem."""
