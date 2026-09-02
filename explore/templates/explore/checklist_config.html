@@ -58,6 +58,10 @@
   .clc-fld .ff-label { flex: 1 1 80px; }
   /* a non-static field without a label is dropped from the schema/preview */
   .clc-fld .ff-label.miss { border-color: var(--bad, #a33); }
+  /* clicked in the preview → its editor row flashes */
+  .clc-hit { outline: 2px solid var(--accent-ink); outline-offset: 2px;
+    border-radius: var(--r-sm); transition: outline-color .3s; }
+  #clc-preview .cl-field { cursor: pointer; }
   /* #113: zoomed slot placement — the drawing at full resolution */
   #clc-mapzoom { border: 1px solid var(--rule); border-radius: var(--r-sm);
     padding: 10px; background: var(--surface); color: var(--ink); }
@@ -164,7 +168,7 @@
 
     <div class="clc-preview-wrap">
       <div class="ec-card" style="background: var(--surface);">
-        <h2>Live preview — exactly what the fill-out page renders</h2>
+        <h2>Live preview — exactly what the fill-out page renders; click a field to find it in the editor</h2>
         <div id="clc-preview"><p class="es-hint">…</p></div>
       </div>
     </div>
@@ -534,7 +538,12 @@
     return f;
   }
 
+  // preview field → editor row (#118 review): normalize keys leaves by RAW
+  // enumerate indices (si/fi/ki/ji), so walking collect()'s cfg with the
+  // same indices reproduces every data-key exactly
+  var keyRow = {};
   function collect() {
+    var fldRow = new Map();
     var cfg = { name: $("#f-title").value.trim(),
                 test_type_name: $("#f-ttn").value.trim() };
     var instr = $("#f-instr").value.trim();
@@ -549,6 +558,7 @@
       $$(".clc-fields > .clc-fld", s).forEach(function (r) {
         var f = readField(r);
         if (!f) return;
+        fldRow.set(f, r);
         var place = $(".ff-place", r).value;
         if (place === "stack" && fields.length) {
           // #117: join the previous field's CELL vertically
@@ -574,6 +584,21 @@
       if (wf && we) sec.when = { field: wf, equals: we };
       return sec;
     }).filter(function (s) { return s.title || s.fields.length; });
+    keyRow = {};
+    cfg.sections.forEach(function (sec, si) {
+      (sec.fields || []).forEach(function (f, fi) {
+        if (f.type === "row") {
+          f.fields.forEach(function (k, ki) {
+            if (k.type === "column") k.fields.forEach(function (kk, ji) {
+              keyRow["f" + si + "-" + fi + "-" + ki + "-" + ji] = fldRow.get(kk);
+            });
+            else keyRow["f" + si + "-" + fi + "-" + ki] = fldRow.get(k);
+          });
+        } else {
+          keyRow["f" + si + "-" + fi] = fldRow.get(f);
+        }
+      });
+    });
     return cfg;
   }
 
@@ -666,6 +691,17 @@
   // the preview's tolerance coloring works live, same as the real page
   document.getElementById("clc-preview").addEventListener("input", function (e) {
     if (e.target.matches && e.target.matches("input[data-min], input[data-max]")) paint(e.target);
+  });
+  // click a preview field → scroll to and flash its editor row (long
+  // checklists make the mapping hard to eyeball)
+  document.getElementById("clc-preview").addEventListener("click", function (e) {
+    if (e.target.closest("input, select, textarea, button, a")) return;
+    var fld = e.target.closest("[data-key]");
+    var row = fld && keyRow[fld.getAttribute("data-key")];
+    if (!row) return;
+    row.scrollIntoView({ behavior: "smooth", block: "center" });
+    row.classList.add("clc-hit");
+    setTimeout(function () { row.classList.remove("clc-hit"); }, 1600);
   });
 
   editor.addEventListener("input", function (e) {
