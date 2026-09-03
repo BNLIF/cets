@@ -106,6 +106,18 @@ def _tol_range(f: dict):
 # reach the evaluator.
 _FORMULA_CHARS = re.compile(r"^[0-9.\s()+\-*/Cc]+$")
 _FORMULA_TOKEN = re.compile(r"[Cc]\d+|\d+\.?\d*|\.\d+|[()+\-*/]|\S")
+# a cell written as "value ± tolerance" ("3 +- 1", "3.1±0.1", "3 +/- 1"):
+# formulas read the value, the record keeps the whole string
+_TOLERANCED = re.compile(r"^\s*(-?\d+(?:\.\d+)?|-?\.\d+)\s*(?:±|\+-|\+/-)\s*\d*\.?\d+\s*$")
+
+
+def _cell_num(v):
+    """A cell's value as a float for formula use: numbers as they are, a
+    "value ± tolerance" string as its value, anything else None."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return float(v)
+    m = _TOLERANCED.match(v) if isinstance(v, str) else None
+    return float(m.group(1)) if m else None
 
 
 def _eval_formula(expr: str, values: list) -> float | None:
@@ -138,10 +150,10 @@ def _eval_formula(expr: str, values: list) -> float | None:
         if t[0] in "Cc":
             pos += 1
             i = int(t[1:]) - 1
-            if not 0 <= i < len(values) or not isinstance(values[i], (int, float)) \
-                    or isinstance(values[i], bool):
+            n = _cell_num(values[i]) if 0 <= i < len(values) else None
+            if n is None:
                 raise ValueError
-            return float(values[i])
+            return n
         pos += 1
         return float(t)   # ValueError on anything else
 
@@ -182,6 +194,14 @@ def _eval_formula(expr: str, values: list) -> float | None:
 # inputs keep their own ground). Light so the row stays a wash, not a block.
 _TINTS = {"yellow": "#fff2cc", "green": "#d9ead3", "blue": "#cfe2f3",
           "red": "#f4cccc", "gray": "#efefef", "grey": "#efefef"}
+
+
+def _tint(v) -> str:
+    """A #115 tint — named palette or #rrggbb (XSS-safe before a style
+    attribute); anything else is ''."""
+    c = str(v or "").strip().lower()
+    c = _TINTS.get(c, c)
+    return c if re.fullmatch(r"#[0-9a-f]{6}", c) else ""
 
 
 def _norm_field(f: dict) -> dict | None:
@@ -263,10 +283,16 @@ def _norm_field(f: dict) -> dict | None:
         # — computed from the row's other cells, C<n> = 1-based column index —
         # and may carry its OWN tolerance (nominal/tol or min/max), overriding
         # the table-wide one (a computed Total has a different range).
-        cols, formulas, texts, col_tol = [], {}, {}, {}
+        cols, formulas, texts, col_tol, checks = [], {}, {}, {}, []
         for c in f.get("columns") or []:
             if isinstance(c, dict):
                 label = str(c.get("label") or "").strip()
+                # #116: a pass/fail column — a compact tri-state per cell;
+                # no text, formula or range applies to it
+                if label and c.get("check") is True:
+                    checks.append(label)
+                    cols.append(label)
+                    continue
                 fx = str(c.get("formula") or "").strip()
                 # #114 (HVS): "text" makes a constant cell (the Expected
                 # column) — fixed display, not editable, referenceable by
@@ -286,19 +312,40 @@ def _norm_field(f: dict) -> dict | None:
         out["columns"] = cols
         # #115 (HVS): a table-wide background tint keyed to the reference
         # drawing (one iPad row = one Dashboard table). Named colors map to
-        # base hexes; anything else must be #rrggbb or it's dropped. The
-        # template mixes the base into the theme surface, so tints stay
-        # legible in dark mode.
-        color = str(f.get("color") or "").strip().lower()
-        color = _TINTS.get(color, color)
-        if re.fullmatch(r"#[0-9a-f]{6}", color):
-            out["color"] = color
+        # light hexes; anything else must be #rrggbb or it's dropped.
+        if _tint(f.get("color")):
+            out["color"] = _tint(f.get("color"))
         if texts:
             out["texts"] = texts
         if formulas:
             out["formulas"] = formulas
         if col_tol:
             out["col_tol"] = col_tol
+        if checks:
+            out["checks"] = checks
+        # #119: named rows sharing the columns; each may carry its own
+        # constants (an Expected column differs per row) and tint, which
+        # override the table-wide ones. No rows = the single implicit row,
+        # stored and rendered exactly as before.
+        rows, seen = [], set()
+        for rw in f.get("rows") or []:
+            rw = rw if isinstance(rw, dict) else {"label": rw}
+            lab = str(rw.get("label") or "").strip()
+            if not lab or lab in seen:
+                continue
+            seen.add(lab)
+            row = {"label": lab}
+            rtx = rw.get("texts") if isinstance(rw.get("texts"), dict) else {}
+            rtx = {str(k).strip(): str(v).strip() for k, v in rtx.items()
+                   if str(k).strip() in cols and str(k).strip() not in checks
+                   and str(v).strip()}
+            if rtx:
+                row["texts"] = rtx
+            if _tint(rw.get("color")):
+                row["color"] = _tint(rw.get("color"))
+            rows.append(row)
+        if rows:
+            out["rows"] = rows
         if not out["columns"]:
             return None
     if t == "select":
@@ -502,6 +549,31 @@ def leaf_fields(schema: dict):
                 yield sec["title"], leaf
 
 
+def _table_cells(f: dict, cells: dict, tx: dict, prefix: str) -> list:
+    """The display cells of one table row. A column's own tolerance replaces
+    the table-wide one wholesale; a constant cell (#114) always shows its
+    fixed text, never paints, and beats a formula on the same column."""
+    ct = f.get("col_tol") or {}
+    fx = f.get("formulas") or {}
+    checks = f.get("checks") or []
+    out = []
+    for i, c in enumerate(f["columns"]):
+        v = cells.get(c)
+        if c in checks:   # #116: tri-state cell
+            out.append({"column": c, "name": f"{prefix}-c{i}", "check": True,
+                        "value": "pass" if v is True else ("fail" if v is False else ""),
+                        "formula": "", "text": "", "min": None, "max": None, "range": ""})
+            continue
+        out.append({"column": c, "name": f"{prefix}-c{i}",
+                    "value": tx[c] if c in tx else _fmt("" if isinstance(v, dict) else v),
+                    "formula": "" if c in tx else fx.get(c, ""),
+                    "text": tx.get(c, ""),
+                    "min": None if c in tx else (ct[c]["min"] if c in ct else f["min"]),
+                    "max": None if c in tx else (ct[c]["max"] if c in ct else f["max"]),
+                    "range": ct[c]["range"] if c in ct and c not in tx else ""})
+    return out
+
+
 def _fmt(v) -> str:
     if v is None:
         return ""
@@ -533,21 +605,23 @@ def _bind_leaf(f: dict, v) -> None:
     if t == "check":
         f["value"] = "pass" if v is True else ("fail" if v is False else "")
     elif t == "table":
-        cells = v if isinstance(v, dict) else {}
-        ct = f.get("col_tol") or {}
+        vals = v if isinstance(v, dict) else {}
         tx = f.get("texts") or {}
-        # a column's own tolerance replaces the table-wide one wholesale;
-        # a constant cell (#114) always shows its fixed text, never paints
-        f["cells"] = [{"column": c, "name": f"{f['key']}-c{i}",
-                       "value": tx[c] if c in tx else _fmt(cells.get(c)),
-                       "formula": (f.get("formulas") or {}).get(c, ""),
-                       "text": tx.get(c, ""),
-                       "min": None if c in tx else
-                              (ct[c]["min"] if c in ct else f["min"]),
-                       "max": None if c in tx else
-                              (ct[c]["max"] if c in ct else f["max"]),
-                       "range": ct[c]["range"] if c in ct and c not in tx else ""}
-                      for i, c in enumerate(f["columns"])]
+        f["cells"] = _table_cells(f, vals, tx, f["key"])
+        if f.get("rows"):
+            # #119: one cell row per named row, keyed f<..>-r<i>-c<j>; the
+            # header still comes from f["cells"]. A row's texts/tint
+            # override the table's. A legacy flat record under a table
+            # that gained rows (or vice versa) simply pre-fills nothing.
+            f["trows"] = []
+            for i, rw in enumerate(f["rows"]):
+                rv = vals.get(rw["label"])
+                f["trows"].append({
+                    "label": rw["label"],
+                    "color": rw.get("color") or f.get("color", ""),
+                    "cells": _table_cells(f, rv if isinstance(rv, dict) else {},
+                                          {**tx, **rw.get("texts", {})},
+                                          f"{f['key']}-r{i}")})
     elif t == "steps":
         done = v if isinstance(v, dict) else {}
         f["items"] = [{"label": s.strip(), "name": f"{f['key']}-s{i}",
@@ -569,6 +643,41 @@ def _bind_leaf(f: dict, v) -> None:
 def _num_or_str(raw: str):
     n = _num(raw)
     return n if n is not None else raw
+
+
+def _parse_table_row(f: dict, post, prefix: str, texts: dict):
+    """One table row's posted cells as ``{column: value}``, or None when
+    nothing was typed (constants alone, and what they'd compute, aren't a
+    submission)."""
+    formulas = f.get("formulas") or {}
+    checks = f.get("checks") or []
+    # #114: constant cells first, so formulas can reference a numeric one;
+    # posted overrides for them are ignored like formulas'.
+    cells = {c: _num_or_str(tx) for c, tx in texts.items()}
+    typed = False
+    for i, c in enumerate(f["columns"]):
+        if c in formulas or c in texts:
+            continue   # computed/fixed below, whatever was posted
+        raw = (post.get(f"{prefix}-c{i}") or "").strip()
+        if c in checks:   # #116: pass/fail → bool; blank = not inspected
+            if raw in ("pass", "fail"):
+                cells[c] = raw == "pass"
+                typed = True
+            continue
+        if raw:
+            cells[c] = _num_or_str(raw)
+            typed = True
+    if not typed:
+        return None
+    # #109: computed columns, left to right — a formula may reference plain
+    # cells and computed ones to its LEFT; anything unresolvable leaves the
+    # cell out. A row's constant (#119) beats the column's formula.
+    for c in f["columns"]:
+        if c in formulas and c not in texts:
+            v = _eval_formula(formulas[c], [cells.get(col) for col in f["columns"]])
+            if v is not None:
+                cells[c] = round(v, 9)
+    return cells
 
 
 def parse(schema: dict, post) -> dict:
@@ -593,33 +702,22 @@ def parse(schema: dict, post) -> dict:
                 continue
             value = _num_or_str(raw)
         elif t == "table":
-            formulas = f.get("formulas") or {}
             texts = f.get("texts") or {}
-            # #114: constant cells first, so formulas can reference a numeric
-            # one; posted overrides for them are ignored like formulas'.
-            cells = {c: _num_or_str(tx) for c, tx in texts.items()}
-            typed = False
-            for i, c in enumerate(f["columns"]):
-                if c in formulas or c in texts:
-                    continue   # computed/fixed below, whatever was posted
-                raw = (post.get(f"{key}-c{i}") or "").strip()
-                if raw:
-                    cells[c] = _num_or_str(raw)
-                    typed = True
-            # an untouched table stays omitted — constants alone (and what
-            # they'd compute) aren't a submission
-            if not typed:
-                continue
-            # #109: computed columns, left to right — a formula may reference
-            # plain cells and computed ones to its LEFT; anything unresolvable
-            # leaves the cell out.
-            for c in f["columns"]:
-                if c in formulas:
-                    v = _eval_formula(formulas[c],
-                                      [cells.get(col) for col in f["columns"]])
-                    if v is not None:
-                        cells[c] = round(v, 9)
-            value = cells
+            if f.get("rows"):
+                # #119: {row: {column: value}}; untouched rows are omitted
+                # and an all-untouched table stays omitted like before
+                value = {}
+                for i, rw in enumerate(f["rows"]):
+                    cells = _parse_table_row(f, post, f"{key}-r{i}",
+                                             {**texts, **rw.get("texts", {})})
+                    if cells is not None:
+                        value[rw["label"]] = cells
+                if not value:
+                    continue
+            else:
+                value = _parse_table_row(f, post, key, texts)
+                if value is None:
+                    continue
         elif t == "steps":
             value = {s.strip(): bool(post.get(f"{key}-s{i}"))
                      for i, s in enumerate(f["steps"])}

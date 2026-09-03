@@ -59,6 +59,9 @@
   .cl-tri-opt span { display: block; padding: 7px 18px; font-size: 14px; color: var(--faint);
     border-left: 1px solid var(--rule); }
   .cl-tri-opt:first-child span { border-left: none; }
+  /* #116: a pass/fail table cell — as wide as a number cell */
+  .cl-tri-sm { vertical-align: middle; }
+  .cl-tri-sm .cl-tri-opt span { padding: 6px 8px; font-size: 13px; }
   .cl-tri-opt input:checked + span { background: var(--accent-soft); color: var(--ink); font-weight: 700; }
   .cl-tri-opt.ok input:checked + span { background: var(--good-bg); color: var(--good); }
   .cl-tri-opt.bad input:checked + span {
@@ -71,6 +74,9 @@
   .cl-table th { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase;
     padding: 2px 8px 4px; border-bottom: 1px solid var(--rule); text-align: center; }
   .cl-table td { padding: 5px 4px; }
+  /* #119: row labels of a multi-row table */
+  .cl-table th.cl-rowlab { text-align: left; text-transform: none; font-size: 12.5px;
+    color: var(--dim); padding: 5px 10px 5px 4px; border-bottom: 0; white-space: nowrap; }
   /* beside other fields, align neighbours to the table's INPUT row, not to
      the 5px of cell padding (tint band) below it — the extra -5px shifts
      the alignment box up while the paint stays put (#120 review) */

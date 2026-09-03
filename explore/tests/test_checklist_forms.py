@@ -1315,6 +1315,11 @@ class FormulaCellsTest(TestCase):
         self.assertIsNone(ev("C1 +", [1]))                # syntax
         self.assertIsNone(ev("1 2", []))                  # leftover tokens
         self.assertEqual(ev("-C1 + 2", [0.5]), 1.5)       # unary minus ok
+        # a "value ± tolerance" cell reads as its value (Chao, 2026-09-03)
+        for s in ("3 +- 1", "3.1±0.1", "3 +/- 1", " -3.5 ± .2 "):
+            self.assertEqual(ev("C1 - C2", [s, 1]), float(s.split("±")[0].split("+")[0]) - 1, s)
+        self.assertIsNone(ev("C1", ["3 mm"]))
+        self.assertIsNone(ev("C1", ["3 +- "]))
 
     def test_parse_computes_the_cell_and_ignores_posted_overrides(self):
         schema = self._schema(["A", "B", {"label": "Sum", "formula": "C1 + C2"},
@@ -1778,6 +1783,155 @@ class SectionGridTest(TestCase):
         self.assertIn("repeat(3, minmax(0, 1fr))", html)
         self.assertIn("grid-area: 1 / 2 / auto / span 2;", html)
         self.assertIn("grid-area: 1 / 1 / auto / span 1; align-self: start;", html)
+
+
+class LegacyTableGoldenTest(TestCase):
+    """#119 back-compat contract: a table WITHOUT rows normalizes, parses,
+    binds and renders exactly as before rows existed (snapshot taken on
+    2026-09-03, before the change)."""
+
+    CFG = {**SCHEMA, "sections": [SCHEMA["sections"][0], {
+        "title": "Measurements", "fields": [
+            {"type": "table", "label": "Thickness", "units": "mm", "nominal": 1.6,
+             "tol": 0.1, "color": "yellow",
+             "columns": ["P1", {"label": "Expected", "text": "1.6"},
+                         {"label": "Diff", "formula": "C1 - C2", "min": -0.1, "max": 0.1}]}]},
+        SCHEMA["sections"][2]]}
+    NORM = {"col_tol": {"Diff": {"max": 0.1, "min": -0.1, "range": "-0.1 – 0.1"}},
+            "color": "#fff2cc", "columns": ["P1", "Expected", "Diff"],
+            "formulas": {"Diff": "C1 - C2"}, "key": "f1-0", "label": "Thickness",
+            "max": 1.7, "min": 1.5, "range": "1.5 – 1.7", "texts": {"Expected": "1.6"},
+            "to_spec": False, "type": "table", "units": "mm"}
+    BIND = [{"column": "P1", "formula": "", "max": 1.7, "min": 1.5, "name": "f1-0-c0",
+             "range": "", "text": "", "value": "1.7"},
+            {"column": "Expected", "formula": "", "max": None, "min": None,
+             "name": "f1-0-c1", "range": "", "text": "1.6", "value": "1.6"},
+            {"column": "Diff", "formula": "C1 - C2", "max": 0.1, "min": -0.1,
+             "name": "f1-0-c2", "range": "-0.1 – 0.1", "text": "", "value": "0.1"}]
+    HTML = ('<table class="cl-table cl-tint" style="--cl-tint: #fff2cc;"> <thead><tr>'
+            '<th title="">P1</th><th title="">Expected</th>'
+            '<th title="= C1 - C2 · allowed -0.1 – 0.1">Diff <span aria-hidden="true">&fnof;</span> '
+            '<span class="cl-hint">-0.1 – 0.1</span></th></tr></thead> <tbody><tr>'
+            '<td><input name="f1-0-c0" value="1.7" inputmode="decimal" autocomplete="off" data-ci="0" '
+            'data-min="1.5" data-max="1.7"></td>'
+            '<td><input name="f1-0-c1" value="1.6" inputmode="decimal" autocomplete="off" data-ci="1" '
+            'readonly tabindex="-1" data-const></td>'
+            '<td><input name="f1-0-c2" value="0.1" inputmode="decimal" autocomplete="off" data-ci="2" '
+            'readonly tabindex="-1" data-formula="C1 - C2" title="= C1 - C2" data-min="-0.1" data-max="0.1">'
+            '</td></tr></tbody> </table>')
+
+    def test_legacy_table_is_byte_for_byte_stable(self):
+        import re
+        from django.template.loader import render_to_string
+        s = checklistforms.normalize(self.CFG, NAME)
+        self.assertEqual(s["sections"][1]["fields"][0], self.NORM)
+        data = checklistforms.parse(s, {"f1-0-c0": "1.7"})
+        self.assertEqual(data["Measurements"], {"Thickness": {"Diff": 0.1, "Expected": 1.6, "P1": 1.7}})
+        b = checklistforms.bind(s, {"DATA": {"Measurements": {"Thickness": {"P1": 1.7, "Expected": 1.6, "Diff": 0.1}}}})
+        f = b["sections"][1]["fields"][0]
+        self.assertEqual(f["cells"], self.BIND)
+        self.assertNotIn("trows", f)
+        html = render_to_string("explore/_checklist_field.html", {"f": f})
+        html = re.sub(r"\s+", " ", re.search(r"<table.*?</table>", html, re.S).group(0))
+        self.assertEqual(html.replace(" >", ">"), self.HTML)
+
+
+class MultiRowTableTest(TestCase):
+    """#119: named rows with per-row constants and tints."""
+
+    TABLE = {"type": "table", "label": "Dims", "units": "in",
+             "columns": ["Expected", "Measured",
+                         {"label": "Diff", "formula": "C2 - C1", "tol": 0.1, "nominal": 0}],
+             "color": "gray",
+             "rows": [{"label": "Length", "texts": {"Expected": "3.1"}, "color": "yellow"},
+                      {"label": "Hole 1", "texts": {"Expected": "0.425", "Junk": "x"}},
+                      {"label": "Hole 1"},          # duplicate → dropped
+                      "Hole 3",                     # bare label
+                      {"texts": {"Expected": "1"}}  # no label → dropped
+                      ]}
+
+    def _schema(self):
+        return checklistforms.normalize(
+            {**SCHEMA, "sections": [{"title": "S", "fields": [self.TABLE]}]}, NAME)
+
+    def test_normalize_rows(self):
+        f = self._schema()["sections"][0]["fields"][0]
+        self.assertEqual(f["rows"], [
+            {"label": "Length", "texts": {"Expected": "3.1"}, "color": "#fff2cc"},
+            {"label": "Hole 1", "texts": {"Expected": "0.425"}},
+            {"label": "Hole 3"}])
+
+    def test_bind_rows_override_texts_and_tint(self):
+        s = self._schema()
+        b = checklistforms.bind(s, {"DATA": {"S": {"Dims": {
+            "Length": {"Measured": 3.2, "Diff": 0.1},
+            "Hole 3": {"Measured": 2}}}}})
+        f = b["sections"][0]["fields"][0]
+        rows = f["trows"]
+        self.assertEqual([r["label"] for r in rows], ["Length", "Hole 1", "Hole 3"])
+        self.assertEqual([r["color"] for r in rows], ["#fff2cc", "#efefef", "#efefef"])
+        self.assertEqual(rows[0]["cells"][0]["value"], "3.1")      # row constant
+        self.assertEqual(rows[0]["cells"][0]["name"], "f0-0-r0-c0")
+        self.assertEqual(rows[0]["cells"][1]["value"], "3.2")
+        self.assertEqual(rows[2]["cells"][0]["value"], "")         # no constant on Hole 3
+        self.assertEqual(rows[2]["cells"][1]["value"], "2")
+        # a legacy FLAT record under a rows table pre-fills nothing, no crash
+        b2 = checklistforms.bind(s, {"DATA": {"S": {"Dims": {"Measured": 3.2}}}})
+        self.assertEqual(b2["sections"][0]["fields"][0]["trows"][0]["cells"][1]["value"], "")
+
+    def test_parse_rows_per_row_formulas_and_omissions(self):
+        s = self._schema()
+        data = checklistforms.parse(s, {"f0-0-r0-c1": "3.2", "f0-0-r2-c1": "2.5"})
+        self.assertEqual(data["S"]["Dims"], {
+            "Length": {"Expected": 3.1, "Measured": 3.2, "Diff": 0.1},
+            "Hole 3": {"Measured": 2.5}})            # no constant → no Diff
+        self.assertEqual(checklistforms.parse(s, {}), {})   # untouched → omitted
+
+    def test_form_renders_rows(self):
+        user = get_user_model().objects.create_user("n", "n@n.io", "pw")
+        self.client.force_login(user)
+        schema = {**SCHEMA, "sections": [{"title": "S", "fields": [self.TABLE]}]}
+        m1, m2 = _mocked(_api(schema=schema))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('<th scope="row" class="cl-rowlab">Length</th>', html)
+        self.assertIn('<tr class="cl-tint" style="--cl-tint: #fff2cc;">', html)
+        self.assertIn('name="f0-0-r1-c1"', html)
+        self.assertNotIn('<table class="cl-table cl-tint"', html)   # tint is per row now
+
+    def test_check_column(self):
+        # #116: a pass/fail column — tri-state cells, bools in the record
+        tbl = {"type": "table", "label": "T",
+               "columns": ["Measured", {"label": "OK", "check": True, "formula": "C1"}],
+               "rows": [{"label": "A", "texts": {"OK": "x"}}, {"label": "B"}]}
+        s = checklistforms.normalize(
+            {**SCHEMA, "sections": [{"title": "S", "fields": [tbl]}]}, NAME)
+        f = s["sections"][0]["fields"][0]
+        self.assertEqual(f["checks"], ["OK"])
+        self.assertNotIn("formulas", f)                   # check beats formula
+        self.assertNotIn("texts", f["rows"][0])           # no constant on a check
+        data = checklistforms.parse(s, {"f0-0-r0-c1": "pass", "f0-0-r1-c0": "2",
+                                        "f0-0-r1-c1": "fail"})
+        self.assertEqual(data["S"]["T"], {"A": {"OK": True}, "B": {"Measured": 2.0, "OK": False}})
+        b = checklistforms.bind(s, {"DATA": data})
+        cells = b["sections"][0]["fields"][0]["trows"][1]["cells"]
+        self.assertEqual((cells[1]["check"], cells[1]["value"]), (True, "fail"))
+        user = get_user_model().objects.create_user("n", "n@n.io", "pw")
+        self.client.force_login(user)
+        m1, m2 = _mocked(_api(schema={**SCHEMA, "sections": [{"title": "S", "fields": [tbl]}]}))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('<input type="radio" name="f0-0-r0-c1" value="pass">', html)
+        self.assertIn("cl-tri cl-tri-sm", html)
+
+    def test_editor_ships_the_rows_dialog(self):
+        user = get_user_model().objects.create_user("e", "e@e.io", "pw")
+        self.client.force_login(user)
+        m1, m2 = _mocked(_api())
+        with m1, m2:
+            html = self.client.get(CONFIG_PAGE).content.decode()
+        self.assertIn('id="clc-tbl"', html)
+        self.assertIn('class="ff-rows"', html)
 
 
 class ChecklistBookmarkTest(TestCase):

@@ -1,0 +1,9 @@
+{# One table cell (#109/#114/#116/#119) — included per column inside the row loop, so forloop.counter0 is the column index. #}{% if c.check %}<td><div class="cl-tri cl-tri-sm" role="radiogroup" aria-label="{{ c.column }}">
+      <label class="cl-tri-opt"><input type="radio" name="{{ c.name }}" value=""{% if not c.value %} checked{% endif %}><span>&mdash;</span></label>
+      <label class="cl-tri-opt ok"><input type="radio" name="{{ c.name }}" value="pass"{% if c.value == "pass" %} checked{% endif %}><span>&#10003;</span></label>
+      <label class="cl-tri-opt bad"><input type="radio" name="{{ c.name }}" value="fail"{% if c.value == "fail" %} checked{% endif %}><span>&#10007;</span></label>
+    </div></td>{% else %}<td><input name="{{ c.name }}" value="{{ c.value }}" inputmode="decimal" autocomplete="off" data-ci="{{ forloop.counter0 }}"
+      {% if c.formula %}readonly tabindex="-1" data-formula="{{ c.formula }}" title="= {{ c.formula }}"{% endif %}
+      {% if c.text %}readonly tabindex="-1" data-const{% endif %}
+      {% if c.min != None %}data-min="{{ c.min|stringformat:"g" }}"{% endif %}
+      {% if c.max != None %}data-max="{{ c.max|stringformat:"g" }}"{% endif %}></td>{% endif %}
