@@ -77,7 +77,7 @@
   </div>
 {% elif f.type == "static" %}
   {% if f.label %}<span class="cl-lab">{{ f.label }}</span>{% endif %}
-  {% if f.image_id %}<img class="cl-static-img" data-lightbox src="{% url 'explore:shipment_image' image_id=f.image_id %}" alt="{{ f.label|default:'reference' }}">
+  {% if f.image_id %}<img class="cl-static-img" data-lightbox data-lb-src="{% url 'explore:shipment_image' image_id=f.image_id %}" src="{% url 'explore:shipment_image' image_id=f.image_id %}?thumb=1" alt="{{ f.label|default:'reference' }}">
   {% elif f.image %}<img class="cl-static-img" data-lightbox src="{{ f.image }}" alt="{{ f.label|default:'reference' }}">{% endif %}
   {% if f.note %}<div class="cl-note">{{ f.note }}</div>{% endif %}
   {% if f.url %}<div><a href="{{ f.url }}" target="_blank" rel="noopener">{{ f.url }} <span aria-hidden="true">&#x2197;</span></a></div>{% endif %}

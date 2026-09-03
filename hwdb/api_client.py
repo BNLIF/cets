@@ -309,14 +309,17 @@ class FnalDbApiClient:
             )
         return response.json()
 
-    def post_component_type_image(self, part_type_id, fileobj, filename, comments=""):
+    def post_component_type_image(self, part_type_id, fileobj, filename, comments="",
+                                  content_type="application/json"):
         """Multipart upload of an attachment onto a component TYPE — the
         executive-summary config (``ES_{typeid}_*.json``) lives there
         (issue #64). Same multipart shape as ``post_component_image``.
+        ``content_type`` matters for files the browser must render itself
+        (a PDF drawing in an <iframe>, #121).
         """
         url = f"{self.base_url}/component-types/{part_type_id}/images"
         files = {"comments": (None, comments),
-                 "image": (filename, fileobj, "application/json")}
+                 "image": (filename, fileobj, content_type)}
         try:
             response = self.session.post(url, files=files)
         except requests.exceptions.RequestException:

@@ -725,6 +725,46 @@ class ChecklistEditorTest(TestCase):
             html = self.client.get(PAGE).content.decode()
         self.assertIn("/hw/dev/shipment-image/ref-9/", html)
 
+    def test_static_thumbnail_src_and_click_target(self):
+        # #121: the inline copy asks the proxy for a thumbnail (a PDF's first
+        # page); the click opens the file itself
+        cfg = {**SCHEMA, "sections": [{"title": "Guide", "fields": [
+            {"type": "static", "label": "DFD-20-A402", "image_id": "pdf-1"}]}]}
+        api = _api(schema=cfg)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('data-lb-src="/hw/dev/shipment-image/pdf-1/"', html)
+        self.assertIn('src="/hw/dev/shipment-image/pdf-1/?thumb=1"', html)
+
+    def test_proxy_thumb_renders_a_pdf_first_page_once(self):
+        # #121: ?thumb=1 on a PDF → PNG of page 1, cached; on an image → as is
+        import fitz
+        from django.core.cache import cache
+        cache.clear()
+        doc = fitz.open()
+        doc.new_page(width=300, height=200)
+        pdf = doc.tobytes()
+        api = _api()
+
+        def upstream(blob, ctype):
+            return mock.Mock(headers={"Content-Type": ctype},
+                             iter_content=lambda chunk_size: iter([blob]))
+        api.get_image_response.return_value = upstream(pdf, "application/pdf")
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            r = self.client.get("/hw/dev/shipment-image/pdf-1/?thumb=1")
+            self.assertEqual(r.status_code, 200)
+            self.assertEqual(r["Content-Type"], "image/png")
+            self.assertTrue(r.content.startswith(b"\x89PNG"))
+            n = api.get_image_response.call_count
+            r = self.client.get("/hw/dev/shipment-image/pdf-1/?thumb=1")
+            self.assertTrue(r.content.startswith(b"\x89PNG"))
+            self.assertEqual(api.get_image_response.call_count, n)   # cached
+            api.get_image_response.return_value = upstream(PNG, "image/png")
+            r = self.client.get("/hw/dev/shipment-image/png-1/?thumb=1")
+            self.assertEqual(b"".join(r.streaming_content), PNG)     # untouched
+
 
 # ---- #97: drafts, CSV export, roles gate, new-item flow ----------------------
 

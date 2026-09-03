@@ -73,7 +73,7 @@ each field then shows col/span/new-line instead of the placement select.
 | `qr` | `type_id` (optional, #112) | scanned/typed string — with `type_id` set (e.g. `D00300100002`), a code of any other type won't register: the scanner keeps scanning, typed input paints red, and a mismatch is dropped at submit |
 | `photo` | — | `{image_id, image_name}` (posted to the item first) |
 | `steps` | `steps` (required) | `{step: bool}` — leading spaces indent a step (2 per level, #106); the stored key is the stripped text |
-| `static` | `note`, `url`, `image` (external URL) or `image_id` (reference image uploaded in the editor — e.g. a P1–P10 measurement diagram — stored on the type's HWDB images, served via the image proxy; an id of a picture already in HWDB can also be typed in directly, #108), `checklist` (+ optional `part_type_id`, #118) — a jump link to another checklist: name only = this item's checklist of that name; with a type id = that type's PID chooser (the iPad scenes' green "Checklist" links); opens in a new tab, the current form is untouched (save a draft first if half done) | nothing — display only |
+| `static` | `note`, `url`, `image` (external URL) or `image_id` (reference image uploaded in the editor — e.g. a P1–P10 measurement diagram — stored on the type's HWDB images, served via the image proxy; an id of a picture already in HWDB can also be typed in directly, #108; a PDF drawing uploads too, #121 — it shows its first page as the thumbnail and opens as a PDF on click), `checklist` (+ optional `part_type_id`, #118) — a jump link to another checklist: name only = this item's checklist of that name; with a type id = that type's PID chooser (the iPad scenes' green "Checklist" links); opens in a new tab, the current form is untouched (save a draft first if half done) | nothing — display only |
 | `link` | `position` (optional), `type_id` (optional, #112 — as `qr`) | scanned child PID — also PATCHed into the item's subcomponents (#96) |
 | `imagemap` | `image_id` (required), `slots` (required: `[{label, x, y}]`, percent coords), `type_id` (optional — guards every slot) | `{slot label: PID}` (#113, Top CRP) — the drawing renders with a numbered dot per slot; tapping a dot scans into that slot (green once filled), and a compact list below takes typed input. Values go to the test record only (no subcomponent linking). In the editor: pick the image, then click it to drop slots — or edit the `label @ x, y` lines directly |
 
@@ -82,7 +82,10 @@ Unknown types and malformed entries are dropped silently on render.
 Reference figures open in a fullscreen viewer on click (#107): wheel/±
 zooms, drag pans, Esc closes. A reference stored as a PDF (mechanical
 drawings usually are) falls back to the browser's own PDF viewer inline —
-zoom and print come with it; inline it shows as a "view drawing" button.
+zoom and print come with it. Inline, a PDF shows its first page (#121: the
+image proxy's `?thumb=1` renders it with PyMuPDF on first request and
+caches it — nothing extra is stored in HWDB); if the renderer is missing,
+it shows as a "view drawing" button instead.
 
 Any value-bearing field (not `photo`/`link`/`static`/`steps`) may carry
 `"to_spec": true` (#96): its value ALSO folds into the item's latest

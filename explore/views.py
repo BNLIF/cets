@@ -1,4 +1,5 @@
 import io
+import itertools
 import json
 import logging
 import re
@@ -9,6 +10,7 @@ import requests
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_not_required
+from django.core.cache import cache
 from django.core.paginator import Paginator
 from django.db.models import F, Max, Q
 from django.http import (
@@ -809,7 +811,9 @@ def explore_shipment_image_view(request, image_id):
 
     The bytes are bearer-gated, so we mint and stream them through rather than
     handing the browser a direct FNAL link. ``?name=`` sets the download
-    filename (sanitised).
+    filename (sanitised). ``?thumb=1`` (#121) turns a PDF into a PNG of its
+    first page — checklist reference thumbnails — and passes anything else
+    through unchanged; rendered pages are cached (HWDB images never change).
     """
     try:
         bearer = mint_for(request)
@@ -820,6 +824,11 @@ def explore_shipment_image_view(request, image_id):
     except FnalUnavailable:
         return JsonResponse({"error": "unavailable"}, status=502)
 
+    thumb = bool(request.GET.get("thumb"))
+    if thumb:
+        png = cache.get(f"pdfthumb:{image_id}")
+        if png:
+            return HttpResponse(png, content_type="image/png")
     api = FnalDbApiClient(settings.HWDB_PROFILES[instance_of(request)]["api"], bearer)
     try:
         upstream = api.get_image_response(image_id)
@@ -827,16 +836,39 @@ def explore_shipment_image_view(request, image_id):
         logger.exception("explore_shipment_image_view(%s) crashed", image_id)
         return JsonResponse({"error": "fetch_failed"}, status=502)
 
+    chunks = upstream.iter_content(chunk_size=65536)
+    if thumb:
+        first = next(chunks, b"")
+        if first.startswith(b"%PDF"):
+            png = _pdf_thumbnail(first + b"".join(chunks))
+            if png:
+                cache.set(f"pdfthumb:{image_id}", png, None)
+                return HttpResponse(png, content_type="image/png")
+        chunks = itertools.chain([first], chunks)
     raw = request.GET.get("name") or f"hwdb-{image_id}"
     safe = "".join(c for c in raw if c.isalnum() or c in " ._-").strip() or f"hwdb-{image_id}"
     # ?inline=1 → view in the browser (thumbnail click); default → download.
     disposition = "inline" if request.GET.get("inline") else "attachment"
     resp = StreamingHttpResponse(
-        upstream.iter_content(chunk_size=65536),
+        chunks,
         content_type=upstream.headers.get("Content-Type", "application/octet-stream"),
     )
     resp["Content-Disposition"] = f'{disposition}; filename="{safe}"'
     return resp
+
+
+def _pdf_thumbnail(data: bytes, width: int = 800) -> bytes | None:
+    """Page 1 of a PDF as PNG bytes, ``width`` px wide; None when PyMuPDF
+    is not installed or the file won't render (the <img> then errors and the
+    form swaps in its "view drawing" button, #107)."""
+    try:
+        import fitz  # PyMuPDF — optional at runtime (requirements.txt lists it)
+        page = fitz.open(stream=data, filetype="pdf").load_page(0)
+        zoom = width / max(page.rect.width, 1)
+        return page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False).tobytes("png")
+    except Exception:
+        logger.warning("PDF thumbnail render failed", exc_info=True)
+        return None
 
 
 @login_not_required
@@ -2809,15 +2841,16 @@ def explore_checklist_asset_view(request, part_type_id):
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
     img = request.FILES.get("image")
     ext = img.name.rsplit(".", 1)[-1].lower() if img and "." in img.name else ""
-    if img is None or ext not in ("png", "jpg", "jpeg", "gif"):
-        return JsonResponse({"error": "Pick a PNG/JPG/GIF image."}, status=400)
+    if img is None or ext not in ("png", "jpg", "jpeg", "gif", "pdf"):
+        return JsonResponse({"error": "Pick a PNG/JPG/GIF image or a PDF."}, status=400)
     if img.size > 10 * 1024 * 1024:
-        return JsonResponse({"error": "That image is over 10 MB."}, status=400)
+        return JsonResponse({"error": "That file is over 10 MB."}, status=400)
     fname = (f"ChecklistImage_{part_type_id}_"
              f"{timezone.now():{execsummary.FILENAME_TS_FMT}}.{ext}")
+    ctype = {"pdf": "application/pdf", "png": "image/png", "gif": "image/gif"}.get(ext, "image/jpeg")
     try:
         body = api.post_component_type_image(
-            part_type_id, img, fname,
+            part_type_id, img, fname, content_type=ctype,
             comments=f"Checklist reference image: {img.name}")
     except requests.RequestException as e:
         return JsonResponse({"error": _hwdb_error_detail(e)}, status=502)

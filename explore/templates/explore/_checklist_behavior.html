@@ -137,7 +137,7 @@
     b.type = "button";
     b.className = "cl-lb-pdfbtn";
     b.setAttribute("data-lightbox", "");
-    b.setAttribute("data-lb-src", im.src);
+    b.setAttribute("data-lb-src", im.getAttribute("data-lb-src") || im.src);
     b.textContent = "📄 view drawing";
     im.replaceWith(b);
   }, true);
