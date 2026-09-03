@@ -1,5 +1,5 @@
 {# One checklist leaf field (#95) — dispatched on f.type, closed vocabulary. #}
-<div class="cl-field cl-{{ f.type }}" data-key="{{ f.key }}"{% if f.g %} style="grid-area: {{ f.g.r }} / {{ f.g.c }} / auto / span {{ f.g.s }};"{% endif %}>
+<div class="cl-field cl-{{ f.type }}" data-key="{{ f.key }}"{% if f.g %} style="grid-area: {{ f.g.r }} / {{ f.g.c }} / auto / span {{ f.g.s }};{% if f.g.a %} align-self: {{ f.g.a }};{% endif %}"{% endif %}>
 {% if f.type == "check" %}
   <span class="cl-lab">{{ f.label }}</span>
   <div class="cl-tri" role="radiogroup" aria-label="{{ f.label }}">

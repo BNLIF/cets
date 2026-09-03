@@ -204,7 +204,7 @@ def _norm_field(f: dict) -> dict | None:
                "note": str(f.get("note") or "").strip(),
                "checklist": str(f.get("checklist") or "").strip(),
                "checklist_type": ctid if re.fullmatch(r"[A-Z]\d{11}", ctid) else ""}
-        for k in ("col", "span", "newline"):   # #120: grid placement hints
+        for k in ("col", "span", "newline", "align"):   # #120/#123: grid placement hints
             if f.get(k) is not None:
                 out[k] = f[k]
         # #122: thumb:false → no inline figure; the label is the link that
@@ -219,7 +219,7 @@ def _norm_field(f: dict) -> dict | None:
            "to_spec": bool(f.get("to_spec")) and t in SPEC_CAPABLE}
     # #120: grid placement hints — only consumed in a section that declares
     # ``grid``; popped (or dropped) by normalize either way.
-    for k in ("col", "span", "newline"):
+    for k in ("col", "span", "newline", "align"):   # align: #123
         if f.get(k) is not None:
             out[k] = f[k]
     if t == "link":
@@ -347,16 +347,21 @@ STATUS_OPTIONS = [
 _ITEM_FLAGS = ("is_installed", "qaqc_uploaded", "certified_qaqc")
 
 
+_ALIGNS = {"top": "start", "middle": "center"}   # #123; bottom = the grid default
+
+
 def _grid_place(leaves: list, n: int) -> list:
     """#120: deterministic cursor placement on an ``n``-column grid. Each
     leaf's optional ``col`` (start column), ``span`` (columns occupied, or
     "full") and ``newline`` are consumed into ``g = {r, c, s}`` — explicit
     coordinates, so gaps are expressible and overlaps impossible. A ``col``
     already passed on the current line wraps to the next line; a span that
-    doesn't fit in the remainder wraps too."""
+    doesn't fit in the remainder wraps too. ``align`` (#123: top/middle,
+    default bottom) rides along as ``g["a"]`` = the CSS align-self value."""
     r, c = 1, 1
     for f in leaves:
         span, col, nl = f.pop("span", None), f.pop("col", None), f.pop("newline", None)
+        a = _ALIGNS.get(str(f.pop("align", "") or "").lower())
         s = n if span == "full" else max(1, min(int(_num(span) or 1), n))
         if nl and c > 1:
             r, c = r + 1, 1
@@ -369,6 +374,8 @@ def _grid_place(leaves: list, n: int) -> list:
         elif c + s - 1 > n:
             r, c = r + 1, 1
         f["g"] = {"r": r, "c": c, "s": s}
+        if a:
+            f["g"]["a"] = a
         c += s
         if c > n:
             r, c = r + 1, 1
@@ -446,7 +453,7 @@ def normalize(cfg: dict, name: str) -> dict:
             else:
                 for f in fields:
                     for leaf in _row_leaves(f):
-                        for k in ("col", "span", "newline"):
+                        for k in ("col", "span", "newline", "align"):
                             leaf.pop(k, None)
             if s.get("collapsed") is True:
                 sec["collapsed"] = True            # #98: opens folded

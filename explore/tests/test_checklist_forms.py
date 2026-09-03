@@ -1706,6 +1706,18 @@ class SectionGridTest(TestCase):
         self.assertEqual(self._g(s), [("A", 1, 1, 1), ("B", 1, 2, 1),
                                       ("C", 2, 1, 1)])
 
+    def test_align_rides_on_the_grid_coordinates(self):
+        # #123: top/middle → align-self; bottom (the default) adds nothing
+        s = self._norm(2, [{"type": "text", "label": "A", "align": "top"},
+                           {"type": "text", "label": "B", "align": "bottom"},
+                           {"type": "text", "label": "C", "align": "Middle"}])
+        gs = [f["g"].get("a") for f in s["sections"][0]["fields"]]
+        self.assertEqual(gs, ["start", None, "center"])
+        flow = checklistforms.normalize(
+            {"name": "t", "test_type_name": "T", "sections": [
+                {"title": "S", "fields": [{"type": "text", "label": "A", "align": "top"}]}]}, "t")
+        self.assertNotIn("align", flow["sections"][0]["fields"][0])   # no grid → dropped
+
     def test_col_span_newline_and_full(self):
         s = self._norm(3, [
             {"type": "text", "label": "A"},
@@ -1750,13 +1762,14 @@ class SectionGridTest(TestCase):
         self.client.force_login(user)
         schema = dict(SCHEMA)
         schema["sections"] = [{"title": "S", "grid": 3, "fields": [
-            {"type": "text", "label": "A"},
+            {"type": "text", "label": "A", "align": "top"},
             {"type": "text", "label": "B", "col": 2, "span": 2}]}]
         m1, m2 = _mocked(_api(schema=schema))
         with m1, m2:
             html = self.client.get(PAGE).content.decode()
         self.assertIn("repeat(3, minmax(0, 1fr))", html)
         self.assertIn("grid-area: 1 / 2 / auto / span 2;", html)
+        self.assertIn("grid-area: 1 / 1 / auto / span 1; align-self: start;", html)
 
 
 class ChecklistBookmarkTest(TestCase):

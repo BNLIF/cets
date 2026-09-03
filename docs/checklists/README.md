@@ -43,7 +43,9 @@ the next free slot by default; a `col` already passed, or a span that
 doesn't fit the remainder, wraps to the next line. Placement is computed
 server-side into explicit grid coordinates, so gaps are expressible and
 overlaps impossible; on phones the grid collapses to one column in field
-order. `row`/`column` trees don't mix with a grid — inside a grid section
+order. Cells bottom-align (inputs beside a table share a line); a field
+may set `"align": "top"` or `"middle"` (#123) — a long procedure text
+at the top of its line while figures stack beside it. `row`/`column` trees don't mix with a grid — inside a grid section
 they're flattened. In the editor, pick "columns" on the section header;
 each field then shows col/span/new-line instead of the placement select.
 

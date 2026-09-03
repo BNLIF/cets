@@ -276,6 +276,8 @@
       <label class="ec-inline" title="how many columns this field occupies">span
         <select class="ff-gspan"><option>1</option><option>2</option><option>3</option><option>4</option><option>full</option></select></label>
       <label class="ec-inline" title="start on a fresh line (col still applies)"><input type="checkbox" class="ff-gnl"> new line</label>
+      <label class="ec-inline" title="where the field sits when its line is taller than it (#123)">align
+        <select class="ff-galign"><option>bottom</option><option>top</option><option>middle</option></select></label>
     </div>
     <div class="ec-row g-map" style="display:none;">
       <span class="ec-hint" style="flex:1 1 100%;">Click the image to add a slot &mdash; one per line: label @ x, y (% of image size).</span>
@@ -366,6 +368,7 @@
     $(".ff-gcol", r).value = f.col ? String(f.col) : "auto";           // #120
     $(".ff-gspan", r).value = f.span ? String(f.span) : "1";
     $(".ff-gnl", r).checked = !!f.newline;
+    $(".ff-galign", r).value = f.align || "bottom";                    // #123
     $(".ff-checklist", r).value = f.checklist || "";                   // #118
     $(".ff-checklisttype", r).value = f.part_type_id || "";
     $(".ff-imageid", r).value = f.image_id || "";
@@ -582,6 +585,8 @@
           if (gs === "full") f.span = "full";
           else if (parseInt(gs, 10) > 1) f.span = parseInt(gs, 10);
           if ($(".ff-gnl", r).checked) f.newline = true;
+          var ga = $(".ff-galign", r).value;                           // #123
+          if (ga !== "bottom") f.align = ga;
           fields.push(f);
           return;
         }
