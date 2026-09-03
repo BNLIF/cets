@@ -1711,6 +1711,27 @@ class SectionGridTest(TestCase):
         self.assertEqual(self._g(s), [("A", 1, 1, 1), ("B", 1, 2, 1),
                                       ("C", 2, 1, 1)])
 
+    def test_stacked_cell_in_a_grid(self):
+        # #125: a column group is ONE grid item; its leaves keep 3-part keys
+        s = self._norm(4, [
+            {"type": "textarea", "label": "Step", "span": 2, "align": "top"},
+            {"type": "column", "col": 4, "align": "top", "fields": [
+                {"type": "static", "note": "A402"}, {"type": "static", "note": "A404"},
+                {"type": "check", "label": "OK"}]},
+            {"type": "text", "label": "Next"}])
+        items = s["sections"][0]["fields"]
+        self.assertEqual([i["type"] for i in items], ["textarea", "column", "text"])
+        self.assertEqual(items[1]["g"], {"r": 1, "c": 4, "s": 1, "a": "start"})
+        self.assertEqual([f["key"] for f in items[1]["fields"]], ["f0-1-0", "f0-1-1", "f0-1-2"])
+        self.assertEqual(items[2]["g"], {"r": 2, "c": 1, "s": 1})
+        self.assertEqual(checklistforms.parse(s, {"f0-1-2": "pass"}), {"S": {"OK": True}})
+        # hints tolerated on the group's first leaf; a 1-field group collapses
+        s2 = self._norm(3, [{"type": "column", "fields": [
+            {"type": "text", "label": "A", "col": 3}, {"type": "text", "label": "B"}]}])
+        self.assertEqual(s2["sections"][0]["fields"][0]["g"]["c"], 3)
+        s3 = self._norm(3, [{"type": "column", "fields": [{"type": "text", "label": "A"}]}])
+        self.assertEqual(s3["sections"][0]["fields"][0]["type"], "text")
+
     def test_six_columns_give_unequal_widths(self):
         # #124: Hajime's 3:1:1:1 row; 7 is over the cap → plain flow
         s = self._norm(6, [{"type": "text", "label": "T", "span": 3}] +
@@ -1783,6 +1804,20 @@ class SectionGridTest(TestCase):
         self.assertIn("repeat(3, minmax(0, 1fr))", html)
         self.assertIn("grid-area: 1 / 2 / auto / span 2;", html)
         self.assertIn("grid-area: 1 / 1 / auto / span 1; align-self: start;", html)
+
+    def test_form_renders_a_stacked_grid_cell(self):
+        user = get_user_model().objects.create_user("n", "n@n.io", "pw")
+        self.client.force_login(user)
+        schema = dict(SCHEMA)
+        schema["sections"] = [{"title": "S", "grid": 3, "fields": [
+            {"type": "text", "label": "A"},
+            {"type": "column", "col": 3, "fields": [
+                {"type": "text", "label": "B"}, {"type": "text", "label": "C"}]}]}]
+        m1, m2 = _mocked(_api(schema=schema))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('<div class="cl-col" style="grid-area: 1 / 3 / auto / span 1;">', html)
+        self.assertIn('data-key="f0-1-1"', html)
 
 
 class LegacyTableGoldenTest(TestCase):
@@ -1932,6 +1967,8 @@ class MultiRowTableTest(TestCase):
             html = self.client.get(CONFIG_PAGE).content.decode()
         self.assertIn('id="clc-tbl"', html)
         self.assertIn('class="ff-rows"', html)
+        self.assertIn('id="clc-lay"', html)          # #125 layout dialog
+        self.assertIn('class="ec-del fs-layout"', html)
 
 
 class ChecklistBookmarkTest(TestCase):

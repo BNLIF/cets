@@ -4,12 +4,13 @@
   <div class="cl-sec-body">
   {% if sec.grid %}
   <div class="cl-grid" style="grid-template-columns: repeat({{ sec.grid }}, minmax(0, 1fr));">
-    {% for f in sec.fields %}{% include "explore/_checklist_field.html" %}{% endfor %}
+    {% for f in sec.fields %}{% if f.type == "column" %}<div class="cl-col" style="grid-area: {{ f.g.r }} / {{ f.g.c }} / auto / span {{ f.g.s }};{% if f.g.a %} align-self: {{ f.g.a }};{% endif %}">{% for j in f.fields %}{% include "explore/_checklist_field.html" with f=j %}{% endfor %}</div>{% else %}{% include "explore/_checklist_field.html" %}{% endif %}{% endfor %}
   </div>
   {% else %}
   {% for f in sec.fields %}
     {% if f.type == "row" %}
     <div class="cl-row">{% for k in f.fields %}{% if k.type == "column" %}<div class="cl-col">{% for j in k.fields %}{% include "explore/_checklist_field.html" with f=j %}{% endfor %}</div>{% else %}{% include "explore/_checklist_field.html" with f=k %}{% endif %}{% endfor %}</div>
+    {% elif f.type == "column" %}{% for j in f.fields %}{% include "explore/_checklist_field.html" with f=j %}{% endfor %}
     {% else %}{% include "explore/_checklist_field.html" %}{% endif %}
   {% endfor %}
   {% endif %}

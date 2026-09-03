@@ -34,9 +34,10 @@
   .cl-row > .cl-col { flex: 1 1 220px; min-width: 0; }
   /* #120: a section's column grid — fields carry explicit grid-area */
   .cl-grid { display: grid; gap: 0 22px; align-items: end; }
+  .cl-grid > .cl-col { min-width: 0; }   /* #125: a stacked cell */
   @media (max-width: 560px) {
     .cl-grid { grid-template-columns: 1fr !important; }
-    .cl-grid > .cl-field { grid-area: auto !important; }
+    .cl-grid > .cl-field, .cl-grid > .cl-col { grid-area: auto !important; }
   }
   .cl-field input:not([type=radio]):not([type=checkbox]):not([type=file]),
   .cl-field select, .cl-field textarea { font: inherit; font-size: 13px; color: var(--ink);
@@ -56,8 +57,8 @@
     overflow: hidden; background: var(--surface); }
   .cl-tri-opt { position: relative; }
   .cl-tri-opt input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-  .cl-tri-opt span { display: block; padding: 7px 18px; font-size: 14px; color: var(--faint);
-    border-left: 1px solid var(--rule); }
+  .cl-tri-opt span { display: block; padding: 6px 11px; font-size: 13.5px; color: var(--faint);
+    border-left: 1px solid var(--rule); }   /* compact: fits a narrow grid column (#125 review) */
   .cl-tri-opt:first-child span { border-left: none; }
   /* #116: a pass/fail table cell — as wide as a number cell */
   .cl-tri-sm { vertical-align: middle; }
@@ -147,7 +148,7 @@
      shows on touch devices */
   .cl-photo-cam { display: none; }
   @media (pointer: coarse) {
-    .cl-tri-opt span { padding: 10px 20px; }
+    .cl-tri-opt span { padding: 9px 14px; }
     .cl-steps li { margin: 9px 0; }
     .cl-photo-cam { display: inline-block; }
   }

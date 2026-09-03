@@ -47,9 +47,18 @@ server-side into explicit grid coordinates, so gaps are expressible and
 overlaps impossible; on phones the grid collapses to one column in field
 order. Cells bottom-align (inputs beside a table share a line); a field
 may set `"align": "top"` or `"middle"` (#123) — a long procedure text
-at the top of its line while figures stack beside it. `row`/`column` trees don't mix with a grid — inside a grid section
-they're flattened. In the editor, pick "columns" on the section header;
-each field then shows col/span/new-line instead of the placement select.
+at the top of its line while figures stack beside it. `row` groups don't mix with a grid — inside a grid section they're
+unwrapped — but a `column` group is ONE grid cell holding a stack (#125:
+a step's text on the left, a column of drawing links level with it on the
+right; the group carries `col`/`span`/`newline`/`align`). In the editor,
+pick "columns" on the section header; each field then shows col/span/
+new-line/align, and the placement select offers "same cell" to join the
+field above's cell. The section's *layout…* button opens a schematic of
+the grid: click a chip and move it with the arrows, change its span or
+alignment, drag it to a cell, drop it onto another chip to stack,
+*unstack* to split a stack one field per row. Every change rewrites the
+field order and hints (order is the layout, so the field rows reorder)
+and refreshes the preview.
 
 ### Section keys (#98)
 

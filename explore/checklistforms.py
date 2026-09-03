@@ -400,7 +400,8 @@ _ALIGNS = {"top": "start", "middle": "center"}   # #123; bottom = the grid defau
 def _grid_place(leaves: list, n: int) -> list:
     """#120: deterministic cursor placement on an ``n``-column grid. Each
     leaf's optional ``col`` (start column), ``span`` (columns occupied, or
-    "full") and ``newline`` are consumed into ``g = {r, c, s}`` — explicit
+    "full") and ``newline`` are consumed into ``g = {r, c, s}`` (a leaf or a
+    stacked ``column`` group alike, #125) — explicit
     coordinates, so gaps are expressible and overlaps impossible. A ``col``
     already passed on the current line wraps to the next line; a span that
     doesn't fit in the remainder wraps too. ``align`` (#123: top/middle,
@@ -480,6 +481,25 @@ def normalize(cfg: dict, name: str) -> dict:
                         kids.append(nk)
                 if kids:
                     fields.append({"type": "row", "fields": kids})
+            elif str(f.get("type") or "").strip().lower() == "column":
+                # #125: a stack as a top-level item — one cell of a grid
+                # section holding several fields (a column of drawing links
+                # beside a step's text). The group carries the placement
+                # hints; keys are f<si>-<fi>-<ji>.
+                stack = []
+                for ji, kk in enumerate(f.get("fields") or []):
+                    nk = _norm_field(kk) if isinstance(kk, dict) else None
+                    if nk:
+                        nk["key"] = f"f{si}-{fi}-{ji}"
+                        stack.append(nk)
+                if len(stack) == 1:
+                    fields.append(stack[0])
+                elif stack:
+                    grp = {"type": "column", "fields": stack}
+                    for k in ("col", "span", "newline", "align"):
+                        if f.get(k) is not None:
+                            grp[k] = f[k]
+                    fields.append(grp)
             else:
                 nf = _norm_field(f)
                 if nf:
@@ -487,16 +507,26 @@ def normalize(cfg: dict, name: str) -> dict:
                     fields.append(nf)
         if title and fields:
             sec = {"title": title, "fields": fields}
-            # #120: a section may declare a column grid; its fields are then
-            # flattened (row/column trees don't mix with a grid) and placed
-            # by the cursor algorithm. Absent/1 = today's vertical flow.
+            # #120: a section may declare a column grid; rows are then
+            # unwrapped (they don't mix with a grid) and every item — a leaf
+            # or a stacked ``column`` group (#125), which is ONE grid cell —
+            # is placed by the cursor algorithm. Absent/1 = vertical flow.
             g = _num(s.get("grid"))
             if g is not None and 2 <= int(g) <= 6:   # cap 6 (#124): span gives 3:1:1:1 rows
-                flat = []
+                items = []
                 for f in fields:
-                    flat.extend(_row_leaves(f))
+                    items.extend(f["fields"] if f["type"] == "row" else [f])
+                for it in items:
+                    if it["type"] == "column":
+                        # hints on the group; tolerate them on its first leaf
+                        for k in ("col", "span", "newline", "align"):
+                            if it.get(k) is None and it["fields"][0].get(k) is not None:
+                                it[k] = it["fields"][0][k]
+                        for leaf in it["fields"]:
+                            for k in ("col", "span", "newline", "align"):
+                                leaf.pop(k, None)
                 sec["grid"] = int(g)
-                sec["fields"] = _grid_place(flat, int(g))
+                sec["fields"] = _grid_place(items, int(g))
             else:
                 for f in fields:
                     for leaf in _row_leaves(f):
@@ -533,6 +563,8 @@ def _resolve_when(schema: dict) -> None:
 def _row_leaves(f: dict) -> list[dict]:
     """Flat leaves of one top-level field — a row's cells, with any stacked
     ``column`` cells (#117) unwrapped."""
+    if f["type"] == "column":          # #125: a top-level stack
+        return list(f["fields"])
     if f["type"] != "row":
         return [f]
     out = []
