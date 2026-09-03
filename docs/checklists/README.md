@@ -105,6 +105,40 @@ get a ✕ per row there to remove a stale key (#102) — the FNAL UI has no
 key deletion, and datasheet-level keys stay untouchable (HWDB validates
 them against the type template).
 
+### Table format rules (#109, #114–#116, #119)
+
+Columns — the editor's columns box, one per line or comma-separated:
+
+1. `P1` — a plain input cell.
+2. `Total = C1 + C2*(C3/C4)` — a computed cell. `C<n>` is the n-th column
+   of the same row, counting every column. Only `+ - * / ( )` and numbers;
+   anything unresolvable leaves the cell empty.
+3. `Expected = "3.1 +- 0.1"` — a fixed, non-editable cell. Formulas can use
+   it when it is a number or a `value ± tolerance` string (`3 +- 1`,
+   `3.1±0.1`, `3 +/- 1`), reading the value; the record keeps the text.
+4. `OK = check` — a pass/fail cell (—/✓/✗), stored as true/false.
+5. `Diff = C2 - C1 [0 ± 0.1]` or `P1 [1.4..1.6]` — a column's own accepted
+   range, overriding the table's nominal/tol or min/max. Not for fixed or
+   check columns.
+6. The table's nominal/tol or min/max apply to every input and computed
+   cell without its own range.
+
+Rows — the "rows…" dialog; without rows the table is a single unnamed row:
+
+7. Each row has a label, shown in a left cell. Labels must be unique;
+   blank labels are dropped.
+8. A row cell holds that row's fixed text, overriding a fixed column value
+   for that row. Blank means an input. Formula and check columns take no
+   row text.
+9. A row's color overrides the table's color for that row.
+10. Formulas and ranges apply per row. Untouched rows are left out of the
+    record; an all-untouched table is left out entirely.
+
+Colors:
+
+11. Named `yellow`, `green`, `blue`, `red`, `gray`, or any `#rrggbb`. Light
+    colors read best. Cells only, not the header.
+
 ## Top-level schema keys (#97, #103)
 
 - `item_fields: [...]` (#103) — which of HWDB's standard item fields the
