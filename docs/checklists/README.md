@@ -234,8 +234,11 @@ which HWDB accepts once the type has it.
 ## Drafts, exports (#97)
 
 - **Save draft** stores the parsed values server-side per (item, checklist,
-  user) — start on the shop floor, finish at a desk. Nothing goes to HWDB;
-  photos aren't drafted (attach them at submit). The draft pre-fills the
+  user) — start on the shop floor, finish at a desk. Only photos go to
+  HWDB (they post to the item at draft time; the draft keeps the
+  references and submit reuses them unless a new file is picked — HWDB is
+  append-only, so a retaken photo leaves the first one on the item). The
+  draft pre-fills the
   next visit (winning over the last submission) and is deleted the moment a
   submission lands. **Discard draft** drops it.
 - **Download CSV** exports the latest submission as section/field/value

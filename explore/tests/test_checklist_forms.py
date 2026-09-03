@@ -259,6 +259,8 @@ class ChecklistPageTest(TestCase):
         self.assertIn('value="pass"', html)                   # tri-state radios
         self.assertIn('type="file" id="f2-2" name="f2-2"', html)   # photo
         self.assertIn('cl-photo-cam" data-target="f2-2"', html)   # camera button
+        self.assertIn('<img class="cl-photo-prev"', html)            # #127 preview slot
+        self.assertIn('id="cl-cam-modal"', html)                     # #127 desktop camera
         self.assertIn("Unwrap", html)                         # steps
         self.assertIn("https://edms.cern.ch/x", html)         # static link
         self.assertNotIn("Bogus", html)                       # unknown dropped
@@ -791,6 +793,28 @@ class DraftAndExportTest(TestCase):
         self.assertEqual(d.name, NAME)
         self.assertEqual(d.data["Identification"]["PCB Batch PID"], "PCB0001")
         self.assertEqual(d.data["Measurements"]["Dim 1"], 1709.5)
+
+    def test_save_draft_posts_photos_and_keeps_their_references(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"action": "draft", "f0-0": "PCB0001",
+                                    "f2-2": SimpleUploadedFile(
+                                        "shot.png", PNG, content_type="image/png")})
+        api.post_test.assert_not_called()
+        img_name = api.post_component_image.call_args.args[2]
+        d = ChecklistDraft.objects.get()
+        self.assertEqual(d.data["Visual Inspection"]["Photo 1"],
+                         {"image_id": "img-77", "image_name": img_name})
+        # a later submit without a new file reuses the drafted photo
+        api.post_component_image.reset_mock()
+        api.get_test_types.return_value = {"data": [
+            {"name": "ES"}, {"name": "PCB Segments Interface"}]}
+        with m1, m2:
+            self.client.post(PAGE, {"f0-0": "PCB0001"})
+        api.post_component_image.assert_not_called()
+        data = api.post_test.call_args.args[1]["test_data"]["DATA"]
+        self.assertEqual(data["Visual Inspection"]["Photo 1"]["image_id"], "img-77")
 
     def test_draft_prefills_and_wins_over_the_last_submission(self):
         api = _api(prev={"DATA": {

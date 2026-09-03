@@ -2502,20 +2502,33 @@ def explore_checklist_view(request, part_id, name):
     item = _checklist_item(api, part_id, schema)
     item_opts = _checklist_item_opts(api, ptid, schema)
 
+    # what the form showed: draft values win; untouched sections (photo
+    # references!) survive — the base both draft-save and submit keep
+    # photos from when no new file is picked
+    display_td = prev_td
+    if draft:
+        display_td = {"DATA": checklistforms.merge_data(
+            (prev_td or {}).get("DATA"), draft.data)}
+
     if request.method == "POST":
         action = request.POST.get("action") or "submit"
         if action == "draft":
-            # #97: server-side draft — parsed DATA only, nothing to HWDB.
+            # #97: server-side draft — parsed DATA, nothing to HWDB except
+            # photos (#127 follow-up): files can't be drafted, so they post to
+            # the item now and the draft keeps their references like a
+            # previous submission would.
             ddata = checklistforms.parse(schema, request.POST)
             iv = checklistforms.item_values(schema, request.POST, item, item_opts)
             if iv and iv["record"]:
                 ddata["Item"] = iv["record"]
+            err = _checklist_photos(request, api, part_id, name, schema, display_td, ddata)
             ChecklistDraft.objects.update_or_create(
                 instance=inst, part_id=part_id, name=name, username=actor,
                 defaults={"data": ddata})
-            messages.success(request, "Draft saved — nothing was posted to "
-                                      "HWDB. Photos aren’t drafted; attach "
-                                      "them when you submit.")
+            if err:
+                messages.error(request, f"Draft saved, but {err}")
+            else:
+                messages.success(request, "Draft saved — only photos went to HWDB.")
             return redirect(page_url)
         if action == "discard_draft":
             if draft:
@@ -2529,7 +2542,7 @@ def explore_checklist_view(request, part_id, name):
         err = _checklist_role_gate(api, schema)
         if err is None:
             err = _checklist_submit(request, api, part_id, name, schema,
-                                    prev_td, item=item, opts=item_opts)
+                                    display_td, item=item, opts=item_opts)
         if err:
             messages.error(request, err)
         else:
@@ -2565,11 +2578,6 @@ def explore_checklist_view(request, part_id, name):
             f'attachment; filename="Checklist_{part_id}_{name}.csv"'
         return resp
 
-    display_td = prev_td
-    if draft:
-        # draft values win; untouched sections (photo references!) survive
-        display_td = {"DATA": checklistforms.merge_data(
-            (prev_td or {}).get("DATA"), draft.data)}
     email_href = ""
     if rec:
         # #99: Hajime's EMAIL button — a mailto: draft in the user's own

@@ -74,6 +74,7 @@
 {% include "explore/_checklist_behavior.html" %}
 {% include "explore/_lightbox.html" %}
 {% include "explore/_checklist_scan.html" %}
+{% include "explore/_checklist_photo.html" %}
 <script>
 (function () {
   // --- live tolerance coloring on number/table inputs -----------------------
@@ -109,18 +110,7 @@
 
   // (QR/barcode scanning into PID fields lives in _checklist_scan.html)
 
-  // --- photo fields: a real camera button next to the file picker ----------
-  // (capture=environment forces the camera app; it's set only for the
-  // button's click so the plain input keeps offering the gallery/files)
-  document.addEventListener("click", function (e) {
-    var b = e.target.closest && e.target.closest(".cl-photo-cam");
-    if (!b) return;
-    var inp = document.getElementById(b.getAttribute("data-target"));
-    if (!inp) return;
-    inp.setAttribute("capture", "environment");
-    inp.click();
-    setTimeout(function () { inp.removeAttribute("capture"); }, 1000);
-  });
+  // (photo capture/preview lives in _checklist_photo.html)
 })();
 </script>
 {% endblock %}

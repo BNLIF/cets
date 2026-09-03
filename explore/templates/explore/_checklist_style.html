@@ -106,6 +106,8 @@
   .cl-steps .cl-step-l3::before { content: "\25E6\a0"; }   /* ◦ */
   .cl-steps .cl-step-l4 { margin-left: 104px; }
   .cl-steps .cl-step-l4::before { content: "\25AA\a0"; }   /* ▪ */
+  .cl-photo { display: block; }
+  .cl-photo-prev { display: block; margin-top: 6px; max-width: 100%; max-height: 240px; border: 1px solid var(--rule); border-radius: var(--r-sm); }
   .cl-static-img { max-width: 100%; max-height: 320px; border: 1px solid var(--rule);
     border-radius: var(--r-sm); }
   /* #107: the "view drawing" stand-in for a PDF reference (viewer: _lightbox.html) */
@@ -143,14 +145,9 @@
   .cl-static-link { font-size: 13px; text-decoration: none; }   /* #122 */
   .cl-static-link:hover { text-decoration: underline; }
   .cl-field a { color: var(--accent-ink); }
-  /* the Take-photo button only works where capture= opens a camera app —
-     desktops ignore it (it would just re-open the file picker), so it only
-     shows on touch devices */
-  .cl-photo-cam { display: none; }
   @media (pointer: coarse) {
     .cl-tri-opt span { padding: 9px 14px; }
     .cl-steps li { margin: 9px 0; }
-    .cl-photo-cam { display: inline-block; }
   }
   /* #105: print / save-as-PDF — the browser's print dialog is the PDF
      engine. Folded sections open, app chrome and buttons vanish; the

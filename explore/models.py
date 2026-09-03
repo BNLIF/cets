@@ -405,7 +405,10 @@ class ChecklistDraft(InstanceScoped):
     at a desk. Deleted the moment its submission lands in HWDB: HWDB owns
     everything permanent, this table only in-progress state. Photos are NOT
     drafted (files can't be); previous photo references survive via the
-    revive merge. ``username`` is the FNAL credkey (``activity.actor_of``)."""
+    revive merge. ``username`` is the FNAL credkey (``activity.actor_of``).
+    Photos picked when a draft is saved DO post to the item right away
+    (HWDB is the only place a file can live); the draft keeps their
+    references and submit reuses them unless a new file is picked."""
 
     part_id = models.CharField(max_length=50, db_index=True)
     name = models.CharField(max_length=120)
