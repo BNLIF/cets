@@ -444,7 +444,7 @@ def normalize(cfg: dict, name: str) -> dict:
             # flattened (row/column trees don't mix with a grid) and placed
             # by the cursor algorithm. Absent/1 = today's vertical flow.
             g = _num(s.get("grid"))
-            if g is not None and 2 <= int(g) <= 4:
+            if g is not None and 2 <= int(g) <= 6:   # cap 6 (#124): span gives 3:1:1:1 rows
                 flat = []
                 for f in fields:
                     flat.extend(_row_leaves(f))

@@ -34,11 +34,13 @@ its cell); a section's first field has no select.
 
 ### Section grid (#120)
 
-A section may instead declare `"grid": N` (2–4): its fields lay out on an
+A section may instead declare `"grid": N` (2–6): its fields lay out on an
 N-column grid, and each field takes an optional `"col"` (start column),
 `"span"` (columns occupied, or `"full"`) and `"newline": true` (start a
 fresh line — `col` still applies, so "new line, columns 2–3" is
-`{"newline": true, "col": 2, "span": 2}`). Fields flow left-to-right into
+`{"newline": true, "col": 2, "span": 2}`). Unequal widths come from span
+on a finer grid (#124): six columns with the text spanning 3 and three
+1-wide cells beside it is a 3:1:1:1 row. Fields flow left-to-right into
 the next free slot by default; a `col` already passed, or a span that
 doesn't fit the remainder, wraps to the next line. Placement is computed
 server-side into explicit grid coordinates, so gaps are expressible and

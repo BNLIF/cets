@@ -1706,6 +1706,14 @@ class SectionGridTest(TestCase):
         self.assertEqual(self._g(s), [("A", 1, 1, 1), ("B", 1, 2, 1),
                                       ("C", 2, 1, 1)])
 
+    def test_six_columns_give_unequal_widths(self):
+        # #124: Hajime's 3:1:1:1 row; 7 is over the cap → plain flow
+        s = self._norm(6, [{"type": "text", "label": "T", "span": 3}] +
+                          [{"type": "text", "label": l} for l in "PDC"])
+        self.assertEqual(self._g(s), [("T", 1, 1, 3), ("P", 1, 4, 1),
+                                      ("D", 1, 5, 1), ("C", 1, 6, 1)])
+        self.assertNotIn("grid", self._norm(7, [{"type": "text", "label": "A"}])["sections"][0])
+
     def test_align_rides_on_the_grid_coordinates(self):
         # #123: top/middle → align-self; bottom (the default) adds nothing
         s = self._norm(2, [{"type": "text", "label": "A", "align": "top"},
