@@ -263,6 +263,7 @@ class ChecklistPageTest(TestCase):
         self.assertIn("https://edms.cern.ch/x", html)         # static link
         self.assertNotIn("Bogus", html)                       # unknown dropped
         self.assertIn("Submit to HWDB", html)
+        self.assertIn(f'confirm("Submit to HWDB for {PART}?")', html)  # names the item
 
     def test_sections_fold_and_follow_a_select(self):
         cfg = json.loads(json.dumps(SCHEMA))

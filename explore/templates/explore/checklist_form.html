@@ -100,6 +100,13 @@
   }
   document.querySelectorAll("input[data-type-id]").forEach(paintPid);
 
+  // confirm the real submit (not draft/discard) — after the browser's own
+  // validation, naming the item so a wrong page is caught (Hajime, 2026-09-03)
+  document.addEventListener("submit", function (e) {
+    var b = e.submitter;
+    if (b && b.classList.contains("es-btn") && !b.name && !confirm("Submit to HWDB for {{ part_id }}?")) e.preventDefault();
+  });
+
   // (QR/barcode scanning into PID fields lives in _checklist_scan.html)
 
   // --- photo fields: a real camera button next to the file picker ----------
