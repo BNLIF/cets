@@ -1494,7 +1494,7 @@ class ConstantCellsTest(TestCase):
     def test_normalize_maps_named_tints_and_drops_junk(self):
         # #115: table background color — named palette or #rrggbb
         f = self._schema(self.COLS)
-        for given, want in (("yellow", "#d4a72c"), ("#AbCdEf", "#abcdef")):
+        for given, want in (("yellow", "#fff2cc"), ("#AbCdEf", "#abcdef")):
             g = checklistforms.normalize(
                 {"name": "t", "test_type_name": "T", "sections": [
                     {"title": "S", "fields": [{"type": "table", "label": "M",
@@ -1520,7 +1520,7 @@ class ConstantCellsTest(TestCase):
         with m1, m2:
             html = self.client.get(PAGE).content.decode()
         self.assertIn("cl-tint", html)
-        self.assertIn("color-mix(in oklch, #d4a72c 26%, var(--surface))", html)
+        self.assertIn("--cl-tint: #fff2cc;", html)
 
     def test_form_renders_the_constant_readonly(self):
         user = get_user_model().objects.create_user("n", "n@n.io", "pw")

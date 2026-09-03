@@ -40,17 +40,17 @@
   }
   .cl-field input:not([type=radio]):not([type=checkbox]):not([type=file]),
   .cl-field select, .cl-field textarea { font: inherit; font-size: 13px; color: var(--ink);
-    background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm);
-    padding: 7px 9px; width: 100%; max-width: 360px; }
+    background: var(--cl-input-bg, var(--surface));
+    border: 1px solid var(--cl-input-rule, var(--rule));
+    border-radius: var(--r-sm); padding: 7px 9px; width: 100%; max-width: 360px; }
   .cl-field textarea { max-width: 100%; }
   .cl-qr input, .cl-link input { font-family: var(--font-mono); max-width: 260px; }
   .cl-ok { border-color: var(--good) !important; background: var(--good-bg) !important; }
-  /* an outline ring (offset shows the ground through) reads on any #115
-     tint — a red border on a red-tinted cell doesn't; bold digits add a
-     non-color cue */
+  /* a ring with a 1px surface halo reads on any #115 tint — a red border
+     on a red-tinted cell doesn't; bold digits add a non-color cue */
   .cl-bad { border-color: var(--bad, #a33) !important;
     background: var(--surface) !important;
-    outline: 2px solid var(--bad, #a33); outline-offset: 1px;
+    box-shadow: 0 0 0 1px var(--surface), 0 0 0 3px var(--bad, #a33);
     color: var(--bad, #a33); font-weight: 600; }
   .cl-tri { display: inline-flex; border: 1px solid var(--rule); border-radius: var(--r-sm);
     overflow: hidden; background: var(--surface); }
@@ -64,7 +64,7 @@
   .cl-tri-opt.bad input:checked + span {
     background: color-mix(in oklch, var(--bad, #a33) 12%, var(--surface)); color: var(--bad, #a33); }
   /* the 3px padding/negative-margin pair leaves paint room for the cl-bad
-     outline ring (2px + 1px offset) — overflow-x clips vertically too —
+     ring (1px halo + 2px ring) — overflow-x clips vertically too —
      without moving the table's outer bottom edge */
   .tbl-scroll { overflow-x: auto; padding: 3px; margin: -3px; }
   .cl-table { border-collapse: collapse; font-size: 13px; }
@@ -78,10 +78,11 @@
   .cl-table td input { width: 86px; text-align: center; }
   .cl-table td input[readonly] { background: var(--page); border-style: dashed; }  /* computed (#109) */
   .cl-table td input[data-const] { background: none; border-color: transparent; }  /* fixed text (#114) */
-  /* #115: table tint keyed to the reference drawing (cells only, not the
-     header); inputs keep their own ground so ok/bad paint stays readable */
-  .cl-tint td { background: var(--cl-tint); print-color-adjust: exact;
-    -webkit-print-color-adjust: exact; }
+  /* #115: table tint keyed to the reference drawing, painted as picked
+     across the whole row, inputs included (cells only, not the header) */
+  .cl-tint td { background: var(--cl-tint); --cl-input-bg: var(--cl-tint);
+    --cl-input-rule: color-mix(in oklch, var(--cl-tint) 65%, var(--ink));
+    print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .cl-steps { margin: 4px 0 0; padding-left: 4px; font-size: 13.5px; color: var(--ink);
     list-style: none; counter-reset: clstep; }
   .cl-steps li { margin: 5px 0; }

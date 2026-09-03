@@ -178,10 +178,10 @@ def _eval_formula(expr: str, values: list) -> float | None:
         return None
 
 
-# #115: named table tints → base colors (mixed into the theme surface at
-# render). Chosen to echo the iPad scenes' row colors.
-_TINTS = {"yellow": "#d4a72c", "green": "#6aa84f", "blue": "#6d87c2",
-          "red": "#cc4125", "gray": "#999999", "grey": "#999999"}
+# #115: named table tints → light colors, painted as-is on the cells (the
+# inputs keep their own ground). Light so the row stays a wash, not a block.
+_TINTS = {"yellow": "#fff2cc", "green": "#d9ead3", "blue": "#cfe2f3",
+          "red": "#f4cccc", "gray": "#efefef", "grey": "#efefef"}
 
 
 def _norm_field(f: dict) -> dict | None:
