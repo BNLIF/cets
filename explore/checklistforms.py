@@ -341,6 +341,16 @@ def _norm_field(f: dict) -> dict | None:
                    and str(v).strip()}
             if rtx:
                 row["texts"] = rtx
+            # per-row accepted range on a column (Hajime: ±0.1 on one row,
+            # ±0.01 on the others) — beats the column's own and the table's
+            rr = rw.get("ranges") if isinstance(rw.get("ranges"), dict) else {}
+            rr = {str(k).strip(): _tol_range(v) for k, v in rr.items()
+                  if isinstance(v, dict) and str(k).strip() in cols
+                  and str(k).strip() not in checks}
+            rr = {k: {"min": lo, "max": hi, "range": rng} for k, (lo, hi, rng) in rr.items()
+                  if lo is not None or hi is not None}
+            if rr:
+                row["ranges"] = rr
             if _tint(rw.get("color")):
                 row["color"] = _tint(rw.get("color"))
             rows.append(row)
@@ -581,11 +591,12 @@ def leaf_fields(schema: dict):
                 yield sec["title"], leaf
 
 
-def _table_cells(f: dict, cells: dict, tx: dict, prefix: str) -> list:
-    """The display cells of one table row. A column's own tolerance replaces
-    the table-wide one wholesale; a constant cell (#114) always shows its
-    fixed text, never paints, and beats a formula on the same column."""
-    ct = f.get("col_tol") or {}
+def _table_cells(f: dict, cells: dict, tx: dict, prefix: str, rr: dict | None = None) -> list:
+    """The display cells of one table row. A row's range (#119 review) beats
+    the column's own, which replaces the table-wide one wholesale; a constant
+    cell (#114) always shows its fixed text, never paints, and beats a
+    formula on the same column."""
+    ct = {**(f.get("col_tol") or {}), **(rr or {})}
     fx = f.get("formulas") or {}
     checks = f.get("checks") or []
     out = []
@@ -653,7 +664,7 @@ def _bind_leaf(f: dict, v) -> None:
                     "color": rw.get("color") or f.get("color", ""),
                     "cells": _table_cells(f, rv if isinstance(rv, dict) else {},
                                           {**tx, **rw.get("texts", {})},
-                                          f"{f['key']}-r{i}")})
+                                          f"{f['key']}-r{i}", rw.get("ranges"))})
     elif t == "steps":
         done = v if isinstance(v, dict) else {}
         f["items"] = [{"label": s.strip(), "name": f"{f['key']}-s{i}",

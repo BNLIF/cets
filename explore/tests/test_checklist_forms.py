@@ -1934,6 +1934,29 @@ class MultiRowTableTest(TestCase):
         self.assertIn('name="f0-0-r1-c1"', html)
         self.assertNotIn('<table class="cl-table cl-tint"', html)   # tint is per row now
 
+    def test_row_ranges_beat_the_column_range(self):
+        # Hajime (2026-09-03): ±0.1 on Length, ±0.01 on the holes
+        tbl = {"type": "table", "label": "T", "nominal": 0, "tol": 1,
+               "columns": ["Expected", "Measured",
+                           {"label": "Diff", "formula": "C2 - C1", "min": -0.1, "max": 0.1}],
+               "rows": [{"label": "Length"},
+                        {"label": "Hole 1", "ranges": {"Diff": {"nominal": 0, "tol": 0.01},
+                                                       "Measured": {"min": 0.4},
+                                                       "Nope": {"tol": 1}, "Expected": "x"}}]}
+        s = checklistforms.normalize(
+            {**SCHEMA, "sections": [{"title": "S", "fields": [tbl]}]}, NAME)
+        rows = s["sections"][0]["fields"][0]["rows"]
+        self.assertNotIn("ranges", rows[0])
+        self.assertEqual(rows[1]["ranges"], {
+            "Diff": {"min": -0.01, "max": 0.01, "range": "-0.01 – 0.01"},
+            "Measured": {"min": 0.4, "max": None, "range": "≥ 0.4"}})
+        b = checklistforms.bind(s, None)
+        tr = b["sections"][0]["fields"][0]["trows"]
+        self.assertEqual((tr[0]["cells"][2]["min"], tr[0]["cells"][2]["max"]), (-0.1, 0.1))   # column's
+        self.assertEqual((tr[1]["cells"][2]["min"], tr[1]["cells"][2]["max"]), (-0.01, 0.01))  # row's
+        self.assertEqual((tr[1]["cells"][1]["min"], tr[1]["cells"][1]["max"]), (0.4, None))
+        self.assertEqual((tr[0]["cells"][1]["min"], tr[0]["cells"][1]["max"]), (-1.0, 1.0))    # table's
+
     def test_check_column(self):
         # #116: a pass/fail column — tri-state cells, bools in the record
         tbl = {"type": "table", "label": "T",
