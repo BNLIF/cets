@@ -260,6 +260,7 @@
       <input type="file" class="ff-imgfile" accept="image/*,.pdf,application/pdf" title="upload a diagram (e.g. where P1–P10 are measured) or a PDF drawing — stored on the component type in HWDB; a PDF shows its first page">
       <input class="ff-imageid" placeholder="or existing image_id" style="flex:0 0 150px;" title="reference a picture already stored in HWDB by its image_id — the preview shows it (a broken image means a wrong id)">
       <span class="ec-hint ff-imgstatus"></span>
+      <label class="ec-inline ff-thumbwrap" title="off: no inline picture — the label is the link that opens it (#122)"><input type="checkbox" class="ff-thumb" checked> thumbnail</label>
       <button type="button" class="ec-del ff-imgclear" style="display:none;" title="Detach the image">&#x2715; image</button>
     </div>
     <div class="ec-row g-link" style="display:none;">
@@ -368,6 +369,7 @@
     $(".ff-checklist", r).value = f.checklist || "";                   // #118
     $(".ff-checklisttype", r).value = f.part_type_id || "";
     $(".ff-imageid", r).value = f.image_id || "";
+    $(".ff-thumb", r).checked = f.thumb !== false;                    // #122
     $(".ff-slots", r).value = (f.slots || []).map(function (s) {   // #113
       return s.label + " @ " + s.x + ", " + s.y;
     }).join("\n");
@@ -488,6 +490,7 @@
       if (url) f.url = url;
       if (image) f.image = image;
       if (imageId) f.image_id = imageId;
+      if ((image || imageId) && !$(".ff-thumb", r).checked) f.thumb = false;   // #122
       if (cl) f.checklist = cl;
       if (cl && clType) f.part_type_id = clType;
       return (note || url || image || imageId || cl) ? f : null;
@@ -680,6 +683,9 @@
     $$(".clc-fld").forEach(function (r) {
       $(".ff-label", r).classList.toggle(
         "miss", !$(".ff-label", r).value.trim() && $(".ff-type", r).value !== "static");
+      // #122: the thumbnail toggle only means something on a static with a figure
+      $(".ff-thumbwrap", r).style.display = ($(".ff-type", r).value === "static" &&
+        ($(".ff-image", r).value.trim() || $(".ff-imageid", r).value.trim())) ? "" : "none";
     });
     // placement controls: in a grid section (#120) each field gets col/span/
     // new-line and the flow select hides; in a 1-column section the flow
@@ -720,6 +726,35 @@
     var hi = el.hasAttribute("data-max") ? parseFloat(el.getAttribute("data-max")) : Infinity;
     el.classList.add(v >= lo && v <= hi ? "cl-ok" : "cl-bad");
   }
+  // what the previewer did in the pane — typed values, a picked variant,
+  // folded/unfolded sections — survives the re-render, so a change can be
+  // checked in the state that shows it (keys are positional, so a field
+  // moved to another slot forgets; fine)
+  function previewState(root) {
+    var st = { v: {}, on: {}, fold: {} };
+    $$("input[name], select[name], textarea[name]", root).forEach(function (el) {
+      if (el.type === "radio" || el.type === "checkbox") { if (el.checked) st.on[el.name + "=" + el.value] = 1; }
+      else if (el.type !== "file") st.v[el.name] = el.value;
+    });
+    $$(".cl-sec", root).forEach(function (sec) {
+      var b = $(".cl-fold", sec);
+      if (b) st.fold[b.textContent] = sec.classList.contains("cl-folded");
+    });
+    return st;
+  }
+  function restorePreview(root, st) {
+    $$("input[name], select[name], textarea[name]", root).forEach(function (el) {
+      if (el.type === "radio" || el.type === "checkbox") el.checked = !!st.on[el.name + "=" + el.value];
+      else if (el.type !== "file" && st.v[el.name] !== undefined && !el.readOnly) el.value = st.v[el.name];
+    });
+    $$(".cl-sec", root).forEach(function (sec) {
+      var b = $(".cl-fold", sec), f = b && st.fold[b.textContent];
+      if (f === undefined) return;
+      sec.classList.toggle("cl-folded", f);
+      b.setAttribute("aria-expanded", f ? "false" : "true");
+    });
+    $$("input[data-min], input[data-max]", root).forEach(paint);
+  }
   function preview() {
     var fd = new FormData();
     fd.append("config_json", $("#clc-json").value);
@@ -728,7 +763,12 @@
     fetch("{% url 'explore:checklist_preview' part_type_id=part_type_id %}",
           { method: "POST", body: fd })
       .then(function (r) { return r.text(); })
-      .then(function (html) { $("#clc-preview").innerHTML = html; window.clApplyWhen(); window.clRecompute(); })
+      .then(function (html) {
+        var pane = $("#clc-preview"), st = previewState(pane);
+        pane.innerHTML = html;
+        restorePreview(pane, st);
+        window.clApplyWhen(); window.clRecompute();
+      })
       .catch(function () {});
   }
   // the preview's tolerance coloring works live, same as the real page

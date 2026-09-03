@@ -1651,6 +1651,18 @@ class ChecklistLinkTest(TestCase):
                        )["sections"][0]["fields"][0]
         self.assertEqual(f["checklist_type"], "")   # malformed → item link
 
+    def test_thumb_false_makes_the_label_the_link(self):
+        # #122: no inline picture; the label opens the figure in the lightbox
+        f = self._norm(image_id="pdf-1", thumb=False)["sections"][0]["fields"][0]
+        self.assertIs(f["thumb"], False)
+        self.assertNotIn("thumb", self._norm(note="n", thumb=False)   # no figure → moot
+                         ["sections"][0]["fields"][0])
+        html = self._render({"type": "static", "label": "DFD-20-A402",
+                             "image_id": "pdf-1", "thumb": False})
+        self.assertIn('class="cl-static-link" data-lightbox href="/hw/dev/shipment-image/pdf-1/"', html)
+        self.assertIn("DFD-20-A402</a>", html)
+        self.assertNotIn('<img class="cl-static-img"', html)
+
     def test_checklist_alone_keeps_the_static_field(self):
         self.assertEqual(
             len(self._norm(checklist="Frame")["sections"][0]["fields"]), 1)

@@ -207,6 +207,10 @@ def _norm_field(f: dict) -> dict | None:
         for k in ("col", "span", "newline"):   # #120: grid placement hints
             if f.get(k) is not None:
                 out[k] = f[k]
+        # #122: thumb:false → no inline figure; the label is the link that
+        # opens it (a column of drawing numbers instead of thumbnails)
+        if f.get("thumb") in (False, "false") and (out["image"] or out["image_id"]):
+            out["thumb"] = False
         return out if (out["image"] or out["image_id"] or out["url"]
                        or out["note"] or out["checklist"]) else None
     if t not in FIELD_TYPES or not label:

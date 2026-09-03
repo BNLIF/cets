@@ -76,9 +76,13 @@
     {% endfor %}
   </div>
 {% elif f.type == "static" %}
+  {% if f.thumb is False %}{# #122: the label opens the figure, no thumbnail #}
+  <div><a class="cl-static-link" data-lightbox href="{% if f.image_id %}{% url 'explore:shipment_image' image_id=f.image_id %}{% else %}{{ f.image }}{% endif %}">&#128196; {{ f.label|default:'view drawing' }}</a></div>
+  {% else %}
   {% if f.label %}<span class="cl-lab">{{ f.label }}</span>{% endif %}
   {% if f.image_id %}<img class="cl-static-img" data-lightbox data-lb-src="{% url 'explore:shipment_image' image_id=f.image_id %}" src="{% url 'explore:shipment_image' image_id=f.image_id %}?thumb=1" alt="{{ f.label|default:'reference' }}">
   {% elif f.image %}<img class="cl-static-img" data-lightbox src="{{ f.image }}" alt="{{ f.label|default:'reference' }}">{% endif %}
+  {% endif %}
   {% if f.note %}<div class="cl-note">{{ f.note }}</div>{% endif %}
   {% if f.url %}<div><a href="{{ f.url }}" target="_blank" rel="noopener">{{ f.url }} <span aria-hidden="true">&#x2197;</span></a></div>{% endif %}
   {% if f.checklist %}{# #118: jump to another checklist — this item's, or another type's chooser #}
