@@ -1306,6 +1306,7 @@ class PrintTest(TestCase):
             html = self.client.get(PAGE).content.decode()
         self.assertIn("cl-lightbox", html)
         self.assertIn("cl-lb-pdfbtn", html)
+        self.assertIn("pointercancel", html)     # #126 pinch handlers ride along
         self.assertIn("cursor: zoom-in", html)
 
 
