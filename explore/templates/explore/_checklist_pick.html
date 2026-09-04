@@ -1,0 +1,133 @@
+{# Pick-from-list for PID inputs, shared like the scan modal: any button with class "cl-pick" and a data-target input id opens a dialog listing the type's mirrored items — the type from the button's data-type-id (a comma list allowed, names in data-type-names), else the target's — and a row click fills the input. data-free="1" (link fields) hides items already inside another item. #}
+<style>
+  #cl-pick-modal { border: 1px solid var(--rule); border-radius: var(--r-lg); background: var(--page);
+    color: var(--ink); padding: 14px; width: min(680px, 94vw); }
+  #cl-pick-modal::backdrop { background: rgba(0, 0, 0, .45); }
+  .cl-pick-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .cl-pick-head h3 { margin: 0; font-size: 14px; }
+  .cl-pick-head h3 .mono { font-family: var(--font-mono); font-weight: 400; }
+  .cl-pick-head select { font: inherit; font-size: 13px; color: var(--ink); background: var(--surface);
+    border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 5px 6px; }
+  .cl-pick-tbl.one .ty { display: none; }
+  .cl-pick-head input[type="search"] { flex: 1 1 160px; font: inherit; font-size: 13px; font-family: var(--font-mono);
+    color: var(--ink); background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 6px 8px; }
+  .cl-pick-head label { font-size: 12px; color: var(--dim); display: inline-flex; gap: 5px; align-items: center; }
+  .cl-pick-scroll { max-height: 55vh; overflow: auto; border: 1px solid var(--rule); border-radius: var(--r-sm); }
+  .cl-pick-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .cl-pick-tbl th { text-align: left; font-weight: 600; color: var(--faint); font-size: 11.5px; text-transform: uppercase;
+    letter-spacing: .03em; padding: 6px 8px; border-bottom: 1px solid var(--rule); position: sticky; top: 0; background: var(--page); }
+  .cl-pick-tbl td { padding: 6px 8px; border-bottom: 1px solid var(--rule); }
+  .cl-pick-tbl tr:last-child td { border-bottom: none; }
+  .cl-pick-tbl tr.pick { cursor: pointer; }
+  .cl-pick-tbl tr.pick:hover { background: var(--surface); }
+  .cl-pick-tbl tr.off td { color: var(--faint); }
+  .cl-pick-tbl .mono { font-family: var(--font-mono); font-size: 12.5px; }
+  .cl-pick-tbl .ok { color: var(--good); }
+  .cl-pick-tbl .bad { color: var(--bad); }
+  .cl-pick-foot { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+  #cl-pick-status { font-size: 12px; color: var(--faint); flex: 1 1 auto; }
+  .cl-pick-foot .es-btn[disabled] { opacity: .45; cursor: default; }
+</style>
+
+<dialog id="cl-pick-modal" data-url="{% url 'explore:pid_list' part_type_id='__T__' %}">
+  <div class="cl-pick-head">
+    <h3 id="cl-pick-head">Items of type <span class="mono" id="cl-pick-type"></span></h3>
+    <select id="cl-pick-sel" hidden></select>
+    <input type="search" id="cl-pick-q" placeholder="PID or serial" autocomplete="off" spellcheck="false">
+    <label title="Also list statuses the Shipping Procedure doesn’t allow to be linked — shown for information only"><input type="checkbox" id="cl-pick-all"> show all statuses</label>
+  </div>
+  <div class="cl-pick-scroll">
+    <table class="cl-pick-tbl">
+      <thead><tr><th>Item</th><th class="ty">Type</th><th>Status</th><th>Uploaded</th><th>Certified</th><th>Institution</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <div class="cl-pick-foot">
+    <span id="cl-pick-status"></span>
+    <button type="button" class="es-btn quiet" id="cl-pick-prev" title="Previous page">&lsaquo;</button>
+    <button type="button" class="es-btn quiet" id="cl-pick-next" title="Next page">&rsaquo;</button>
+    <button type="button" class="es-btn" id="cl-pick-close">Close</button>
+  </div>
+</dialog>
+
+<script>
+(function () {
+  var dlg = document.getElementById("cl-pick-modal"), q = document.getElementById("cl-pick-q"),
+      all = document.getElementById("cl-pick-all"), tbody = dlg.querySelector("tbody"),
+      sel = document.getElementById("cl-pick-sel"), tbl = dlg.querySelector("table"),
+      status = document.getElementById("cl-pick-status"), prev = document.getElementById("cl-pick-prev"),
+      next = document.getElementById("cl-pick-next");
+  var target = null, types = [], names = {}, free = false, timer = null, seq = 0, page = 1;
+  function esc(t) { var d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
+  function mark(v, yes, no) {
+    return v ? '<span class="ok" title="' + yes + '">✓</span>' : '<span class="bad" title="' + no + '">✗</span>';
+  }
+  function load() {
+    var n = ++seq;
+    status.textContent = "loading…";
+    var url = dlg.getAttribute("data-url").replace("__T__", encodeURIComponent(sel.value || types.join(","))) +
+      "?q=" + encodeURIComponent(q.value.trim()) + "&page=" + page + (all.checked ? "&all=1" : "") + (free ? "&free=1" : "");
+    fetch(url, { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : { rows: [], total: 0, pages: 1, error: true }; })
+      .catch(function () { return { rows: [], total: 0, pages: 1, error: true }; })
+      .then(function (d) {
+        if (n !== seq) return;                       // a newer search superseded this one
+        tbody.innerHTML = d.rows.map(function (r) {
+          // only the four linkable statuses are pickable; the rest (under "show all") are display-only
+          return '<tr class="' + (r.linkable ? "pick" : "off") + '" data-pid="' + esc(r.part_id) + '"' +
+            (r.linkable ? "" : ' title="Display only — the Shipping Procedure doesn’t allow linking this status."') + ">" +
+            '<td class="mono">' + esc(r.part_id) + '</td><td class="ty">' + esc(names[r.part_type_id] || r.part_type_id) +
+            "</td><td>" + esc(r.status) + "</td>" +
+            "<td>" + mark(r.qc_up, "QA/QC uploaded", "QA/QC not uploaded") + "</td>" +
+            "<td>" + mark(r.qc_cert, "Certified QA/QC", "Not certified") + "</td>" +
+            "<td>" + esc(r.institution) + "</td></tr>";
+        }).join("") || '<tr class="off"><td colspan="6">' +
+          (d.error ? "List not available." : q.value.trim() ? "No match." : "No items in the mirror — sync this type first.") + "</td></tr>";
+        page = d.page || 1;
+        var lo = d.rows.length ? (page - 1) * (d.per || d.rows.length) + 1 : 0;
+        status.textContent = (d.pages > 1 ? lo + "–" + (lo + d.rows.length - 1) + " of " + d.total : d.total + " item(s)") +
+          (d.parented ? " · " + d.parented + " more sit inside another item and can’t be linked" : "");
+        prev.hidden = next.hidden = !(d.pages > 1);
+        prev.disabled = page <= 1;
+        next.disabled = page >= d.pages;
+      });
+  }
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest(".cl-pick");
+    if (!b) return;
+    target = document.getElementById(b.getAttribute("data-target"));
+    types = (b.getAttribute("data-type-id") || (target && target.getAttribute("data-type-id")) || "").split(",").filter(Boolean);
+    if (!types.length) return;
+    var nm = []; try { nm = JSON.parse(b.getAttribute("data-type-names") || "[]"); } catch (e) {}
+    names = {}; types.forEach(function (t, i) { names[t] = nm[i] || t; });
+    free = b.getAttribute("data-free") === "1";
+    document.getElementById("cl-pick-head").childNodes[0].textContent = types.length === 1 ? "Items of type " : "Items";
+    document.getElementById("cl-pick-type").textContent = types.length === 1 ? types[0] : "";
+    sel.hidden = types.length === 1;
+    tbl.classList.toggle("one", types.length === 1);
+    sel.innerHTML = '<option value="">all types</option>' + types.map(function (t) {
+      return '<option value="' + esc(t) + '">' + esc(names[t] === t ? t : names[t] + " · " + t) + "</option>";
+    }).join("");
+    q.value = "";
+    page = 1;
+    tbody.innerHTML = "";
+    dlg.showModal();
+    load();
+  });
+  function first() { page = 1; load(); }
+  q.addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(first, 250); });
+  all.addEventListener("change", first);
+  sel.addEventListener("change", first);
+  prev.addEventListener("click", function () { if (page > 1) { page--; load(); } });
+  next.addEventListener("click", function () { page++; load(); });
+  tbody.addEventListener("click", function (e) {
+    var tr = e.target.closest && e.target.closest("tr.pick");
+    if (!tr || !target) return;
+    target.value = tr.getAttribute("data-pid");
+    target.dispatchEvent(new Event("input", { bubbles: true }));   // type guard, map dots, link button follow
+    dlg.close();
+  });
+  document.getElementById("cl-pick-close").addEventListener("click", function () { dlg.close(); });
+  dlg.addEventListener("click", function (e) { if (e.target === dlg) dlg.close(); });
+})();
+</script>

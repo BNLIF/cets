@@ -12,7 +12,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 
 from explore import checklistforms
-from explore.models import ChecklistDraft, InstitutionPref
+from explore.models import ChecklistDraft, HwdbComponentEvent, InstitutionPref
 
 PART = "Z00100300041-00150"
 PTID = "Z00100300041"
@@ -1642,6 +1642,28 @@ class ImageMapLinkTest(TestCase):
             self.assertEqual(d["error"], "position “FEB1” expects D05700300001 items, not D08100100003.")
             api.patch_subcomponents.assert_not_called()
 
+    def test_link_and_unlink_stamp_the_mirror_parent(self):
+        """#134: the pick list reads parents from the mirror, so a link made
+        here must show up there right away (and an unlink must clear it)."""
+        HwdbComponentEvent.objects.create(instance="dev", part_type_id="D05700300001",
+                                          part_id="D05700300001-00011", status_id=120)
+        api = self._api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(f"/hw/dev/checklist-map/{PART}/",
+                             {"action": "link", "slot": "FEB1", "pid": "D05700300001-00011"})
+            row = HwdbComponentEvent.objects.get(part_id="D05700300001-00011")
+            self.assertEqual(row.parent_part_id, PART)
+            d = self.client.get("/hw/dev/pid-list/D05700300001/?free=1").json()
+            self.assertEqual(d["rows"], [])
+            self.assertEqual(d["parented"], 1)
+            api.get_subcomponents.return_value = {"data": [
+                {"functional_position": "FEB1", "part_id": "D05700300001-00011"}]}
+            self.client.post(f"/hw/dev/checklist-map/{PART}/",
+                             {"action": "unlink", "pid": "D05700300001-00011"})
+            row.refresh_from_db()
+            self.assertEqual(row.parent_part_id, "")
+
     def test_occupied_named_position_fails_by_slot(self):
         api = self._api()
         api.get_subcomponents.return_value = {"data": [
@@ -1660,6 +1682,8 @@ class ImageMapLinkTest(TestCase):
             html = self.client.get(PAGE).content.decode()
             self.assertIn(f'data-link-url="/hw/dev/checklist-map/{PART}/"', html)
             self.assertIn('class="es-btn quiet cl-map-lnk" data-slot="Board 2"', html)
+            # #134: every slot gets a pick button; untyped map → type(s) come from the live state
+            self.assertIn('cl-pick" data-target="f0-0-m1" data-free="1" data-slot="Board 2" hidden', html)
             self.assertIn('<div class="cl-map-cols">', html)          # packing-page layout
             self.assertIn('<table class="cl-map-tbl">', html)
             # live state (type names from the mirror when known)
@@ -2378,3 +2402,83 @@ class ChecklistBookmarkTest(TestCase):
         self.assertIn("Photon Detector › PCB", html)
         self.assertIn(f"/hw/dev/checklist/{PTID}/{NAME}/", html)
         self.assertNotIn(">X<", html)
+
+
+class PidPickTest(TestCase):
+    """#134 (Hajime): a Pick button beside PID inputs whose type is known lists
+    the type's mirrored items (four linkable statuses by default) and fills
+    the input on click."""
+    T = "D05700300001"
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("p", "p@p.io", "pw"))
+        mk = HwdbComponentEvent.objects.create
+        mk(instance="dev", part_type_id=self.T, part_id=f"{self.T}-00001", status="In Fabrication",
+           status_id=100, serial_number="SN-A", institution="BNL", qaqc_uploaded=True)
+        mk(instance="dev", part_type_id=self.T, part_id=f"{self.T}-00002", status="All passed",
+           status_id=120, parent_part_id="Z00100300041-00150")           # already inside an item
+        mk(instance="dev", part_type_id=self.T, part_id=f"{self.T}-00003", status="Rejected",
+           status_id=150)                                                # not linkable
+        mk(instance="dev", part_type_id=self.T, part_id=f"{self.T}-00004", status="All passed",
+           status_id=120, enabled=False)                                 # not approved
+        mk(instance="dev", part_type_id="D08100100003", part_id="D08100100003-00001",
+           status="All passed", status_id=120)                           # another type
+        mk(instance="prod", part_type_id=self.T, part_id=f"{self.T}-00009",
+           status="All passed", status_id=120)                           # other instance
+
+    def _pids(self, qs=""):
+        d = self.client.get(f"/hw/dev/pid-list/{self.T}/{qs}").json()
+        return [r["part_id"] for r in d["rows"]], d
+
+    def test_default_lists_linkable_items_of_the_type(self):
+        pids, d = self._pids()
+        self.assertEqual(pids, [f"{self.T}-00001", f"{self.T}-00002"])
+        self.assertEqual(d["total"], 2)
+        self.assertEqual(d["rows"][0], {"part_id": f"{self.T}-00001", "part_type_id": self.T, "status": "In Fabrication",
+                                        "linkable": True, "qc_up": True, "qc_cert": False,
+                                        "institution": "BNL"})
+
+    def test_free_hides_items_with_a_parent(self):
+        pids, _ = self._pids("?free=1")
+        self.assertEqual(pids, [f"{self.T}-00001"])
+
+    def test_show_all_adds_display_only_rows(self):
+        pids, d = self._pids("?all=1")
+        self.assertEqual(pids, [f"{self.T}-00001", f"{self.T}-00002", f"{self.T}-00003"])
+        self.assertFalse(d["rows"][2]["linkable"])
+
+    def test_search_narrows_by_pid_or_serial(self):
+        self.assertEqual(self._pids("?q=00002")[0], [f"{self.T}-00002"])
+        self.assertEqual(self._pids("?q=sn-a")[0], [f"{self.T}-00001"])
+        self.assertEqual(self._pids("?q=zzz")[0], [])
+
+    def test_fill_page_shows_pick_only_where_the_type_is_known(self):
+        schema = {"name": "P", "test_type_name": "P", "sections": [{"title": "S", "fields": [
+            {"type": "qr", "label": "Any"},
+            {"type": "qr", "label": "Typed", "type_id": self.T},
+            {"type": "link", "label": "Child", "type_id": self.T},
+            {"type": "imagemap", "label": "Map", "image_id": "img-1", "type_id": self.T,
+             "slots": [{"label": "A", "x": 1, "y": 1}]}]}]}
+        m1, m2 = _mocked(_api(schema=schema, test_types=("ES", "P")))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertNotIn('cl-pick" data-target="f0-0"', html)
+        self.assertIn('cl-pick" data-target="f0-1" title=', html)                 # plain PID: parented items too
+        self.assertIn('cl-pick" data-target="f0-2" data-free="1"', html)          # link: free items only
+        self.assertIn('cl-pick" data-target="f0-3-m0" title=', html)           # typed map: the map's type
+        self.assertIn('id="cl-pick-modal"', html)
+
+    def test_pages(self):
+        with mock.patch("explore.views._PID_LIST_CAP", 1):
+            d = self.client.get(f"/hw/dev/pid-list/{self.T}/?page=2").json()
+            self.assertEqual(([r["part_id"] for r in d["rows"]], d["page"], d["pages"], d["total"]),
+                             ([f"{self.T}-00002"], 2, 2, 2))
+            self.assertEqual(self.client.get(f"/hw/dev/pid-list/{self.T}/?page=9").json()["page"], 2)
+        self.assertEqual(self._pids("?page=x")[1]["page"], 1)
+
+    def test_several_types_at_once_and_the_parented_count(self):
+        d = self.client.get(f"/hw/dev/pid-list/{self.T},D08100100003/?free=1").json()
+        self.assertEqual([r["part_id"] for r in d["rows"]], [f"{self.T}-00001", "D08100100003-00001"])
+        self.assertEqual(d["rows"][1]["part_type_id"], "D08100100003")
+        self.assertEqual(d["parented"], 1)                                        # -00002 sits inside an item
+        self.assertEqual(self._pids()[1]["parented"], 0)

@@ -40,7 +40,8 @@
   <span style="display:inline-flex; gap:8px; align-items:center; max-width:100%;">
     <input id="{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}" autocomplete="off"
       autocapitalize="characters" spellcheck="false"{% if f.type_id %} data-type-id="{{ f.type_id }}"{% endif %}>
-    <button type="button" class="es-btn cl-scan" data-target="{{ f.key }}">&#9635; Scan</button>
+    <button type="button" class="es-btn cl-scan" data-target="{{ f.key }}">&#9635; Scan</button>{% if f.type_id %}
+    <button type="button" class="es-btn cl-pick" data-target="{{ f.key }}"{% if f.type == "link" %} data-free="1"{% endif %} title="Pick from the type’s items">&#9776; Pick</button>{% endif %}
   </span>
 {% elif f.type == "photo" %}
   <span class="cl-lab">{{ f.label }}</span>
@@ -76,7 +77,9 @@
       <label for="{{ s.name }}">{{ s.label }}</label>
       <input id="{{ s.name }}" name="{{ s.name }}" value="{{ s.value }}" autocomplete="off"
         autocapitalize="characters" spellcheck="false"{% if f.type_id %} data-type-id="{{ f.type_id }}"{% endif %}>
-      <button type="button" class="es-btn cl-scan" data-target="{{ s.name }}" title="Scan">&#9635;</button>{% if f.link and part_id %}
+      <button type="button" class="es-btn cl-scan" data-target="{{ s.name }}" title="Scan">&#9635;</button>{% if f.type_id or f.link and part_id %}
+      {# no type on the map: the live state supplies it per slot (cl-pick[data-slot]) — a slot named like a position takes that position's type, any other every type the free positions accept #}
+      <button type="button" class="es-btn cl-pick" data-target="{{ s.name }}"{% if f.link %} data-free="1"{% endif %}{% if not f.type_id %} data-slot="{{ s.label }}" hidden{% endif %} title="Pick from the type’s items">&#9776;</button>{% endif %}{% if f.link and part_id %}
       <button type="button" class="es-btn quiet cl-map-lnk" data-slot="{{ s.label }}" data-for="{{ s.name }}" hidden></button>{% endif %}</span>
     {% endfor %}
   </div>

@@ -160,8 +160,30 @@
       d.slotBtn.closest(".cl-map-slot").insertAdjacentElement("afterend", msg);
     }
     fld.querySelector(".cl-map-err").textContent = d.error && !d.slotBtn ? d.error : "";
-    var wants = {};
-    state.forEach(function (p) { wants[p.position] = p.child_type_id; });
+    var wants = {}, holds = {};
+    state.forEach(function (p) { wants[p.position] = p.child_type_id; holds[p.position] = p.part_id; });
+    // an empty slot named like a position shows what already sits there
+    fld.querySelectorAll(".cl-map-lnk").forEach(function (b) {
+      var inp = document.getElementById(b.getAttribute("data-for")), cur = holds[b.getAttribute("data-slot")];
+      if (inp && cur && !inp.value.trim()) {
+        inp.value = cur;
+        fld.querySelectorAll('.cl-map-dot[data-target="' + inp.id + '"]').forEach(function (d) { d.classList.add("on"); });
+      }
+    });
+    // pick lists: a slot named like a position lists that position's type,
+    // any other slot every type a free position accepts (all types when none is free)
+    var names = {}, freeT = [], allT = [];
+    state.forEach(function (p) {
+      names[p.child_type_id] = p.child_type_name;
+      if (allT.indexOf(p.child_type_id) < 0) allT.push(p.child_type_id);
+      if (!p.part_id && freeT.indexOf(p.child_type_id) < 0) freeT.push(p.child_type_id);
+    });
+    fld.querySelectorAll(".cl-pick[data-slot]").forEach(function (b) {
+      var w = wants[b.getAttribute("data-slot")], t = w ? [w] : freeT.length ? freeT : allT;
+      b.hidden = !t.length;
+      b.setAttribute("data-type-id", t.join(","));
+      b.setAttribute("data-type-names", JSON.stringify(t.map(function (x) { return names[x] || x; })));
+    });
     fld.querySelectorAll(".cl-map-lnk").forEach(function (b) {
       var inp = document.getElementById(b.getAttribute("data-for"));
       var pid = inp ? inp.value.trim().toUpperCase() : "";

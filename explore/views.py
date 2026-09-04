@@ -47,7 +47,8 @@ from .queries import (
     component_update_filters, component_update_progress,
 )
 from .parts import assembly_children, current_container, part_detail, subtree_rows
-from .shipments import _spec_data, current_manifest, refresh_box, sync_shipments
+from .shipments import (_mirror_box_parent, _spec_data, current_manifest, refresh_box,
+                        sync_shipments)
 
 logger = logging.getLogger(__name__)
 FNAL_UNAVAILABLE = "FNAL authentication service is unavailable. Please try again later."
@@ -1477,14 +1478,7 @@ def _pack_groups(instance, connectors, manifest, show_all=False) -> list[dict]:
             free_by_type.setdefault(ctid, []).append(pos)
     groups = []
     for ctid, free_pos in sorted(free_by_type.items()):
-        rows = (HwdbComponentEvent.for_instance(instance)
-                .filter(part_type_id=ctid, parent_part_id="")
-                .exclude(part_id__in=in_box)
-                .exclude(enabled=False)
-                .order_by("part_id"))
-        if not show_all:
-            rows = rows.filter(
-                status_id__in=sorted(parts.PROCEDURE_LINKABLE_STATUS_IDS))
+        rows = _type_candidates(instance, [ctid], show_all).exclude(part_id__in=in_box)
         leaf = HierarchyNode.for_instance(instance).filter(
             level=HierarchyNode.LEVEL_TYPE, part_type_id=ctid).first()
         groups.append({
@@ -1496,20 +1490,72 @@ def _pack_groups(instance, connectors, manifest, show_all=False) -> list[dict]:
             # (#74) — show the free ones this group's picks will land in.
             "positions": sorted(free_pos, key=str),
             "n_free": len(free_pos), "total": rows.count(),
-            # The two QC flags shown separately (Hajime 2026-07-28) — a
-            # combined mark hid which one was missing. Obsolete status ids
-            # 1-3 display as Unknown BY ID — id 3 shares its name with the
-            # modern id 170, so the name-based normalizer can't tell them apart.
-            "candidates": [
-                {"part_id": r.part_id,
-                 "status": ("Unknown" if r.status_id in parts.OBSOLETE_STATUS_IDS
-                            else r.status or "—"),
-                 "linkable": r.status_id in parts.PROCEDURE_LINKABLE_STATUS_IDS,
-                 "qc_up": bool(r.qaqc_uploaded),
-                 "qc_cert": bool(r.certified_qaqc)}
-                for r in rows[:_PACK_CANDIDATE_CAP]],
+            "candidates": [_candidate_row(r) for r in rows[:_PACK_CANDIDATE_CAP]],
         })
     return groups
+
+
+def _type_candidates(instance, ctids, show_all=False, free=True, q=""):
+    """Mirror rows of the given types a user may pick from (packing page,
+    checklist pick list): known-unapproved (``enabled=False``) hidden;
+    ``free`` also hides rows with a known parent (HWDB rejects linking those,
+    "already in use"); only the Shipping Procedure's four linkable statuses
+    (#84) unless ``show_all``; ``q`` narrows by PID or serial number."""
+    rows = (HwdbComponentEvent.for_instance(instance)
+            .filter(part_type_id__in=ctids).exclude(enabled=False).order_by("part_id"))
+    if free:
+        rows = rows.filter(parent_part_id="")
+    if not show_all:
+        rows = rows.filter(status_id__in=sorted(parts.PROCEDURE_LINKABLE_STATUS_IDS))
+    if q:
+        rows = rows.filter(Q(part_id__icontains=q) | Q(serial_number__icontains=q))
+    return rows
+
+
+def _candidate_row(r) -> dict:
+    """One pickable row. The two QC flags shown separately (Hajime
+    2026-07-28) — a combined mark hid which one was missing. Obsolete status
+    ids 1-3 display as Unknown BY ID — id 3 shares its name with the modern
+    id 170, so the name-based normalizer can't tell them apart."""
+    return {"part_id": r.part_id, "part_type_id": r.part_type_id,
+            "status": ("Unknown" if r.status_id in parts.OBSOLETE_STATUS_IDS
+                       else r.status or "—"),
+            "linkable": r.status_id in parts.PROCEDURE_LINKABLE_STATUS_IDS,
+            "qc_up": bool(r.qaqc_uploaded),
+            "qc_cert": bool(r.certified_qaqc),
+            "institution": r.institution}
+
+
+_PID_LIST_CAP = 200
+
+
+@login_not_required
+def explore_pid_list_view(request, part_type_id):
+    """#134 (Hajime): the checklist's pick-from-list for PID fields whose type
+    is known — mirror rows only, as JSON ``{rows, total, parented}``.
+    ``part_type_id`` may be a comma list (a linking imagemap's unnamed slot
+    takes any type its free positions accept). Default lists the four
+    statuses the Shipping Procedure allows to link; ``all=1`` adds the rest
+    display-only (the packing page's #84 rule); ``free=1`` (link fields,
+    linking imagemaps) hides items with a known parent and reports how many
+    it hid as ``parented``; ``q`` narrows by PID/serial. Pages of
+    ``_PID_LIST_CAP`` rows (``page``, 1-based)."""
+    ctids = [t for t in part_type_id.split(",") if t]
+    show_all, free = request.GET.get("all") == "1", request.GET.get("free") == "1"
+    q = (request.GET.get("q") or "").strip()
+    rows = _type_candidates(instance_of(request), ctids, show_all, free, q)
+    total = rows.count()
+    parented = (_type_candidates(instance_of(request), ctids, show_all, False, q).count() - total
+                if free else 0)
+    pages = max(1, -(-total // _PID_LIST_CAP))
+    try:
+        page = min(max(1, int(request.GET.get("page") or 1)), pages)
+    except ValueError:
+        page = 1
+    start = (page - 1) * _PID_LIST_CAP
+    return JsonResponse({"rows": [_candidate_row(r) for r in rows[start:start + _PID_LIST_CAP]],
+                         "total": total, "parented": parented,
+                         "page": page, "pages": pages, "per": _PID_LIST_CAP})
 
 
 def _pack_body_context(instance, part_id, ptid, connectors, current,
@@ -2428,7 +2474,14 @@ def _patch_spec_data(api, part_id, values: dict, owned=()) -> str | None:
     return None if body.get("status") == "OK" else str(body.get("data") or body)
 
 
-def _checklist_link(api, part_id, pid: str, position: str) -> str | None:
+def _mirror_positions(inst, part_id, current: dict) -> None:
+    """After a subcomponent PATCH, stamp the members' parent in the item
+    mirror right away (as the packing page does via ``refresh_box``) so the
+    pick lists (#134) and the packing page stop offering them."""
+    _mirror_box_parent(inst, part_id, [{"part_id": v} for v in current.values() if v])
+
+
+def _checklist_link(api, inst, part_id, pid: str, position: str) -> str | None:
     """Link a scanned child into this item's subcomponents (#96): the named
     functional position, or the first free one matching the child's type.
     HWDB wants the COMPLETE positions dict. Error or None; a child already
@@ -2462,16 +2515,19 @@ def _checklist_link(api, part_id, pid: str, position: str) -> str | None:
         if not free:
             return f"no free position for {ctid} items."
         pos = free[0]
+    current[pos] = pid
     try:
         body = api.patch_subcomponents(part_id, {
-            "component": {"part_id": part_id},
-            "subcomponents": {**current, pos: pid}})
+            "component": {"part_id": part_id}, "subcomponents": current})
     except requests.RequestException as e:
         return _hwdb_error_detail(e)
-    return None if body.get("status") == "OK" else str(body.get("data") or body)
+    if body.get("status") != "OK":
+        return str(body.get("data") or body)
+    _mirror_positions(inst, part_id, current)
+    return None
 
 
-def _checklist_link_map(api, part_id, slots: dict) -> str | None:
+def _checklist_link_map(api, inst, part_id, slots: dict) -> str | None:
     """#133: place an imagemap's scanned items ``{slot label: PID}`` (any
     hardware — boards, cables, sensors) into this item's subcomponents with
     ONE read and ONE PATCH (a CRP drawing has many slots). A slot named like
@@ -2516,7 +2572,10 @@ def _checklist_link_map(api, part_id, slots: dict) -> str | None:
             "component": {"part_id": part_id}, "subcomponents": current})
     except requests.RequestException as e:
         return _hwdb_error_detail(e)
-    return None if body.get("status") == "OK" else str(body.get("data") or body)
+    if body.get("status") != "OK":
+        return str(body.get("data") or body)
+    _mirror_positions(inst, part_id, current)
+    return None
 
 
 def _map_positions(api, inst, part_id) -> list[dict]:
@@ -2564,7 +2623,7 @@ def explore_checklist_map_view(request, part_id):
             except Exception as e:
                 connectors, err = {}, f"couldn’t read the item’s positions — {e}"
             if not err:
-                err = _checklist_link(api, part_id, pid, slot if slot in connectors else "")
+                err = _checklist_link(api, inst, part_id, pid, slot if slot in connectors else "")
         elif action == "unlink":
             try:
                 state = _map_positions(api, inst, part_id)
@@ -2572,11 +2631,13 @@ def explore_checklist_map_view(request, part_id):
                 if pos is None:
                     err = f"{pid} is not linked here."
                 else:
+                    after = {**{p["position"]: p["part_id"] for p in state}, pos: None}
                     body = api.patch_subcomponents(part_id, {
-                        "component": {"part_id": part_id},
-                        "subcomponents": {**{p["position"]: p["part_id"] for p in state}, pos: None}})
+                        "component": {"part_id": part_id}, "subcomponents": after})
                     if body.get("status") != "OK":
                         err = str(body.get("data") or body)
+                    else:
+                        _mirror_positions(inst, part_id, after)
             except requests.RequestException as e:
                 err = _hwdb_error_detail(e)
         else:
@@ -2684,11 +2745,11 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
         test_comments = iv["test_comments"]
     # subcomponent links (#96) — before the record, like the iPad
     for req in checklistforms.link_requests(schema, data):
-        lerr = _checklist_link(api, part_id, req["pid"], req["position"])
+        lerr = _checklist_link(api, instance_of(request), part_id, req["pid"], req["position"])
         if lerr:
             return f"“{req['label']}”: {req['pid']} not linked — {lerr}"
     for req in checklistforms.imagemap_link_requests(schema, data):   # #133
-        lerr = _checklist_link_map(api, part_id, req["slots"])
+        lerr = _checklist_link_map(api, instance_of(request), part_id, req["slots"])
         if lerr:
             return f"“{req['label']}”: not linked — {lerr}"
     # to_spec values (#96) also fold into the item's specifications. A

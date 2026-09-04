@@ -27,6 +27,7 @@ urlpatterns = [
     path("institutions/", views.explore_institutions_view, name="institutions"),
     path("lookup/<str:part_id>/", views.explore_lookup_view, name="lookup"),
     path("checklist-map/<str:part_id>/", views.explore_checklist_map_view, name="checklist_map"),
+    path("pid-list/<str:part_type_id>/", views.explore_pid_list_view, name="pid_list"),
     path("scan/", views.explore_scan_view, name="scan"),
     path("scan/submit/", views.explore_scan_submit_view, name="scan_submit"),
     path("scan/feed/", views.explore_scan_feed_view, name="scan_feed"),
