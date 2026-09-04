@@ -325,6 +325,8 @@
     <div class="ec-row g-map" style="display:none;">
       <span class="ec-hint" style="flex:1 1 100%;">Click the image to add a slot &mdash; one per line: label @ x, y (% of image size).</span>
       <textarea class="ff-slots" rows="3" placeholder="Board 1 @ 4.5, 8" style="flex:1 1 100%;"></textarea>
+      <label class="ec-check" title="at submit each scanned board is linked into this item's sub-components: a slot named like one of the type's positions goes there, any other slot takes the first free position for the board's type"><input type="checkbox" class="ff-maplink"> link scanned boards as sub-components</label>
+      <div class="ec-hint ff-mappos" style="flex:1 1 100%; display:none;"></div>
       <button type="button" class="es-btn quiet ff-mapzoom" style="display:none; align-self:flex-start;" title="place slots on the full-size drawing">&#x26F6; Zoom</button>
       <div class="clc-mapwrap" style="position:relative; display:none; max-width:100%;">
         <img class="ff-mapimg" alt="" style="display:block; max-width:100%; max-height:300px; cursor:crosshair;">
@@ -444,6 +446,8 @@
     $(".ff-slots", r).value = (f.slots || []).map(function (s) {   // #113
       return s.label + " @ " + s.x + ", " + s.y;
     }).join("\n");
+    $(".ff-maplink", r).checked = !!f.link;                            // #133
+    syncMapPos(r);
     syncImgStatus(r);
     syncType(r);
     syncMap(r);
@@ -459,6 +463,33 @@
     }).filter(Boolean);
   }
   var IMG_PROXY = "{% url 'explore:shipment_image' image_id='IMGID000' %}";
+  // #133: the type's functional positions, fetched once, listed under a
+  // linking imagemap with the slots that match them ticked
+  var posP = null;
+  function positions() {
+    return posP || (posP = fetch("{% url 'explore:type_positions' part_type_id=part_type_id %}")
+      .then(function (r) { return r.ok ? r.json() : { positions: [] }; })
+      .then(function (d) { return d.positions || []; })
+      .catch(function () { posP = null; return []; }));
+  }
+  function syncMapPos(r) {
+    var box = $(".ff-mappos", r);
+    if (!box) return;
+    if (!$(".ff-maplink", r).checked) { box.style.display = "none"; return; }
+    box.style.display = "";
+    positions().then(function (ps) {
+      var labels = readSlots(r).map(function (s) { return s.label; });
+      if (!ps.length) { box.textContent = "This type defines no positions — nothing can be linked."; return; }
+      var named = ps.map(function (p) {
+        var hit = labels.indexOf(p.position) !== -1;
+        return '<span style="white-space:nowrap;' + (hit ? "" : "opacity:.6;") + '">' +
+          (hit ? "&#10003; " : "") + esc(p.position) + ' <span class="mono">' + esc(p.child_type_id) + "</span></span>";
+      });
+      var other = labels.filter(function (l) { return !ps.some(function (p) { return p.position === l; }); });
+      box.innerHTML = "Positions: " + named.join(" &middot; ") +
+        (other.length ? "<br>First free position for the board's type: " + other.map(esc).join(", ") : "");
+    });
+  }
   function syncMap(r) {
     var wrap = $(".clc-mapwrap", r);
     if (!wrap) return;
@@ -936,6 +967,7 @@
       var mid = $(".ff-imageid", r).value.trim();
       if (mid) f.image_id = mid;
       f.slots = readSlots(r);
+      if ($(".ff-maplink", r).checked) f.link = true;                  // #133
     }
     if ($(".ff-tospec", r).checked && SPEC_OK.indexOf(t) !== -1) f.to_spec = true;
     return f;
@@ -1216,8 +1248,12 @@
       syncImgStatus(e.target.closest(".clc-fld"));
       syncMap(e.target.closest(".clc-fld"));
     }
-    if (e.target.classList && e.target.classList.contains("ff-slots"))
+    if (e.target.classList && e.target.classList.contains("ff-slots")) {
       syncMap(e.target.closest(".clc-fld"));
+      syncMapPos(e.target.closest(".clc-fld"));
+    }
+    if (e.target.classList && e.target.classList.contains("ff-maplink"))
+      syncMapPos(e.target.closest(".clc-fld"));
     if (e.target.id !== "clc-json") refresh();
   });
 

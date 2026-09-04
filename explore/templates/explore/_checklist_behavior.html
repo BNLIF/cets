@@ -134,6 +134,90 @@
       .forEach(function (d) { d.classList.toggle("on", el.value.trim() !== ""); });
   });
 
+  // #133: an imagemap that links sub-components shows the item's positions
+  // live and a link/unlink button per scanned slot — one PATCH each, no
+  // submit needed (the submit still links whatever is left)
+  function esc(t) { var d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
+  function csrf() { var i = document.querySelector('input[name="csrfmiddlewaretoken"]'); return i ? i.value : ""; }
+  function mapState(map, d) {
+    var fld = map.closest(".cl-field"), state = d.positions || [], just = d.just || "";
+    var linked = {};
+    state.forEach(function (p) { if (p.part_id) linked[String(p.part_id).toUpperCase()] = p.position; });
+    var n = state.filter(function (p) { return p.part_id; }).length;
+    fld.querySelector(".cl-map-count").textContent = n + " of " + state.length + " positions filled";
+    fld.querySelector(".cl-map-tbl tbody").innerHTML = state.length ? state.map(function (p) {
+      return "<tr" + (p.part_id && p.part_id === just ? ' class="now"' : "") + "><td>" + esc(p.child_type_name) +
+        "</td><td>" + esc(p.position) + "</td>" +
+        (p.part_id ? '<td class="mono">' + esc(p.part_id) + '</td><td><button type="button" class="cl-map-unl" data-pid="' +
+                     esc(p.part_id) + '" title="Remove ' + esc(p.part_id) + ' from this item">Unlink</button></td>'
+                   : '<td class="empty">— empty</td><td></td>') + "</tr>";
+    }).join("") : '<tr><td colspan="4" class="empty">This type defines no positions.</td></tr>';
+    fld.querySelectorAll(".cl-map-slot-err").forEach(function (el) { el.remove(); });
+    if (d.error && d.slotBtn) {                       // a slot's link failed → under that line
+      var msg = document.createElement("div");
+      msg.className = "cl-map-slot-err";
+      msg.textContent = d.error;
+      d.slotBtn.closest(".cl-map-slot").insertAdjacentElement("afterend", msg);
+    }
+    fld.querySelector(".cl-map-err").textContent = d.error && !d.slotBtn ? d.error : "";
+    var wants = {};
+    state.forEach(function (p) { wants[p.position] = p.child_type_id; });
+    fld.querySelectorAll(".cl-map-lnk").forEach(function (b) {
+      var inp = document.getElementById(b.getAttribute("data-for"));
+      var pid = inp ? inp.value.trim().toUpperCase() : "";
+      b.hidden = !pid;
+      if (!pid) return;
+      var on = pid in linked, slot = b.getAttribute("data-slot"), ctid = pid.split("-")[0];
+      // a slot named like a position must get that position's type
+      var wrong = !on && wants[slot] && wants[slot] !== ctid;
+      b.classList.toggle("on", on);
+      b.disabled = !!wrong;
+      b.textContent = on ? "unlink" : "link";
+      b.title = on ? "in " + linked[pid] : wrong ? slot + " expects " + wants[slot] + " items" : "link into this item now";
+    });
+    map._state = d;
+  }
+  function mapCall(map, body) {
+    var opts = { credentials: "same-origin" };
+    if (body) { opts.method = "POST"; opts.body = body; opts.headers = { "X-CSRFToken": csrf() }; }
+    return fetch(map.getAttribute("data-link-url"), opts)
+      .then(function (r) { return r.json(); })
+      .catch(function () { return { positions: (map._state || {}).positions || [], error: "HWDB not reachable" }; })
+      .then(function (d) { mapState(map, d); });
+  }
+  document.querySelectorAll(".cl-map[data-link-url]").forEach(function (m) { mapCall(m); });
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest(".cl-map-lnk, .cl-map-unl");
+    if (!b) return;
+    var map = b.closest(".cl-field").querySelector(".cl-map[data-link-url]");
+    var fd = new FormData(), pid;
+    if (b.classList.contains("cl-map-unl")) {
+      pid = b.getAttribute("data-pid");
+      fd.append("action", "unlink");
+    } else {
+      var inp = document.getElementById(b.getAttribute("data-for"));
+      pid = inp ? inp.value.trim().toUpperCase() : "";
+      fd.append("action", b.classList.contains("on") ? "unlink" : "link");
+      fd.append("slot", b.getAttribute("data-slot"));
+    }
+    fd.append("pid", pid);
+    b.disabled = true;
+    mapCall(map, fd).then(function () {
+      b.disabled = false;
+      if (map._state) {
+        map._state.just = pid;
+        map._state.slotBtn = b.classList.contains("cl-map-lnk") ? b : null;
+        mapState(map, map._state);
+      }
+    });
+  });
+  document.addEventListener("input", function (e) {   // typed/scanned → button follows
+    var el = e.target;
+    if (!el.closest || !el.closest(".cl-map-list")) return;
+    var map = el.closest(".cl-field").querySelector(".cl-map[data-link-url]");
+    if (map && map._state) { map._state.error = null; mapState(map, map._state); }   // editing clears a stale error
+  });
+
   // #113: tap the map drawing → zoomed view at full resolution with the
   // slot circles; the cloned dots keep cl-scan + data-target, so tapping
   // one there opens the scanner on top (where the scan modal is included)

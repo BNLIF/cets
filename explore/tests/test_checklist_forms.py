@@ -1586,6 +1586,123 @@ class ImageMapTest(TestCase):
         self.assertIn("cl-mapzoom", html)          # tap-to-zoom view with dots
 
 
+class ImageMapLinkTest(TestCase):
+    """#133: an imagemap flagged ``link`` places its boards as subcomponents."""
+    SCHEMA = {"name": "CRU", "test_type_name": "CRU", "sections": [{"title": "S", "fields": [
+        {"type": "imagemap", "label": "Boards", "image_id": "img-1", "link": True,
+         "slots": [{"label": "FEB1", "x": 1, "y": 1},       # named like a position
+                   {"label": "Board 2", "x": 2, "y": 2},    # → first free for its type
+                   {"label": "Board 3", "x": 3, "y": 3}]}]}]}
+
+    def _api(self):
+        api = _api(schema=self.SCHEMA, test_types=("ES", "CRU"))
+        api.get_component_type.return_value = {"data": {
+            "connectors": {"FEB1": "D05700300001", "FEB2": "D05700300001", "CBL1": "D08100100003"},
+            "properties": {"specifications": [{"datasheet": {"DATA": {}}}]}}}
+        api.get_subcomponents.return_value = {"data": [
+            {"functional_position": "CBL1", "part_id": "D08100100003-00009"}]}
+        api.patch_subcomponents.return_value = {"status": "OK"}
+        return api
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("m", "m@m.io", "pw"))
+
+    def test_normalize_keeps_the_flag(self):
+        f = checklistforms.normalize(self.SCHEMA, "CRU")["sections"][0]["fields"][0]
+        self.assertTrue(f["link"])
+        plain = {**self.SCHEMA["sections"][0]["fields"][0]}; plain.pop("link")
+        n = checklistforms.normalize({**self.SCHEMA, "sections": [{"title": "S", "fields": [plain]}]}, "CRU")
+        self.assertNotIn("link", n["sections"][0]["fields"][0])
+
+    def test_submit_places_every_board_in_one_patch(self):
+        api = self._api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"f0-0-m0": "D05700300001-00011",
+                                    "f0-0-m1": "D05700300001-00012",
+                                    "f0-0-m2": "D08100100003-00009"})   # already linked (CBL1)
+        api.patch_subcomponents.assert_called_once()
+        self.assertEqual(api.patch_subcomponents.call_args.args[1]["subcomponents"],
+                         {"FEB1": "D05700300001-00011", "FEB2": "D05700300001-00012",
+                          "CBL1": "D08100100003-00009"})
+        calls = [c[0] for c in api.mock_calls]
+        self.assertLess(calls.index("patch_subcomponents"), calls.index("post_test"))
+        data = api.post_test.call_args.args[1]["test_data"]["DATA"]
+        self.assertEqual(data["S"]["Boards"]["Board 2"], "D05700300001-00012")
+
+    def test_named_position_refuses_a_board_of_another_type(self):
+        api = self._api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            r = self.client.post(PAGE, {"f0-0-m0": "D08100100003-00011"}, follow=True)   # a cable into FEB1
+            self.assertIn("slot “FEB1”: expects D05700300001 items, not D08100100003", r.content.decode())
+            api.patch_subcomponents.assert_not_called()
+            d = self.client.post(f"/hw/dev/checklist-map/{PART}/",
+                                 {"action": "link", "slot": "FEB1", "pid": "D08100100003-00011"}).json()
+            self.assertEqual(d["error"], "position “FEB1” expects D05700300001 items, not D08100100003.")
+            api.patch_subcomponents.assert_not_called()
+
+    def test_occupied_named_position_fails_by_slot(self):
+        api = self._api()
+        api.get_subcomponents.return_value = {"data": [
+            {"functional_position": "FEB1", "part_id": "D05700300001-00099"}]}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            r = self.client.post(PAGE, {"f0-0-m0": "D05700300001-00011"}, follow=True)
+        api.patch_subcomponents.assert_not_called()
+        api.post_test.assert_not_called()
+        self.assertIn("slot “FEB1”: position already holds D05700300001-00099", r.content.decode())
+
+    def test_fill_page_shows_positions_and_links_without_submitting(self):
+        api = self._api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+            self.assertIn(f'data-link-url="/hw/dev/checklist-map/{PART}/"', html)
+            self.assertIn('class="es-btn quiet cl-map-lnk" data-slot="Board 2"', html)
+            self.assertIn('<div class="cl-map-cols">', html)          # packing-page layout
+            self.assertIn('<table class="cl-map-tbl">', html)
+            # live state (type names from the mirror when known)
+            d = self.client.get(f"/hw/dev/checklist-map/{PART}/").json()
+            self.assertEqual(d["positions"][0], {"position": "CBL1", "child_type_id": "D08100100003",
+                                                 "child_type_name": "D08100100003",
+                                                 "part_id": "D08100100003-00009"})
+            self.assertIsNone(d["error"])
+            # link a board into its named slot → one PATCH, complete dict
+            d = self.client.post(f"/hw/dev/checklist-map/{PART}/",
+                                 {"action": "link", "slot": "FEB1", "pid": "D05700300001-00011"}).json()
+            self.assertIsNone(d["error"])
+            self.assertEqual(api.patch_subcomponents.call_args.args[1]["subcomponents"]["FEB1"],
+                             "D05700300001-00011")
+            # a slot with no position of that name → first free for the type
+            d = self.client.post(f"/hw/dev/checklist-map/{PART}/",
+                                 {"action": "link", "slot": "Board 2", "pid": "D05700300001-00012"}).json()
+            self.assertEqual(api.patch_subcomponents.call_args.args[1]["subcomponents"]["FEB1"],
+                             "D05700300001-00012")   # mocked occupants never change, so FEB1 is still free
+            # unlink frees the position it sits in
+            d = self.client.post(f"/hw/dev/checklist-map/{PART}/",
+                                 {"action": "unlink", "pid": "D08100100003-00009"}).json()
+            self.assertIsNone(d["error"])
+            self.assertIsNone(api.patch_subcomponents.call_args.args[1]["subcomponents"]["CBL1"])
+            d = self.client.post(f"/hw/dev/checklist-map/{PART}/",
+                                 {"action": "unlink", "pid": "D05700300001-00077"}).json()
+            self.assertIn("not linked here", d["error"])
+        api.post_test.assert_not_called()
+
+    def test_editor_ships_the_link_checkbox_and_lists_positions(self):
+        api = self._api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(CONFIG_PAGE).content.decode()
+            self.assertIn('class="ff-maplink"', html)
+            self.assertIn('class="ec-hint ff-mappos"', html)
+            self.assertIn(f"/hw/dev/type-positions/{PTID}/", html)
+            self.assertEqual(self.client.get(f"/hw/dev/type-positions/{PTID}/").json(), {"positions": [
+                {"position": "CBL1", "child_type_id": "D08100100003"},
+                {"position": "FEB1", "child_type_id": "D05700300001"},
+                {"position": "FEB2", "child_type_id": "D05700300001"}]})
+
+
 class ConstantCellsTest(TestCase):
     """#114 (HVS): fixed-string table cells — the "Expected" column shows a
     constant, is not editable, and formulas can reference numeric ones."""

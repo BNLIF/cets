@@ -23,7 +23,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.clickjacking import xframe_options_sameorigin
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_http_methods
 
 from core.queries import chart_config
 from hwdb.api_client import FnalDbApiClient
@@ -381,6 +381,25 @@ def _location_label(loc) -> str:
 
 @login_not_required
 @fnal_login_required
+@login_not_required
+def explore_type_positions_view(request, part_type_id):
+    """#133: a type's functional positions ``[{position, child_type_id}]``
+    as JSON — the checklist editor lists them under an imagemap flagged
+    ``link`` so slot names can be matched to them."""
+    try:
+        bearer = mint_for(request)
+    except (FnalLinkRequired, FnalUnavailable):
+        return JsonResponse({"positions": []}, status=401)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[instance_of(request)]["api"], bearer)
+    try:
+        connectors = _box_connectors(api, part_type_id)
+    except Exception as e:
+        logger.warning("positions for %s failed: %s", part_type_id, e)
+        return JsonResponse({"positions": []})
+    return JsonResponse({"positions": [{"position": p, "child_type_id": c}
+                                       for p, c in sorted(connectors.items(), key=lambda kv: str(kv[0]))]})
+
+
 def explore_type_locations_view(request, part_type_id):
     """Live location distribution for one component type (#92, Hajime): a
     paged sweep of the type's component listing — whose rows carry
@@ -2425,6 +2444,8 @@ def _checklist_link(api, part_id, pid: str, position: str) -> str | None:
     if position:
         if position not in current:
             return f"this type has no “{position}” position."
+        if connectors.get(position) and connectors[position] != ctid:
+            return f"position “{position}” expects {connectors[position]} items, not {ctid}."
         if current[position] and current[position] != pid:
             return (f"position “{position}” already holds "
                     f"{current[position]} — unlink it first.")
@@ -2442,6 +2463,122 @@ def _checklist_link(api, part_id, pid: str, position: str) -> str | None:
     except requests.RequestException as e:
         return _hwdb_error_detail(e)
     return None if body.get("status") == "OK" else str(body.get("data") or body)
+
+
+def _checklist_link_map(api, part_id, slots: dict) -> str | None:
+    """#133: place an imagemap's scanned boards ``{slot label: PID}`` into
+    this item's subcomponents with ONE read and ONE PATCH (a CRP drawing has
+    many slots). A slot named like one of the type's positions goes there;
+    any other slot takes the first free position for the board's type.
+    Boards already sitting somewhere are left alone. Error or None."""
+    ptid = part_id.rsplit("-", 1)[0]
+    try:
+        connectors = _box_connectors(api, ptid)
+        occupants = {(m.get("functional_position") or ""): m.get("part_id")
+                     for m in (api.get_subcomponents(part_id).get("data") or [])
+                     if isinstance(m, dict)}
+    except requests.RequestException as e:
+        return _hwdb_error_detail(e)
+    except Exception as e:
+        return f"couldn’t read the item’s positions — {e}"
+    current = {pos: occupants.get(pos) for pos in connectors}
+    changed = False
+    for label, pid in slots.items():
+        if pid in current.values():
+            continue                       # already linked
+        ctid = pid.rsplit("-", 1)[0]
+        if label in current:
+            if connectors.get(label) and connectors[label] != ctid:
+                return f"slot “{label}”: expects {connectors[label]} items, not {ctid}."
+            if current[label]:
+                return (f"slot “{label}”: position already holds "
+                        f"{current[label]} — unlink it first.")
+            pos = label
+        else:
+            free = [p for p in sorted(current, key=str)
+                    if current[p] is None and connectors.get(p) == ctid]
+            if not free:
+                return f"slot “{label}”: no free position for {ctid} items."
+            pos = free[0]
+        current[pos] = pid
+        changed = True
+    if not changed:
+        return None
+    try:
+        body = api.patch_subcomponents(part_id, {
+            "component": {"part_id": part_id}, "subcomponents": current})
+    except requests.RequestException as e:
+        return _hwdb_error_detail(e)
+    return None if body.get("status") == "OK" else str(body.get("data") or body)
+
+
+def _map_positions(api, inst, part_id) -> list[dict]:
+    """The item's positions with their occupants, ``[{position,
+    child_type_id, child_type_name, part_id}]`` name-sorted — the imagemap's
+    live contents table (type names from the mirror, id when unknown)."""
+    connectors = _box_connectors(api, part_id.rsplit("-", 1)[0])
+    occupants = {(m.get("functional_position") or ""): m.get("part_id")
+                 for m in (api.get_subcomponents(part_id).get("data") or [])
+                 if isinstance(m, dict)}
+    names = {n.part_type_id: n.name
+             for n in HierarchyNode.for_instance(inst).filter(
+                 level=HierarchyNode.LEVEL_TYPE,
+                 part_type_id__in={v for v in connectors.values() if v})}
+    return [{"position": p, "child_type_id": c, "child_type_name": names.get(c, c),
+             "part_id": occupants.get(p)}
+            for p, c in sorted(connectors.items(), key=lambda kv: str(kv[0]))]
+
+
+@login_not_required
+@require_http_methods(["GET", "POST"])
+def explore_checklist_map_view(request, part_id):
+    """#133: the fill page's live sub-component linking for an imagemap
+    flagged ``link``. GET → the item's positions and occupants; POST
+    ``action=link&slot=<label>&pid=<PID>`` places one scanned board now
+    (slot named like a position → there, else first free for its type —
+    the submit rule) and ``action=unlink&pid=<PID>`` frees it. Both answer
+    with the new state, plus ``error`` when HWDB refused."""
+    try:
+        bearer = mint_for(request)
+    except (FnalLinkRequired, FnalUnavailable):
+        return JsonResponse({"positions": [], "error": "sign in to HWDB first"}, status=401)
+    inst = instance_of(request)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    err = None
+    if request.method == "POST":
+        action = request.POST.get("action") or ""
+        pid = (request.POST.get("pid") or "").strip().upper()
+        slot = (request.POST.get("slot") or "").strip()
+        if not pid:
+            err = "nothing scanned in that slot."
+        elif action == "link":
+            try:
+                connectors = _box_connectors(api, part_id.rsplit("-", 1)[0])
+            except Exception as e:
+                connectors, err = {}, f"couldn’t read the item’s positions — {e}"
+            if not err:
+                err = _checklist_link(api, part_id, pid, slot if slot in connectors else "")
+        elif action == "unlink":
+            try:
+                state = _map_positions(api, inst, part_id)
+                pos = next((p["position"] for p in state if p["part_id"] == pid), None)
+                if pos is None:
+                    err = f"{pid} is not linked here."
+                else:
+                    body = api.patch_subcomponents(part_id, {
+                        "component": {"part_id": part_id},
+                        "subcomponents": {**{p["position"]: p["part_id"] for p in state}, pos: None}})
+                    if body.get("status") != "OK":
+                        err = str(body.get("data") or body)
+            except requests.RequestException as e:
+                err = _hwdb_error_detail(e)
+        else:
+            err = "unknown action."
+    try:
+        positions = _map_positions(api, inst, part_id)
+    except Exception as e:
+        return JsonResponse({"positions": [], "error": err or f"couldn’t read the item’s positions — {e}"})
+    return JsonResponse({"positions": positions, "error": err})
 
 
 def _checklist_role_gate(api, schema) -> str | None:
@@ -2543,6 +2680,10 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
         lerr = _checklist_link(api, part_id, req["pid"], req["position"])
         if lerr:
             return f"“{req['label']}”: {req['pid']} not linked — {lerr}"
+    for req in checklistforms.imagemap_link_requests(schema, data):   # #133
+        lerr = _checklist_link_map(api, part_id, req["slots"])
+        if lerr:
+            return f"“{req['label']}”: boards not linked — {lerr}"
     # to_spec values (#96) also fold into the item's specifications. A
     # checklist OWNS the DATA sections named after its sections — this
     # submission replaces them, and sections its previous submission wrote

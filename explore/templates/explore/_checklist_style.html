@@ -140,6 +140,27 @@
   .cl-map-list { display: grid; gap: 6px 14px; margin-top: 8px;
     grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
   .cl-map-slot { display: flex; gap: 6px; align-items: center; font-size: 13px; }
+  .es-btn.cl-map-lnk { flex: 0 0 auto; color: var(--good); border-color: var(--good); }   /* "link" — the action to take */
+  .es-btn.cl-map-lnk.on { color: var(--dim); border-color: var(--rule); }                  /* "unlink" — already done */
+  /* the packing page's two columns: drawing + slots left, live contents right */
+  .cl-map-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
+  .cl-map-cols > div:first-child { min-width: 0; }
+  .cl-map-cols .cl-map-list { grid-template-columns: 1fr; }   /* one slot per line beside the contents table */
+  .cl-map-pos { border: 2px solid var(--good); border-radius: var(--r-lg); padding: 10px 12px; }
+  .cl-map-pos h3 { font-size: 13px; margin: 0 0 6px; color: var(--ink); }
+  .cl-map-pos h3 .cl-map-count { font-family: var(--font-mono); font-weight: 400; color: var(--faint); font-size: 12px; }
+  .cl-map-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .cl-map-tbl th { text-align: left; font-weight: 500; color: var(--faint); font-size: 11px; padding: 4px 8px; }
+  .cl-map-tbl td { padding: 5px 8px; border-top: 1px solid var(--rule); }
+  .cl-map-tbl .mono { font-family: var(--font-mono); font-size: 12.5px; }
+  .cl-map-tbl .empty { color: var(--faint); font-size: 12px; }
+  .cl-map-tbl tr.now td { background: var(--good-bg); }
+  .cl-map-unl { font: inherit; font-size: 12px; font-weight: 600; color: var(--dim); background: var(--surface);
+    border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 3px 11px; cursor: pointer; }
+  .cl-map-err { color: var(--bad); font-size: 12.5px; margin-top: 6px; }
+  .cl-map-slot-err { color: var(--bad); font-size: 12px; margin: -2px 0 2px 22px; }
+  .cl-map-err:empty { display: none; }
+  @media (max-width: 900px) { .cl-map-cols { grid-template-columns: 1fr; } }
   .cl-map-slot label { flex: 0 1 auto; white-space: nowrap; }
   .cl-map-slot input { flex: 1 1 90px; min-width: 0; font-family: var(--font-mono); }
   .cl-map-n { flex: 0 0 auto; color: var(--faint); font-size: 11.5px; min-width: 16px;

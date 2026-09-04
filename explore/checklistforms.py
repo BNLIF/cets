@@ -276,6 +276,8 @@ def _norm_field(f: dict) -> dict | None:
         out["slots"] = slots
         if not out["image_id"] or not slots:
             return None
+        if f.get("link"):        # #133: scanned boards become subcomponents
+            out["link"] = True
     if t in ("number", "table"):
         out["min"], out["max"], out["range"] = _tol_range(f)
     if t == "table":
@@ -976,6 +978,21 @@ def link_requests(schema: dict, data: dict) -> list[dict]:
         if isinstance(pid, str) and pid.strip():
             out.append({"label": f["label"], "pid": pid.strip(),
                         "position": f["position"]})
+    return out
+
+
+def imagemap_link_requests(schema: dict, data: dict) -> list[dict]:
+    """#133: the submitted ``imagemap`` fields flagged ``link``, each with
+    its filled slots ``[{label, slots: {slot label: PID}}]`` — the view
+    places every board into the item's subcomponents in one PATCH."""
+    out = []
+    for title, f in leaf_fields(schema):
+        if f["type"] != "imagemap" or not f.get("link"):
+            continue
+        sec = data.get(title)
+        vals = sec.get(f["label"]) if isinstance(sec, dict) else None
+        if isinstance(vals, dict) and vals:
+            out.append({"label": f["label"], "slots": vals})
     return out
 
 
