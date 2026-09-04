@@ -325,7 +325,7 @@
     <div class="ec-row g-map" style="display:none;">
       <span class="ec-hint" style="flex:1 1 100%;">Click the image to add a slot &mdash; one per line: label @ x, y (% of image size).</span>
       <textarea class="ff-slots" rows="3" placeholder="Board 1 @ 4.5, 8" style="flex:1 1 100%;"></textarea>
-      <label class="ec-check" title="at submit each scanned board is linked into this item's sub-components: a slot named like one of the type's positions goes there, any other slot takes the first free position for the board's type"><input type="checkbox" class="ff-maplink"> link scanned boards as sub-components</label>
+      <label class="ec-check" title="at submit each scanned item is linked into this item's sub-components: a slot named like one of the type's positions goes there, any other slot takes the first free position for the scanned item's type"><input type="checkbox" class="ff-maplink"> link scanned items as sub-components</label>
       <div class="ec-hint ff-mappos" style="flex:1 1 100%; display:none;"></div>
       <button type="button" class="es-btn quiet ff-mapzoom" style="display:none; align-self:flex-start;" title="place slots on the full-size drawing">&#x26F6; Zoom</button>
       <div class="clc-mapwrap" style="position:relative; display:none; max-width:100%;">
@@ -487,7 +487,7 @@
       });
       var other = labels.filter(function (l) { return !ps.some(function (p) { return p.position === l; }); });
       box.innerHTML = "Positions: " + named.join(" &middot; ") +
-        (other.length ? "<br>First free position for the board's type: " + other.map(esc).join(", ") : "");
+        (other.length ? "<br>First free position for the scanned item's type: " + other.map(esc).join(", ") : "");
     });
   }
   function syncMap(r) {

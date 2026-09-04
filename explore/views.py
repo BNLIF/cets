@@ -2466,11 +2466,12 @@ def _checklist_link(api, part_id, pid: str, position: str) -> str | None:
 
 
 def _checklist_link_map(api, part_id, slots: dict) -> str | None:
-    """#133: place an imagemap's scanned boards ``{slot label: PID}`` into
-    this item's subcomponents with ONE read and ONE PATCH (a CRP drawing has
-    many slots). A slot named like one of the type's positions goes there;
-    any other slot takes the first free position for the board's type.
-    Boards already sitting somewhere are left alone. Error or None."""
+    """#133: place an imagemap's scanned items ``{slot label: PID}`` (any
+    hardware — boards, cables, sensors) into this item's subcomponents with
+    ONE read and ONE PATCH (a CRP drawing has many slots). A slot named like
+    one of the type's positions goes there; any other slot takes the first
+    free position for the scanned item's type. Items already sitting
+    somewhere are left alone. Error or None."""
     ptid = part_id.rsplit("-", 1)[0]
     try:
         connectors = _box_connectors(api, ptid)
@@ -2534,7 +2535,7 @@ def _map_positions(api, inst, part_id) -> list[dict]:
 def explore_checklist_map_view(request, part_id):
     """#133: the fill page's live sub-component linking for an imagemap
     flagged ``link``. GET → the item's positions and occupants; POST
-    ``action=link&slot=<label>&pid=<PID>`` places one scanned board now
+    ``action=link&slot=<label>&pid=<PID>`` places one scanned item now
     (slot named like a position → there, else first free for its type —
     the submit rule) and ``action=unlink&pid=<PID>`` frees it. Both answer
     with the new state, plus ``error`` when HWDB refused."""
@@ -2683,7 +2684,7 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
     for req in checklistforms.imagemap_link_requests(schema, data):   # #133
         lerr = _checklist_link_map(api, part_id, req["slots"])
         if lerr:
-            return f"“{req['label']}”: boards not linked — {lerr}"
+            return f"“{req['label']}”: not linked — {lerr}"
     # to_spec values (#96) also fold into the item's specifications. A
     # checklist OWNS the DATA sections named after its sections — this
     # submission replaces them, and sections its previous submission wrote
