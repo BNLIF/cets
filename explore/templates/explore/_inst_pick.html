@@ -1,0 +1,43 @@
+{# #129: country → institution picker. Include with pick=<dict from views._inst_pick> (insts, countries, field, sel, req, blank). The country select is unnamed (not submitted) and only filters the institution list; a pre-selected institution sets it on load. JS is delegated by class and guarded once per page, so lazily built copies (the New-box pane) just need window.instPickInit(select). #}
+{% if pick %}<span class="ip">
+  <select class="ip-country" aria-label="Country">
+    <option value="">any country</option>
+    {% for c in pick.countries %}<option value="{{ c.code }}">{{ c.name }}</option>{% endfor %}
+  </select>
+  <select class="ip-inst" name="{{ pick.field }}"{% if pick.req %} required{% endif %}>
+    <option value="">{{ pick.blank|default:"— pick an institution —" }}</option>
+    {% for o in pick.insts %}<option value="{{ o.id }}" data-cc="{{ o.country_code }}"{% if o.id == pick.sel %} selected{% endif %}>{{ o.name }}</option>{% endfor %}
+  </select>
+</span>{% endif %}
+<style>
+  .ip { display: flex; flex-direction: column; gap: 4px; }
+  .ip .ip-country { max-width: 240px; }
+</style>
+<script>
+(function () {
+  if (window.instPickInit) return;
+  // options are rebuilt rather than hidden — Safari ignores hidden <option>s
+  function refill(inst, cc) {
+    if (!inst._all) inst._all = Array.prototype.slice.call(inst.options, 1);
+    var keep = inst.value;
+    while (inst.options.length > 1) inst.remove(1);
+    inst._all.forEach(function (o) { if (!cc || o.dataset.cc === cc) inst.add(o); });
+    inst.value = keep;
+    if (inst.value !== keep) inst.selectedIndex = 0;
+  }
+  window.instPickInit = function (inst) {
+    var wrap = inst.closest(".ip"), country = wrap && wrap.querySelector(".ip-country");
+    if (!country) return;
+    inst._all = null;
+    var sel = inst.options[inst.selectedIndex];
+    country.value = (sel && sel.dataset.cc) || "";
+    refill(inst, country.value);
+  };
+  document.addEventListener("change", function (e) {
+    if (!e.target.matches || !e.target.matches(".ip-country")) return;
+    var inst = e.target.closest(".ip").querySelector(".ip-inst");
+    refill(inst, e.target.value);
+  });
+  document.querySelectorAll(".ip-inst").forEach(window.instPickInit);
+})();
+</script>

@@ -343,14 +343,18 @@
     {% for m in messages %}<div class="ex-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
 
     {% if can_create_box %}
+    {% include "explore/_inst_pick.html" with pick=None only %}
     <details class="nb-pane" id="newbox-pane" data-institutions-url="{% url 'explore:institutions' %}">
       <summary>New box</summary>
       <form class="nb-form" method="post" action="{% url 'explore:box_create' part_type_id=leaf.part_type_id %}">
         {% csrf_token %}
         <label>Institution
-          <select name="institution_id" required data-role="nb-inst">
-            <option value="">loading institutions…</option>
-          </select>
+          <span class="ip">
+            <select class="ip-country" aria-label="Country"><option value="">any country</option></select>
+            <select class="ip-inst" name="institution_id" required data-role="nb-inst">
+              <option value="">loading institutions…</option>
+            </select>
+          </span>
         </label>
         <label>Serial number <input name="serial_number" maxlength="120" placeholder="optional"></label>
         <label>Comments <input name="comments" maxlength="500" placeholder="optional"></label>
@@ -711,10 +715,17 @@
                 sel.innerHTML = "<option value=''>— pick an institution —</option>";
                 (d.institutions || []).forEach(function (i) {
                     var o = document.createElement("option");
-                    o.value = i.id;
-                    o.textContent = "(" + i.id + ") " + i.name + (i.country_code ? " [" + i.country_code + "]" : "");
+                    o.value = i.id; o.dataset.cc = i.country_code || "";
+                    o.textContent = i.name;
                     sel.appendChild(o);
                 });
+                var cs = pane.querySelector(".ip-country");
+                (d.countries || []).forEach(function (c) {
+                    var o = document.createElement("option");
+                    o.value = c.code; o.textContent = c.name; cs.appendChild(o);
+                });
+                if (d.default) sel.value = d.default;           // #129 home institution
+                if (window.instPickInit) window.instPickInit(sel);
             })
             .catch(function () {
                 loaded = false;  // allow retry on next open

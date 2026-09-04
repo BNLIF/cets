@@ -446,6 +446,26 @@ class ChecklistBookmark(InstanceScoped):
         return f"ChecklistBookmark({self.username}, {self.part_type_id}, {self.name})"
 
 
+class InstitutionPref(InstanceScoped):
+    """The institution a user last picked in any HWDB write form (#129) —
+    the default the picker opens on next time, so a shop-floor user isn't
+    scrolling a 100-row list for their own lab. Seeded once from the HWDB
+    ``whoami`` affiliation when it names an institution exactly; a row with
+    ``institution_id`` NULL records that the seed was tried and found
+    nothing. ``username`` is the FNAL credkey (``activity.actor_of``)."""
+
+    username = models.CharField(max_length=150, db_index=True)
+    institution_id = models.IntegerField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=["instance", "username"], name="uniq_institution_pref")]
+
+    def __str__(self):
+        return f"InstitutionPref({self.username}, {self.institution_id})"
+
+
 class HierarchySyncState(models.Model):
     """One row per HWDB instance recording that instance's last hierarchy
     (skeleton) sync run.

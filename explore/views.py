@@ -39,7 +39,7 @@ from .hierarchy import sync_hierarchy, sync_system
 from .instances import instance_of, namespace_of
 from .models import (
     ActivityEvent, BoxChecklist, ChecklistBookmark, ChecklistDraft, HierarchyNode,
-    ShippingTypeOverride,
+    InstitutionPref, ShippingTypeOverride,
     HierarchySyncState, HwdbComponentEvent, HwdbTestEvent, PackScan, ShipmentItem,
 )
 from .queries import (
@@ -1069,6 +1069,9 @@ def explore_part_view(request, part_id):
         "editing": editing,
         "item_edit": item_edit,
         "institutions": _institution_options(api) if show_location_form else [],
+        "inst_pick": _inst_pick(insts, "location_id", req=True,
+                                sel=_default_institution(request, api, inst, insts))
+                     if show_location_form and (insts := _institution_options(api)) else None,
         "arrived_default": timezone.localtime().strftime("%Y-%m-%dT%H:%M"),
         # Packing card (issue #63): the box's slot schema + occupants; the
         # item picker is its own page. None when writes are off or the
@@ -1114,9 +1117,86 @@ def _institution_options(api) -> list[dict]:
         logger.warning("institutions fetch failed: %s", e)
         return []
     opts = [{"id": r.get("id"), "name": r.get("name") or "",
-             "country_code": ((r.get("country") or {}).get("code") or "")}
+             "country_code": ((r.get("country") or {}).get("code") or ""),
+             "country_name": ((r.get("country") or {}).get("name") or "")}
             for r in rows if isinstance(r, dict) and r.get("id") is not None]
     return sorted(opts, key=lambda o: o["name"].lower())
+
+
+def _countries(opts) -> list[dict]:
+    """Distinct countries of an institution list, name-sorted, for the
+    country → institution picker (#129)."""
+    seen = {}
+    for o in opts:
+        # "In-Transit" carries the pseudo-country "--": listed under any country
+        if o["country_code"] and o["country_code"] != "--" and o["country_code"] not in seen:
+            seen[o["country_code"]] = o["country_name"] or o["country_code"]
+    return sorted(({"code": c, "name": n} for c, n in seen.items()),
+                  key=lambda c: c["name"].lower())
+
+
+def _inst_pick(opts, field, sel=None, req=False, blank=None) -> dict:
+    """Context for the shared country → institution widget
+    (``_inst_pick.html``, #129): ``field`` is the submitted select's name,
+    ``sel`` the pre-selected institution id, ``blank`` the empty option's
+    text."""
+    return {"insts": opts, "countries": _countries(opts), "field": field,
+            "sel": sel, "req": req, "blank": blank}
+
+
+_INITIALS_SKIP = {"of", "and", "the", "for", "at", "de", "di", "del", "der", "da",
+                  "do", "des", "du", "la", "le", "in", "on", "&", "-"}
+
+
+def _initials(name: str) -> str:
+    """``Brookhaven National Laboratory`` → ``BNL`` (connectives skipped)."""
+    return "".join(w[0] for w in name.replace(",", " ").split()
+                   if w.lower() not in _INITIALS_SKIP and w[0].isalnum()).upper()
+
+
+def _match_affiliation(aff: str, opts):
+    """The one institution a whoami affiliation names — by full name, else
+    by initials (HWDB affiliations read like "BNL"; institutions carry only
+    the long name). Ambiguous initials ("UM") match nothing."""
+    aff = (aff or "").strip().lower()
+    if not aff:
+        return None
+    exact = [o["id"] for o in opts if o["name"].lower() == aff]
+    if exact:
+        return exact[0]
+    hits = [o["id"] for o in opts if _initials(o["name"]).lower() == aff]
+    return hits[0] if len(hits) == 1 else None
+
+
+def _default_institution(request, api, inst, opts):
+    """#129: the institution to pre-select — the user's last pick on this
+    instance, seeded once from the HWDB whoami ``affiliation`` (Hajime: "the
+    user's home institution"). None when nothing is known or the remembered
+    id left the list."""
+    actor = activity.actor_of(request)
+    row = InstitutionPref.for_instance(inst).filter(username=actor).first()
+    if row is None:
+        iid = None
+        try:
+            iid = _match_affiliation(
+                (api.whoami().get("data") or {}).get("affiliation"), opts)
+        except Exception as e:
+            logger.warning("whoami for institution default failed: %s", e)
+            return None      # transient — try the seed again next time
+        row = InstitutionPref.objects.create(instance=inst, username=actor,
+                                             institution_id=iid)
+    return row.institution_id if any(o["id"] == row.institution_id for o in opts) else None
+
+
+def _remember_institution(request, inst, institution_id):
+    """#129: a successful HWDB write with this institution makes it the
+    user's default."""
+    try:
+        InstitutionPref.objects.update_or_create(
+            instance=inst, username=activity.actor_of(request),
+            defaults={"institution_id": int(institution_id)})
+    except (TypeError, ValueError):
+        pass
 
 
 @login_not_required
@@ -1173,6 +1253,7 @@ def explore_part_location_view(request, part_id):
             logger.warning("refresh_box(%s) failed: %s", part_id, e)
         row = ShipmentItem.for_instance(inst).filter(part_id=part_id).first()
     refresh_component_row(api, inst, part_id)   # institution/updated (#110 review)
+    _remember_institution(request, inst, request.POST.get("location_id"))
     messages.success(request, "Location update posted to HWDB.")
     activity.log(
         inst, ActivityEvent.KIND_LOCATION,
@@ -1198,7 +1279,9 @@ def explore_institutions_view(request):
     except FnalUnavailable:
         return JsonResponse({"error": "unavailable"}, status=503)
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
-    return JsonResponse({"institutions": _institution_options(api)})
+    opts = _institution_options(api)
+    return JsonResponse({"institutions": opts, "countries": _countries(opts),
+                         "default": _default_institution(request, api, inst, opts)})
 
 
 def _refresh_box_quietly(api, instance, part_type_id, part_id):
@@ -1291,6 +1374,7 @@ def explore_box_create_view(request, part_type_id):
         refresh_box(api, inst, part_type_id, part_id)
     except Exception as e:
         logger.warning("refresh_box(%s) failed: %s", part_id, e)
+    _remember_institution(request, inst, institution["id"])
     messages.success(request, f"Box {part_id} minted in the {inst} HWDB.")
     activity.log(inst, ActivityEvent.KIND_MINTED, f"Box {part_id} minted",
                  part_id=part_id, part_type_id=part_type_id,
@@ -2376,8 +2460,9 @@ def _checklist_item_opts(api, ptid, schema) -> dict:
             logger.warning("manufacturers for %s failed: %s", ptid, e)
     if "location" in fields:
         try:
-            opts["institutions"] = [{"value": o["id"], "label": o["name"]}
+            opts["institutions"] = [{"value": o["id"], "label": o["name"], **o}
                                     for o in _institution_options(api)]
+            opts["countries"] = _countries(opts["institutions"])
         except Exception as e:
             logger.warning("institutions failed: %s", e)
     return opts
@@ -2430,6 +2515,7 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
                     return f"location not updated — {body.get('data') or body}"
             except requests.RequestException as e:
                 return f"location not updated — {_hwdb_error_detail(e)}"
+            _remember_institution(request, instance_of(request), iv["location"]["id"])
         if iv["record"]:
             data["Item"] = iv["record"]
         test_comments = iv["test_comments"]
@@ -2965,6 +3051,7 @@ def explore_item_create_view(request, part_type_id):
         except Exception as e:
             logger.warning("post-create sync for %s failed: %s",
                            part_type_id, e)
+        _remember_institution(request, inst, institution["id"])
         messages.success(request, f"Item {part_id} minted in the {inst} HWDB.")
         # #110: arrived via a checklist's PID chooser — continue into THAT
         # checklist; else the #97 rule (single checklist, or the part page).
@@ -2981,7 +3068,8 @@ def explore_item_create_view(request, part_type_id):
     return render(request, "explore/item_create.html", {
         "sidebar": navigation.sidebar_tree(inst, {}),
         "part_type_id": part_type_id,
-        "institutions": _institution_options(api),
+        "inst_pick": _inst_pick(insts := _institution_options(api), "institution_id",
+                                sel=_default_institution(request, api, inst, insts)),
         "checklist_names": checklist_names,
         "via_checklist": via if via in checklist_names else "",
         "spec_template": json.dumps(template, indent=2, ensure_ascii=False),
@@ -4274,6 +4362,7 @@ def explore_receiving_view(request, part_id):
                                     "institution_name": names.get(cleaned["location_id"], "")},
                        "arrived": cleaned["arrived"], "comments": cleaned["comments"],
                        "affirm_update": True}
+            _remember_institution(request, inst, cleaned["location"]["institution_id"])
         cl.state[key] = {**cl.state.get(key, {}), **cleaned}
         cl.save()
         if err:
@@ -4338,7 +4427,11 @@ def explore_receiving_view(request, part_id):
         if scene == 1:
             ctx["n_items"] = len(_manifest())
         if scene == 2:
-            ctx["institutions"] = _institution_options(api)
+            insts = _institution_options(api)
+            ctx["inst_pick"] = _inst_pick(
+                insts, "location_id", req=True,
+                sel=(ctx["saved"].get("location") or {}).get("institution_id")
+                    or _default_institution(request, api, inst, insts))
             ctx["arrived_default"] = timezone.localtime().strftime("%Y-%m-%dT%H:%M")
         if scene == 3:
             try:

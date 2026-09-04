@@ -11,9 +11,11 @@
       {% else %}
       <div class="cl-field">
         <label class="cl-lab" for="{{ w.key }}">{{ w.label }}{% if w.hint %} <span class="cl-hint">({{ w.hint }})</span>{% endif %}</label>
-        {% if w.kind == "select" or w.kind == "location" %}
+        {% if w.kind == "location" %}
+        {% include "explore/_inst_pick.html" with pick=w.pick %}
+        {% elif w.kind == "select" %}
         <select id="{{ w.key }}" name="{{ w.key }}">
-          <option value="">&mdash;{% if w.kind == "location" and w.current %} (now: {{ w.current }}){% endif %}</option>
+          <option value="">&mdash;</option>
           {% for o in w.options %}<option value="{{ o.value }}"{% if o.value == w.value %} selected{% endif %}>{{ o.label }}</option>{% endfor %}
         </select>
         {% if w.kind == "location" %}<input type="datetime-local" name="item-arrived" value="{{ arrived_default }}" title="arrival time for the location update" style="margin-top:4px;">{% endif %}

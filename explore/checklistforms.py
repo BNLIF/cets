@@ -829,6 +829,10 @@ def item_card(schema: dict, item: dict | None, opts: dict | None,
                      value=cur(name, loc.get("id") if isinstance(loc, dict) else None),
                      current=(loc.get("name") if isinstance(loc, dict) else "") or "",
                      hint="posts a location update only when changed")
+            # #129 country → institution widget; blank = unchanged, so no default
+            w["pick"] = {"insts": w["options"], "countries": opts.get("countries") or [],
+                         "field": w["key"], "sel": w["value"], "req": False,
+                         "blank": f"— (now: {w['current']})" if w["current"] else "—"}
         elif name == "serial_number":
             w.update(kind="text", value=cur(name, item.get("serial_number") or ""))
         elif name == "item_comments":

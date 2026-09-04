@@ -191,7 +191,9 @@ class InstitutionsEndpointTest(TestCase):
             [o["name"] for o in data["institutions"]],
             ["Brookhaven National Laboratory", "SURF"])
         self.assertEqual(data["institutions"][1],
-                         {"id": 186, "name": "SURF", "country_code": "US"})
+                         {"id": 186, "name": "SURF", "country_code": "US", "country_name": ""})
+        self.assertEqual(data["countries"], [{"code": "US", "name": "US"}])   # #129
+        self.assertIsNone(data["default"])          # nothing remembered, whoami affiliation blank
 
     @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_prod_is_forbidden(self):

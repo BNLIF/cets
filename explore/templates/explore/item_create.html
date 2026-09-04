@@ -43,11 +43,8 @@
     {% csrf_token %}
     {% if via_checklist %}<input type="hidden" name="checklist" value="{{ via_checklist }}">{% endif %}
     <div class="cl-field">
-      <label class="cl-lab" for="ic-inst">Institution <span class="cl-hint">(where the item belongs — required)</span></label>
-      <select id="ic-inst" name="institution_id">
-        <option value="">&mdash;</option>
-        {% for o in institutions %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}
-      </select>
+      <label class="cl-lab">Institution <span class="cl-hint">(where the item belongs — required)</span></label>
+      {% include "explore/_inst_pick.html" with pick=inst_pick %}
     </div>
     <div class="cl-field">
       <label class="cl-lab" for="ic-sn">Serial number <span class="cl-hint">(optional)</span></label>

@@ -397,14 +397,11 @@
         {% if show_location_form %}
         <details class="sd-locform"{% if editing %} open{% endif %}>
           <summary>Update location</summary>
-          {% if institutions %}
+          {% if inst_pick %}
           <form method="post" action="{% url 'explore:part_location' part_id=part_id %}">
             {% csrf_token %}
             <label>New location
-              <select name="location_id" required>
-                <option value="">— pick an institution —</option>
-                {% for i in institutions %}<option value="{{ i.id }}">({{ i.id }}) {{ i.name }}{% if i.country_code %} [{{ i.country_code }}]{% endif %}</option>{% endfor %}
-              </select>
+              {% include "explore/_inst_pick.html" with pick=inst_pick %}
             </label>
             <div class="row">
               <label>Arrived <input type="datetime-local" name="arrived" value="{{ arrived_default }}" required></label>

@@ -12,7 +12,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 
 from explore import checklistforms
-from explore.models import ChecklistDraft
+from explore.models import ChecklistDraft, InstitutionPref
 
 PART = "Z00100300041-00150"
 PTID = "Z00100300041"
@@ -1010,6 +1010,48 @@ class ItemCreateTest(TestCase):
         self.assertIn("BNL", html)
         self.assertIn("Create the item", html)
         self.assertIn(NAME, html)      # tells the user which checklist is next
+
+    def test_institution_picker_seeds_from_affiliation_then_remembers(self):
+        # #129: first visit — whoami affiliation names BNL → pre-selected,
+        # country select + institution select from the shared widget
+        api = self._api_create()
+        # real HWDB shape: the affiliation is "BNL", the institution carries
+        # only its long name → matched on initials; In-Transit's "--" country
+        # stays off the country list
+        api.get_institutions.return_value = {"data": [
+            {"id": 128, "name": "Brookhaven National Laboratory",
+             "country": {"code": "US", "name": "United States"}},
+            {"id": 0, "name": "In-Transit", "country": {"code": "--", "name": "--"}}]}
+        api.whoami.return_value = {"data": {"affiliation": "BNL"}}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(NEW_PAGE).content.decode()
+        self.assertIn('class="ip-country"', html)
+        self.assertIn('<option value="128" data-cc="US" selected>Brookhaven National Laboratory</option>', html)
+        self.assertIn('<option value="0" data-cc="--">In-Transit</option>', html)
+        self.assertNotIn('<option value="--">', html)
+        pref = InstitutionPref.objects.get()
+        self.assertEqual(pref.institution_id, 128)
+        # a later create with another institution becomes the new default
+        api.get_institutions.return_value["data"].append(
+            {"id": 9, "name": "CERN", "country": {"code": "CH", "name": "Switzerland"}})
+        with m1, m2:
+            self.client.post(NEW_PAGE, {"institution_id": "9"})
+            html = self.client.get(NEW_PAGE).content.decode()
+        self.assertEqual(InstitutionPref.objects.get().institution_id, 9)
+        self.assertIn('<option value="9" data-cc="CH" selected>CERN</option>', html)
+        self.assertIn('<option value="CH">Switzerland</option>', html)
+        self.assertEqual(InstitutionPref.objects.count(), 1)   # one row per user, updated in place
+
+    def test_affiliation_match_needs_a_unique_hit(self):
+        opts = [{"id": 1, "name": "University of Maryland"},
+                {"id": 2, "name": "University of Michigan"},
+                {"id": 3, "name": "Fermi National Accelerator Laboratory"}]
+        from explore.views import _match_affiliation
+        self.assertIsNone(_match_affiliation("UM", opts))       # ambiguous initials
+        self.assertEqual(_match_affiliation("fnal", opts), 3)
+        self.assertEqual(_match_affiliation("University of Michigan", opts), 2)
+        self.assertIsNone(_match_affiliation("", opts))
 
     def test_create_lands_in_the_single_checklist(self):
         api = self._api_create()
