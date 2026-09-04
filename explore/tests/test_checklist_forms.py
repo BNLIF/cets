@@ -259,7 +259,7 @@ class ChecklistPageTest(TestCase):
         self.assertIn('value="pass"', html)                   # tri-state radios
         self.assertIn('type="file" id="f2-2" name="f2-2"', html)   # photo
         self.assertIn('cl-photo-cam" data-target="f2-2"', html)   # camera button
-        self.assertIn('<img class="cl-photo-prev"', html)            # #127 preview slot
+        self.assertIn('<img class="cl-photo-prev cl-photo-new"', html)   # #127 preview slot
         self.assertIn('id="cl-cam-modal"', html)                     # #127 desktop camera
         self.assertIn("Unwrap", html)                         # steps
         self.assertIn("https://edms.cern.ch/x", html)         # static link
@@ -347,7 +347,9 @@ class ChecklistPageTest(TestCase):
             html = self.client.get(PAGE).content.decode()
         self.assertIn('value="1709.5"', html)
         self.assertIn("Pre-filled from the latest submission", html)
-        self.assertIn("p.jpg", html)                          # existing photo linked
+        self.assertIn("p.jpg", html)                          # existing photo shown
+        self.assertIn('class="cl-photo-prev" alt="p.jpg" data-lightbox', html)   # #130 thumbnail
+        self.assertIn("/hw/dev/shipment-image/img-1/?thumb=1", html)
         # the checked tri-state: pass radio carries checked
         self.assertIn('value="pass"\n      checked', html.replace("\r", ""))
 
@@ -787,7 +789,17 @@ class ChecklistEditorTest(TestCase):
             self.assertEqual(api.get_image_response.call_count, n)   # cached
             api.get_image_response.return_value = upstream(PNG, "image/png")
             r = self.client.get("/hw/dev/shipment-image/png-1/?thumb=1")
-            self.assertEqual(b"".join(r.streaming_content), PNG)     # untouched
+            self.assertEqual(b"".join(r.streaming_content), PNG)     # unrenderable → untouched
+            # #130: a wide photo shrinks to 800 px in its own format
+            big = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 1600, 900), False)
+            api.get_image_response.return_value = upstream(big.tobytes("jpeg"), "image/jpeg")
+            r = self.client.get("/hw/dev/shipment-image/jpg-1/?thumb=1")
+            self.assertEqual(r["Content-Type"], "image/jpeg")
+            self.assertEqual(fitz.Pixmap(r.content).width, 800)
+            small = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 300, 200), False).tobytes("png")
+            api.get_image_response.return_value = upstream(small, "image/png")
+            r = self.client.get("/hw/dev/shipment-image/png-2/?thumb=1")
+            self.assertEqual(b"".join(r.streaming_content), small)   # narrow → untouched
 
 
 # ---- #97: drafts, CSV export, roles gate, new-item flow ----------------------

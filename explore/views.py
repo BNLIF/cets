@@ -812,8 +812,9 @@ def explore_shipment_image_view(request, image_id):
     The bytes are bearer-gated, so we mint and stream them through rather than
     handing the browser a direct FNAL link. ``?name=`` sets the download
     filename (sanitised). ``?thumb=1`` (#121) turns a PDF into a PNG of its
-    first page — checklist reference thumbnails — and passes anything else
-    through unchanged; rendered pages are cached (HWDB images never change).
+    first page and (#130) shrinks a wide PNG/JPEG/GIF — checklist reference
+    and photo thumbnails — passing anything else through unchanged; results
+    are cached (HWDB images never change).
     """
     try:
         bearer = mint_for(request)
@@ -826,9 +827,9 @@ def explore_shipment_image_view(request, image_id):
 
     thumb = bool(request.GET.get("thumb"))
     if thumb:
-        png = cache.get(f"pdfthumb:{image_id}")
-        if png:
-            return HttpResponse(png, content_type="image/png")
+        hit = cache.get(f"pdfthumb:{image_id}")
+        if hit:
+            return HttpResponse(hit[0], content_type=hit[1])
     api = FnalDbApiClient(settings.HWDB_PROFILES[instance_of(request)]["api"], bearer)
     try:
         upstream = api.get_image_response(image_id)
@@ -839,11 +840,12 @@ def explore_shipment_image_view(request, image_id):
     chunks = upstream.iter_content(chunk_size=65536)
     if thumb:
         first = next(chunks, b"")
-        if first.startswith(b"%PDF"):
-            png = _pdf_thumbnail(first + b"".join(chunks))
-            if png:
-                cache.set(f"pdfthumb:{image_id}", png, None)
-                return HttpResponse(png, content_type="image/png")
+        kind = _image_kind(first)
+        if kind:
+            out = _thumbnail(first + b"".join(chunks), kind)
+            if out:
+                cache.set(f"pdfthumb:{image_id}", out, None)
+                return HttpResponse(out[0], content_type=out[1])
         chunks = itertools.chain([first], chunks)
     raw = request.GET.get("name") or f"hwdb-{image_id}"
     safe = "".join(c for c in raw if c.isalnum() or c in " ._-").strip() or f"hwdb-{image_id}"
@@ -857,17 +859,31 @@ def explore_shipment_image_view(request, image_id):
     return resp
 
 
-def _pdf_thumbnail(data: bytes, width: int = 800) -> bytes | None:
-    """Page 1 of a PDF as PNG bytes, ``width`` px wide; None when PyMuPDF
-    is not installed or the file won't render (the <img> then errors and the
-    form swaps in its "view drawing" button, #107)."""
+_MAGIC = ((b"%PDF", "pdf"), (b"\x89PNG", "png"), (b"\xff\xd8", "jpg"), (b"GIF8", "gif"))
+
+
+def _image_kind(head: bytes) -> str | None:
+    return next((k for m, k in _MAGIC if head.startswith(m)), None)
+
+
+def _thumbnail(data: bytes, kind: str, width: int = 800) -> tuple[bytes, str] | None:
+    """``(bytes, content_type)`` of a thumbnail at most ``width`` px wide:
+    page 1 of a PDF as PNG (#121), a raster shrunk in its own format (#130;
+    a GIF comes back as PNG). None when the file is already narrow enough or
+    won't render — the caller then streams the original (the <img> errors
+    on a PDF and the form swaps in its "view drawing" button, #107)."""
     try:
         import fitz  # PyMuPDF — optional at runtime (requirements.txt lists it)
-        page = fitz.open(stream=data, filetype="pdf").load_page(0)
+        page = fitz.open(stream=data, filetype=kind).load_page(0)
+        if kind != "pdf" and page.rect.width <= width:
+            return None
         zoom = width / max(page.rect.width, 1)
-        return page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False).tobytes("png")
+        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        if kind == "jpg":
+            return pix.tobytes("jpeg"), "image/jpeg"
+        return pix.tobytes("png"), "image/png"
     except Exception:
-        logger.warning("PDF thumbnail render failed", exc_info=True)
+        logger.warning("thumbnail render failed (%s)", kind, exc_info=True)
         return None
 
 

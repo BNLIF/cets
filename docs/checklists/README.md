@@ -98,7 +98,10 @@ drawings usually are) falls back to the browser's own PDF viewer inline —
 zoom and print come with it. Inline, a PDF shows its first page (#121: the
 image proxy's `?thumb=1` renders it with PyMuPDF on first request and
 caches it — nothing extra is stored in HWDB); if the renderer is missing,
-it shows as a "view drawing" button instead.
+it shows as a "view drawing" button instead. The same `?thumb=1` shrinks a
+wide PNG/JPEG to 800 px (#130) — reference pictures and a previously
+uploaded photo on a revisited checklist both show as thumbnails that open
+full-size in the lightbox.
 
 Any value-bearing field (not `photo`/`link`/`static`/`steps`) may carry
 `"to_spec": true` (#96): its value ALSO folds into the item's latest

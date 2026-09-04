@@ -44,15 +44,16 @@
   </span>
 {% elif f.type == "photo" %}
   <span class="cl-lab">{{ f.label }}</span>
-  {% if f.existing %}<div class="cl-hint" style="margin-bottom:4px;">current:
-    <a href="{% url 'explore:shipment_image' image_id=f.existing.image_id %}?name={{ f.existing.image_name|urlencode }}&amp;inline=1"
-       target="_blank" rel="noopener">{{ f.existing.image_name }}</a> &mdash; choose a file to replace it</div>{% endif %}
   <span class="cl-photo">
+    {% if f.existing %}<span class="cl-photo-cur">
+      <img class="cl-photo-prev" alt="{{ f.existing.image_name }}" data-lightbox data-lb-src="{% url 'explore:shipment_image' image_id=f.existing.image_id %}?name={{ f.existing.image_name|urlencode }}&amp;inline=1" src="{% url 'explore:shipment_image' image_id=f.existing.image_id %}?thumb=1">
+      <span class="cl-hint">{{ f.existing.image_name }} &mdash; choose a file to replace it</span>
+    </span>{% endif %}
     <span style="display:inline-flex; gap:8px; align-items:center; flex-wrap:wrap;">
       <input type="file" id="{{ f.key }}" name="{{ f.key }}" accept="image/*">
       <button type="button" class="es-btn cl-photo-cam" data-target="{{ f.key }}">&#128247; Take photo</button>
     </span>
-    <img class="cl-photo-prev" alt="" hidden>
+    <img class="cl-photo-prev cl-photo-new" alt="" hidden>
     <input class="cl-photo-note" name="{{ f.key }}-note" value="{{ f.existing.comment|default:'' }}" placeholder="comment" autocomplete="off" maxlength="500">
   </span>
 {% elif f.type == "steps" %}

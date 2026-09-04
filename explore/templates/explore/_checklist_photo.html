@@ -33,12 +33,15 @@
   function closeCam() { stopCam(); if (dlg.open) dlg.close(); }
 
   function preview(inp) {
-    var img = inp.closest(".cl-photo") && inp.closest(".cl-photo").querySelector(".cl-photo-prev");
+    var wrap = inp.closest(".cl-photo"), img = wrap && wrap.querySelector(".cl-photo-new");
     if (!img) return;
     var f = inp.files && inp.files[0];
     if (img.src && img.src.indexOf("blob:") === 0) URL.revokeObjectURL(img.src);
-    if (f && f.type.indexOf("image/") === 0) { img.src = URL.createObjectURL(f); img.hidden = false; }
-    else { img.removeAttribute("src"); img.hidden = true; }
+    var show = !!(f && f.type.indexOf("image/") === 0);
+    if (show) img.src = URL.createObjectURL(f); else img.removeAttribute("src");
+    img.hidden = !show;
+    var cur = wrap.querySelector(".cl-photo-cur");   // the uploaded one steps aside for the new pick
+    if (cur) cur.hidden = show;
   }
   document.addEventListener("change", function (e) {
     if (e.target.matches && e.target.matches(".cl-photo input[type=file]")) preview(e.target);
