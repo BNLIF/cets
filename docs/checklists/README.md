@@ -84,7 +84,7 @@ and refreshes the preview.
 | `datetime` | — | `YYYY-MM-DDTHH:MM` string |
 | `select` | `options` (required) | chosen option |
 | `qr` | `type_id` (optional, #112) | scanned/typed string — with `type_id` set (e.g. `D00300100002`), a code of any other type won't register: the scanner keeps scanning, typed input paints red, and a mismatch is dropped at submit |
-| `photo` | — | `{image_id, image_name}` (posted to the item first) |
+| `photo` | — | `{image_id, image_name[, comment]}` (posted to the item first; the optional comment becomes the HWDB image comment on upload and rides in the record) |
 | `steps` | `steps` (required) | `{step: bool}` — leading spaces indent a step (2 per level, #106); the stored key is the stripped text |
 | `static` | `note`, `url`, `image` (external URL) or `image_id` (reference image uploaded in the editor — e.g. a P1–P10 measurement diagram — stored on the type's HWDB images, served via the image proxy; an id of a picture already in HWDB can also be typed in directly, #108; a PDF drawing uploads too, #121 — it shows its first page as the thumbnail and opens as a PDF on click; `"thumb": false` (#122) drops the inline picture and makes the label the link that opens it — a column of drawing numbers instead of thumbnails), `checklist` (+ optional `part_type_id`, #118) — a jump link to another checklist: name only = this item's checklist of that name; with a type id = that type's PID chooser (the iPad scenes' green "Checklist" links); opens in a new tab, the current form is untouched (save a draft first if half done) | nothing — display only |
 | `link` | `position` (optional), `type_id` (optional, #112 — as `qr`) | scanned child PID — also PATCHed into the item's subcomponents (#96) |

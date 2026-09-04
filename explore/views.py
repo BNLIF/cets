@@ -2236,6 +2236,7 @@ def _checklist_photos(request, api, part_id, name, schema, prev_td, data) -> str
         if f["type"] != "photo":
             continue
         img = request.FILES.get(f["key"])
+        note = (request.POST.get(f["key"] + "-note") or "").strip()   # #128
         ref = None
         if img:
             ext = img.name.rsplit(".", 1)[-1].lower() if "." in img.name else ""
@@ -2248,7 +2249,7 @@ def _checklist_photos(request, api, part_id, name, schema, prev_td, data) -> str
             try:
                 body = api.post_component_image(
                     part_id, img, fname,
-                    comments=f"Checklist “{schema['name']}”: {f['label']}")
+                    comments=note or f"Checklist “{schema['name']}”: {f['label']}")
             except requests.RequestException as e:
                 return f"HWDB rejected “{f['label']}” — {_hwdb_error_detail(e)}"
             if body.get("status") != "OK":
@@ -2259,8 +2260,14 @@ def _checklist_photos(request, api, part_id, name, schema, prev_td, data) -> str
             sec = prev.get(title)
             old = sec.get(f["label"]) if isinstance(sec, dict) else None
             if isinstance(old, dict) and old.get("image_id"):
-                ref = old
+                ref = dict(old)
         if ref:
+            # the comment lives in the record (an edit without a new file
+            # can't reach the HWDB image — those are immutable)
+            if note:
+                ref["comment"] = note
+            else:
+                ref.pop("comment", None)
             data.setdefault(title, {})[f["label"]] = ref
     return None
 

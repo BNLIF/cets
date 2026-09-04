@@ -53,6 +53,7 @@
       <button type="button" class="es-btn cl-photo-cam" data-target="{{ f.key }}">&#128247; Take photo</button>
     </span>
     <img class="cl-photo-prev" alt="" hidden>
+    <input class="cl-photo-note" name="{{ f.key }}-note" value="{{ f.existing.comment|default:'' }}" placeholder="comment" autocomplete="off" maxlength="500">
   </span>
 {% elif f.type == "steps" %}
   <span class="cl-lab">{{ f.label }}</span>

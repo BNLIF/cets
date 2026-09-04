@@ -382,6 +382,28 @@ class ChecklistPageTest(TestCase):
         self.assertLess(calls.index("post_component_image"),
                         calls.index("post_test"))
 
+    def test_photo_comment_goes_to_hwdb_and_the_record(self):
+        api = _api(test_types=("ES", "PCB Segments Interface"))
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {
+                "f2-2": SimpleUploadedFile("shot.png", PNG, content_type="image/png"),
+                "f2-2-note": " scratch near pin 3 "})
+        self.assertEqual(api.post_component_image.call_args.kwargs["comments"],
+                         "scratch near pin 3")
+        data = api.post_test.call_args.args[1]["test_data"]["DATA"]
+        self.assertEqual(data["Visual Inspection"]["Photo 1"]["comment"], "scratch near pin 3")
+        # the record-only edit: no new file, new comment
+        api.get_tests.return_value = {"data": [{"test_data": {"DATA": data}}]}
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+            self.assertIn('name="f2-2-note" value="scratch near pin 3"', html)
+            self.client.post(PAGE, {"f2-2-note": "fixed"})
+        api.post_component_image.assert_called_once()
+        data = api.post_test.call_args.args[1]["test_data"]["DATA"]
+        self.assertEqual(data["Visual Inspection"]["Photo 1"],
+                         {"image_id": "img-77", "image_name": data["Visual Inspection"]["Photo 1"]["image_name"], "comment": "fixed"})
+
     def test_submit_keeps_the_previous_photo_without_a_new_file(self):
         api = _api(prev={"DATA": {"Visual Inspection": {
             "Photo 1": {"image_id": "img-old", "image_name": "old.jpg"}}}},

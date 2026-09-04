@@ -996,7 +996,10 @@ def export_rows(schema: dict, test_data: dict | None):
         sec = data.get(title)
         v = sec.get(f["label"]) if isinstance(sec, dict) else None
         if f["type"] == "photo" and isinstance(v, dict):
+            note = v.get("comment")
             v = f"{v.get('image_name', '')} (image_id={v.get('image_id', '')})"
+            if note:
+                v = f"{v} — {note}"
         elif isinstance(v, (dict, list)):
             v = json.dumps(v, ensure_ascii=False)
         yield title, f["label"], "" if v is None else _fmt(v)
