@@ -61,10 +61,35 @@ def mint_for(request) -> str:
         # stored OIDC credentials) — the vault token may still look valid,
         # but only re-linking recreates the creds (seen on prod 2026-09-01).
         if status in (401, 403, 404):
-            logger.warning("FNAL bearer mint rejected (%s); relink", status)
+            logger.warning("FNAL bearer mint rejected (%s) for credkey %s at %s; relink",
+                           status, data["credkey"], flow.creds_path(data["credkey"]))
             raise FnalLinkRequired("vault token rejected")
         logger.warning("FNAL bearer mint failed (HTTP %s)", status)
         raise FnalUnavailable("could not mint bearer")
     except Exception as e:
         logger.warning("FNAL bearer mint error: %s", e)
         raise FnalUnavailable("could not mint bearer")
+
+
+def verify_link(login) -> str | None:
+    """Mint once right after a device flow completes. A 401/403/404 means
+    vault holds no HWDB token for this account even though CILogon succeeded
+    (prod user, 2026-09-04) — storing the link would only bounce the user
+    between the page and the re-link screen forever, so the caller shows this
+    message instead. Transient trouble returns None: the link is stored and
+    the pages report it as they do today."""
+    try:
+        flow.mint_bearer(login.vault_token, login.credkey)
+        return None
+    except requests.HTTPError as e:
+        status = e.response.status_code if e.response is not None else None
+        if status in (401, 403, 404):
+            logger.warning("FNAL link for credkey %s completed but vault has no HWDB token "
+                           "(%s at %s)", login.credkey, status, flow.creds_path(login.credkey))
+            return (f"Fermilab login succeeded for {login.credkey}, but the hardware database "
+                    f"has no access token for that account (vault answered {status}). "
+                    f"Ask the HWDB administrators to enable {login.credkey} for the FNAL token service.")
+        logger.warning("FNAL verify-link mint failed (HTTP %s) for %s", status, login.credkey)
+    except Exception as e:
+        logger.warning("FNAL verify-link mint error for %s: %s", login.credkey, e)
+    return None

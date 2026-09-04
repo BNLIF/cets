@@ -92,7 +92,8 @@ class ExploreLoginPollTest(TestCase):
         # FNAL users live in the fnal: namespace — never the bare credkey.
         self.assertFalse(User.objects.filter(username="chaoz").exists())
         with mock.patch("hwdb.fnal.flow.poll",
-                        return_value=flow.PollResult(outcome="complete", auth=_complete_auth())):
+                        return_value=flow.PollResult(outcome="complete", auth=_complete_auth())), \
+             mock.patch("hwdb.fnal.flow.mint_bearer", return_value="jwt"):
             resp = self.client.get(reverse("explore:login_poll"))
 
         self.assertEqual(resp.status_code, 200)
@@ -110,12 +111,35 @@ class ExploreLoginPollTest(TestCase):
         self.assertIn(LINK_KEY, self.client.session)
         self.assertNotIn(FLOW_KEY, self.client.session)
 
+    def test_login_view_reuses_the_running_flow(self):
+        self._seed(next_url="/explore/a/")
+        with mock.patch("hwdb.fnal.flow.start") as start:
+            resp = self.client.get(reverse("explore:login"), {"next": "/explore/b/"})
+        start.assert_not_called()
+        self.assertContains(resp, "cilogon.org/device/?user_code=ABC-DEF")
+        self.assertEqual(self.client.session[FLOW_KEY]["next"], "/explore/b/")
+
+    def test_completion_without_a_vault_token_neither_links_nor_logs_in(self):
+        import requests
+        self._seed()
+        with mock.patch("hwdb.fnal.flow.poll",
+                        return_value=flow.PollResult(outcome="complete", auth=_complete_auth("lkokoska"))), \
+             mock.patch("hwdb.fnal.flow.mint_bearer",
+                        side_effect=requests.HTTPError(response=mock.Mock(status_code=404))):
+            resp = self.client.get(reverse("explore:login_poll"))
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn("lkokoska", resp.json()["detail"])
+        self.assertNotIn(LINK_KEY, self.client.session)
+        self.assertNotIn(SESSION_KEY, self.client.session)
+        self.assertFalse(get_user_model().objects.filter(username="fnal:lkokoska").exists())
+
     def test_second_login_reuses_user(self):
         User = get_user_model()
         for _ in range(2):
             self._seed()
             with mock.patch("hwdb.fnal.flow.poll",
-                            return_value=flow.PollResult(outcome="complete", auth=_complete_auth())):
+                            return_value=flow.PollResult(outcome="complete", auth=_complete_auth())), \
+                 mock.patch("hwdb.fnal.flow.mint_bearer", return_value="jwt"):
                 self.client.get(reverse("explore:login_poll"))
         self.assertEqual(User.objects.filter(username="fnal:chaoz").count(), 1)
 
@@ -126,7 +150,8 @@ class ExploreLoginPollTest(TestCase):
         User.objects.create_superuser("chaoz", "c@c.io", "pw")
         self._seed()
         with mock.patch("hwdb.fnal.flow.poll",
-                        return_value=flow.PollResult(outcome="complete", auth=_complete_auth())):
+                        return_value=flow.PollResult(outcome="complete", auth=_complete_auth())), \
+             mock.patch("hwdb.fnal.flow.mint_bearer", return_value="jwt"):
             self.client.get(reverse("explore:login_poll"))
         # Logged in as the namespaced explore-only user, not the superuser.
         u = User.objects.get(pk=int(self.client.session[SESSION_KEY]))
@@ -138,7 +163,8 @@ class ExploreLoginPollTest(TestCase):
         # needed to *view*).
         self._seed()
         with mock.patch("hwdb.fnal.flow.poll",
-                        return_value=flow.PollResult(outcome="complete", auth=_complete_auth())):
+                        return_value=flow.PollResult(outcome="complete", auth=_complete_auth())), \
+             mock.patch("hwdb.fnal.flow.mint_bearer", return_value="jwt"):
             self.client.get(reverse("explore:login_poll"))
         resp = self.client.get(reverse("explore:home"))
         self.assertEqual(resp.status_code, 200)

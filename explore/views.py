@@ -29,7 +29,7 @@ from core.queries import chart_config
 from hwdb.api_client import FnalDbApiClient
 from hwdb.fnal import flow
 from hwdb.fnal import session as fnal_session
-from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
+from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for, verify_link
 
 from . import (activity, charts, checklistforms, checklists, curation, events,
                execsummary, navigation, parts, scanning, watches)
@@ -83,22 +83,24 @@ def login_view(request):
     next_url = _safe_next(request, _rev(request, "explore:home"))
     if request.user.is_authenticated:
         return redirect(next_url)
-    try:
-        start = flow.start()
-    except Exception:
-        logger.exception("FNAL device-flow start failed")
-        return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
-
-    fnal_session.set_flow(
-        request, start.poll_body, timezone.now() + DEVICE_FLOW_LIFETIME, next_url,
-        login_user=True,
-    )
+    live = fnal_session.resume_flow(request, next_url, login_user=True)
+    if live is None:
+        try:
+            start = flow.start()
+        except Exception:
+            logger.exception("FNAL device-flow start failed")
+            return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
+        fnal_session.set_flow(
+            request, start.poll_body, timezone.now() + DEVICE_FLOW_LIFETIME, next_url,
+            login_user=True, auth_url=start.auth_url, user_code=start.user_code,
+        )
+        live = (start.auth_url, start.user_code)
     return render(
         request,
         "explore/login.html",
         {
-            "auth_url": start.auth_url,
-            "user_code": start.user_code,
+            "auth_url": live[0],
+            "user_code": live[1],
             "poll_url": _rev(request, "explore:login_poll"),
         },
     )
@@ -137,6 +139,10 @@ def login_poll_view(request):
         logger.exception("FNAL device-flow completion failed")
         return JsonResponse({"status": "error", "detail": FNAL_UNAVAILABLE}, status=502)
 
+    refused = verify_link(login_result)
+    if refused:
+        fnal_session.clear_flow(request)
+        return JsonResponse({"status": "error", "detail": refused}, status=403)
     fnal_session.store_link(request, login_result)
     if state.get("login_user"):
         provision_and_login(request, login_result)

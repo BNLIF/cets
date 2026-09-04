@@ -88,7 +88,7 @@ class LinkFlowTest(TestCase):
         with mock.patch(
             "hwdb.fnal.flow.poll",
             return_value=flow.PollResult(outcome="complete", auth=auth),
-        ):
+        ), mock.patch("hwdb.fnal.flow.mint_bearer", return_value="jwt"):
             resp = self.client.get(self.poll_url)
 
         self.assertEqual(resp.status_code, 200)
@@ -119,12 +119,50 @@ class LinkFlowTest(TestCase):
         with mock.patch(
             "hwdb.fnal.flow.poll",
             return_value=flow.PollResult(outcome="complete", auth=auth),
-        ):
+        ), mock.patch("hwdb.fnal.flow.mint_bearer", return_value="jwt"):
             self.client.get(self.poll_url)
         User = get_user_model()
         self.assertFalse(User.objects.filter(username="chaoz").exists())
         # Still the original guest in the session.
         self.assertEqual(self.client.session[SESSION_KEY], str(User.objects.get(username="guest").pk))
+
+    def test_link_view_reuses_the_running_flow(self):
+        # several bounced requests land here at once — they must share ONE
+        # flow, or the one the user completes in CILogon is overwritten
+        self._seed_flow(next_url="/hwdb/a/")
+        with mock.patch("hwdb.fnal.flow.start") as start:
+            resp = self.client.get(self.link_url, {"next": "/hwdb/b/"})
+        start.assert_not_called()
+        self.assertContains(resp, "cilogon.org/device/?user_code=ABC-DEF")
+        self.assertEqual(self.client.session[FLOW_KEY]["next"], "/hwdb/b/")   # latest wins
+        # an expired flow is not reused
+        sess = self.client.session
+        sess[FLOW_KEY]["expires_at"] = "2000-01-01T00:00:00+00:00"
+        sess.save()
+        with mock.patch("hwdb.fnal.flow.start", return_value=self._start()) as start:
+            self.client.get(self.link_url)
+        start.assert_called_once()
+
+    def test_poll_complete_but_vault_has_no_token_shows_why(self):
+        # CILogon succeeds, yet vault 404s the creds path (prod user 2026-09-04):
+        # say so instead of storing a link that bounces forever
+        import requests
+        self._seed_flow()
+        auth = {"client_token": "s.tok", "lease_duration": 100, "metadata": {"credkey": "lkokoska"}}
+        resp404 = mock.Mock(status_code=404)
+        with mock.patch("hwdb.fnal.flow.poll",
+                        return_value=flow.PollResult(outcome="complete", auth=auth)), \
+             mock.patch("hwdb.fnal.flow.mint_bearer",
+                        side_effect=requests.HTTPError(response=resp404)):
+            resp = self.client.get(self.poll_url)
+        self.assertEqual(resp.status_code, 403)
+        body = resp.json()
+        self.assertEqual(body["status"], "error")
+        self.assertIn("lkokoska", body["detail"])
+        self.assertIn("404", body["detail"])
+        self.assertNotIn("s.tok", body["detail"])            # never the token
+        self.assertNotIn(LINK_KEY, self.client.session)
+        self.assertNotIn(FLOW_KEY, self.client.session)
 
     def test_poll_expired_flow_410_and_cleared(self):
         self._seed_flow()

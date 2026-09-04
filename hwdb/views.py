@@ -19,7 +19,7 @@ from core.models import LArASIC, FEMB, FembTest
 from .api_client import FnalDbApiClient
 from .fnal import flow
 from .fnal import session as fnal_session
-from .fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for
+from .fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for, verify_link
 from .fnal.session import LINK_KEY
 from .instance import SESSION_KEY, active_instance, active_profile
 from .models import (
@@ -412,21 +412,24 @@ def fnal_link_view(request):
     page polls fnal_link_poll_view until vault completes the login.
     """
     next_url = _safe_next(request, reverse("hwdb:home"))
-    try:
-        start = flow.start()
-    except Exception:
-        logger.exception("FNAL device-flow start failed")
-        return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
-
-    fnal_session.set_flow(
-        request, start.poll_body, timezone.now() + DEVICE_FLOW_LIFETIME, next_url
-    )
+    live = fnal_session.resume_flow(request, next_url)
+    if live is None:
+        try:
+            start = flow.start()
+        except Exception:
+            logger.exception("FNAL device-flow start failed")
+            return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
+        fnal_session.set_flow(
+            request, start.poll_body, timezone.now() + DEVICE_FLOW_LIFETIME, next_url,
+            auth_url=start.auth_url, user_code=start.user_code,
+        )
+        live = (start.auth_url, start.user_code)
     return render(
         request,
         "hwdb/link.html",
         {
-            "auth_url": start.auth_url,
-            "user_code": start.user_code,
+            "auth_url": live[0],
+            "user_code": live[1],
             "poll_url": reverse("hwdb:link_poll"),
             "reason": request.GET.get("reason"),
         },
@@ -463,6 +466,10 @@ def fnal_link_poll_view(request):
         logger.exception("FNAL device-flow completion failed")
         return JsonResponse({"status": "error", "detail": FNAL_UNAVAILABLE}, status=502)
 
+    refused = verify_link(login)
+    if refused:
+        fnal_session.clear_flow(request)
+        return JsonResponse({"status": "error", "detail": refused}, status=403)
     fnal_session.store_link(request, login)
     next_url = state.get("next") or reverse("hwdb:home")
     fnal_session.clear_flow(request)

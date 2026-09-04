@@ -138,11 +138,15 @@ def complete(auth: dict) -> LoginResult:
     )
 
 
+def creds_path(credkey: str) -> str:
+    """Where vault keeps this user's HWDB token (logged when it is missing)."""
+    return f"secret/oauth/creds/{ISSUER}/{credkey}:{ROLE}"
+
+
 def mint_bearer(vault_token: str, credkey: str) -> str:
     """Read the secret path and return the bearer JWT."""
-    path = f"secret/oauth/creds/{ISSUER}/{credkey}:{ROLE}"
     r = _vault_get(
-        f"{VAULT}/v1/{path}",
+        f"{VAULT}/v1/{creds_path(credkey)}",
         headers={"X-Vault-Token": vault_token},
         params={"minimum_seconds": 60},
     )
