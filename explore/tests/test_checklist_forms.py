@@ -1966,6 +1966,73 @@ class StepsRequireAllTest(TestCase):
             api.post_test.assert_called_once()
 
 
+class DataDrivenWhenTest(TestCase):
+    """#132: a section's ``when`` keyed on a scanned item's stored data."""
+    SCHEMA = {"name": "S", "test_type_name": "S", "sections": [
+        {"title": "Id", "fields": [{"type": "qr", "label": "Plane PID"},
+                                   {"type": "select", "label": "Mode", "options": ["A"]}]},
+        {"title": "Edge", "when": {"field": "Plane PID", "path": "specifications.DATA.Row", "equals": "Edge"},
+         "fields": [{"type": "steps", "label": "Edge steps", "steps": ["E1"], "require_all": True}]},
+        {"title": "Bad", "when": {"field": "Mode", "path": "specifications.DATA.Row", "equals": "x"},
+         "fields": [{"type": "text", "label": "T"}]},
+        {"title": "NoVal", "when": {"field": "Plane PID", "path": "specifications.DATA.Row"},
+         "fields": [{"type": "text", "label": "U"}]}]}
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("w", "w@w.io", "pw")
+        self.client.force_login(self.user)
+
+    def test_resolve_needs_a_qr_field_a_path_and_a_value(self):
+        n = checklistforms.normalize(self.SCHEMA, "S")
+        secs = {s["title"]: s for s in n["sections"]}
+        self.assertEqual(secs["Edge"]["when"], {"field": "Plane PID", "key": "f0-0",
+                                                "path": "specifications.DATA.Row", "equals": "Edge"})
+        self.assertNotIn("when", secs["Bad"])        # a path on a select → dropped
+        self.assertNotIn("when", secs["NoVal"])      # no value → dropped
+
+    def test_form_renders_the_rule_and_a_slot_for_the_resolved_value(self):
+        m1, m2 = _mocked(_api(schema=self.SCHEMA))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('data-when-key="f0-0" data-when-eq="Edge" data-when-path="specifications.DATA.Row" '
+                      'data-when-url="/hw/dev/lookup/PID/"', html)
+        self.assertIn('<input type="hidden" name="w1" class="cl-when-val">', html)
+        self.assertIn("shown when Plane PID › specifications.DATA.Row = Edge", html)
+
+    def test_lookup_endpoint_walks_the_item_record(self):
+        api = _api()
+        # real shape: specifications is a history list, newest last
+        api.get_component.return_value = {"data": {"specifications": [
+            {"DATA": {"Row": "Old"}}, {"DATA": {"Row": "Edge", "Holes": [3, 4]}}]}}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.assertEqual(self.client.get("/hw/dev/lookup/Z00100300005-00001/?path=specifications.DATA.Row").json(),
+                             {"value": "Edge"})
+            self.assertEqual(self.client.get("/hw/dev/lookup/Z00100300005-00001/?path=specifications.DATA.Holes.1").json(),
+                             {"value": "4"})
+            self.assertEqual(self.client.get("/hw/dev/lookup/Z00100300005-00001/?path=specifications.DATA.Nope").json(),
+                             {"value": None})
+            self.assertEqual(self.client.get("/hw/dev/lookup/Z00100300005-00001/?path=specifications.0.DATA.Row").json(),
+                             {"value": "Old"})                     # explicit index still works
+            for short in ("DATA.Row", "Row"):                      # shorthands into Item Specs
+                self.assertEqual(self.client.get(f"/hw/dev/lookup/Z00100300005-00001/?path={short}").json(),
+                                 {"value": "Edge"})
+        api.get_component.assert_called_with("Z00100300005-00001")
+
+    def test_server_side_require_all_reads_the_posted_resolution(self):
+        n = checklistforms.normalize(self.SCHEMA, "S")
+        self.assertEqual(checklistforms.unchecked_required(n, {"w1": "Middle"}), [])      # hidden
+        self.assertEqual(checklistforms.unchecked_required(n, {"w1": "Edge"}), ["Edge steps"])
+        self.assertEqual(checklistforms.unchecked_required(n, {"w1": "Edge", "f1-0-s0": "on"}), [])
+
+    def test_editor_ships_the_path_picker(self):
+        m1, m2 = _mocked(_api())
+        with m1, m2:
+            html = self.client.get(CONFIG_PAGE).content.decode()
+        self.assertIn('class="fs-whenp"', html)
+        self.assertIn('class="fs-wheneqt"', html)
+
+
 class LegacyTableGoldenTest(TestCase):
     """#119 back-compat contract: a table WITHOUT rows normalizes, parses,
     binds and renders exactly as before rows existed (snapshot taken on

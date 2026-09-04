@@ -224,11 +224,12 @@
     <div class="ec-row clc-secopts">
       <label class="ec-inline" title="lay this section's fields on a column grid — each field then picks its column and width">columns
         <select class="fs-grid"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select></label>
-      <button type="button" class="ec-del fs-layout" title="arrange this section's fields on the grid: drag cells, change spans, stack (#125)">&#9638; layout&hellip;</button>
+      <button type="button" class="ec-del fs-layout" title="arrange this section's fields on the grid: drag cells, change spans, stack">&#9638; layout&hellip;</button>
       <label class="ec-inline"><input type="checkbox" class="fs-collapsed"> start collapsed</label>
-      <label class="ec-inline" title="the section shows only while that select field holds this option">show only when
+      <label class="ec-inline" title="a select field: the section shows only while it holds this option. A PID field: the scanned item&#8217;s stored value at the path must equal the value — the path is a key chain into the item&#8217;s HWDB record; a bare Item Specs key like Side works, as do DATA.Side, specifications.DATA.Side, serial_number or location.name">show only when
         <select class="fs-whenf"><option value="">&mdash; always &mdash;</option></select>
-        <span class="fs-whenwrap">= <select class="fs-wheneq"></select></span></label>
+        <span class="fs-whenwrap">= <select class="fs-wheneq"></select></span>
+        <span class="fs-whenpwrap" style="display:none;">› <input class="fs-whenp" placeholder="Item Specs key, e.g. Side" style="width:220px;"> = <input class="fs-wheneqt" placeholder="value" style="width:110px;"></span></label>
     </div>
     <div class="clc-fields"></div>
     <button type="button" class="ec-add clc-addf">+ add field</button>
@@ -274,7 +275,7 @@
       <label class="ec-inline ff-color-w" title="cell background tint keyed to the reference drawing">tint
         <input type="color" class="ff-color" list="clc-tints"></label>
       <button type="button" class="ec-del ff-colorclear" style="display:none;" title="Remove the tint">&#x2715; tint</button>
-      <button type="button" class="ec-del ff-tbl" title="named rows, each with its own fixed cells and tint (#119)">&#9636; rows&hellip;</button>
+      <button type="button" class="ec-del ff-tbl" title="named rows, each with its own fixed cells and tint">&#9636; rows&hellip;</button>
       <input type="hidden" class="ff-rows">
       <textarea class="ff-columns" rows="2" style="flex:1 1 100%;" placeholder="columns — comma- or line-separated; computed: Total = C1 + C2*(C3/C4) [11 ± 1]; fixed: Expected = &quot;3.1+-0.1&quot;; pass/fail: OK = check" title="label = formula makes a computed column (C1 = first column's value, formula/fixed cells count too); label = &quot;text&quot; makes a fixed non-editable cell (no commas in the text); [nominal ± tol] or [min..max] gives that column its own accepted range"></textarea>
     </div>
@@ -302,7 +303,7 @@
       <input type="file" class="ff-imgfile" accept="image/*,.pdf,application/pdf" title="upload a diagram (e.g. where P1–P10 are measured) or a PDF drawing — stored on the component type in HWDB; a PDF shows its first page">
       <input class="ff-imageid" placeholder="or existing image_id" style="flex:0 0 150px;" title="reference a picture already stored in HWDB by its image_id — the preview shows it (a broken image means a wrong id)">
       <span class="ec-hint ff-imgstatus"></span>
-      <label class="ec-inline ff-thumbwrap" title="off: no inline picture — the label is the link that opens it (#122)"><input type="checkbox" class="ff-thumb" checked> thumbnail</label>
+      <label class="ec-inline ff-thumbwrap" title="off: no inline picture — the label is the link that opens it"><input type="checkbox" class="ff-thumb" checked> thumbnail</label>
       <button type="button" class="ec-del ff-imgclear" style="display:none;" title="Detach the image">&#x2715; image</button>
     </div>
     <div class="ec-row g-link" style="display:none;">
@@ -318,7 +319,7 @@
       <label class="ec-inline" title="how many columns this field occupies">span
         <select class="ff-gspan"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>full</option></select></label>
       <label class="ec-inline" title="start on a fresh line (col still applies)"><input type="checkbox" class="ff-gnl"> new line</label>
-      <label class="ec-inline" title="where the field sits when its line is taller than it (#123)">align
+      <label class="ec-inline" title="where the field sits when its line is taller than it">align
         <select class="ff-galign"><option>bottom</option><option>top</option><option>middle</option></select></label>
     </div>
     <div class="ec-row g-map" style="display:none;">
@@ -788,6 +789,7 @@
     // the when-pickers fill in at refresh() once every select field exists
     n.dataset.whenF = (s.when && s.when.field) || "";
     n.dataset.whenEq = (s.when && s.when.equals) || "";
+    n.dataset.whenP = (s.when && s.when.path) || "";                     // #132
     (s.fields || []).forEach(function (f) {
       if (f && f.type === "row") {
         (f.fields || []).forEach(function (k, i) {
@@ -1008,7 +1010,10 @@
       if (gridN > 1) sec.grid = gridN;                                 // #120
       if ($(".fs-collapsed", s).checked) sec.collapsed = true;
       var wf = $(".fs-whenf", s).value, we = $(".fs-wheneq", s).value;
-      if (wf && we) sec.when = { field: wf, equals: we };
+      var wp = $(".fs-whenp", s).value.trim(), wt = $(".fs-wheneqt", s).value.trim();
+      if (wf && $(".fs-whenpwrap", s).style.display !== "none") {        // #132 PID field
+        if (wp && wt) sec.when = { field: wf, path: wp, equals: wt };
+      } else if (wf && we) sec.when = { field: wf, equals: we };
       return sec;
     }).filter(function (s) { return s.title || s.fields.length; });
     keyRow = {};
@@ -1047,20 +1052,28 @@
     sel.value = current || "";
   }
   function syncWhenPickers() {
-    var selects = {};
+    var selects = {}, pids = {};                    // #132: PID fields drive too
     $$(".clc-fld").forEach(function (r) {
-      if ($(".ff-type", r).value !== "select") return;
-      var label = $(".ff-label", r).value.trim();
-      if (label) selects[label] = list($(".ff-options", r).value, ",");
+      var t = $(".ff-type", r).value, label = $(".ff-label", r).value.trim();
+      if (!label) return;
+      if (t === "select") selects[label] = list($(".ff-options", r).value, ",");
+      if (t === "qr") pids[label] = true;
     });
     $$("#clc-sections > .clc-sec").forEach(function (s) {
       var fsel = $(".fs-whenf", s), esel = $(".fs-wheneq", s);
       var curF = fsel.value || s.dataset.whenF || "";
       var curE = esel.value || s.dataset.whenEq || "";
-      s.dataset.whenF = s.dataset.whenEq = "";
-      fillSelect(fsel, Object.keys(selects), curF, "&mdash; always &mdash;");
-      fillSelect(esel, selects[curF] || [], curF ? curE : "", "");
-      $(".fs-whenwrap", s).style.display = curF ? "" : "none";
+      if (s.dataset.whenP) {                       // loading a path rule
+        $(".fs-whenp", s).value = s.dataset.whenP;
+        $(".fs-wheneqt", s).value = s.dataset.whenEq || "";
+        curE = "";
+      }
+      s.dataset.whenF = s.dataset.whenEq = s.dataset.whenP = "";
+      fillSelect(fsel, Object.keys(selects).concat(Object.keys(pids)), curF, "&mdash; always &mdash;");
+      var isPid = !!pids[curF];
+      fillSelect(esel, selects[curF] || [], curF && !isPid ? curE : "", "");
+      $(".fs-whenwrap", s).style.display = curF && !isPid ? "" : "none";
+      $(".fs-whenpwrap", s).style.display = curF && isPid ? "" : "none";
     });
   }
 

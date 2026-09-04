@@ -382,9 +382,9 @@ def unchecked_required(schema: dict, post) -> list[str]:
     Sections hidden by an unmet ``when`` rule don't count, exactly as the
     browser skips their controls."""
     out = []
-    for sec in schema["sections"]:
+    for si, sec in enumerate(schema["sections"]):
         w = sec.get("when")
-        if w and (post.get(w["key"]) or "") != w["equals"]:
+        if w and (post.get(f"w{si}" if w.get("path") else w["key"]) or "") != w["equals"]:
             continue
         for f in (leaf for top in sec["fields"] for leaf in _row_leaves(top)):
             if f["type"] == "steps" and f.get("require_all") and not all(
@@ -578,12 +578,23 @@ def _resolve_when(schema: dict) -> None:
     it forever."""
     selects = {leaf["label"]: leaf for _, leaf in leaf_fields(schema)
                if leaf["type"] == "select"}
+    pids = {leaf["label"]: leaf for _, leaf in leaf_fields(schema)
+            if leaf["type"] == "qr"}
     for sec in schema["sections"]:
         w = sec.pop("when", None)
         if not w:
             continue
         label = str(w.get("field") or "").strip()
         eq = str(w.get("equals") or "").strip()
+        path = str(w.get("path") or "").strip().strip(".")
+        if path:
+            # #132: ``{field: <qr label>, path: "specifications.DATA.Row",
+            # equals: "North"}`` — the value is read off the scanned item
+            # (any type) at fill time; the page posts what it resolved
+            q = pids.get(label)
+            if q and eq:
+                sec["when"] = {"field": label, "key": q["key"], "path": path, "equals": eq}
+            continue
         sel = selects.get(label)
         if sel and eq in sel["options"]:
             sec["when"] = {"field": label, "key": sel["key"], "equals": eq}

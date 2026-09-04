@@ -1,6 +1,7 @@
 {% for sec in schema.sections %}
-<div class="es-card cl-sec{% if sec.collapsed %} cl-folded{% endif %}"{% if sec.when %} data-when-key="{{ sec.when.key }}" data-when-eq="{{ sec.when.equals }}"{% endif %}>
-  <h2><button type="button" class="cl-fold" aria-expanded="{% if sec.collapsed %}false{% else %}true{% endif %}">{{ sec.title }}</button>{% if sec.when %}<span class="cl-hint">shown when {{ sec.when.field }} = {{ sec.when.equals }}</span>{% endif %}</h2>
+<div class="es-card cl-sec{% if sec.collapsed %} cl-folded{% endif %}"{% if sec.when %} data-when-key="{{ sec.when.key }}" data-when-eq="{{ sec.when.equals }}"{% if sec.when.path %} data-when-path="{{ sec.when.path }}" data-when-url="{% url 'explore:lookup' part_id='PID' %}"{% endif %}{% endif %}>
+  <h2><button type="button" class="cl-fold" aria-expanded="{% if sec.collapsed %}false{% else %}true{% endif %}">{{ sec.title }}</button>{% if sec.when %}<span class="cl-hint">shown when {{ sec.when.field }}{% if sec.when.path %} › {{ sec.when.path }}{% endif %} = {{ sec.when.equals }}</span>{% endif %}</h2>
+  {% if sec.when.path %}<input type="hidden" name="w{{ forloop.counter0 }}" class="cl-when-val">{% endif %}
   <div class="cl-sec-body">
   {% if sec.grid %}
   <div class="cl-grid" style="grid-template-columns: repeat({{ sec.grid }}, minmax(0, 1fr));">

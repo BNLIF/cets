@@ -3,10 +3,34 @@
 // preview both include this once: section fold/unfold, and sections that
 // show only while a select field holds a given value.
 (function () {
+  // #132: values read off a scanned item — {"<PID>|<path>": string|null},
+  // fetched once per pair; unknown = the section stays hidden
+  var looked = {}, pending = {};
+  function lookup(sec, pid, path) {
+    var k = pid + "|" + path;
+    if (k in looked || pending[k]) return looked[k];
+    pending[k] = true;
+    fetch(sec.getAttribute("data-when-url").replace("PID", encodeURIComponent(pid)) +
+          "?path=" + encodeURIComponent(path))
+      .then(function (r) { return r.ok ? r.json() : { value: null }; })
+      .catch(function () { return { value: null }; })
+      .then(function (d) { looked[k] = d.value == null ? null : String(d.value); delete pending[k]; applyWhen(); });
+    return undefined;
+  }
   function applyWhen() {
     document.querySelectorAll(".cl-sec[data-when-key]").forEach(function (sec) {
       // the driving select lives among this section's siblings (same form /
       // same preview), never in another checklist on the page
+      var path = sec.getAttribute("data-when-path");
+      if (path) {
+        var inp = sec.parentNode.querySelector('input[name="' + sec.getAttribute("data-when-key") + '"]');
+        var pid = inp ? inp.value.trim().toUpperCase() : "";
+        var v = pid ? lookup(sec, pid, path) : null;
+        sec.querySelector(".cl-when-val").value = v == null ? "" : v;
+        sec.hidden = !(v != null && v === sec.getAttribute("data-when-eq"));
+        sec.querySelectorAll("[data-req]").forEach(function (i) { i.required = !sec.hidden; });
+        return;
+      }
       var sel = sec.parentNode.querySelector('select[name="' + sec.getAttribute("data-when-key") + '"]');
       sec.hidden = !(sel && sel.value === sec.getAttribute("data-when-eq"));
       // #131: a required box in a hidden section would silently block submit
@@ -16,6 +40,12 @@
   window.clApplyWhen = applyWhen;
   document.addEventListener("change", function (e) {
     if (e.target.tagName === "SELECT" && e.target.closest(".cl-sec")) applyWhen();
+  });
+  var whenT = null;
+  document.addEventListener("input", function (e) {   // a PID typed or scanned
+    if (e.target.tagName !== "INPUT" || !e.target.name || !e.target.closest(".cl-sec")) return;
+    if (!document.querySelector('.cl-sec[data-when-path][data-when-key="' + e.target.name + '"]')) return;
+    clearTimeout(whenT); whenT = setTimeout(applyWhen, 350);
   });
   document.addEventListener("click", function (e) {
     var b = e.target.closest && e.target.closest(".cl-fold");

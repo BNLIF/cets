@@ -23,6 +23,7 @@ urlpatterns = [
     path("search/api/", views.explore_search_api_view, name="search_api"),
     path("docs/", views.explore_docs_view, name="docs"),
     path("institutions/", views.explore_institutions_view, name="institutions"),
+    path("lookup/<str:part_id>/", views.explore_lookup_view, name="lookup"),
     path("scan/", views.explore_scan_view, name="scan"),
     path("scan/submit/", views.explore_scan_submit_view, name="scan_submit"),
     path("scan/feed/", views.explore_scan_feed_view, name="scan_feed"),

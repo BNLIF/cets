@@ -2833,6 +2833,57 @@ def explore_checklist_names_view(request, part_type_id):
         r["name"] for r in checklistforms.available(api, part_type_id)]})
 
 
+@login_not_required
+def explore_lookup_view(request, part_id):
+    """#132: one value off an item's HWDB record, by dotted path — the fill
+    page asks for it when a PID is scanned into a field that drives a
+    ``when`` rule, so a section can show for, say, edge CPA planes only.
+    The path is tried against the whole record, then the latest
+    ``specifications`` entry, then its ``DATA`` — so ``Side``, ``DATA.Side``
+    and ``specifications.DATA.Side`` all name the Item Specs value while
+    ``serial_number`` still reads the standard field. A numeric segment
+    indexes a list; a named one on a list takes its LAST entry (HWDB's
+    ``specifications`` is a history, newest last — the rule every spec read
+    here follows). ``{"value": null}`` for anything unresolved."""
+    path = (request.GET.get("path") or "").strip().strip(".")
+    inst = instance_of(request)
+    try:
+        bearer = mint_for(request)
+    except (FnalLinkRequired, FnalUnavailable):
+        return JsonResponse({"value": None}, status=401)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    try:
+        record = api.get_component(part_id).get("data") or {}
+    except requests.RequestException as e:
+        logger.info("lookup %s failed: %s", part_id, e)
+        return JsonResponse({"value": None})
+    spec = _walk(record, ["specifications"])
+    roots = [record, spec, _walk(spec, ["DATA"])]
+    segs = path.split(".") if path else []
+    node = next((v for v in (_walk(r, segs) for r in roots if r is not None)
+                 if v is not None), None)
+    if isinstance(node, (dict, list)):
+        node = json.dumps(node, ensure_ascii=False)
+    return JsonResponse({"value": None if node is None else str(node)})
+
+
+def _walk(node, segs):
+    """Follow dotted-path segments through dicts and lists (see
+    ``explore_lookup_view``); None when the path runs out."""
+    for seg in segs:
+        if isinstance(node, list) and not seg.isdigit() and node:
+            node = node[-1]                     # the latest entry
+        if isinstance(node, dict):
+            node = node.get(seg)
+        elif isinstance(node, list) and seg.isdigit() and int(seg) < len(node):
+            node = node[int(seg)]
+        else:
+            return None
+        if node is None:
+            return None
+    return node
+
+
 CHECKLIST_SKELETON = {
     "name": "",
     "test_type_name": "",
