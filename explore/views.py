@@ -2501,6 +2501,9 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
     """The whole submit pipeline (#95/#96/#103): photos → subcomponent links
     → item PATCH + location (standard HWDB fields) → to_spec fold → test
     record. Returns an error string or None."""
+    missing = checklistforms.unchecked_required(schema, request.POST)   # #131
+    if missing:
+        return "every step must be checked first: " + ", ".join(f"“{m}”" for m in missing)
     data = checklistforms.parse(schema, request.POST)
     err = _checklist_photos(request, api, part_id, name, schema, prev_td, data)
     if err:

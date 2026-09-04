@@ -9,6 +9,8 @@
       // same preview), never in another checklist on the page
       var sel = sec.parentNode.querySelector('select[name="' + sec.getAttribute("data-when-key") + '"]');
       sec.hidden = !(sel && sel.value === sec.getAttribute("data-when-eq"));
+      // #131: a required box in a hidden section would silently block submit
+      sec.querySelectorAll("[data-req]").forEach(function (i) { i.required = !sec.hidden; });
     });
   }
   window.clApplyWhen = applyWhen;

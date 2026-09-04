@@ -284,6 +284,7 @@
     <div class="ec-row g-steps" style="display:none;">
       <span class="ec-hint" style="flex:1 1 100%;">One step per line. Tab / Shift+Tab indents the current line (2 spaces = 1 level).</span>
       <textarea class="ff-steps" rows="3" placeholder="one step per line" style="flex:1 1 100%;"></textarea>
+      <label class="ec-check"><input type="checkbox" class="ff-reqall"> all steps required to submit</label>
     </div>
     <div class="ec-row g-static" style="display:none;">
       <input class="ff-note" placeholder="note text">
@@ -425,6 +426,7 @@
     $(".ff-rows", r).value = f.rows && f.rows.length ? JSON.stringify(f.rows) : "";   // #119
     syncTblBtn(r);
     $(".ff-steps", r).value = (f.steps || []).join("\n");
+    $(".ff-reqall", r).checked = !!f.require_all;                       // #131
     if (f.color) {                        // #115: the picker can't be empty —
       $(".ff-color", r).value = f.color;  // "no tint" is tracked on data-on
       $(".ff-color", r).dataset.on = "1";
@@ -914,9 +916,12 @@
       if (rows.length) f.rows = rows;
     }
     if (t === "select") f.options = list($(".ff-options", r).value, ",");
-    if (t === "steps") f.steps = $(".ff-steps", r).value.split("\n")   // keep the
-      .map(function (s) { return s.replace(/\s+$/, ""); })             // indent (#106)
-      .filter(Boolean);
+    if (t === "steps") {
+      f.steps = $(".ff-steps", r).value.split("\n")                     // keep the
+        .map(function (s) { return s.replace(/\s+$/, ""); })           // indent (#106)
+        .filter(Boolean);
+      if ($(".ff-reqall", r).checked) f.require_all = true;             // #131
+    }
     if (t === "link") {
       var pos = $(".ff-position", r).value.trim();
       if (pos) f.position = pos;

@@ -57,9 +57,9 @@
     <input class="cl-photo-note" name="{{ f.key }}-note" value="{{ f.existing.comment|default:'' }}" placeholder="comment" autocomplete="off" maxlength="500">
   </span>
 {% elif f.type == "steps" %}
-  <span class="cl-lab">{{ f.label }}</span>
+  <span class="cl-lab">{{ f.label }}{% if f.require_all %} <span class="cl-hint">all required</span>{% endif %}</span>
   <ol class="cl-steps">
-    {% for it in f.items %}<li{% if it.level %} class="cl-step-l{{ it.level }}"{% endif %}><label><input type="checkbox" name="{{ it.name }}"{% if it.done %} checked{% endif %}> {{ it.label }}</label></li>{% endfor %}
+    {% for it in f.items %}<li{% if it.level %} class="cl-step-l{{ it.level }}"{% endif %}><label><input type="checkbox" name="{{ it.name }}"{% if it.done %} checked{% endif %}{% if f.require_all %} required data-req{% endif %}> {{ it.label }}</label></li>{% endfor %}
   </ol>
 {% elif f.type == "imagemap" %}
   <span class="cl-lab">{{ f.label }}{% if f.type_id %} <span class="cl-hint">type {{ f.type_id }}</span>{% endif %}</span>

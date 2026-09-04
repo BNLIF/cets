@@ -371,6 +371,25 @@ def _norm_field(f: dict) -> dict | None:
                         if str(s).strip()]
         if not out["steps"]:
             return None
+        if f.get("require_all"):          # #131: every step before Submit
+            out["require_all"] = True
+    return out
+
+
+def unchecked_required(schema: dict, post) -> list[str]:
+    """#131: labels of ``require_all`` steps fields with a step still
+    unchecked — the server-side twin of the checkboxes' ``required``.
+    Sections hidden by an unmet ``when`` rule don't count, exactly as the
+    browser skips their controls."""
+    out = []
+    for sec in schema["sections"]:
+        w = sec.get("when")
+        if w and (post.get(w["key"]) or "") != w["equals"]:
+            continue
+        for f in (leaf for top in sec["fields"] for leaf in _row_leaves(top)):
+            if f["type"] == "steps" and f.get("require_all") and not all(
+                    post.get(f"{f['key']}-s{i}") for i in range(len(f["steps"]))):
+                out.append(f["label"])
     return out
 
 

@@ -1921,6 +1921,51 @@ class SectionGridTest(TestCase):
         self.assertIn('data-key="f0-1-1"', html)
 
 
+class StepsRequireAllTest(TestCase):
+    """#131: ``require_all`` on a steps field gates Submit to HWDB."""
+    SCHEMA = {"name": "S", "test_type_name": "S", "sections": [
+        {"title": "Gate", "fields": [{"type": "select", "label": "Mode", "options": ["A", "B"]}]},
+        {"title": "Proc", "fields": [{"type": "steps", "label": "Procedure",
+                                      "steps": ["Unwrap", "Inspect"], "require_all": True}]},
+        {"title": "Only B", "when": {"field": "Mode", "equals": "B"},
+         "fields": [{"type": "steps", "label": "Extra", "steps": ["X"], "require_all": True}]}]}
+
+    def test_normalize_keeps_the_flag_and_the_form_marks_boxes_required(self):
+        n = checklistforms.normalize(self.SCHEMA, "S")
+        f = n["sections"][1]["fields"][0]
+        self.assertTrue(f["require_all"])
+        user = get_user_model().objects.create_user("r", "r@r.io", "pw")
+        self.client.force_login(user)
+        m1, m2 = _mocked(_api(schema=self.SCHEMA))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('name="f1-0-s0" required data-req>', html)
+        self.assertIn("all required", html)
+        plain = checklistforms.normalize({**self.SCHEMA, "sections": [{"title": "P", "fields": [
+            {"type": "steps", "label": "L", "steps": ["a"]}]}]}, "S")
+        self.assertNotIn("require_all", plain["sections"][0]["fields"][0])
+
+    def test_server_side_check_skips_when_hidden_sections(self):
+        n = checklistforms.normalize(self.SCHEMA, "S")
+        self.assertEqual(checklistforms.unchecked_required(n, {"f0-0": "A", "f1-0-s0": "on"}),
+                         ["Procedure"])                       # Inspect unchecked; Extra hidden
+        self.assertEqual(checklistforms.unchecked_required(n, {"f0-0": "B", "f1-0-s0": "on", "f1-0-s1": "on"}),
+                         ["Extra"])                           # now visible and unchecked
+        self.assertEqual(checklistforms.unchecked_required(
+            n, {"f0-0": "B", "f1-0-s0": "on", "f1-0-s1": "on", "f2-0-s0": "on"}), [])
+
+    def test_submit_is_refused_until_all_steps_are_checked(self):
+        user = get_user_model().objects.create_user("s", "s@s.io", "pw")
+        self.client.force_login(user)
+        api = _api(schema=self.SCHEMA, test_types=("ES", "S"))
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"f0-0": "A", "f1-0-s0": "on"}, follow=True)
+            api.post_test.assert_not_called()
+            self.client.post(PAGE, {"f0-0": "A", "f1-0-s0": "on", "f1-0-s1": "on"})
+            api.post_test.assert_called_once()
+
+
 class LegacyTableGoldenTest(TestCase):
     """#119 back-compat contract: a table WITHOUT rows normalizes, parses,
     binds and renders exactly as before rows existed (snapshot taken on
