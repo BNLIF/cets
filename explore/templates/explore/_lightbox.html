@@ -28,6 +28,7 @@
   // or iframe needs ?inline=1 to VIEW rather than download (external
   // reference URLs pass through untouched)
   function lbInlineUrl(u) {
+    if (u.indexOf("blob:") === 0) return u;     // a just-picked photo, not the proxy
     if (new URL(u, location.href).origin !== location.origin || u.indexOf("inline=") !== -1) return u;
     return u + (u.indexOf("?") === -1 ? "?" : "&") + "inline=1";
   }

@@ -259,7 +259,7 @@ class ChecklistPageTest(TestCase):
         self.assertIn('value="pass"', html)                   # tri-state radios
         self.assertIn('type="file" id="f2-2" name="f2-2"', html)   # photo
         self.assertIn('cl-photo-cam" data-target="f2-2"', html)   # camera button
-        self.assertIn('<img class="cl-photo-prev cl-photo-new"', html)   # #127 preview slot
+        self.assertIn('<img class="cl-photo-prev cl-photo-new" alt="" data-lightbox', html)   # #127 preview opens the viewer
         self.assertIn('id="cl-cam-modal"', html)                     # #127 desktop camera
         self.assertIn("Unwrap", html)                         # steps
         self.assertIn("https://edms.cern.ch/x", html)         # static link
