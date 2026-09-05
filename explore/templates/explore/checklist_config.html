@@ -226,7 +226,7 @@
         <select class="fs-grid"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select></label>
       <button type="button" class="ec-del fs-layout" title="arrange this section's fields on the grid: drag cells, change spans, stack">&#9638; layout&hellip;</button>
       <label class="ec-inline"><input type="checkbox" class="fs-collapsed"> start collapsed</label>
-      <label class="ec-inline" title="a select field: the section shows only while it holds this option. A PID field: the scanned item&#8217;s stored value at the path must equal the value — the path is a key chain into the item&#8217;s HWDB record; a bare Item Specs key like Side works, as do DATA.Side, specifications.DATA.Side, serial_number or location.name">show only when
+      <label class="ec-inline" title="a select field: the section shows only while it holds this option. A PID field: the scanned item&#8217;s stored value at the path must equal the value — the path is a key chain into the item&#8217;s HWDB record; a bare Item Specs key like Side works, as do DATA.Side, specifications.DATA.Side, Warehouse.SKU (a key inside a list of entries), serial_number or location.name">show only when
         <select class="fs-whenf"><option value="">&mdash; always &mdash;</option></select>
         <span class="fs-whenwrap">= <select class="fs-wheneq"></select></span>
         <span class="fs-whenpwrap" style="display:none;">› <input class="fs-whenp" placeholder="Item Specs key, e.g. Side" style="width:220px;"> = <input class="fs-wheneqt" placeholder="value" style="width:110px;"></span></label>
@@ -1089,7 +1089,7 @@
       var t = $(".ff-type", r).value, label = $(".ff-label", r).value.trim();
       if (!label) return;
       if (t === "select") selects[label] = list($(".ff-options", r).value, ",");
-      if (t === "qr") pids[label] = true;
+      if (t === "qr" || t === "link") pids[label] = true;
     });
     $$("#clc-sections > .clc-sec").forEach(function (s) {
       var fsel = $(".fs-whenf", s), esel = $(".fs-wheneq", s);

@@ -69,7 +69,7 @@ and refreshes the preview.
   "pick H or J first, then see that variant's table and figure"). The select
   may sit in any section; the rule is dropped when the label/option doesn't
   match anything (a typo shows the section rather than hiding it).
-  `"when": {"field": "<qr label>", "path": "specifications.DATA.Row",
+  `"when": {"field": "<qr or link label>", "path": "specifications.DATA.Row",
   "equals": "North"}` (#132) reads the value off the item whose PID is
   scanned into that field — any type, one live HWDB read per PID via
   `lookup/<pid>/?path=` — and shows the section while it matches. The path
@@ -77,8 +77,10 @@ and refreshes the preview.
   record, then the latest `specifications` entry, then its `DATA` — so a
   bare `Side` (or `DATA.Side`) names an Item Specs value and
   `serial_number` / `location.name` read the standard fields; a named
-  segment on a list takes its latest entry (`specifications` is a history),
-  a numeric one indexes it; unresolved = hidden. Two sections with the same
+  segment on a list takes the newest entry holding that key — so
+  `specifications` (a history) reads its latest, and the iPad's ordered
+  blocks (`Warehouse: [{"Receipt Date": ..}, {"SKU": ..}, ..]`) resolve as
+  `Warehouse.SKU`; a numeric segment indexes a list; unresolved = hidden. Two sections with the same
   field and different values give "a different table per location". Hidden
   sections' inputs are simply left blank, so they're omitted from the
   submission; values typed before switching are kept in case you switch

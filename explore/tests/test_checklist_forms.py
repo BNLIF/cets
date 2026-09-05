@@ -2111,13 +2111,16 @@ class DataDrivenWhenTest(TestCase):
     """#132: a section's ``when`` keyed on a scanned item's stored data."""
     SCHEMA = {"name": "S", "test_type_name": "S", "sections": [
         {"title": "Id", "fields": [{"type": "qr", "label": "Plane PID"},
+                                   {"type": "link", "label": "Child PID"},
                                    {"type": "select", "label": "Mode", "options": ["A"]}]},
         {"title": "Edge", "when": {"field": "Plane PID", "path": "specifications.DATA.Row", "equals": "Edge"},
          "fields": [{"type": "steps", "label": "Edge steps", "steps": ["E1"], "require_all": True}]},
         {"title": "Bad", "when": {"field": "Mode", "path": "specifications.DATA.Row", "equals": "x"},
          "fields": [{"type": "text", "label": "T"}]},
         {"title": "NoVal", "when": {"field": "Plane PID", "path": "specifications.DATA.Row"},
-         "fields": [{"type": "text", "label": "U"}]}]}
+         "fields": [{"type": "text", "label": "U"}]},
+        {"title": "ByChild", "when": {"field": "Child PID", "path": "Warehouse.SKU", "equals": "20305"},
+         "fields": [{"type": "text", "label": "V"}]}]}
 
     def setUp(self):
         self.user = get_user_model().objects.create_user("w", "w@w.io", "pw")
@@ -2128,6 +2131,7 @@ class DataDrivenWhenTest(TestCase):
         secs = {s["title"]: s for s in n["sections"]}
         self.assertEqual(secs["Edge"]["when"], {"field": "Plane PID", "key": "f0-0",
                                                 "path": "specifications.DATA.Row", "equals": "Edge"})
+        self.assertEqual(secs["ByChild"]["when"]["key"], "f0-1")   # a link field drives a rule too
         self.assertNotIn("when", secs["Bad"])        # a path on a select → dropped
         self.assertNotIn("when", secs["NoVal"])      # no value → dropped
 
@@ -2159,6 +2163,23 @@ class DataDrivenWhenTest(TestCase):
                 self.assertEqual(self.client.get(f"/hw/dev/lookup/Z00100300005-00001/?path={short}").json(),
                                  {"value": "Edge"})
         api.get_component.assert_called_with("Z00100300005-00001")
+
+    def test_lookup_finds_a_key_inside_a_list_of_one_key_entries(self):
+        """Hajime 2026-09-05: D00599800007-00084's Warehouse block is
+        ``[{"Receipt Date": ..}, {"Customer": ..}, {"SKU": ..}, ..]`` — the
+        iPad's ordered key/value list — so the key must be searched for, not
+        read off the last entry."""
+        api = _api()
+        api.get_component.return_value = {"data": {"specifications": [{"DATA": {
+            "Warehouse": [{"Receipt Date": "2025-12-18"}, {"SKU": "20305.POO.ACC.XXX"},
+                          {"On Hand Primary": 3}]}}]}}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            for path in ("DATA.Warehouse.SKU", "Warehouse.SKU"):
+                self.assertEqual(self.client.get(f"/hw/dev/lookup/D00599800007-00084/?path={path}").json(),
+                                 {"value": "20305.POO.ACC.XXX"})
+            self.assertEqual(self.client.get("/hw/dev/lookup/D00599800007-00084/?path=Warehouse.Nope").json(),
+                             {"value": None})
 
     def test_server_side_require_all_reads_the_posted_resolution(self):
         n = checklistforms.normalize(self.SCHEMA, "S")

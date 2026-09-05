@@ -3051,9 +3051,11 @@ def explore_lookup_view(request, part_id):
     ``specifications`` entry, then its ``DATA`` — so ``Side``, ``DATA.Side``
     and ``specifications.DATA.Side`` all name the Item Specs value while
     ``serial_number`` still reads the standard field. A numeric segment
-    indexes a list; a named one on a list takes its LAST entry (HWDB's
-    ``specifications`` is a history, newest last — the rule every spec read
-    here follows). ``{"value": null}`` for anything unresolved."""
+    indexes a list; a named one on a list takes the NEWEST entry holding
+    that key — HWDB's ``specifications`` is a history, newest last, and the
+    iPad-style blocks (``Warehouse``, shipping checklists) are ordered lists
+    of one-key dicts, so ``Warehouse.SKU`` finds ``[.., {"SKU": ..}, ..]``.
+    ``{"value": null}`` for anything unresolved."""
     path = (request.GET.get("path") or "").strip().strip(".")
     inst = instance_of(request)
     try:
@@ -3080,9 +3082,10 @@ def _walk(node, segs):
     """Follow dotted-path segments through dicts and lists (see
     ``explore_lookup_view``); None when the path runs out."""
     for seg in segs:
-        if isinstance(node, list) and not seg.isdigit() and node:
-            node = node[-1]                     # the latest entry
-        if isinstance(node, dict):
+        if isinstance(node, list) and not seg.isdigit():
+            # the newest entry that has the key (history lists; ordered lists of one-key dicts)
+            node = next((d[seg] for d in reversed(node) if isinstance(d, dict) and seg in d), None)
+        elif isinstance(node, dict):
             node = node.get(seg)
         elif isinstance(node, list) and seg.isdigit() and int(seg) < len(node):
             node = node[int(seg)]

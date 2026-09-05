@@ -581,7 +581,7 @@ def _resolve_when(schema: dict) -> None:
     selects = {leaf["label"]: leaf for _, leaf in leaf_fields(schema)
                if leaf["type"] == "select"}
     pids = {leaf["label"]: leaf for _, leaf in leaf_fields(schema)
-            if leaf["type"] == "qr"}
+            if leaf["type"] in ("qr", "link")}
     for sec in schema["sections"]:
         w = sec.pop("when", None)
         if not w:
@@ -590,7 +590,7 @@ def _resolve_when(schema: dict) -> None:
         eq = str(w.get("equals") or "").strip()
         path = str(w.get("path") or "").strip().strip(".")
         if path:
-            # #132: ``{field: <qr label>, path: "specifications.DATA.Row",
+            # #132: ``{field: <qr/link label>, path: "specifications.DATA.Row",
             # equals: "North"}`` — the value is read off the scanned item
             # (any type) at fill time; the page posts what it resolved
             q = pids.get(label)
