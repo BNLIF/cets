@@ -1664,6 +1664,30 @@ class ImageMapLinkTest(TestCase):
             row.refresh_from_db()
             self.assertEqual(row.parent_part_id, "")
 
+    def test_link_field_links_live_like_one_slot(self):
+        """#135: a link field on an item's page carries the state URL, a
+        link/unlink button keyed on its position, and (no type_id) a pick
+        button whose type comes from the live state."""
+        schema = {"name": "CRU", "test_type_name": "CRU", "sections": [{"title": "S", "fields": [
+            {"type": "link", "label": "FEB", "position": "FEB1"},
+            {"type": "link", "label": "Any board", "type_id": "D05700300001"}]}]}
+        m1, m2 = _mocked(_api(schema=schema, test_types=("ES", "CRU")))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+            self.assertIn(f'class="cl-lnk" data-link-url="/hw/dev/checklist-map/{PART}/"', html)
+            self.assertIn('cl-pick" data-target="f0-0" data-free="1" data-slot="FEB1" hidden', html)
+            self.assertIn('cl-map-lnk" data-slot="FEB1" data-for="f0-0" hidden', html)
+            self.assertIn('class="cl-hint cl-lnk-in" data-for="f0-0"', html)
+            self.assertIn('cl-pick" data-target="f0-1" data-free="1" title=', html)     # typed: no live type
+            self.assertIn('cl-map-lnk" data-slot="" data-for="f0-1" hidden', html)        # unpositioned: first free
+        # no item (type preview) → a plain field, nothing to link into
+        from django.template.loader import render_to_string
+        n = checklistforms.normalize(schema, "CRU")
+        plain = render_to_string("explore/_checklist_field.html",
+                                 {"f": n["sections"][0]["fields"][0], "part_id": None})
+        self.assertNotIn("cl-lnk", plain)
+        self.assertNotIn("cl-map-lnk", plain)
+
     def test_occupied_named_position_fails_by_slot(self):
         api = self._api()
         api.get_subcomponents.return_value = {"data": [

@@ -136,7 +136,8 @@
 
   // #133: an imagemap that links sub-components shows the item's positions
   // live and a link/unlink button per scanned slot — one PATCH each, no
-  // submit needed (the submit still links whatever is left)
+  // submit needed (the submit still links whatever is left). A link field
+  // (.cl-lnk) is the same thing with one slot (its position) and no table.
   function esc(t) { var d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
   function csrf() { var i = document.querySelector('input[name="csrfmiddlewaretoken"]'); return i ? i.value : ""; }
   function mapState(map, d) {
@@ -144,8 +145,9 @@
     var linked = {};
     state.forEach(function (p) { if (p.part_id) linked[String(p.part_id).toUpperCase()] = p.position; });
     var n = state.filter(function (p) { return p.part_id; }).length;
-    fld.querySelector(".cl-map-count").textContent = n + " of " + state.length + " positions filled";
-    fld.querySelector(".cl-map-tbl tbody").innerHTML = state.length ? state.map(function (p) {
+    var count = fld.querySelector(".cl-map-count"), tbody = fld.querySelector(".cl-map-tbl tbody"), errBox = fld.querySelector(".cl-map-err");
+    if (count) count.textContent = n + " of " + state.length + " positions filled";
+    if (tbody) tbody.innerHTML = state.length ? state.map(function (p) {
       return "<tr" + (p.part_id && p.part_id === just ? ' class="now"' : "") + "><td>" + esc(p.child_type_name) +
         "</td><td>" + esc(p.position) + "</td>" +
         (p.part_id ? '<td class="mono">' + esc(p.part_id) + '</td><td><button type="button" class="cl-map-unl" data-pid="' +
@@ -157,9 +159,9 @@
       var msg = document.createElement("div");
       msg.className = "cl-map-slot-err";
       msg.textContent = d.error;
-      d.slotBtn.closest(".cl-map-slot").insertAdjacentElement("afterend", msg);
+      d.slotBtn.closest(".cl-map-slot, .cl-lnk").insertAdjacentElement("afterend", msg);
     }
-    fld.querySelector(".cl-map-err").textContent = d.error && !d.slotBtn ? d.error : "";
+    if (errBox) errBox.textContent = d.error && !d.slotBtn ? d.error : "";
     var wants = {}, holds = {};
     state.forEach(function (p) { wants[p.position] = p.child_type_id; holds[p.position] = p.part_id; });
     // an empty slot named like a position shows what already sits there
@@ -168,6 +170,7 @@
       if (inp && cur && !inp.value.trim()) {
         inp.value = cur;
         fld.querySelectorAll('.cl-map-dot[data-target="' + inp.id + '"]').forEach(function (d) { d.classList.add("on"); });
+        inp.dispatchEvent(new Event("input", { bubbles: true }));   // a when-rule on a link field follows
       }
     });
     // pick lists: a slot named like a position lists that position's type,
@@ -196,22 +199,30 @@
       b.disabled = !!wrong;
       b.textContent = on ? "unlink" : "link";
       b.title = on ? "in " + linked[pid] : wrong ? slot + " expects " + wants[slot] + " items" : "link into this item now";
+      var note = fld.querySelector('.cl-lnk-in[data-for="' + b.getAttribute("data-for") + '"]');
+      if (note) note.textContent = on ? "in " + linked[pid] : "";
     });
     map._state = d;
   }
+  var LINKERS = ".cl-map[data-link-url], .cl-lnk[data-link-url]";
   function mapCall(map, body) {
     var opts = { credentials: "same-origin" };
     if (body) { opts.method = "POST"; opts.body = body; opts.headers = { "X-CSRFToken": csrf() }; }
     return fetch(map.getAttribute("data-link-url"), opts)
       .then(function (r) { return r.json(); })
       .catch(function () { return { positions: (map._state || {}).positions || [], error: "HWDB not reachable" }; })
-      .then(function (d) { mapState(map, d); });
+      .then(function (d) {
+        mapState(map, d);
+        // every other linker on the page shows the same item — keep them in step (no error carried over)
+        document.querySelectorAll(LINKERS).forEach(function (o) { if (o !== map) mapState(o, { positions: d.positions }); });
+      });
   }
-  document.querySelectorAll(".cl-map[data-link-url]").forEach(function (m) { mapCall(m); });
+  var first = document.querySelector(LINKERS);
+  if (first) mapCall(first);   // one GET fills all of them
   document.addEventListener("click", function (e) {
     var b = e.target.closest && e.target.closest(".cl-map-lnk, .cl-map-unl");
     if (!b) return;
-    var map = b.closest(".cl-field").querySelector(".cl-map[data-link-url]");
+    var map = b.closest(".cl-field").querySelector(LINKERS);
     var fd = new FormData(), pid;
     if (b.classList.contains("cl-map-unl")) {
       pid = b.getAttribute("data-pid");
@@ -235,8 +246,8 @@
   });
   document.addEventListener("input", function (e) {   // typed/scanned → button follows
     var el = e.target;
-    if (!el.closest || !el.closest(".cl-map-list")) return;
-    var map = el.closest(".cl-field").querySelector(".cl-map[data-link-url]");
+    if (!el.closest || !el.closest(".cl-map-list, .cl-lnk")) return;
+    var map = el.closest(".cl-field").querySelector(LINKERS);
     if (map && map._state) { map._state.error = null; mapState(map, map._state); }   // editing clears a stale error
   });
 

@@ -37,11 +37,15 @@
   </select>
 {% elif f.type == "qr" or f.type == "link" %}
   <label class="cl-lab" for="{{ f.key }}">{{ f.label }}{% if f.type == "link" %} <span class="cl-hint">links a sub-component{% if f.position %} into “{{ f.position }}”{% endif %}</span>{% endif %}{% if f.type_id %} <span class="cl-hint">type {{ f.type_id }}</span>{% endif %}</label>
-  <span style="display:inline-flex; gap:8px; align-items:center; max-width:100%;">
+  {# a link field on an item's page links live like an imagemap slot: the container carries the state URL, its position is the slot #}
+  <span class="{% if f.type == "link" and part_id %}cl-lnk{% endif %}"{% if f.type == "link" and part_id %} data-link-url="{% url 'explore:checklist_map' part_id=part_id %}"{% endif %} style="display:inline-flex; gap:8px; align-items:center; max-width:100%; flex-wrap:wrap;">
     <input id="{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}" autocomplete="off"
       autocapitalize="characters" spellcheck="false"{% if f.type_id %} data-type-id="{{ f.type_id }}"{% endif %}>
     <button type="button" class="es-btn cl-scan" data-target="{{ f.key }}">&#9635; Scan</button>{% if f.type_id %}
-    <button type="button" class="es-btn cl-pick" data-target="{{ f.key }}"{% if f.type == "link" %} data-free="1"{% endif %} title="Pick from the type’s items">&#9776; Pick</button>{% endif %}
+    <button type="button" class="es-btn cl-pick" data-target="{{ f.key }}"{% if f.type == "link" %} data-free="1"{% endif %} title="Pick from the type’s items">&#9776; Pick</button>{% elif f.type == "link" and part_id %}
+    <button type="button" class="es-btn cl-pick" data-target="{{ f.key }}" data-free="1" data-slot="{{ f.position }}" hidden title="Pick from the type’s items">&#9776; Pick</button>{% endif %}{% if f.type == "link" and part_id %}
+    <button type="button" class="es-btn quiet cl-map-lnk" data-slot="{{ f.position }}" data-for="{{ f.key }}" hidden></button>
+    <span class="cl-hint cl-lnk-in" data-for="{{ f.key }}"></span>{% endif %}
   </span>
 {% elif f.type == "photo" %}
   <span class="cl-lab">{{ f.label }}</span>

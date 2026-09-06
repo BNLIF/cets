@@ -159,6 +159,8 @@
     border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 3px 11px; cursor: pointer; }
   .cl-map-err { color: var(--bad); font-size: 12.5px; margin-top: 6px; }
   .cl-map-slot-err { color: var(--bad); font-size: 12px; margin: -2px 0 2px 22px; }
+  .cl-lnk + .cl-map-slot-err { margin-left: 0; }
+  .cl-lnk-in:empty { display: none; }
   .cl-map-err:empty { display: none; }
   @media (max-width: 900px) { .cl-map-cols { grid-template-columns: 1fr; } }
   .cl-map-slot label { flex: 0 1 auto; white-space: nowrap; }
