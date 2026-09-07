@@ -125,6 +125,18 @@ class PackingCardRenderTest(TestCase):
         self.assertIn(f">{BOX}</a>", html)
         self.assertIn("My Sub Comp 2", html)
 
+    def test_item_page_offers_link_items_when_its_type_has_positions(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(f"/hw/dev/part/{GOOD}/").content.decode()
+        self.assertIn(f'href="/hw/dev/part/{GOOD}/pack/">Link items…</a>', html)
+        self.assertNotIn("<h2>Packing</h2>", html)          # no second card
+        api.get_component_type.return_value = {"status": "OK", "data": {"connectors": {}}}
+        with m1, m2:
+            html = self.client.get(f"/hw/dev/part/{GOOD}/").content.decode()
+        self.assertNotIn("Link items…", html)
+
     def test_item_page_without_a_box_shows_nothing(self):
         api = _api()
         m1, m2 = _mocked(api)
@@ -527,17 +539,95 @@ class PackPostTest(TestCase):
         self.assertIn("nothing to unlink", resp.content.decode())
 
     @override_settings(HWDB_WRITE_INSTANCES=["dev"])
-    def test_prod_and_non_shipping_are_forbidden(self):
+    def test_prod_is_forbidden(self):
         api = _api()
         m1, m2 = _mocked(api)
         with m1, m2:
             prod = self.client.post("/hw/part/D08120200001-00001/pack/",
                                     {"pid": [GOOD]})
-            nonship = self.client.post("/hw/dev/part/D05700200099-00007/pack/",
-                                       {"pid": [GOOD]})
         self.assertEqual(prod.status_code, 403)
-        self.assertEqual(nonship.status_code, 403)
         api.patch_subcomponents.assert_not_called()
+
+    def test_any_item_with_positions_links_on_the_same_page(self):
+        """#136: a non-shipping item whose type defines positions gets the
+        page with "item" wording and stamps the mirror parent itself."""
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get("/hw/dev/part/D05700200099-00007/pack/").content.decode()
+            self.assertIn("Link items into", html)
+            self.assertIn("Add to item", html)
+            self.assertIn("In the item", html)
+            self.assertNotIn("Add to box", html)
+            self.assertIn("Re-sync to refresh", html)       # mirror-only availability, no sweep
+            api._make_request.assert_not_called()
+            r = self.client.post("/hw/dev/part/D05700200099-00007/pack/", {"pid": [GOOD]})
+        self.assertEqual(r.status_code, 302)
+        api.patch_subcomponents.assert_called_once()
+        self.assertEqual(HwdbComponentEvent.objects.get(part_id=GOOD).parent_part_id,
+                         "D05700200099-00007")
+        api.get_locations.assert_not_called()          # no shipment row to refresh
+
+    def test_place_into_a_specific_position(self):
+        """#136 (Chao): F1/B2 of one type aren't interchangeable — the
+        contents pane links a typed PID into exactly that position."""
+        api = _api()
+        m1, m2 = _mocked(api)
+        item = "/hw/dev/part/D05700200099-00007/pack/"
+        with m1, m2:
+            html = self.client.get(item).content.decode()
+            self.assertIn('name="pid-Slot 2"', html)                      # empty → Link here
+            self.assertIn('name="place" value="Slot 2"', html)
+            self.assertIn('name="to-Slot 1"', html)                       # filled → move to…
+            self.assertIn("<option>Slot 2</option>", html)
+            self.assertNotIn("<option>Doc</option>", html)                # other type
+            r = self.client.post(item, {"place": "Slot 2", "pid-Slot 2": GOOD}, follow=True)
+        api.patch_subcomponents.assert_called_once_with("D05700200099-00007", {
+            "component": {"part_id": "D05700200099-00007"},
+            "subcomponents": {"Slot 1": IN_BOX, "Slot 2": GOOD, "Doc": None}})
+        self.assertIn(f"Linked {GOOD} into “Slot 2”", r.content.decode())
+
+    def test_place_refuses_wrong_type_and_occupied_positions(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        item = "/hw/dev/part/D05700200099-00007/pack/"
+        with m1, m2:
+            r1 = self.client.post(item, {"place": "Doc", "pid-Doc": GOOD}, follow=True)
+            r2 = self.client.post(item, {"place": "Slot 1", "pid-Slot 1": GOOD}, follow=True)
+            r3 = self.client.post(item, {"place": "Slot 2", "pid-Slot 2": ""}, follow=True)
+        self.assertIn(f"“Doc” takes {DOC_TYPE} items", r1.content.decode())
+        self.assertIn(f"“Slot 1” already holds {IN_BOX}", r2.content.decode())
+        self.assertIn("Type a PID first", r3.content.decode())
+        api.patch_subcomponents.assert_not_called()
+
+    def test_move_between_positions(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        item = "/hw/dev/part/D05700200099-00007/pack/"
+        with m1, m2:
+            r = self.client.post(item, {"move": "Slot 1", "to-Slot 1": "Slot 2"}, follow=True)
+        api.patch_subcomponents.assert_called_once_with("D05700200099-00007", {
+            "component": {"part_id": "D05700200099-00007"},
+            "subcomponents": {"Slot 1": None, "Slot 2": IN_BOX, "Doc": None}})
+        self.assertIn(f"Moved {IN_BOX} from “Slot 1” to “Slot 2”", r.content.decode())
+        self.assertEqual(HwdbComponentEvent.objects.get(part_id=IN_BOX).parent_part_id,
+                         "D05700200099-00007")
+
+    def test_box_page_keeps_auto_assign_only(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PACK).content.decode()
+        self.assertNotIn('name="place"', html)
+        self.assertNotIn("move to…", html)
+
+    def test_item_without_positions_is_forbidden(self):
+        api = _api()
+        api.get_component_type.return_value = {"status": "OK", "data": {"connectors": {}}}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            r = self.client.get("/hw/dev/part/D05700200099-00007/pack/")
+        self.assertEqual(r.status_code, 403)
 
     def test_picker_shows_box_contents_column(self):
         api = _api()

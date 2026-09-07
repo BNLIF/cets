@@ -1056,6 +1056,15 @@ def explore_part_view(request, part_id):
         a["label"] = _summary_label(a["image_name"])
     packing = (_packing_context(api, inst, ptid, detail["manifest"])
                if can_update_location else None)
+    # #136: any other item whose type defines positions links sub-components
+    # on the same page — the Assembly card offers it (no second card).
+    link_items_url = None
+    if not is_shipping and inst in settings.HWDB_WRITE_INSTANCES:
+        try:
+            if _box_connectors(api, ptid):
+                link_items_url = _rev(request, "explore:box_pack", args=[part_id])
+        except Exception as e:
+            logger.warning("connectors for %s failed: %s", ptid, e)
 
     # Every shipping sheet on the box (each checklist run appends one, both
     # naming eras) — the Pre-shipping card lists them in a newest-first
@@ -1119,6 +1128,7 @@ def explore_part_view(request, part_id):
         # item picker is its own page. None when writes are off or the
         # connectors fetch fails (the card just doesn't render).
         "packing": packing,
+        "link_items_url": link_items_url,
         "shipping_sheets": shipping_sheets,
         # Executive summaries already on this item (issue #53): attachments
         # matching the Dashboard's gate convention, newest first (the gate
@@ -1332,6 +1342,16 @@ def _refresh_box_quietly(api, instance, part_type_id, part_id):
         refresh_box(api, instance, part_type_id, part_id)
     except Exception as e:
         logger.warning("refresh_box(%s) failed: %s", part_id, e)
+
+
+def _after_subcomponent_write(api, instance, part_type_id, part_id, state: dict):
+    """Mirror upkeep after a subcomponent PATCH: a shipping container re-mirrors
+    its shipment row + members' parents (``refresh_box``); any other item
+    (#136) only stamps the members' parents from the state just written."""
+    if curation.is_shipping_type(instance, part_type_id):
+        _refresh_box_quietly(api, instance, part_type_id, part_id)
+    else:
+        _mirror_positions(instance, part_id, state)
 
 
 def _hwdb_error_detail(e) -> str:
@@ -1577,9 +1597,20 @@ def _pack_body_context(instance, part_id, ptid, connectors, current,
                               or connectors.get(pos) or "",
                  "part_id": current[pos]}
                 for pos in sorted(current, key=str)]
+    # #136: where a filled position's occupant could move — the free
+    # positions accepting its type (the contents pane's "move to" picker)
+    free_of = {}
+    for c in contents:
+        if not c["part_id"]:
+            free_of.setdefault(c["type_id"], []).append(c["position"])
+    for c in contents:
+        c["move_to"] = free_of.get(c["type_id"], []) if c["part_id"] else []
+    is_box = curation.is_shipping_type(instance, ptid)
     return {
         "part_id": part_id,
         "part_type_id": ptid,
+        "is_box": is_box,
+        "noun": "box" if is_box else "item",
         "groups": _pack_groups(instance, connectors, manifest, show_all),
         "contents": contents,
         "n_filled": sum(1 for c in contents if c["part_id"]),
@@ -1626,6 +1657,27 @@ def _refusal_detail(api, pid, detail) -> str:
     return str(detail)
 
 
+def _placement_error(inst, connectors, current, pos, pid, moving=False) -> str | None:
+    """Why ``pid`` can't go into exactly ``pos`` (#136), or None. A move
+    skips the status rule — the item is already linked here."""
+    if not re.fullmatch(r"[A-Z]\d{11}-\d{5}", pid or ""):
+        return "Type a PID first." if not moving else "Nothing to move."
+    if pos not in current:
+        return f"There is no “{pos}” position." if pos else "Pick a position."
+    if current[pos]:
+        return f"“{pos}” already holds {current[pos]} — unlink it first."
+    ctid = pid.rsplit("-", 1)[0]
+    if connectors.get(pos) and connectors[pos] != ctid:
+        return f"“{pos}” takes {connectors[pos]} items, not {ctid}."
+    if not moving:
+        if pid in current.values():
+            return f"{pid} is already in this item."
+        block = _procedure_status_block(inst, pid)
+        if block:
+            return f"{pid} was not linked — {block}."
+    return None
+
+
 def _scan_link(api, inst, box_pid, pid) -> tuple[bool, str]:
     """Scan-to-cart: link ONE scanned item into the box right away — the
     shopping-cart behavior. Returns (ok, message); the message shows on the
@@ -1638,11 +1690,12 @@ def _scan_link(api, inst, box_pid, pid) -> tuple[bool, str]:
     for m in manifest:
         if m["functional_position"] in current:
             current[m["functional_position"]] = m["part_id"]
+    noun = "box" if curation.is_shipping_type(inst, ptid) else "item"
     if pid in current.values():
-        return False, f"{pid} is already in this box."
+        return False, f"{pid} is already in this {noun}."
     ctid = pid.rsplit("-", 1)[0]
     if ctid not in set(connectors.values()):
-        return False, f"this box has no positions for {ctid} items."
+        return False, f"this {noun} has no positions for {ctid} items."
     free = [pos for pos in sorted(current, key=str)
             if current[pos] is None and connectors.get(pos) == ctid]
     if not free:
@@ -1661,7 +1714,7 @@ def _scan_link(api, inst, box_pid, pid) -> tuple[bool, str]:
         ok, detail = False, _hwdb_error_detail(e)
     if not ok:
         return False, f"not added — {_refusal_detail(api, pid, detail)}"
-    _refresh_box_quietly(api, inst, ptid, box_pid)
+    _after_subcomponent_write(api, inst, ptid, box_pid, {**current, pos: pid})
     return True, f"added to “{pos}”"
 
 
@@ -1669,7 +1722,10 @@ def _scan_link(api, inst, box_pid, pid) -> tuple[bool, str]:
 @fnal_login_required
 def explore_box_pack_view(request, part_id):
     """The packing page + endpoint (issue #63) — the iPad app's packing
-    step 2, via ``PATCH components/{pid}/subcomponents``.
+    step 2, via ``PATCH components/{pid}/subcomponents``. Since #136 the
+    same page links sub-components into ANY item whose type defines
+    functional positions (reached from the part page's Assembly card);
+    the copy says "box" for shipping containers and "item" otherwise.
 
     GET renders the item picker: one candidate group per child type with free
     slots (mirror rows with status + QC flags), plus an add-by-PID box for
@@ -1684,8 +1740,10 @@ def explore_box_pack_view(request, part_id):
     part_url = _rev(request, "explore:part", args=[part_id])
     pack_url = _rev(request, "explore:box_pack", args=[part_id])
     ptid = part_id.rsplit("-", 1)[0]
-    if inst not in settings.HWDB_WRITE_INSTANCES or not curation.is_shipping_type(inst, ptid):
+    if inst not in settings.HWDB_WRITE_INSTANCES:
         return HttpResponseForbidden("Packing is not enabled here.")
+    is_box = curation.is_shipping_type(inst, ptid)
+    noun = "box" if is_box else "item"
 
     try:
         bearer = mint_for(request)
@@ -1699,6 +1757,8 @@ def explore_box_pack_view(request, part_id):
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
     try:
         connectors = _box_connectors(api, ptid)
+        if not connectors and not is_box:
+            return HttpResponseForbidden("This type defines no functional positions.")
         manifest = current_manifest(api.get_subcomponents(part_id).get("data"))
         current = {pos: None for pos in connectors}
         for m in manifest:
@@ -1706,7 +1766,7 @@ def explore_box_pack_view(request, part_id):
                 current[m["functional_position"]] = m["part_id"]
     except requests.RequestException as e:
         logger.warning("packing: state fetch for %s failed: %s", part_id, e)
-        messages.error(request, f"Couldn’t read the box’s current state — {e}")
+        messages.error(request, f"Couldn’t read the {noun}’s current state — {e}")
         return redirect(part_url)
 
     # The "show all items" toggle (#84) rides on every request — the checkbox
@@ -1728,10 +1788,14 @@ def explore_box_pack_view(request, part_id):
         # Live availability check: two listing calls per child type stamp the
         # mirror's parent links + enabled flags, so a stale mirror doesn't
         # offer items HWDB would refuse at write time ("already in use" /
-        # "not yet available").
-        for ctid in sorted({c for c in connectors.values() if c}):
-            events.sweep_parents(api, inst, ctid)
-            events.sweep_enabled(api, inst, ctid)
+        # "not yet available"). Shipping only (Chao 2026-09-06): a CRU's
+        # child types run to 17k items (47 listing pages, ~45 s) — plain
+        # linking reads the mirror as is, Re-sync refreshes it, and HWDB
+        # still refuses an in-use item at write time.
+        if is_box:
+            for ctid in sorted({c for c in connectors.values() if c}):
+                events.sweep_parents(api, inst, ctid)
+                events.sweep_enabled(api, inst, ctid)
         # Phone-as-scanner hookup (issue #68): the picker polls the scan feed
         # for PIDs this user scans on their phone, starting AFTER the newest
         # row at page load so stale scans don't flood in. The scan URL (and
@@ -1743,7 +1807,7 @@ def explore_box_pack_view(request, part_id):
                       .filter(username=request.user.get_username())
                       .order_by("-id").values_list("id", flat=True).first()) or 0
         return render(request, "explore/pack.html", {
-            "active_nav": "shipments",
+            "active_nav": "shipments" if is_box else "hardware",
             "sidebar": navigation.sidebar_tree(inst, {}),
             **_pack_body_context(inst, part_id, ptid, connectors, current,
                                  show_all=show_all),
@@ -1764,6 +1828,9 @@ def explore_box_pack_view(request, part_id):
                                          state_, just_added=just_added,
                                          show_all=show_all))
 
+    def _mirror(state_):
+        _after_subcomponent_write(api, inst, ptid, part_id, state_)
+
     unlink = (request.POST.get("unlink") or "").strip()
     if unlink:
         removed = current.get(unlink)
@@ -1781,9 +1848,39 @@ def explore_box_pack_view(request, part_id):
         if body.get("status") != "OK":
             messages.error(request, f"HWDB rejected the packing change — {body.get('data') or body}")
             return _body(current) if is_htmx else redirect(part_url)
-        _refresh_box_quietly(api, inst, ptid, part_id)
+        _mirror({**current, unlink: None})
         messages.success(request, f"Unlinked {removed} from “{unlink}”.")
         return _body({**current, unlink: None}) if is_htmx else redirect(part_url)
+
+    # Explicit placement (#136, Chao: F1/B2 slots of one type aren't
+    # interchangeable on some hardware): ``place=<pos>`` links the PID typed
+    # in ``pid-<pos>`` into exactly that position; ``move=<pos>`` moves its
+    # occupant to ``to-<pos>``. Both PATCH the complete dict.
+    place = (request.POST.get("place") or "").strip()
+    move = (request.POST.get("move") or "").strip()
+    if place or move:
+        if place:
+            pos, pid = place, (request.POST.get(f"pid-{place}") or "").strip().upper()
+            after, what = {**current, pos: pid}, f"Linked {pid} into “{pos}”."
+        else:
+            pos, pid = (request.POST.get(f"to-{move}") or "").strip(), current.get(move) or ""
+            after, what = {**current, move: None, pos: pid}, f"Moved {pid} from “{move}” to “{pos}”."
+        err = _placement_error(inst, connectors, current, pos, pid, moving=bool(move))
+        if not err:
+            try:
+                body = api.patch_subcomponents(part_id, {"component": {"part_id": part_id},
+                                                         "subcomponents": after})
+                ok, detail = body.get("status") == "OK", body.get("data")
+            except requests.RequestException as e:
+                logger.warning("packing: place %s into %s failed: %s", pid, part_id, e)
+                ok, detail = False, _hwdb_error_detail(e)
+            err = None if ok else f"{pid} was not linked — {_refusal_detail(api, pid, detail)}"
+        if err:
+            messages.error(request, err)
+            return _body(current) if is_htmx else redirect(pack_url)
+        _mirror(after)
+        messages.success(request, what)
+        return _body(after, just_added=[pid]) if is_htmx else redirect(pack_url)
 
     # Add mode. Checked candidates + the add-by-PID box, deduped, order kept.
     back = pack_url  # keep the user on the picker when an add fails
@@ -1809,13 +1906,13 @@ def explore_box_pack_view(request, part_id):
             messages.error(request, f"“{pid}” doesn’t look like a PID.")
             return _fail()
         if pid in current.values():
-            messages.error(request, f"{pid} is already in this box.")
+            messages.error(request, f"{pid} is already in this {noun}.")
             return _fail()
         ctid = pid.rsplit("-", 1)[0]
         free = free_by_type.get(ctid)
         if free is None:
             messages.error(request,
-                           f"This box has no positions for {ctid} items ({pid}).")
+                           f"This {noun} has no positions for {ctid} items ({pid}).")
             return _fail()
         if not free:
             messages.error(request,
@@ -1850,11 +1947,11 @@ def explore_box_pack_view(request, part_id):
             failed.append((pid, _refusal_detail(api, pid, detail)))
 
     if added:
-        _refresh_box_quietly(api, inst, ptid, part_id)
+        _mirror(state)
         messages.success(request, f"Added {len(added)} item(s): {', '.join(added)}.")
         # Feed (#88): per-item adds would be noisy — record only the moment
         # the box becomes full (every position holds an item).
-        if state and all(state.values()):
+        if is_box and state and all(state.values()):
             activity.log(inst, ActivityEvent.KIND_PACK,
                          f"{part_id} fully packed — all {len(state)} "
                          f"position(s) filled",
@@ -1915,8 +2012,7 @@ def explore_scan_submit_view(request):
     box = (request.POST.get("box") or "").strip()
     ok, result = None, ""
     if box:
-        if (not re.fullmatch(r"[A-Z]\d{11}-\d{5}", box)
-                or not curation.is_shipping_type(inst, box.rsplit("-", 1)[0])):
+        if not re.fullmatch(r"[A-Z]\d{11}-\d{5}", box):
             return JsonResponse({"error": "not a packable box"}, status=422)
         try:
             bearer = mint_for(request)

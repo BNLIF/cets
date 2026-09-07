@@ -1,5 +1,5 @@
 {% extends 'explore/base.html' %}
-{% block title %}Pack {{ part_id }} · HWDB Explorer{% endblock %}
+{% block title %}{% if is_box %}Pack{% else %}Link into{% endif %} {{ part_id }} · HWDB Explorer{% endblock %}
 
 {% block content %}
 <style>
@@ -22,6 +22,10 @@
     background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm);
     padding: 3px 11px; cursor: pointer; }
   .pk-unlink:hover { border-color: var(--rule-hard); }
+  .pk-act { white-space: nowrap; }
+  .pk-act input, .pk-act select { font: inherit; font-size: 12px; color: var(--ink); background: var(--surface);
+    border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 3px 6px; margin-right: 6px; }
+  .pk-act input { font-family: var(--font-mono); width: 150px; }
   @media (max-width: 1000px) { .pk-cols { grid-template-columns: 1fr; } .pk-contents { position: static; } }
 
   .pk-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
@@ -78,13 +82,13 @@
 
 <div class="pk-page">
   <div class="pk-crumbs">
-    <a href="{% url 'explore:shipments' %}">Shipments</a>
+    {% if is_box %}<a href="{% url 'explore:shipments' %}">Shipments</a>{% else %}<a href="{% url 'explore:home' %}">Explorer</a>{% endif %}
     <span class="sep">›</span><a href="{% url 'explore:part' part_id=part_id %}">{{ part_id }}</a>
-    <span class="sep">›</span>Add items
+    <span class="sep">›</span>{% if is_box %}Add items{% else %}Link items{% endif %}
   </div>
 
-  <h1>Add items to <span class="mono">{{ part_id }}</span></h1>
-  <p class="pk-sub">Pick items below (or type/scan PIDs) and they’ll be linked into the box’s
+  <h1>{% if is_box %}Add items to{% else %}Link items into{% endif %} <span class="mono">{{ part_id }}</span></h1>
+  <p class="pk-sub">Pick items below (or type/scan PIDs) and they’ll be linked into the {{ noun }}’s
     free positions in the {{ hwdb_instance }} HWDB. Only the statuses the Shipping Procedure
     allows to be linked (In Fabrication, Waiting on QA/QC Tests, Passed All, Use As Is) can be
     picked — tick “show all items” to also see the rest, for information only. Items inside
@@ -102,7 +106,7 @@
         Open <a class="mono" href="{{ scan_url }}">{{ scan_url }}</a> on your phone (scan this QR code with
         the camera app). This page is listening as <strong>{{ user.get_username }}</strong> — the phone must
         be signed in as the same user (the scan page shows who it's scanning as), or its scans won't appear
-        here. Each label you scan is <strong>added to this box immediately</strong>; anything that can't be
+        here. Each label you scan is <strong>added to this {{ noun }} immediately</strong>; anything that can't be
         added is flagged on the phone and in the log below.
         <div id="pk-scan-status" class="pk-hint" style="margin-top:6px;">Listening for scans…</div>
         <ul id="pk-scan-log" style="list-style:none; margin:4px 0 0; padding:0; font-size:12px; font-family:var(--font-mono);"></ul>

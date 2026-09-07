@@ -43,7 +43,7 @@ without a page reload. {% endcomment %}
           <div class="pk-positions"><span class="pk-pos-label">Free positions:</span>
             {% for p in g.positions %}<span class="pk-pos">{{ p }}</span>{% endfor %}</div>
           <p class="pk-free">{{ g.n_free }} free position(s) for this type
-            · {{ g.total }} free candidate item(s) in the mirror{% if g.total > g.candidates|length %} (first {{ g.candidates|length }} listed — add others by PID below){% endif %}.</p>
+            · {{ g.total }} free candidate item(s) in the mirror{% if g.total > g.candidates|length %} (first {{ g.candidates|length }} listed — add others by PID below){% endif %}.{% if not is_box %} Availability comes from the mirror — Re-sync to refresh.{% endif %}</p>
           <pre class="pk-sync-log"></pre>
           {% if g.candidates %}
           <div class="pk-scroll">
@@ -67,7 +67,7 @@ without a page reload. {% endcomment %}
             </table>
           </div>
           <div class="pk-actions">
-            <button type="submit" class="pk-submit">Add to box</button>
+            <button type="submit" class="pk-submit">Add to {{ noun }}</button>
           </div>
           {% else %}
           <div class="pk-empty">No candidates in the mirror yet — sync this type’s items first, or add by PID below.</div>
@@ -87,7 +87,7 @@ without a page reload. {% endcomment %}
             <input id="pk-manual-input" name="manual" placeholder="e.g. D08100100004-00123, D08100100004-00124">
           </div>
           <div class="pk-actions">
-            <button type="submit" class="pk-submit">Add to box</button>
+            <button type="submit" class="pk-submit">Add to {{ noun }}</button>
             <span class="pk-hint">Items are assigned to free positions automatically and linked one by one —
               an item HWDB refuses (e.g. already inside an assembly the mirror can’t see) is reported
               individually and doesn’t block the others.</span>
@@ -95,9 +95,9 @@ without a page reload. {% endcomment %}
         </div>
       </form>
       {% else %}
-      <div class="pk-group"><div class="pk-empty">No free positions left in this box — unlink something on the
-        <a href="{% url 'explore:part' part_id=part_id %}">box page</a> first, or
-        <a href="{% url 'explore:box_type' part_type_id=part_type_id %}">add positions to the box type</a>.</div></div>
+      <div class="pk-group"><div class="pk-empty">No free positions left in this {{ noun }} — unlink something on the
+        <a href="{% url 'explore:part' part_id=part_id %}">{{ noun }} page</a> first{% if is_box %}, or
+        <a href="{% url 'explore:box_type' part_type_id=part_type_id %}">add positions to the box type</a>{% endif %}.</div></div>
       {% endif %}
     </div>
 
@@ -107,7 +107,7 @@ without a page reload. {% endcomment %}
           class="pk-group pk-contents">
       {% csrf_token %}
       {% if show_all %}<input type="hidden" name="show_all" value="1">{% endif %}
-      <h2>In the box <span class="mono">{{ n_filled }} of {{ contents|length }} positions filled</span></h2>
+      <h2>In the {{ noun }} <span class="mono">{{ n_filled }} of {{ contents|length }} positions filled</span></h2>
       <table class="pk-table">
         <thead><tr><th>Type</th><th>Position</th><th>Item</th><th></th></tr></thead>
         <tbody>
@@ -117,11 +117,14 @@ without a page reload. {% endcomment %}
             <td>{{ c.position }}</td>
             {% if c.part_id %}
             <td class="mono"><a href="{% url 'explore:part' part_id=c.part_id %}" target="_blank" rel="noopener">{{ c.part_id }}</a></td>
-            <td><button class="pk-unlink" name="unlink" value="{{ c.position }}"
-                        title="Remove {{ c.part_id }} from this box">Unlink</button></td>
+            <td class="pk-act"><button class="pk-unlink" name="unlink" value="{{ c.position }}"
+                        title="Remove {{ c.part_id }} from this {{ noun }}">Unlink</button>{% if not is_box and c.move_to %}
+              {# positions of one type aren't always interchangeable (F1 ≠ B2): move the occupant to a specific free one #}
+              <select name="to-{{ c.position }}" title="Move {{ c.part_id }} to another position" onchange="if (this.value) this.form.requestSubmit(this.nextElementSibling)">
+                <option value="">move to…</option>{% for p in c.move_to %}<option>{{ p }}</option>{% endfor %}</select><button hidden name="move" value="{{ c.position }}"></button>{% endif %}</td>
             {% else %}
             <td class="pk-slot-empty">— empty</td>
-            <td></td>
+            <td class="pk-act">{% if not is_box %}<input name="pid-{{ c.position }}" placeholder="{{ c.type_id }}-00000" autocomplete="off" autocapitalize="characters" spellcheck="false" title="Link a specific item into “{{ c.position }}”"><button class="pk-unlink" name="place" value="{{ c.position }}" title="Link the typed item into “{{ c.position }}”">Link here</button>{% endif %}</td>
             {% endif %}
           </tr>
         {% endfor %}

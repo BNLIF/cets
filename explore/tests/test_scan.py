@@ -157,8 +157,9 @@ class ScanEndpointsTest(TestCase):
         self.assertIn("not one the Shipping Procedure allows", body["message"])
         api.patch_subcomponents.assert_not_called()
 
-    def test_submit_with_unpackable_box_is_rejected(self):
-        resp = self.client.post(SUBMIT, {"text": PID, "box": "D08100100004-00001"})
+    def test_submit_with_malformed_box_is_rejected(self):
+        # #136: any item with positions may be a scan target — only a non-PID is refused up front
+        resp = self.client.post(SUBMIT, {"text": PID, "box": "not-a-pid"})
         self.assertEqual(resp.status_code, 422)
         self.assertEqual(PackScan.objects.count(), 0)
 

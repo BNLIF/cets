@@ -504,7 +504,7 @@
 
   {# Full width below the grid — the assembly/connections table is the widest pane on the page. #}
   <div class="sd-card">
-    <h2>{% if detail.is_cable %}Connections{% else %}Assembly{% endif %} ({{ detail.manifest|length }})</h2>
+    <h2>{% if detail.is_cable %}Connections{% else %}Assembly{% endif %} ({{ detail.manifest|length }}){% if link_items_url %} <a class="pk-link" style="margin-left:10px;" href="{{ link_items_url }}">Link items…</a>{% endif %}</h2>
     <div class="tbl-scroll">
     <table class="sd-table asm-table" data-assembly-base="{% url 'explore:assembly' part_id='__PID__' %}">
       <thead><tr><th>Part</th><th>Type</th><th>Position</th><th>Status</th></tr></thead>
