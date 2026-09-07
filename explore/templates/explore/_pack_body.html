@@ -107,6 +107,8 @@ without a page reload. {% endcomment %}
           class="pk-group pk-contents">
       {% csrf_token %}
       {% if show_all %}<input type="hidden" name="show_all" value="1">{% endif %}
+      {# "move to…" sets this to the source position, then submits — htmx ignores a button passed to requestSubmit #}
+      <input type="hidden" name="move" value="">
       <h2>In the {{ noun }} <span class="mono">{{ n_filled }} of {{ contents|length }} positions filled</span></h2>
       <table class="pk-table">
         <thead><tr><th>Type</th><th>Position</th><th>Item</th><th></th></tr></thead>
@@ -120,8 +122,8 @@ without a page reload. {% endcomment %}
             <td class="pk-act"><button class="pk-unlink" name="unlink" value="{{ c.position }}"
                         title="Remove {{ c.part_id }} from this {{ noun }}">Unlink</button>{% if not is_box and c.move_to %}
               {# positions of one type aren't always interchangeable (F1 ≠ B2): move the occupant to a specific free one #}
-              <select name="to-{{ c.position }}" title="Move {{ c.part_id }} to another position" onchange="if (this.value) this.form.requestSubmit(this.nextElementSibling)">
-                <option value="">move to…</option>{% for p in c.move_to %}<option>{{ p }}</option>{% endfor %}</select><button hidden name="move" value="{{ c.position }}"></button>{% endif %}</td>
+              <select name="to-{{ c.position }}" title="Move {{ c.part_id }} to another position" onchange="if (this.value) { this.form.elements.move.value = '{{ c.position|escapejs }}'; this.form.requestSubmit(); }">
+                <option value="">move to…</option>{% for p in c.move_to %}<option>{{ p }}</option>{% endfor %}</select>{% endif %}</td>
             {% else %}
             <td class="pk-slot-empty">— empty</td>
             <td class="pk-act">{% if not is_box %}<input name="pid-{{ c.position }}" placeholder="{{ c.type_id }}-00000" autocomplete="off" autocapitalize="characters" spellcheck="false" title="Link a specific item into “{{ c.position }}”"><button class="pk-unlink" name="place" value="{{ c.position }}" title="Link the typed item into “{{ c.position }}”">Link here</button>{% endif %}</td>
