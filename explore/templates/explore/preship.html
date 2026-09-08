@@ -125,7 +125,6 @@
       <div class="ps-grid">
         <label>QA representative name <input type="text" name="qa_rep_name" value="{{ saved.qa_rep_name|default:qa_rep_default }}"></label>
         <label>QA representative email(s) <input type="text" name="qa_rep_email" value="{{ saved.qa_rep_email|default:'' }}" placeholder="comma-separated"></label>
-        <label style="grid-column:1/-1;">Test information <input type="text" name="test_info" value="{{ saved.test_info|default:'' }}" placeholder="what QC was performed / where recorded"></label>
       </div>
 
     {% elif scene == 3 %}

@@ -92,8 +92,7 @@ def _mocked(api):
 
 
 SCENE_DATA = {
-    2: {"qa_rep_name": "QA Rep", "qa_rep_email": "qa@x.org, qa2@x.org",
-        "test_info": "RoomT QC"},
+    2: {"qa_rep_name": "QA Rep", "qa_rep_email": "qa@x.org, qa2@x.org"},
     3: {"approver_name": "POC", "approver_email": "poc@x.org"},
     4: {"shipping_service_type": "International", "hts_code": "8543.70",
         "shipment_origin": "BNL", "shipment_destination": "SURF",
@@ -267,7 +266,6 @@ class PatchBuildTest(TestCase):
         self.assertEqual(d["FD Logistics team acknoledgement (name)"], "FD Log")  # typo kept
         self.assertEqual(d["Visual Inspection (YES = no damage)"], "YES")
         self.assertEqual(d["HTS code"], "8543.70")       # International keeps it
-        self.assertEqual(d["QA/QC related info Line 1"], "RoomT QC")  # #80
         self.assertEqual(d["Image ID for this Shipping Sheet"], "img7")
         self.assertEqual(checklists.sub_pids(info), [{"FEB (FEB1)": "P-1"}])
 
@@ -296,8 +294,6 @@ class PatchBuildTest(TestCase):
         self.assertRegex(filename,
                          rf"^Notification_{BOX}_hajime_\d{{4}}-\d{{2}}-\d{{2}}-\d{{2}}-\d{{2}}\.csv$")
         self.assertIn("Freight Forwarder name,FF Inc", text)
-        self.assertIn("QA/QC related information for this shipment can be "
-                      "found here,RoomT QC", text)  # #80
         self.assertIn("DUNE PID," + BOX, text)
         self.assertIn("P-1,FEB,FEB1", text)
         pdf = checklists.build_label_pdf(BOX, info, "Development HWDB", None,

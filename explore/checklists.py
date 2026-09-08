@@ -113,9 +113,9 @@ def clean_scene(scene: int, is_surf: bool, post) -> tuple[dict, str | None]:
         return {"confirm_list": True}, None
 
     if scene == 2:
-        d = {k: g(k) for k in ("qa_rep_name", "qa_rep_email", "test_info")}
+        d = {k: g(k) for k in ("qa_rep_name", "qa_rep_email")}
         if not all(d.values()):
-            return d, "QA rep name, email and test info are all required."
+            return d, "QA rep name and email are required."
         return d, None
 
     if scene == 3:
@@ -598,11 +598,6 @@ def build_csv(checklist, info: dict, username: str = "") -> tuple[str, str]:
             ["Shipment's origin", p4a.get("shipment_origin", "")],
             ["HTS code", p4a.get("hts_code", "")],
             [],
-            # Scene 2's test info — in the procedure's CSV example (p.8)
-            # but missing from the Dashboard's CSV (#80).
-            ["QA/QC related information for this shipment can be found here",
-             ws.get("PreShipping2", {}).get("test_info", "")],
-            [],
         ])
     rows.extend([
         ["System Name (ID)", f"{info.get('system_name', '')} ({info.get('system_id', '')})"],
@@ -772,8 +767,7 @@ def _emails(v: str) -> list[str]:
 
 def build_checklist_dict(checklist, info: dict, image_id) -> dict:
     """The ``Pre-Shipping Checklist`` spec dict — the Dashboard's keys
-    (typos included), SURF and non-SURF variants, plus the "QA/QC related
-    info Line 1" key the procedure requires but the Dashboard drops (#80)."""
+    (typos included), SURF and non-SURF variants."""
     ws = checklist.state
     p2, p3 = ws.get("PreShipping2", {}), ws.get("PreShipping3", {})
     p4a, p4b = ws.get("PreShipping4a", {}), ws.get("PreShipping4b", {})
@@ -797,9 +791,6 @@ def build_checklist_dict(checklist, info: dict, image_id) -> dict:
             "POC name": p3.get("approver_name"),
             "POC Email": _emails(p3.get("approver_email", "")),
             **common_head,
-            # Scene 2's test info goes into the spec (procedure p.11) —
-            # the Dashboard collects it but never uploads it (#80).
-            "QA/QC related info Line 1": p2.get("test_info"),
             "HTS code": (p4a.get("hts_code")
                          if p4a.get("shipping_service_type") != "Domestic" else None),
             "Origin of this shipment": p4a.get("shipment_origin"),
