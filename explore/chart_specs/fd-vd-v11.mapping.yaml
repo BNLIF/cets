@@ -6,7 +6,7 @@
 # Grow this as consortia register types; the audit command (#59) reports
 # unmapped chart nodes and candidate matches.
 #
-# Node ids are the stable slugs from fd-vd-v10.yaml (NOT labels — labels
+# Node ids are the stable slugs from fd-vd-v11.yaml (NOT labels — labels
 # duplicate: the two "Adapter board (12)" boxes are different types).
 # Orientation: the BDE/CE subtree (inst-crp-2, cru-2, *-2 boards) reads the
 # BOTTOM CRPs (system 56); the TDE-side Inst. CRP subtree reads the TOP
@@ -19,7 +19,7 @@ instances:
     cold-adc: [D08100200002]                # ColdADC P2 Prod
     cold-data: [D08100300003]               # COLDATA E4 Prod
     femb: [D08101100041]                    # FEMB FD-VD MiniSAS
-    ce-box: [D08101600011]                  # CE Box FD-VD
+    ce-box-assembly: [D08101600011]                  # CE Box FD-VD
     patch-panel: [D08101900001]             # CRU Patch panel
     bde-signal-cable: [D08102100012]        # Cold signal cable FD-VD SAMTEC long
     bde-short-signal-cable: [D08102100021]  # Cold signal cable CRU MiniSAS short
@@ -96,7 +96,7 @@ instances:
     cold-adc: [D08100200001, D08100200002, D08100200003]
     cold-data: [D08100300001, D08100300003]
     femb: [D08100400002, D08101100021]      # FD2 MINISAS versions
-    ce-box: [D08100600002]                  # FD2 CE box version 1
+    ce-box-assembly: [D08100600002]                  # FD2 CE box version 1
     patch-panel: [D08101900001]             # CRP Patch panel
     bde-signal-cable: [D08102100012]        # SAMTEC cold signal long FD2
     bde-short-signal-cable: [D08102100011]  # SAMTEC cold signal short FD2

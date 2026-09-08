@@ -133,11 +133,13 @@ def _build(chart_id: str, spec: dict, overlay: dict | None = None) -> dict:
         annotations = []
     max_x, max_y = size
 
+    if overlay:
+        _place_labels_around_insets(nodes)
     for n in nodes.values():
         n["vertical"] = n["h"] > 1.8 * n["w"]
         # Shrink the label font when it would overflow the box (PDF boxes are
         # not sized to our font); textLength pins the fit exactly.
-        avail = (n["h"] if n["vertical"] else n["w"]) - 6
+        avail = (n.get("label_w") or (n["h"] if n["vertical"] else n["w"])) - 6
         est = CHAR_W * len(n["label"])  # width at font-size 10
         if est > avail > 0:
             n["font"] = round(max(7.0, 10.0 * avail / est), 1)
@@ -198,11 +200,33 @@ def _build(chart_id: str, spec: dict, overlay: dict | None = None) -> dict:
         "width": max_x + (0 if overlay else MARGIN),
         "height": max_y + (0 if overlay else MARGIN),
         "bands": bands,
-        "boxes": [n for n in nodes.values()],
+        # Larger boxes first so a box drawn on top of a wider one (the PDS
+        # flange's sub-flanges) stays visible.
+        "boxes": sorted(nodes.values(), key=lambda n: -n["w"] * n["h"]),
         "annotations": annotations,
         "arrows": arrows,
         "arrow_colors": sorted({(a["color_key"], a["color"]) for a in arrows}),
     }
+
+
+def _place_labels_around_insets(nodes):
+    """A box that has other boxes drawn inside it (the chart's PDS flange bar
+    carries its sub-flanges) gets its label centred on the widest uncovered
+    horizontal gap instead of under an inset; ``lx``/``label_w`` override the
+    default centre and fit width."""
+    for n in nodes.values():
+        x2, y2 = n["x"] + n["w"], n["y"] + n["h"]
+        insets = [m for m in nodes.values() if m is not n
+                  and m["x"] >= n["x"] - 1 and m["x"] + m["w"] <= x2 + 1
+                  and m["y"] >= n["y"] - 1 and m["y"] + m["h"] <= y2 + 1]
+        if not insets:
+            continue
+        edges = [n["x"]] + sorted(v for m in insets for v in (m["x"], m["x"] + m["w"])) + [x2]
+        gaps = [(b - a, a, b) for a, b in zip(edges[::2], edges[1::2])]
+        gw, ga, gb = max(gaps)
+        if gw > 8:
+            n["lx"] = round((ga + gb) / 2, 1)
+            n["label_w"] = gw
 
 
 def _overlay_layout(chart_id, nodes, parent, overlay):

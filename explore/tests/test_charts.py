@@ -19,14 +19,14 @@ def _by_label(chart, label):
 
 
 class ChartSpecTest(TestCase):
-    def test_fd_vd_v10_is_listed(self):
-        self.assertIn("fd-vd-v10", charts.chart_ids())
+    def test_fd_vd_v11_is_listed(self):
+        self.assertIn("fd-vd-v11", charts.chart_ids())
         # overlay files are not charts of their own
-        self.assertNotIn("fd-vd-v10.layout", charts.chart_ids())
-        self.assertNotIn("fd-vd-v10.mapping", charts.chart_ids())
+        self.assertNotIn("fd-vd-v11.layout", charts.chart_ids())
+        self.assertNotIn("fd-vd-v11.mapping", charts.chart_ids())
 
     def test_svg_chart_shape(self):
-        chart = charts.svg_chart("fd-vd-v10")
+        chart = charts.svg_chart("fd-vd-v11")
         self.assertGreater(chart["width"], 0)
         self.assertGreater(chart["height"], 0)
         self.assertTrue(chart["boxes"])
@@ -34,28 +34,28 @@ class ChartSpecTest(TestCase):
         self.assertTrue(chart["bands"])
 
     def test_overlay_places_boxes_at_pdf_positions(self):
-        chart = charts.svg_chart("fd-vd-v10")
+        chart = charts.svg_chart("fd-vd-v11")
         femb = _by_label(chart, "FEMB")
-        self.assertAlmostEqual(femb["x"], 717.0, places=0)
-        self.assertAlmostEqual(femb["y"], 912.4, places=0)
+        self.assertAlmostEqual(femb["x"], 729.9, places=0)
+        self.assertAlmostEqual(femb["y"], 924.8, places=0)
         self.assertEqual((chart["width"], chart["height"]), (1920, 1080))
 
     def test_overlay_band_strips_at_pdf_positions(self):
-        chart = charts.svg_chart("fd-vd-v10")
+        chart = charts.svg_chart("fd-vd-v11")
         mez = next(b for b in chart["bands"] if b["label"] == "Mezzanine racks")
-        self.assertAlmostEqual(mez["y"], 123.8, places=0)
+        self.assertAlmostEqual(mez["y"], 121.5, places=0)
 
     def test_cable_edges_route_with_arrowheads(self):
-        chart = charts.svg_chart("fd-vd-v10")
+        chart = charts.svg_chart("fd-vd-v11")
         cable = next(a for a in chart["arrows"] if a["color"] == "#ff0000")
         self.assertTrue(cable["marker"])
         self.assertGreaterEqual(len(cable["points"]), 2)
         self.assertIn(("ff0000", "#ff0000"), chart["arrow_colors"])
 
     def test_long_labels_shrink_to_fit_their_box(self):
-        chart = charts.svg_chart("fd-vd-v10")
+        chart = charts.svg_chart("fd-vd-v11")
         for box in chart["boxes"]:
-            avail = (box["h"] if box["vertical"] else box["w"]) - 6
+            avail = (box.get("label_w") or (box["h"] if box["vertical"] else box["w"])) - 6
             est = charts.CHAR_W * len(box["label"])
             if est > avail:
                 self.assertLessEqual(box["font"], 10)  # may round back to 10.0
@@ -64,13 +64,13 @@ class ChartSpecTest(TestCase):
                 self.assertNotIn("font", box)
 
     def test_tall_boxes_get_vertical_labels(self):
-        chart = charts.svg_chart("fd-vd-v10")
+        chart = charts.svg_chart("fd-vd-v11")
         tall = _by_label(chart, "BDE signal cable (6)")
         self.assertTrue(tall["vertical"])
         self.assertFalse(_by_label(chart, "FEMB")["vertical"])
 
     def test_notes_and_loose_texts_become_annotations(self):
-        texts = [a["text"] for a in charts.svg_chart("fd-vd-v10")["annotations"]]
+        texts = [a["text"] for a in charts.svg_chart("fd-vd-v11")["annotations"]]
         self.assertIn("7 types", texts)          # note on Adapter board
         self.assertIn("to TMS rack", texts)      # loose text from the overlay
 
@@ -103,15 +103,15 @@ class ChartSpecTest(TestCase):
 
 class TypeMappingTest(TestCase):
     def test_mapping_normalizes_to_lists(self):
-        m = charts.type_mapping("fd-vd-v10", "dev")
+        m = charts.type_mapping("fd-vd-v11", "dev")
         self.assertIn("D08100400002", m["femb"])   # FD2 MINISAS; FD1-HD excluded
         self.assertEqual(len(m["adapter-board"]), 7)
 
     def test_mapping_is_per_instance(self):
-        self.assertIn("utca-crate", charts.type_mapping("fd-vd-v10", "prod"))
+        self.assertIn("utca-crate", charts.type_mapping("fd-vd-v11", "prod"))
         # PDS types are registered on dev only so far
-        self.assertIn("pds-membrane-module", charts.type_mapping("fd-vd-v10", "dev"))
-        self.assertNotIn("pds-membrane-module", charts.type_mapping("fd-vd-v10", "prod"))
+        self.assertIn("pds-membrane-module", charts.type_mapping("fd-vd-v11", "dev"))
+        self.assertNotIn("pds-membrane-module", charts.type_mapping("fd-vd-v11", "prod"))
         self.assertEqual(charts.type_mapping("no-such-chart", "prod"), {})
 
 
@@ -153,7 +153,7 @@ class HierarchyViewTest(TestCase):
         html = self.client.get(reverse("explore:hierarchy")).content.decode()
         self.assertIn("<svg", html)
         self.assertIn("FEMB", html)
-        self.assertIn("FD-VD Complete detector (v10)", html)
+        self.assertIn("FD-VD Complete detector (v11)", html)
         self.assertIn("Cryostat roof", html)
         # pan/zoom affordances (#57)
         self.assertIn('id="hc-reset"', html)

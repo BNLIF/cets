@@ -93,7 +93,7 @@
               fill="{{ b.fill }}"
               {% if b.dashed %}stroke="#000" stroke-width="1" stroke-dasharray="3,2"
               {% elif b.stroke %}stroke="{{ b.stroke }}" stroke-width="1.6"{% endif %}/>
-        <text x="{{ b.cx }}" y="{{ b.cy }}" fill="{{ b.text|default:'#ffffff' }}"
+        <text x="{{ b.lx|default:b.cx }}" y="{{ b.cy }}" fill="{{ b.text|default:'#ffffff' }}"
               {% if b.font %}font-size="{{ b.font }}"{% endif %}
               {% if b.squeeze %}textLength="{{ b.squeeze }}" lengthAdjust="spacingAndGlyphs"{% endif %}
               {% if b.vertical %}transform="rotate(-90 {{ b.cx }} {{ b.cy }})"{% endif %}>{{ b.label }}</text>

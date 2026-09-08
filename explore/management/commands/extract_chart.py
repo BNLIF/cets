@@ -74,9 +74,17 @@ def _attach_labels(rects: list[dict], words: list[tuple]) -> set[int]:
     """Set each rect's ``label`` from the words fully inside it; returns the
     indices of words consumed. Words: (x0, y0, x1, y1, text, block, line)."""
     used: set[int] = set()
-    for r in rects:
+    # Smallest boxes claim their words first, so a box drawn on top of a
+    # wider one (the PDS flange's sub-flanges) keeps its own label and the
+    # wide box is left with only the words outside the small ones.
+    order = sorted(range(len(rects)),
+                   key=lambda k: (rects[k]["x1"] - rects[k]["x0"])
+                   * (rects[k]["y1"] - rects[k]["y0"]))
+    for k in order:
+        r = rects[k]
         inside = [(i, w) for i, w in enumerate(words)
-                  if w[0] >= r["x0"] - 1 and w[2] <= r["x1"] + 1
+                  if i not in used
+                  and w[0] >= r["x0"] - 1 and w[2] <= r["x1"] + 1
                   and w[1] >= r["y0"] - 1 and w[3] <= r["y1"] + 1]
         inside.sort(key=lambda iw: (iw[1][5], iw[1][6], iw[1][0]))
         label = " ".join(w[4] for _, w in inside)
@@ -347,6 +355,31 @@ def _draft_spec(rects, band_rects, lines, segments, title, source):
     return "\n".join(out) + "\n", stats
 
 
+def _closed_box(items, r) -> bool:
+    """A stroked rectangle exported as four axis-aligned lines around its
+    own bounding box (instead of a ``re`` item) is a box, not a connector."""
+    if len(items) != 4 or any(it[0] != "l" for it in items):
+        return False
+    on_edge = 0
+    for it in items:
+        p0, p1 = it[1], it[2]
+        if abs(p0.x - p1.x) < 0.5 and (abs(p0.x - r.x0) < 0.5 or abs(p0.x - r.x1) < 0.5):
+            on_edge += 1
+        elif abs(p0.y - p1.y) < 0.5 and (abs(p0.y - r.y0) < 0.5 or abs(p0.y - r.y1) < 0.5):
+            on_edge += 1
+    return on_edge == 4
+
+
+def _dedupe(seq, key):
+    seen, out = set(), []
+    for item in seq:
+        k = key(item)
+        if k not in seen:
+            seen.add(k)
+            out.append(item)
+    return out
+
+
 def _extract_pdf(path, page_no):
     """(rects, band_rects, segments, lines, canvas) from a PDF page via
     PyMuPDF: box labels are re-attached from the page's words, connector
@@ -362,7 +395,7 @@ def _extract_pdf(path, page_no):
         r, fill, stroke = d["rect"], d.get("fill"), d.get("color")
         op = d.get("fill_opacity")
         painted = fill is not None and (op is None or op > 0)
-        has_re = any(it[0] == "re" for it in d["items"])
+        has_re = any(it[0] == "re" for it in d["items"]) or _closed_box(d["items"], r)
         if painted and r.width >= BAND_MIN_W and 20 < r.height < 300:
             band_rects.append({"y0": r.y0, "y1": r.y1, "fill": _hex(fill)})
         elif ((painted or (stroke and has_re))
@@ -386,7 +419,13 @@ def _extract_pdf(path, page_no):
                 segments.append({"x0": p0.x, "y0": p0.y, "x1": p1.x, "y1": p1.y,
                                  "color": _hex(stroke)})
 
-    words = [tuple(w[:7]) for w in page.get_text("words")]
+    # A slide shape duplicated exactly on top of itself (the chart has a
+    # few) reaches the PDF as two identical rects and two identical text
+    # runs; keep one of each so the box is not labelled "X X".
+    rects = _dedupe(rects, lambda r: (round(r["x0"]), round(r["y0"]), round(r["x1"]),
+                                      round(r["y1"]), r["fill"], r["stroke"]))
+    words = _dedupe([tuple(w[:7]) for w in page.get_text("words")],
+                    lambda w: (round(w[0]), round(w[1]), round(w[2]), round(w[3]), w[4]))
     used = _attach_labels(rects, words)
     lines = _lines(words, used)
     canvas = {"width": round(page.rect.width), "height": round(page.rect.height)}

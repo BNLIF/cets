@@ -3,10 +3,11 @@
 # (parent box above an indented stack of children; root subtrees in band
 # rows) — the spec is purely SEMANTIC, no coordinates.
 #
-# Bootstrapped from the v4 spec (HWDB_FD-VD_hierarchy.pptx.pdf page 2) and
-# hand-updated to the v10 chart (HWDB_FD-VD_hierarchy_v10.pptx slide 2) by
-# diffing extract_chart drafts of both slides and checking every ambiguous
-# change against the slide XML (glued connectors, note row alignment).
+# Bootstrapped from the v4 spec (HWDB_FD-VD_hierarchy.pptx.pdf page 2),
+# hand-updated to v10 (HWDB_FD-VD_hierarchy_v10.pptx slide 2) and to v11
+# (HWDB_FD-VD_PDS_hierarchy.pptx.pdf page 2; page 3 there is v10) by diffing
+# extract_chart drafts of both versions and checking every ambiguous change
+# against a high-resolution render of the slide.
 # Maintain by HAND-EDITING this file when the chart changes.
 #
 #   nodes   id (stable slug), label, fill; optional band (roots only),
@@ -19,9 +20,10 @@
 #
 # The box-label -> part_type_id mapping lives in a separate overlay (#58).
 
+
 chart:
-  title: FD-VD Complete detector (v10)
-  source: HWDB_FD-VD_hierarchy_v10.pptx, slide 2
+  title: FD-VD Complete detector (v11)
+  source: HWDB_FD-VD_PDS_hierarchy.pptx.pdf, page 2
   source_url: https://edms.cern.ch/document/3416341  # EDMS home of the live chart (Google Slides)
 
 bands:
@@ -33,12 +35,14 @@ bands:
 nodes:
   - {id: camera-ps-control, label: Camera PS & Control, fill: '#b269e1', band: mezzanine-racks}
   - {id: cat6-power, label: "CAT6 + POWER …", fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
-  - {id: hv-bias-ps, label: HV bias PS, fill: '#b269e1', band: mezzanine-racks}
-  - {id: shv-4, label: SHV (8), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
-  - {id: shv-6, label: SHV (24), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: hv-bias-ps, label: HV bias PS (1), fill: '#b269e1'}
+  - {id: iseg, label: ISEG -, fill: '#b269e1'}
+  - {id: hv-rack, label: HV rack (10), fill: '#b269e1', band: mezzanine-racks}
+  - {id: iseg-2, label: ISEG (3), fill: '#b269e1', note: 2 types}
   - {id: bde-lv-ps, label: BDE LV PS (6), fill: '#a27310', band: mezzanine-racks}
   - {id: ring-termination, label: Ring termination, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
-  - {id: pds-lv-ps, label: PDS LV PS, fill: '#0000ff', band: mezzanine-racks}
+  - {id: pds-mezzanine-rack, label: PDS mezzanine rack, fill: '#0000ff', band: mezzanine-racks}
+  - {id: pds-lv-ps, label: PDS LV PS, fill: '#0000ff'}
   - {id: switch-dcs, label: Switch/DCS, fill: '#de6a10', band: mezzanine-racks}
   - {id: tms-mux-card, label: TMS MUX card (10), fill: '#50a7f9'}
   - {id: tms-rack, label: TMS rack (1), fill: '#50a7f9', band: mezzanine-racks}
@@ -49,31 +53,42 @@ nodes:
   - {id: wr-switch, label: WR switch, fill: '#773f9b', band: mezzanine-racks}
   - {id: tms-warm-cable-2, label: TMS warm cable, fill: '#50a7f9'}
   - {id: cathode-hvps, label: Cathode HVPS, fill: '#b269e1', band: below-mezzanine-racks}
+  - {id: hv-cable-2, label: HV cable, fill: '#b269e1'}
+  - {id: ripple-filter-ps-side, label: Ripple filter PS side, fill: '#b269e1', band: below-mezzanine-racks}
   - {id: hv-cable, label: HV cable, fill: '#b269e1'}
+  - {id: ripple-filter-fs-side, label: Ripple filter FS side, fill: '#b269e1', band: below-mezzanine-racks}
+  - {id: hv-cable-3, label: HV cable, fill: '#b269e1'}
   - {id: camera-warm-cable, label: Camera warm cable, fill: '#b269e1'}
   - {id: light-warm-cable, label: Light warm cable, fill: '#b269e1'}
   - {id: box, label: BOX, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: shv-4, label: SHV (8), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: bias-shv-warm-cable, label: bias SHV warm cable (2), fill: '#b269e1', note: 4 types}
   - {id: bias-shv-warm-cable-3, label: bias SHV warm cable (6), fill: '#b269e1', note: 4 types}
-  - {id: bias-shv-warm-cable-2, label: bias SHV warm cable (3), fill: '#b269e1'}
+  - {id: shv-6, label: SHV (8), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: shv-t, label: SHV T, fill: '#ffffff', stroke: '#9900ff', text: '#000000'}
+  - {id: bias-shv-warm-cable-2, label: bias SHV warm cable (3), fill: '#b269e1', note: 4 types}
   - {id: wib, label: WIB (6), fill: '#a27310'}
+  - {id: warm-lv-power-cable, label: Warm LV power cable, fill: '#a27310', note: 2 types}
   - {id: ptc, label: PTC (1), fill: '#a27310'}
-  - {id: drawer, label: Drawer (1/0), fill: '#0a5c17'}
   - {id: active-board, label: Active board, fill: '#0a5c17'}
-  - {id: passive-board, label: Passive board, fill: '#0a5c17'}
+  - {id: drawer, label: Drawer (1/0), fill: '#0a5c17'}
   - {id: db25-8, label: DB25 (1/0), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: lm-warm-cable-bundle, label: LM warm cable bundle, fill: '#0a5c17'}
   - {id: daphne-module, label: DAPHNE module (2), fill: '#0000ff'}
-  - {id: mezzanine-card, label: mezzanine card (4), fill: '#0000ff', note: 3 types}
+  - {id: mezzanine-card, label: Mezzanine card (4), fill: '#0000ff', note: 3 types}
   - {id: db15-3, label: DB15 (2), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: passive-board, label: Passive board, fill: '#0a5c17'}
   - {id: fc, label: FC (8), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: pds-warm-cable, label: PDS warm cable, fill: '#0000ff'}
+  - {id: pds-lv-ps-cable, label: PDS LV PS cable, fill: '#0000ff'}
   - {id: pds-rack, label: PDS rack (40), fill: '#0000ff', band: below-mezzanine-racks}
-  - {id: laser-box, label: laser box (2), fill: '#0000ff'}
+  - {id: laser-box, label: Laser box (2), fill: '#0000ff'}
+  - {id: laser, label: Laser, fill: '#0000ff'}
   - {id: fc-2, label: FC (8), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: lcm-module, label: LCM module (1/0), fill: '#0000ff'}
   - {id: sma-2, label: SMA (12), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
-  - {id: pds-warm-fiber, label: PDS warm fiber, fill: '#0000ff'}
+  - {id: rms-warm-fiber, label: RMS warm fiber, fill: '#0000ff'}
+  - {id: light-source, label: Light source, fill: '#0000ff'}
   - {id: interrogator-eth, label: Interrogator Eth, fill: '#de6a10'}
   - {id: interrogator, label: Interrogator, fill: '#50a7f9', band: below-mezzanine-racks}
   - {id: tms-warm-fiber, label: TMS warm fiber (15), fill: '#50a7f9'}
@@ -107,7 +122,6 @@ nodes:
   - {id: db25-6, label: DB25 (1/0), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: fc-bias-flange, label: FC bias flange, fill: '#b269e1'}
   - {id: db25-7, label: DB25 (1/0), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
-  - {id: db25-11, label: DB25 (1/0), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: shv-3, label: SHV (2), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: shv-7, label: SHV (6/0), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: shv-8, label: SHV (6/0), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
@@ -118,17 +132,19 @@ nodes:
   - {id: bde-flange-wiec, label: BDE flange-WIEC (2), fill: '#a27310'}
   - {id: shv, label: SHV (3+1), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: samtec, label: SAMTEC (24), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
-  - {id: power, label: POWER (24), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
-  - {id: tpc-pds-chimney, label: TPC-PDS chimney (40), fill: '#a27310', band: cryostat-roof}
-  - {id: pds-flange, label: PDS flange, fill: '#0000ff'}
+  - {id: power-4, label: POWER (24), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: bde-pds-chimney, label: BDE-PDS chimney (40), fill: '#a27310', band: cryostat-roof}
   - {id: db15, label: DB15 (8), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: niobe, label: Niobe, fill: '#0000ff'}
+  - {id: pds-flange, label: PDS flange, fill: '#3c78d8'}
   - {id: db15-2, label: DB15 (8), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: pof-sof-flange, label: PoF/SoF flange, fill: '#0000ff'}
   - {id: sma-4-2, label: SMA 4/2, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: rms-flange, label: RMS flange, fill: '#0000ff'}
   - {id: sma, label: SMA (4/2), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: manhole, label: Manhole (4), fill: '#ff0000', band: cryostat-roof}
   - {id: prm-flange, label: PrM flange (1/0), fill: '#50a7f9'}
   - {id: sst-chimney, label: SST chimney (64), fill: '#ff0000', band: cryostat-roof}
-  - {id: suspension-system, label: Suspension system, fill: '#0a5c17'}
   - {id: fc-apc, label: FC/APC (6/9), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000', note: 2 types}
   - {id: fbg-flange, label: FBG flange (2), fill: '#50a7f9'}
   - {id: fc-fc, label: FC/FC (6/9), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
@@ -157,42 +173,46 @@ nodes:
   - {id: precision-rtd-3, label: Precision RTD (2), fill: '#50a7f9'}
   - {id: rms-support-kit, label: RMS support kit (2), fill: '#0000ff'}
   - {id: hv-extender, label: HV extender, fill: '#b269e1'}
-  - {id: inst-fc-super-module, label: Inst. FC super module, fill: '#ff0000', band: interior}
-  - {id: 2-m-1-2-rms-fiber, label: 2 m 1-2 RMS fiber, fill: '#0000ff'}
-  - {id: 5-m-1-2-rms-fiber, label: 5 m 1-2 RMS fiber, fill: '#0000ff'}
-  - {id: fc-support-rod, label: FC support rod (2), fill: '#b269e1', note: 4 types}
-  - {id: fc-super-module, label: FC super module, fill: '#b269e1'}
   - {id: jumper-wire, label: Jumper wire, fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
-  - {id: pds-fiber-frp-channel, label: PDS fiber FRP channel (2), fill: '#b269e1'}
-  - {id: hv-bus-resistor, label: HV bus resistor, fill: '#b269e1'}
-  # fc-support-structure's "12 types" lives in the loose annotation
-  # "12 types (max 6 types in SM)", which the v10 chart places by FC module.
-  - {id: fc-support-structure, label: FC support structure, fill: '#b269e1'}
-  - {id: fc-support-beam, label: FC support beam, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 14 types}
-  - {id: fc-top-yoke, label: FC top yoke, fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
+  - {id: inst-fc-super-module, label: Inst. FC super module (0.5), fill: '#ff0000', band: interior}
+  - {id: rms-cold-fiber-5-m-1-2, label: RMS cold fiber 5 m 1-2, fill: '#0000ff'}
+  - {id: rms-cold-fiber-2-m-1-2, label: RMS cold fiber 2 m 1-2, fill: '#0000ff'}
+  - {id: fc-lift-rod, label: FC lift rod (2), fill: '#b269e1', note: 4 types}
+  - {id: fc-super-module, label: FC super module, fill: '#b269e1', note: 6 types}
+  - {id: jumper-wire-2, label: Jumper wire, fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
+  - {id: pds-fiber-conduit, label: PDS fiber conduit (4), fill: '#b269e1'}
+  - {id: pds-fiber-conduit-jumper-strip, label: "PDS fiber conduit jumper strip (?)", fill: '#b269e1', note: 2 types}
+  - {id: hv-bus-resistor, label: HV bus resistor (2), fill: '#b269e1'}
+  - {id: fc-support-beam, label: FC support beam, fill: '#b269e1', note: 14 types}
+  - {id: fc-top-yoke, label: FC top yoke (2), fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
+  - {id: bottom-stabilizer, label: Bottom stabilizer, fill: '#b269e1', note: 2 types}
+  - {id: fc-link-plate, label: FC link plate (6), fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 2 types}
   - {id: fc-module, label: FC module (8), fill: '#b269e1'}
-  - {id: fc-profile, label: FC profile, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 8 types}
-  - {id: fc-splice-bar, label: FC splice bar, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 4 types}
-  - {id: fc-frp-beam, label: FC FRP beam, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 4 types}
-  - {id: fc-alignment-strips, label: FC alignment strips, fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
-  - {id: fc-link-plate, label: FC link plate, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 4 types}
+  - {id: fc-profile, label: FC profile, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 6 types}
+  - {id: fc-splice-bar, label: FC splice bar (2), fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 2 types}
+  - {id: fc-frp-beam, label: FC FRP beam (2), fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 5 types}
+  - {id: fc-alignment-strip, label: FC alignment strip, fill: '#ffffff', stroke: '#b269e1', text: '#000000'}
+  - {id: g10-sheet, label: G10 sheet, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 2 types}
+  - {id: fc-end-cap, label: FC end cap, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 2 types}
   - {id: fc-fastener, label: FC fastener, fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 12 types}
-  - {id: vdb, label: VDB (6), fill: '#b269e1', note: 3 types}
+  - {id: rdb, label: RDB (6), fill: '#b269e1', note: 3 types}
   - {id: camera-cold-cable, label: Camera cold cable, fill: '#b269e1', note: 3 types}
   - {id: light-cold-cable, label: Light cold cable, fill: '#b269e1'}
   - {id: camera, label: Camera, fill: '#b269e1', band: interior, note: 2 types}
   - {id: light, label: Light, fill: '#b269e1', band: interior, note: 2 types}
+  - {id: hv-bus-jumper-wire, label: HV bus jumper wire (8), fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 2 types}
   - {id: lm-assembly-2, label: LM assembly (2), fill: '#b269e1'}
+  - {id: lm-mounting-bracket, label: LM mounting bracket (2), fill: '#b269e1'}
   - {id: fc-term-cold-cable, label: FC term. cold cable (2), fill: '#b269e1', note: 4 types}
   - {id: inter-frame, label: Inter. Frame (34/4), fill: '#6fbe40', band: interior, note: 2 types}
-  - {id: lm-cold-cable, label: LM cold cable, fill: '#b269e1'}
+  - {id: lm-cold-cable, label: LM cold cable, fill: '#b269e1', note: 3 types}
   - {id: inst-crp-2, label: Inst. CRP (2/3), fill: '#6fbe40'}
   - {id: support-post, label: Support post (8), fill: '#6fbe40'}
   - {id: support-adapter-plate, label: Support adapter plate (4), fill: '#6fbe40'}
   - {id: patch-panel, label: Patch panel (2), fill: '#a27310'}
+  - {id: bias-cable-jumper-2, label: Bias cable jumper, fill: '#6fbe40'}
   - {id: cru-2, label: CRU (2), fill: '#6fbe40', stroke: '#ff4a27'}
   - {id: pcb-anode-segment-2, label: PCB anode segment (6), fill: '#ffffff', stroke: '#6fbe40', text: '#000000', note: 4 types}
-  - {id: bias-cable-jumper-2, label: Bias cable jumper, fill: '#6fbe40'}
   - {id: bias-filter-board-2, label: Bias filter board, fill: '#6fbe40'}
   - {id: edge-board-2, label: Edge board (24), fill: '#6fbe40', note: 7 types}
   - {id: adapter-board-2, label: Adapter board (12), fill: '#6fbe40', note: 7 types}
@@ -200,62 +220,72 @@ nodes:
   - {id: ground-plane, label: Ground plane, fill: '#ffffff', stroke: '#6fbe40', text: '#000000'}
   - {id: composite-frame-2, label: Composite frame, fill: '#6fbe40'}
   - {id: cru-anode-panel-2, label: CRU anode panel (2), fill: '#6fbe40', note: 2 types}
+  - {id: strain-relief-bottom, label: Strain relief bottom, fill: '#a27310'}
   - {id: cold-shv-cable-2, label: Cold SHV cable (3), fill: '#a27310'}
-  - {id: bde-pds-cable-tray, label: BDE-PDS cable tray, fill: '#a27310', band: interior, stroke: '#ff4a27'}
   - {id: bde-signal-cable, label: BDE signal cable (6), fill: '#a27310'}
+  - {id: bde-pds-cable-tray, label: BDE-PDS cable tray, fill: '#a27310', band: interior, stroke: '#ff4a27'}
   - {id: bde-cable-bundle, label: BDE cable bundle (4), fill: '#a27310'}
-  - {id: samtec-4, label: SAMTEC, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
-  - {id: samtec-3, label: SAMTEC, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
-  - {id: bde-short-signal-cable, label: BDE short signal cable (6), fill: '#a27310'}
   - {id: samtec-2, label: SAMTEC, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
-  - {id: ce-box, label: CE box (12), fill: '#a27310', stroke: '#00ffff'}
+  - {id: minisas-2, label: MiniSAS, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: bde-short-signal-cable, label: BDE short signal cable (6), fill: '#a27310'}
+  - {id: minisas, label: MiniSAS, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: ce-box-assembly, label: CE box assembly (12), fill: '#a27310', stroke: '#00ffff'}
+  - {id: ce-box, label: CE box, fill: '#ffffff', stroke: '#7f6000', text: '#000000'}
   - {id: femb, label: FEMB, fill: '#a27310'}
   - {id: bde-power-cable, label: BDE power cable (6), fill: '#a27310'}
-  - {id: power-4, label: POWER, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: power-3, label: POWER, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
-  - {id: bde-short-power-cable, label: BDE short power cable (6), fill: '#a27310'}
   - {id: power-2, label: POWER, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
+  - {id: bde-short-power-cable, label: BDE short power cable (6), fill: '#a27310'}
+  - {id: power, label: POWER, fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: larasic, label: LArASIC (8), fill: '#a27310'}
   - {id: cold-adc, label: Cold ADC (8), fill: '#a27310', note: 4 types}
   - {id: cold-data, label: Cold DATA (2), fill: '#a27310'}
-  - {id: 22-m-rms-fiber, label: 22 m RMS fiber, fill: '#0000ff', band: interior}
+  - {id: rms-cold-fiber-22-m, label: RMS cold fiber 22 m, fill: '#0000ff', band: interior}
+  - {id: strain-relief-top, label: Strain relief top, fill: '#a27310'}
   - {id: pds-mm-array, label: PDS MM array (44), fill: '#0000ff', band: interior}
   - {id: mm-mesh, label: MM mesh (8), fill: '#ffffff', stroke: '#0000ff', text: '#000000'}
   - {id: mm-support-kit, label: MM support kit, fill: '#ffffff', stroke: '#0000ff', text: '#000000'}
   - {id: pds-mm-pair, label: PDS MM pair (4), fill: '#0000ff'}
-  - {id: jumper-cable, label: Jumper cable, fill: '#ffffff', stroke: '#0000ff', text: '#000000'}
+  - {id: pds-cold-cable-short, label: PDS cold cable short, fill: '#ffffff', stroke: '#0000ff', text: '#000000'}
   - {id: pds-membrane-module, label: PDS membrane module (2), fill: '#0000ff', stroke: '#00ffff'}
   - {id: mm-frame-kit, label: MM frame kit, fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
   - {id: ptp-substrate-2, label: pTP substrate (16), fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
   - {id: wls-light-guide-2, label: WLS light guide, fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
-  - {id: electronics-box-2, label: Electronics box, fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
+  - {id: ce-enclosure-2, label: CE enclosure, fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
   - {id: sipm-flex-board, label: SiPM flex board (8), fill: '#0000ff', note: 2 types}
-  - {id: sipm-cable, label: SiPM cable (8), fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
-  - {id: mm-cold-motherboard, label: MM Cold Motherboard, fill: '#0000ff', note: 2 types}
-  - {id: fiber-bundle, label: fiber bundle (8), fill: '#0000ff'}
-  - {id: pds-cold-cable, label: PDS cold cable (4), fill: '#0000ff'}
-  - {id: fiber-mega-bundle, label: fiber mega bundle (1), fill: '#0000ff'}
+  - {id: sipm-cable-bundle, label: SiPM cable bundle, fill: '#ffffff', stroke: '#0365c0', text: '#000000', note: 2 types}
+  - {id: mm-cold-motherboard, label: MM cold motherboard, fill: '#0000ff', note: 2 types}
+  - {id: pof-sof-fiber, label: PoF/SoF fiber (4), fill: '#0000ff'}
+  - {id: pds-cold-cable-long, label: PDS cold cable long (4), fill: '#0000ff'}
+  - {id: fiber-bundle, label: Fiber bundle (8), fill: '#0000ff'}
+  - {id: strain-relief-bracket-kit, label: Strain relief bracket kit, fill: '#0000ff'}
   - {id: instrumented-cat-super-module, label: Instrumented CAT super-module (3/1), fill: '#ff0000'}
   - {id: instrumented-cat-module, label: Instrumented CAT module (2), fill: '#ff0000'}
   - {id: pds-cathode-module, label: PDS cathode module (4), fill: '#0000ff', stroke: '#00ffff'}
+  - {id: septum, label: Septum, fill: '#0000ff'}
   - {id: cm-frame-kit, label: CM frame kit, fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
   - {id: ptp-substrate, label: pTP substrate (32), fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
   - {id: wls-light-guide, label: WLS light guide, fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
-  - {id: electronics-box, label: Electronics box, fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
+  - {id: ce-enclosure, label: CE enclosure, fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
+  - {id: opc-assembly, label: OPC assembly, fill: '#0000ff'}
+  - {id: opc, label: OPC, fill: '#0000ff'}
   - {id: cm-ce-package, label: CM CE package, fill: '#0000ff'}
-  - {id: sipm-cable-2, label: SiPM cable, fill: '#ffffff', stroke: '#0365c0', text: '#000000'}
-  - {id: dcdc-bias-card, label: DCDC Bias Card, fill: '#0000ff', note: 2 types}
-  - {id: cm-cold-motherboard, label: CM Cold Motherboard, fill: '#0000ff'}
+  - {id: sipm-cable, label: SiPM cable, fill: '#ffffff', stroke: '#0365c0', text: '#000000', note: 2 types}
+  - {id: dcdc-bias-card, label: DCDC bias card, fill: '#0000ff'}
+  - {id: cm-cold-motherboard, label: CM cold motherboard, fill: '#0000ff'}
   - {id: sipm-flex-board-2, label: SiPM flex board (8), fill: '#0000ff', note: 1 type}
-  - {id: sof-driver-daughtercard, label: SoF Driver Daughtercard, fill: '#0000ff'}
-  - {id: prm, label: PrM (1), fill: '#50a7f9'}
+  - {id: sof-driver-daughtercard, label: SoF driver daughtercard, fill: '#0000ff'}
+  - {id: sof-laser-diode, label: SoF laser diode, fill: '#0000ff'}
   - {id: sst, label: SST, fill: '#ff0000', note: 2 types}
+  - {id: pds-module-support, label: PDS module support (3), fill: '#ffffff', stroke: '#0365c0', text: '#000000', note: 5 types}
+  - {id: prm, label: PrM (1), fill: '#50a7f9'}
+  - {id: half-cathode-plane, label: Half Cathode plane (2), fill: '#b269e1', stroke: '#00ffff', note: 12 types}
+  - {id: suspension-system, label: Suspension system, fill: '#ff0000'}
   - {id: inst-sst, label: Inst. SST (8x2), fill: '#ff0000', band: interior, note: 2 types}
-  - {id: half-cathode-plane, label: Half Cathode plane (2), fill: '#b269e1', note: 8 types}
   - {id: cathode-plane, label: Cathode plane, fill: '#b269e1', note: 6 types}
-  - {id: tad, label: TAD (4), fill: '#b269e1', note: 3 types}
+  - {id: tad, label: TAD (4), fill: '#b269e1', note: 2 types}
   - {id: dyneema-rope, label: dyneema rope, fill: '#b269e1', note: 3 types}
-  - {id: lad, label: LAD (2), fill: '#ffffff', stroke: '#9900ff', text: '#000000', note: 3 types}
+  - {id: lad, label: LAD (2), fill: '#ffffff', stroke: '#9900ff', text: '#000000', note: 4 types}
   - {id: half-frame, label: Half frame, fill: '#b269e1'}
   - {id: cathode-interconnect, label: cathode interconnect (6), fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 2 types}
   - {id: cross-ribs, label: cross ribs (6), fill: '#ffffff', stroke: '#b269e1', text: '#000000', note: 2 types}
@@ -274,13 +304,13 @@ nodes:
   - {id: idc3, label: IDC3 (1), fill: '#ffffff', stroke: '#292c2f', dashed: true, text: '#000000'}
   - {id: lm-cold-cable-bundle, label: LM cold cable bundle, fill: '#0a5c17'}
   - {id: inst-crp, label: Inst. CRP (6/2), fill: '#274e13'}
-  - {id: bias-cable-jumper, label: Bias cable jumper (1), fill: '#0a5c17'}
   - {id: decoupling-device, label: Decoupling device (4), fill: '#ffffff', stroke: '#0a5c17', text: '#000000', note: 3 types}
+  - {id: bias-cable-jumper, label: Bias cable jumper (1), fill: '#0a5c17'}
   - {id: cru, label: CRU (2), fill: '#0a5c17', stroke: '#ff4a27'}
-  - {id: peek-spacer, label: Peek spacer (61), fill: '#ffffff', stroke: '#00882b', text: '#000000'}
+  - {id: bias-filter-board, label: Bias filter board, fill: '#0a5c17'}
   - {id: edge-board, label: Edge board (24), fill: '#0a5c17', note: 7 types}
   - {id: adapter-board, label: Adapter board (12), fill: '#0a5c17', note: 7 types}
-  - {id: bias-filter-board, label: Bias filter board, fill: '#0a5c17'}
+  - {id: peek-spacer, label: Peek spacer (61), fill: '#ffffff', stroke: '#00882b', text: '#000000'}
   - {id: composite-frame, label: Composite frame, fill: '#0a5c17'}
   - {id: cru-anode-panel, label: CRU anode panel (2), fill: '#0a5c17', note: 2 types}
   - {id: pcb-anode-segment, label: PCB anode segment (6), fill: '#ffffff', stroke: '#00882b', text: '#000000', note: 4 types}
@@ -292,11 +322,6 @@ edges:
   - {from: camera-warm-cable, to: camera-ps-control}
   - {from: light-warm-cable, to: camera-ps-control}
   - {from: cat6-power, to: camera-ps-control}
-  - {from: bias-shv-warm-cable, to: hv-bias-ps}
-  - {from: bias-shv-warm-cable-3, to: hv-bias-ps}
-  - {from: bias-shv-warm-cable-2, to: hv-bias-ps}
-  - {from: shv-4, to: hv-bias-ps}
-  - {from: shv-6, to: hv-bias-ps}
   - {from: ring-termination, to: bde-lv-ps}
   - {from: db25-3, to: tms-mux-card}
   - {from: tms-warm-cable, to: tms-mux-card}
@@ -306,7 +331,6 @@ edges:
   - {from: lv-filter-fanout, to: tde-lv-ps}
   - {from: lv-feb-power-sense-cable, to: lv-filter-fanout}
   - {from: lv-feb-power-cable, to: lv-filter-fanout}
-  - {from: hv-cable, to: cathode-hvps}
   - {from: active-board, to: drawer}
   - {from: passive-board, to: drawer}
   - {from: lm-warm-cable-bundle, to: drawer}
@@ -319,8 +343,6 @@ edges:
   - {from: daphne-module, to: pds-rack}
   - {from: laser-box, to: pds-rack}
   - {from: lcm-module, to: pds-rack}
-  - {from: pds-warm-fiber, to: laser-box}
-  - {from: fc-2, to: laser-box}
   - {from: sma-2, to: lcm-module}
   - {from: tms-warm-fiber, to: interrogator}
   - {from: interrogator-eth, to: interrogator}
@@ -345,7 +367,6 @@ edges:
   - {from: box, to: fc-bias-flange}
   - {from: db25-6, to: fc-bias-flange}
   - {from: db25-7, to: fc-bias-flange}
-  - {from: db25-11, to: fc-bias-flange}
   - {from: shv-2, to: fc-bias-flange}
   - {from: shv-3, to: fc-bias-flange}
   - {from: shv-7, to: fc-bias-flange}
@@ -355,15 +376,11 @@ edges:
   - {from: shv-5, to: bde-flange-wiec}
   - {from: shv, to: bde-flange-wiec}
   - {from: samtec, to: bde-flange-wiec}
-  - {from: power, to: bde-flange-wiec}
+  - {from: power-4, to: bde-flange-wiec}
   - {from: wib, to: bde-flange-wiec}
   - {from: ptc, to: bde-flange-wiec}
-  - {from: bde-flange-wiec, to: tpc-pds-chimney}
-  - {from: pds-flange, to: tpc-pds-chimney}
-  - {from: sma-4-2, to: pds-flange}
-  - {from: sma, to: pds-flange}
-  - {from: db15, to: pds-flange}
-  - {from: db15-2, to: pds-flange}
+  - {from: bde-flange-wiec, to: bde-pds-chimney}
+  - {from: pds-flange, to: bde-pds-chimney}
   - {from: prm-flange, to: manhole}
   - {from: prm, to: prm-flange}
   - {from: suspension-system, to: sst-chimney}
@@ -387,27 +404,22 @@ edges:
   - {from: precision-rtd-2, to: prm-tms}
   - {from: standard-rtd, to: wall-tms}
   - {from: precision-rtd-3, to: lar-pump-tms}
-  - {from: 5-m-1-2-rms-fiber, to: rms-support-kit}
-  - {from: 2-m-1-2-rms-fiber, to: rms-support-kit}
+  - {from: rms-cold-fiber-5-m-1-2, to: rms-support-kit}
+  - {from: rms-cold-fiber-2-m-1-2, to: rms-support-kit}
   - {from: rms-support-kit, to: inst-fc-super-module}
   - {from: fc-super-module, to: inst-fc-super-module}
-  - {from: fc-support-rod, to: inst-fc-super-module}
+  - {from: fc-lift-rod, to: inst-fc-super-module}
   - {from: jumper-wire, to: inst-fc-super-module}
   - {from: fc-term-cold-cable, to: inst-fc-super-module}
-  - {from: pds-fiber-frp-channel, to: fc-super-module}
+  - {from: pds-fiber-conduit, to: fc-super-module}
   - {from: hv-bus-resistor, to: fc-super-module}
-  - {from: fc-support-structure, to: fc-super-module}
   - {from: fc-module, to: fc-super-module}
-  - {from: lm-assembly-2, to: fc-support-structure}
-  - {from: fc-support-beam, to: fc-support-structure}
-  - {from: fc-top-yoke, to: fc-support-structure}
   - {from: fc-profile, to: fc-module}
   - {from: fc-splice-bar, to: fc-module}
   - {from: fc-frp-beam, to: fc-module}
-  - {from: fc-alignment-strips, to: fc-module}
-  - {from: fc-link-plate, to: fc-module}
+  - {from: fc-alignment-strip, to: fc-module}
   - {from: fc-fastener, to: fc-module}
-  - {from: vdb, to: fc-module}
+  - {from: rdb, to: fc-module}
   - {from: camera-cold-cable, to: camera}
   - {from: light-cold-cable, to: light}
   - {from: lm-cold-cable, to: lm-assembly-2}
@@ -416,9 +428,9 @@ edges:
   - {from: support-adapter-plate, to: inst-crp-2}
   - {from: patch-panel, to: inst-crp-2}
   - {from: cru-2, to: inst-crp-2}
-  - {from: samtec-4, to: patch-panel}
-  - {from: power-4, to: patch-panel}
-  - {from: samtec-3, to: patch-panel}
+  - {from: samtec-2, to: patch-panel}
+  - {from: power, to: patch-panel}
+  - {from: minisas-2, to: patch-panel}
   - {from: power-3, to: patch-panel}
   - {from: bias-filter-board-2, to: cru-2}
   - {from: edge-board-2, to: cru-2}
@@ -427,45 +439,41 @@ edges:
   - {from: ground-plane, to: cru-2}
   - {from: composite-frame-2, to: cru-2}
   - {from: cru-anode-panel-2, to: cru-2}
-  - {from: bias-cable-jumper-2, to: bias-filter-board-2}
   - {from: cold-shv-cable-2, to: bias-filter-board-2}
-  - {from: ce-box, to: adapter-board-2}
+  - {from: ce-box-assembly, to: adapter-board-2}
   - {from: pcb-anode-segment-2, to: cru-anode-panel-2}
   - {from: bde-cable-bundle, to: bde-pds-cable-tray}
   - {from: bde-signal-cable, to: bde-cable-bundle}
   - {from: bde-power-cable, to: bde-cable-bundle}
-  - {from: samtec-2, to: ce-box}
-  - {from: power-2, to: ce-box}
-  - {from: femb, to: ce-box}
-  - {from: bde-short-signal-cable, to: ce-box}
-  - {from: bde-short-power-cable, to: ce-box}
+  - {from: minisas, to: ce-box-assembly}
+  - {from: power-2, to: ce-box-assembly}
+  - {from: femb, to: ce-box-assembly}
+  - {from: bde-short-signal-cable, to: ce-box-assembly}
+  - {from: bde-short-power-cable, to: ce-box-assembly}
   - {from: larasic, to: femb}
   - {from: cold-adc, to: femb}
   - {from: cold-data, to: femb}
   - {from: mm-mesh, to: pds-mm-array}
   - {from: mm-support-kit, to: pds-mm-array}
   - {from: pds-mm-pair, to: pds-mm-array}
-  - {from: jumper-cable, to: pds-mm-pair}
+  - {from: pds-cold-cable-short, to: pds-mm-pair}
   - {from: pds-membrane-module, to: pds-mm-pair}
-  - {from: pds-cold-cable, to: pds-mm-pair}
   - {from: mm-frame-kit, to: pds-membrane-module}
   - {from: ptp-substrate-2, to: pds-membrane-module}
   - {from: wls-light-guide-2, to: pds-membrane-module}
-  - {from: electronics-box-2, to: pds-membrane-module}
+  - {from: ce-enclosure-2, to: pds-membrane-module}
   - {from: sipm-flex-board, to: pds-membrane-module}
-  - {from: sipm-cable, to: pds-membrane-module}
+  - {from: sipm-cable-bundle, to: pds-membrane-module}
   - {from: mm-cold-motherboard, to: pds-membrane-module}
-  - {from: fiber-bundle, to: pds-membrane-module}
-  - {from: fiber-mega-bundle, to: fiber-bundle}
   - {from: instrumented-cat-module, to: instrumented-cat-super-module}
   - {from: pds-cathode-module, to: instrumented-cat-module}
   - {from: cathode-plane, to: instrumented-cat-module}
   - {from: cm-frame-kit, to: pds-cathode-module}
   - {from: ptp-substrate, to: pds-cathode-module}
   - {from: wls-light-guide, to: pds-cathode-module}
-  - {from: electronics-box, to: pds-cathode-module}
+  - {from: ce-enclosure, to: pds-cathode-module}
   - {from: cm-ce-package, to: pds-cathode-module}
-  - {from: sipm-cable-2, to: cm-ce-package}
+  - {from: sipm-cable, to: cm-ce-package}
   - {from: dcdc-bias-card, to: cm-ce-package}
   - {from: cm-cold-motherboard, to: cm-ce-package}
   - {from: sipm-flex-board-2, to: cm-ce-package}
@@ -503,19 +511,66 @@ edges:
   - {from: bias-filter-board, to: cru}
   - {from: composite-frame, to: cru}
   - {from: cru-anode-panel, to: cru}
-  - {from: cold-shv-cable, to: bias-filter-board}
   - {from: pcb-anode-segment, to: cru-anode-panel}
   - {from: signal-cable, to: cable-tray}
+  - {from: hv-bias-ps, to: hv-rack}
+  - {from: iseg, to: hv-bias-ps}
+  - {from: iseg-2, to: hv-bias-ps}
+  - {from: shv-4, to: iseg}
+  - {from: shv-6, to: iseg-2}
+  - {from: shv-t, to: iseg-2}
+  - {from: bias-shv-warm-cable, to: iseg}
+  - {from: bias-shv-warm-cable-3, to: iseg-2}
+  - {from: bias-shv-warm-cable-2, to: iseg-2}
+  - {from: hv-cable-2, to: cathode-hvps}
+  - {from: hv-cable, to: ripple-filter-ps-side}
+  - {from: hv-cable-3, to: ripple-filter-fs-side}
+  - {from: warm-lv-power-cable, to: bde-lv-ps}
+  - {from: pds-lv-ps, to: pds-mezzanine-rack}
+  - {from: pds-lv-ps-cable, to: pds-lv-ps}
+  - {from: laser, to: laser-box}
+  - {from: fc-2, to: laser}
+  - {from: light-source, to: lcm-module}
+  - {from: rms-warm-fiber, to: lcm-module}
+  - {from: niobe, to: pds-flange}
+  - {from: pof-sof-flange, to: pds-flange}
+  - {from: rms-flange, to: pds-flange}
+  - {from: sma-4-2, to: rms-flange}
+  - {from: sma, to: rms-flange}
+  - {from: db15, to: niobe}
+  - {from: db15-2, to: niobe}
+  - {from: strain-relief-top, to: bde-pds-chimney}
+  - {from: strain-relief-bottom, to: bde-flange-wiec}
+  - {from: septum, to: pds-flange}
+  - {from: strain-relief-bracket-kit, to: septum}
+  - {from: pds-cold-cable-long, to: bde-pds-cable-tray}
+  - {from: pof-sof-fiber, to: pds-cathode-module}
+  - {from: fiber-bundle, to: pds-cathode-module}
+  - {from: pds-fiber-conduit-jumper-strip, to: fc-super-module}
+  - {from: fc-support-beam, to: fc-super-module}
+  - {from: fc-top-yoke, to: fc-super-module}
+  - {from: bottom-stabilizer, to: fc-super-module}
+  - {from: fc-link-plate, to: fc-super-module}
+  - {from: lm-assembly-2, to: fc-support-beam}
+  - {from: lm-mounting-bracket, to: fc-support-beam}
+  - {from: hv-bus-jumper-wire, to: hv-bus-resistor}
+  - {from: g10-sheet, to: fc-module}
+  - {from: fc-end-cap, to: fc-module}
+  - {from: jumper-wire-2, to: fc-super-module}
+  - {from: ce-box, to: ce-box-assembly}
+  - {from: pds-module-support, to: instrumented-cat-module}
+  - {from: opc-assembly, to: pds-cathode-module}
+  - {from: opc, to: opc-assembly}
+  - {from: sof-laser-diode, to: cm-ce-package}
+  - {from: bias-cable-jumper-2, to: inst-crp-2}
+  - {from: cold-shv-cable, to: cable-tray}
   # cables (far endpoints)
   - {from: lar-pipe-tms, to: tms-fc-flange, kind: cable}
   - {from: prm-tms, to: tms-fc-flange, kind: cable}
   - {from: wall-tms, to: tms-fc-flange, kind: cable}
   - {from: lar-pump-tms, to: tms-fc-flange, kind: cable}
   - {from: tms-warm-cable-2, to: tms-fc-flange, kind: cable}
-  - {from: 5-m-1-2-rms-fiber, to: pds-flange, kind: cable}
-  - {from: 2-m-1-2-rms-fiber, to: pds-flange, kind: cable}
   - {from: jumper-wire, to: hv-extender, kind: cable}
-  - {from: hv-cable, to: hvft, kind: cable}
   - {from: camera-cold-cable, to: fc-bias-flange, kind: cable}
   - {from: light-cold-cable, to: fc-bias-flange, kind: cable}
   - {from: fc-term-cold-cable, to: fc-bias-flange, kind: cable}
@@ -531,10 +586,6 @@ edges:
   - {from: bde-power-cable, to: patch-panel, kind: cable}
   - {from: lm-warm-cable-bundle, to: bde-flange-wiec, kind: cable}
   - {from: lm-cold-cable, to: bde-flange-wiec, kind: cable}
-  - {from: pds-cold-cable, to: pds-flange, kind: cable}
-  - {from: fiber-bundle, to: pds-flange, kind: cable}
-  - {from: pds-warm-cable, to: pds-flange, kind: cable}
-  - {from: pds-warm-fiber, to: pds-flange, kind: cable}
   - {from: inst-sst, to: suspension-system, kind: cable, color: '#000000'}
   - {from: dyneema-rope, to: lad, kind: cable}
   - {from: tms-cold-fiber, to: tms-pns-chimney, kind: cable}
@@ -558,17 +609,39 @@ edges:
   - {from: data-fiber, to: daq-patch-panel, kind: cable}
   - {from: eth-mch-control-cable, to: daq-patch-panel, kind: cable}
   - {from: crate-power-cable, to: 110v-av-dist-roof, kind: cable}
+  - {from: hv-cable-2, to: ripple-filter-ps-side, kind: cable}
+  - {from: hv-cable, to: ripple-filter-fs-side, kind: cable}
+  - {from: hv-cable-3, to: hvft, kind: cable}
+  - {from: warm-lv-power-cable, to: ptc, kind: cable}
+  - {from: pds-lv-ps-cable, to: pds-rack, kind: cable}
+  - {from: rms-warm-fiber, to: rms-flange, kind: cable}
+  - {from: pds-warm-cable, to: niobe, kind: cable}
+  - {from: rms-cold-fiber-5-m-1-2, to: rms-flange, kind: cable}
+  - {from: rms-cold-fiber-2-m-1-2, to: rms-flange, kind: cable}
+  - {from: rms-cold-fiber-22-m, to: rms-flange, kind: cable}
+  - {from: pds-cold-cable-long, to: niobe, kind: cable}
+  - {from: pds-cold-cable-long, to: pds-mm-pair, kind: cable}
+  - {from: pof-sof-fiber, to: pof-sof-flange, kind: cable}
+  - {from: fiber-bundle, to: pof-sof-flange, kind: cable}
+  - {from: fc-lift-rod, to: fc-support-flange, kind: cable}
+  - {from: jumper-wire-2, to: instrumented-cat-module, kind: cable}
+  - {from: bias-cable-jumper-2, to: bias-filter-board-2, kind: cable}
+  - {from: cold-shv-cable, to: bias-filter-board, kind: cable}
+  - {from: signal-cable, to: adapter-board, kind: cable}
 
 # Open questions for the consortium chart owners:
-# - 22-m-rms-fiber: endpoints not identifiable in the chart; left as a root.
-# - camera / light (split from v4's camera-light): no parent arrows visible;
-#   left as roots.
+# - rms-cold-fiber-22-m: the chart labels its far end "to PDS LED diffusers
+#   FC super-module" (a text, not a box); drawn here as a root with a cable
+#   to the RMS flange only.
+# - camera / light: still no parent arrows; left as roots.
 # - inst-crp-2 -> inter-frame: the box stacking says Inter. Frame is the
-#   parent, but the arrowhead in the pptx points the other way (arrowheads
-#   are inconsistent elsewhere in the chart too, e.g. Drawer's boards).
-# - fiber-mega-bundle -> fiber-bundle direction guessed from the PDF arrow,
-#   which looks inverted relative to the "child -> parent" convention.
-# - "2 types" over camera/light warm cables, "4 types" over bias SHV warm
-#   cable (3), and "3 types" over LM cold cable sit too far from their boxes
-#   for the extractor to attach; they render as loose layout annotations
-#   instead of node notes.
+#   parent, but the arrowhead points the other way (arrowheads are
+#   inconsistent elsewhere in the chart too, e.g. Drawer's boards).
+# - The warm PoF/SoF fibers from the Mezzanine card / Laser FC (8) connectors
+#   down to the PoF/SoF flange ("2 SoF per module", "2 PoF per module") have
+#   no cable box, so they cannot be drawn as edges.
+# - pds-cold-cable-short: both arrowheads point at PDS MM pair; drawn as a
+#   plain child.
+# - "2 types" over camera/light warm cables and "20 types (max 6 types in
+#   SM)" by FC module sit too far from their boxes for the extractor to
+#   attach; they render as loose layout annotations instead of node notes.
