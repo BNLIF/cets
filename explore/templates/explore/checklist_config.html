@@ -50,6 +50,9 @@
   #clc-preview .cl-row { flex-wrap: nowrap; gap: 0 10px; }
   #clc-preview .cl-row > .cl-field,
   #clc-preview .cl-row > .cl-col { flex: 1 1 0; min-width: 0; }
+  /* the Item card is many fields in one row — it wraps like on the fill page (Hajime 2026-09-07) */
+  #clc-preview .cl-item-row { flex-wrap: wrap; }
+  #clc-preview .cl-item-row > .cl-field { flex: 1 1 160px; }
   .clc-fld { border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 6px 9px; margin: 7px 0; }
   /* the field header row must fit one desktop line: tighter gaps, slimmer
      buttons, smaller checkbox labels */

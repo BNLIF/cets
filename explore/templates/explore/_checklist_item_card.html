@@ -4,7 +4,8 @@
   <h2><button type="button" class="cl-fold" aria-expanded="false">Item</button><span class="cl-hint">HWDB’s own fields on this item — saved to the item record, not just the checklist</span></h2>
   <div class="cl-sec-body">
     <input type="hidden" name="item-card" value="1">
-    <div class="cl-row">
+    {# cl-item-row: this row always wraps — the editor preview pins other rows to one line (#117) #}
+    <div class="cl-row cl-item-row">
     {% for w in item_card %}
       {% if w.kind == "check" %}
       <div class="cl-field cl-check-item"><label class="cl-lab" style="display:inline-flex; gap:8px; align-items:center; cursor:pointer;"><input type="checkbox" name="{{ w.key }}"{% if w.value %} checked{% endif %}> {{ w.label }}</label></div>

@@ -690,6 +690,7 @@ class ChecklistEditorTest(TestCase):
             }).content.decode()
         self.assertIn("Identification", html)              # real section cards
         self.assertIn('name="item-card"', html)            # #103 Item card previews too
+        self.assertIn('class="cl-row cl-item-row"', html)  # …and its row wraps in the preview
         self.assertIn('data-min="1.5"', html)              # real tolerance attrs
         self.assertIn('value="pass"', html)                # real tri-state
         self.assertNotIn("<form", html)                    # fragment only
