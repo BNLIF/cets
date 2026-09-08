@@ -69,7 +69,10 @@ assembly." On `removed_at_repair`, `NULL` means "still installed."
 
 OCR-scanned `femb_parts_*.txt` files in `FEMB_OCR_DIR` are the source of
 truth; the ingestion command diffs successive snapshots to compute the
-repair record.
+repair record. Layout rules: `batch_<id>/<FEMB dir>/` holds an assembly,
+`batch_<id>_rework/<FEMB dir>/repair_N/` holds repair iteration N (a flat
+file in a rework dir is malformed and skipped), and `batch_Assy*` dirs are
+the pre-2026 OCR format and are not imported.
 
 ### RTS
 

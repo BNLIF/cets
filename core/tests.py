@@ -523,3 +523,89 @@ class UpdateLArasicsFromRtsCommandTests(TestCase):
             self._run(root, batch="B009T0099")
         sns = set(LArASIC.objects.values_list("serial_number", flat=True))
         self.assertEqual(sns, {"002-04606"})
+
+
+class UpdateFembsFromOcrLayoutTests(TestCase):
+    """Directory-layout rules of update_fembs_from_ocr (issue #137 follow-up):
+    batch_Assy* is the old OCR format and is skipped; rework files must sit
+    under repair_N/ — a flat one is skipped with a warning, never imported as
+    an assembly; the batch id never comes from a rework dir.
+    """
+
+    PARTS = '''\
+        "FEMB", "BNL/FEMB/IO-1826-1L/{sn}"
+        "(F) COLDATA 1 SN", "2506-0001"
+        "(F) LArASIC 1 SN", "{lar}"
+    '''
+    NOTE = '''\
+        FEMB SN: BNL/FEMB/IO-1826-1L/{sn}
+        Batch ID: 07272026
+        Inspection Type: repair
+        Inspection/Repair Iteration Number: 1
+        Date: 2026-07-30 10:00:00
+        Operator Name: lke
+        What was fixed: swapped larasic
+    '''
+
+    def _write(self, root, rel, text, **fmt):
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(textwrap.dedent(text).format(**fmt))
+
+    def _run(self, root):
+        from unittest import mock
+        out = StringIO()
+        with mock.patch("core.management.commands.update_fembs_from_ocr.config", return_value=str(root)), \
+             mock.patch("builtins.input", return_value="yes"):
+            call_command("update_fembs_from_ocr", stdout=out)
+        return out.getvalue()
+
+    def test_layout_rules(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # current-format assembly batch
+            self._write(root, "batch_07272026/BNL_FEMB_IO_1826_1L_00046/femb_parts_00046.txt",
+                        self.PARTS, sn="00046", lar="011-00001")
+            # old-format batch: must be ignored entirely
+            self._write(root, "batch_Assy08142025/BNL_FEMB_IO_1826_1L_00099/femb_parts_00099.txt",
+                        self.PARTS, sn="00099", lar="011-00099")
+            # malformed flat rework: skipped, NOT applied as an assembly
+            self._write(root, "batch_07272026_rework/BNL_FEMB_IO_1826_1L_00046/femb_parts_00046.txt",
+                        self.PARTS, sn="00046", lar="011-00002")
+            self._write(root, "batch_07272026_rework/BNL_FEMB_IO_1826_1L_00046/inspection_note.txt",
+                        self.NOTE, sn="00046")
+            # well-formed rework for another FEMB
+            self._write(root, "batch_07272026/BNL_FEMB_IO_1826_1L_00004/femb_parts_00004.txt",
+                        self.PARTS, sn="00004", lar="011-00004")
+            self._write(root, "batch_07272026_rework/BNL_FEMB_IO_1826_1L_00004/repair_1/femb_parts_00004.txt",
+                        self.PARTS, sn="00004", lar="011-00005")
+            self._write(root, "batch_07272026_rework/BNL_FEMB_IO_1826_1L_00004/repair_1/inspection_note.txt",
+                        self.NOTE, sn="00004")
+
+            out = self._run(root)          # creates FEMBs + chips
+            out += self._run(root)         # second pass records the repair (needs the FEMB to exist)
+
+        self.assertIn("Skipping old-format batch dir: batch_Assy08142025", out)
+        self.assertIn("is in a rework batch but not under a repair_N/ directory", out)
+        self.assertFalse(FEMB.objects.filter(serial_number="00099").exists())
+
+        f46 = FEMB.objects.get(serial_number="00046")
+        self.assertEqual(f46.batch_id, "07272026")
+        # the flat rework's swapped chip was not attached
+        self.assertEqual(list(f46.larasic_set.values_list("serial_number", flat=True)), ["011-00001"])
+
+        f04 = FEMB.objects.get(serial_number="00004")
+        self.assertEqual(f04.batch_id, "07272026")
+        self.assertEqual(f04.repairs.count(), 1)
+        mounted = f04.larasic_set.filter(removed_at_repair__isnull=True)
+        self.assertEqual(list(mounted.values_list("serial_number", flat=True)), ["011-00005"])
+
+    def test_backfill_replaces_a_rework_batch_id(self):
+        femb = FEMB.objects.create(version="IO-1826-1L", serial_number="00046", batch_id="07272026_rework")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write(root, "batch_07272026/BNL_FEMB_IO_1826_1L_00046/femb_parts_00046.txt",
+                        self.PARTS, sn="00046", lar="011-00001")
+            self._run(root)
+        femb.refresh_from_db()
+        self.assertEqual(femb.batch_id, "07272026")

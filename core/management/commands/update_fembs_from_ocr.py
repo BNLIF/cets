@@ -111,6 +111,15 @@ def parse_inspection_note(filepath):
     return result
 
 
+SKIP_BATCH_PREFIX = "batch_Assy"   # pre-2026 OCR layout, not imported
+
+
+def is_rework_path(ocr_root, filepath):
+    """True when `filepath`'s top-level batch dir under `ocr_root` is `*_rework`."""
+    rel = os.path.relpath(filepath, ocr_root)
+    return rel.split(os.sep)[0].endswith("_rework")
+
+
 def batch_id_from_path(filepath):
     """`.../batch_03192026/BNL_FEMB_.../femb_parts_00002.txt` -> "03192026".
 
@@ -192,6 +201,12 @@ class Command(BaseCommand):
         for root, dirs, files in os.walk(femb_ocr_dir):
             # Sort dirs so repair_1 < repair_2 < ... are processed in order
             dirs.sort()
+            if root == femb_ocr_dir:
+                # batch_Assy* dirs are the pre-2026 OCR layout; not imported.
+                skipped = [d for d in dirs if d.startswith(SKIP_BATCH_PREFIX)]
+                for d in skipped:
+                    self.stdout.write(f"Skipping old-format batch dir: {d}")
+                dirs[:] = [d for d in dirs if d not in skipped]
             for file in files:
                 if not (file.startswith("femb_parts_") and file.endswith(".txt")):
                     continue
@@ -200,6 +215,16 @@ class Command(BaseCommand):
                 repair_match = re.fullmatch(r"repair_(\d+)", dirname)
                 if repair_match:
                     repair_files.append((filepath, root, int(repair_match.group(1))))
+                elif is_rework_path(femb_ocr_dir, filepath):
+                    # A rework batch must nest its files under repair_N/. A flat
+                    # file here is malformed output; importing it as an assembly
+                    # would attach the swapped chips without recording a repair.
+                    self.stdout.write(
+                        self.style.WARNING(
+                            f"  - {filepath} is in a rework batch but not under a "
+                            f"repair_N/ directory. Skipping; fix the layout and re-run."
+                        )
+                    )
                 else:
                     regular_files.append(filepath)
 
@@ -241,7 +266,7 @@ class Command(BaseCommand):
                     {"serial_number": femb_sn, "version": femb_version, "status": "new",
                      "batch_id": batch_id}
                 )
-            elif not femb_obj.batch_id:
+            elif not femb_obj.batch_id or femb_obj.batch_id.endswith("_rework"):
                 batch_backfills.append((femb_obj, batch_id))
 
             for comp in components:
