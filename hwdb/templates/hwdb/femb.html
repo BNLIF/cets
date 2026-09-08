@@ -1,0 +1,56 @@
+{% extends 'core/base.html' %}
+{% load components %}
+
+{% block title %}CETS — FEMB · HWDB upload{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div>
+        {% crumbs "CETS" "/" "Hardware Database" "/hwdb/" "FEMB" %}
+        <h1 class="page-title">FEMB · HWDB upload</h1>
+        <div class="page-subtitle">
+            Push assembled FEMBs and their chips to the <strong>{{ active_instance }}</strong> HWDB instance, one OCR batch at a time.
+        </div>
+    </div>
+    <div class="page-head-actions">
+        <form method="post" action="{% url 'hwdb:set_instance' %}" style="display: inline;">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <div class="instance-toggle" data-active="{{ active_instance }}" role="group" aria-label="HWDB instance" title="HWDB instance">
+                {% for inst in instances %}
+                <button name="instance" value="{{ inst }}" class="{% if inst == active_instance %}is-active{% endif %}" title="Switch to {{ inst }} HWDB">{{ inst }}</button>
+                {% endfor %}
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="table-wrap">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Batch</th>
+                <th>FEMBs</th>
+                <th>In HWDB (prod)</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for b in batches %}
+            <tr{% if b.in_hwdb == b.femb_count %} style="background: rgba(76, 175, 80, 0.08);"{% endif %}>
+                <td class="cell-mono"><a href="{% url 'hwdb:femb_batch' b.batch_id %}" style="color: var(--accent); font-weight: 500;">{{ b.label }}</a></td>
+                <td>{{ b.femb_count }}</td>
+                <td>{% if b.in_hwdb == b.femb_count %}<span class="pill" data-status="pass">✓ {{ b.in_hwdb }}</span>{% else %}{{ b.in_hwdb }}{% endif %}</td>
+                <td><a class="btn btn-sm btn-ghost" href="{% url 'hwdb:femb_batch' b.batch_id %}">Open</a></td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="4" class="cell-muted" style="text-align: center; padding: 36px;">No FEMBs. Run the OCR importer first.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="cell-muted" style="font-size: 12px; margin-top: 12px;">
+    Part types on {{ active_instance }}: {% for marker, pid in femb_part_types.items %}<span class="cell-mono">{{ marker }} → {{ pid }}</span>{% if not forloop.last %} · {% endif %}{% endfor %}
+</div>
+{% endblock %}

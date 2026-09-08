@@ -28,6 +28,7 @@ from .models import (
     LarasicSyncState,
 )
 from .sync import sync_family
+from .upload import femb as femb_lib
 from .upload import larasic as upload_lib
 
 FAMILY_PART_TYPE_KEY = {
@@ -68,7 +69,13 @@ def home(request):
         },
         {"name": "ColdADC", "description": "12-bit cold ADC", "part_type_id": None, "active": False},
         {"name": "COLDATA", "description": "Serializer / control", "part_type_id": None, "active": False},
-        {"name": "FEMB", "description": "Frontend Motherboard", "part_type_id": None, "active": False},
+        {
+            "name": "FEMB",
+            "description": "Frontend Motherboard",
+            "part_type_id": profile["femb_part_types"]["IO-1865"],
+            "active": True,
+            "url": reverse("hwdb:femb"),
+        },
         {"name": "Cable", "description": "Cold flex cable", "part_type_id": None, "active": False},
     ]
     return render(
@@ -1038,3 +1045,157 @@ def part_type_list_view(request, bearer, part1, part2, subsystem_id):
     except Exception:
         logger.exception("HWDB API call failed")
         return render(request, "hwdb/error.html", {"error_message": GENERIC_ERROR})
+
+
+# ---- FEMB assembly upload (issue #137) --------------------------------------
+
+UNBATCHED = "unbatched"  # URL stand-in for FEMBs imported before batch_id existed
+
+
+def _ocr_root() -> Path | None:
+    """Resolve FEMB_OCR_DIR from env. Returns None if unconfigured."""
+    try:
+        return Path(env_config("FEMB_OCR_DIR"))
+    except Exception:
+        return None
+
+
+def _batch_fembs(batch_id):
+    key = "" if batch_id == UNBATCHED else batch_id
+    return FEMB.objects.filter(batch_id=key).order_by("version", "serial_number")
+
+
+def femb_view(request):
+    """FEMB → HWDB worklist, one row per OCR batch.
+
+    Local-only (no HWDB call): the "In HWDB" count is the prod-scoped
+    ``hwdb_part_id`` stamp written by a successful prod upload.
+    """
+    batches = (
+        FEMB.objects.values("batch_id")
+        .annotate(
+            femb_count=Count("id"),
+            in_hwdb=Count("id", filter=~Q(hwdb_part_id="")),
+            newest=Max("id"),
+        )
+        .order_by("-newest")
+    )
+    rows = [
+        {
+            "batch_id": b["batch_id"] or UNBATCHED,
+            "label": b["batch_id"] or "(no batch)",
+            "femb_count": b["femb_count"],
+            "in_hwdb": b["in_hwdb"],
+        }
+        for b in batches
+    ]
+    profile = active_profile(request)
+    return render(
+        request,
+        "hwdb/femb.html",
+        {
+            "batches": rows,
+            "femb_part_types": profile["femb_part_types"],
+            "active_instance": active_instance(request),
+            "instances": list(settings.HWDB_PROFILES),
+            "page": "hwdb",
+        },
+    )
+
+
+def femb_batch_view(request, batch_id):
+    """Per-batch FEMB list with per-row + whole-batch upload buttons."""
+    fembs = list(_batch_fembs(batch_id))
+    ocr_root = _ocr_root()
+    hwdb_ui_base = settings.HWDB_PROFILES["prod"]["ui"]
+    rows = []
+    for femb in fembs:
+        assembly = femb_lib.local_assembly(femb)
+        rows.append({
+            "femb": femb,
+            "key": f"{femb.version}/{femb.serial_number}",
+            "chip_count": len(assembly),
+            "repair_count": femb.repairs.count(),
+            "photo_count": len(femb_lib.find_photos(ocr_root, femb)),
+            "hwdb_url": (f"{hwdb_ui_base}/edit/component/{femb.hwdb_part_id}"
+                         if femb.hwdb_part_id else None),
+        })
+    instance = active_instance(request)
+    return render(
+        request,
+        "hwdb/femb_batch.html",
+        {
+            "batch_id": batch_id,
+            "batch_label": "(no batch)" if batch_id == UNBATCHED else batch_id,
+            "rows": rows,
+            "femb_count": len(rows),
+            "in_hwdb_count": sum(1 for r in rows if r["femb"].hwdb_part_id),
+            "ocr_root": ocr_root,
+            "active_instance": instance,
+            "instances": list(settings.HWDB_PROFILES),
+            "is_dev": instance == "dev",
+            "page": "hwdb",
+        },
+    )
+
+
+@require_POST
+def femb_run_view(request, batch_id):
+    """Stream per-FEMB sync progress as text/plain (same shape as the LArASIC
+    tray run). ``femb=<version>/<serial>`` narrows to one row. On prod a
+    successful run stamps ``FEMB.hwdb_part_id``.
+    """
+    instance = active_instance(request)
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(
+            f"{link}?{urlencode({'next': reverse('hwdb:femb_batch', args=[batch_id])})}"
+        )
+    except FnalUnavailable:
+        return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
+
+    profile = active_profile(request)
+    api = FnalDbApiClient(profile["api"], bearer)
+    fembs = _batch_fembs(batch_id)
+    key = request.POST.get("femb")
+    if key and "/" in key:
+        version, serial = key.split("/", 1)
+        fembs = fembs.filter(version=version, serial_number=serial)
+    fembs = list(fembs)
+    attach_photos = request.POST.get("attach_photos", "on") == "on"
+    ocr_root = _ocr_root()
+
+    def _iter():
+        total = len(fembs)
+        yield f"Syncing {total} FEMB(s) of batch {batch_id} to {instance}.\n"
+        ok = failed = 0
+        for i, femb in enumerate(fembs, 1):
+            yield f"[{i}/{total}] {femb.version}/{femb.serial_number}\n"
+            result = None
+            try:
+                for item in femb_lib.upload_femb(
+                    api, femb, profile=profile, instance=instance,
+                    ocr_root=ocr_root, attach_photos=attach_photos,
+                ):
+                    if isinstance(item, femb_lib.FembResult):
+                        result = item
+                    else:
+                        yield item
+            except Exception as e:
+                logger.exception("femb_run_view crashed on %s", femb)
+                yield f"  *** crashed: {e} ***\n"
+            if result is None or not result.ok:
+                failed += 1
+                continue
+            ok += 1
+            if instance == "prod" and result.part_id and femb.hwdb_part_id != result.part_id:
+                femb.hwdb_part_id = result.part_id
+                femb.save(update_fields=["hwdb_part_id"])
+        yield f"Done: {ok} ok, {failed} failed.\n"
+
+    response = StreamingHttpResponse(_iter(), content_type="text/plain; charset=utf-8")
+    response["Cache-Control"] = "no-cache"
+    response["X-Accel-Buffering"] = "no"
+    return response

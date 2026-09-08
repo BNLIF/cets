@@ -262,6 +262,18 @@ class FnalDbApiClient:
             "PATCH", f"components/{part_id}/subcomponents", data=payload
         )
 
+    def enable_component(self, part_id):
+        """``PATCH components/{pid}/enable`` — HWDB requires an item to be
+        enabled before it can be attached as a sub-component, and a freshly
+        created item is not. Enabling also resets status and WIPES comments
+        (Karla, confirmed empirically), so call it only on items created
+        moments ago (issue #137).
+        """
+        return self._make_request(
+            "PATCH", f"components/{part_id}/enable",
+            data={"component": {"part_id": part_id}},
+        )
+
     def post_location(self, part_id, payload):
         return self._make_request(
             "POST", f"components/{part_id}/locations", data=payload
@@ -285,16 +297,18 @@ class FnalDbApiClient:
             "POST", f"component-types/{part_type_id}/test-types", data=payload
         )
 
-    def post_component_image(self, part_id, fileobj, filename, comments=""):
+    def post_component_image(self, part_id, fileobj, filename, comments="",
+                             content_type="application/pdf"):
         """Multipart upload of an attachment onto an item
         (``POST components/{pid}/images``). ``filename`` becomes the HWDB
         ``image_name`` — the executive-summary gate matches on it (issue
         #53). Mirrors the official ``post_hwitem_image`` shape: data fields
-        as form parts plus the file under ``image``.
+        as form parts plus the file under ``image``. ``content_type``
+        defaults to PDF (executive summaries); FEMB photos pass ``image/png``.
         """
         url = f"{self.base_url}/components/{part_id}/images"
         files = {"comments": (None, comments),
-                 "image": (filename, fileobj, "application/pdf")}
+                 "image": (filename, fileobj, content_type)}
         try:
             response = self.session.post(url, files=files)
         except requests.exceptions.RequestException:

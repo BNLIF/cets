@@ -109,6 +109,9 @@ HWDB_PROFILES = {
         "larasic_part_type": "D08100100003",
         "coldadc_part_type": "D08100200002",  # coldadc_p2prb1
         "coldata_part_type": "D08100300003",  # coldata_e4prb2
+        # FEMB type is keyed by the HD/VD marker in the FEMB version
+        # ("IO-1826-…" = HD SAMTEC, "IO-1865-…" = VD MiniSAS). Issue #137.
+        "femb_part_types": {"IO-1826": "D08101100031", "IO-1865": "D08101100041"},
     },
     "dev": {
         "api": "https://dbwebapi2.fnal.gov:8443/cdbdev/api/v1",
@@ -116,6 +119,8 @@ HWDB_PROFILES = {
         "larasic_part_type": "D08100100004",
         "coldadc_part_type": "D08100200001",  # coldadc_p2prep
         "coldata_part_type": "D08100300001",  # coldata_e4prep
+        # Dev has one generic FEMB type (femb_prep) for both HD and VD.
+        "femb_part_types": {"IO-1826": "D08100400001", "IO-1865": "D08100400001"},
     },
 }
 if HWDB_INSTANCE not in HWDB_PROFILES:
@@ -148,6 +153,19 @@ HWDB_COMPONENT_DEFAULTS = {
         "cold_test_name": "CryoT QC Test",
         # status_id 110 = "Waiting on QA/QC Tests" (per Karla's note.md;
         # patched after RTS upload, refined by later QA/QC analysis).
+        "initial_status_id": 110,
+    },
+    # FEMB assembly upload (issue #137). The FEMB is manufactured by BNL; the
+    # chips it carries are TSMC. Both ids differ per instance (probed
+    # 2026-09-08 via .idea/spike/hwdb_femb_type_probe.py). The per-slot chip
+    # part types are NOT listed here: they are read from the FEMB type's
+    # connectors at run time, which is what makes dev (femb_prep only accepts
+    # the preproduction chip types) and prod work from the same code.
+    "femb": {
+        "manufacturer_id": {"prod": 21, "dev": 58},       # BNL
+        "chip_manufacturer_id": {"prod": 15, "dev": 59},  # TSMC
+        "institution_id": 128,     # BNL
+        "country_code": "US",
         "initial_status_id": 110,
     },
 }

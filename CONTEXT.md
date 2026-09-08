@@ -96,6 +96,18 @@ results (serial path or 10-worker parallel path; see
   a bearer minted fresh per request; see the `hwdb/fnal/` package.
 - **part-type ID** — HWDB's identifier for a component type, e.g. LArASIC is
   `D08100100004` on dev / `D08100100003` on prod.
+- **FEMB assembly upload** (`/hwdb/femb/`, `hwdb/upload/femb.py`) — one
+  idempotent "sync to local assembly" per FEMB: find-or-create the FEMB item
+  (serial `BNL/FEMB/<version>/<sn>`) and its mounted chips, then diff HWDB's
+  sub-component slots against the local `femb_pos` state. HWDB's
+  **functional-position names** are `(F) LArASIC 1`, `(B) ColdADC 4`,
+  `(F) COLDATA 2` — the OCR label without its ` SN` suffix. The chip part type
+  each slot accepts is read from the FEMB type's `connectors` at run time (dev
+  `femb_prep` only accepts the preproduction chip types; prod HD/VD accept
+  the production ones). A slot whose HWDB chip our db marks as
+  `removed_at_repair` is swapped (old chip → 180 + comment); a slot holding a
+  chip our db never saw is left alone. `FEMB.batch_id` (OCR batch) groups the
+  worklist; `FEMB.hwdb_part_id` is the prod-scoped upload stamp.
 - **HWDB mirror** — a slice of CETS state tracking what the production HWDB
   says about each chip (existence + RT/LN latest-test dates), kept in a
   dedicated `HwdbChip` table separate from the BNL-tested chip models.

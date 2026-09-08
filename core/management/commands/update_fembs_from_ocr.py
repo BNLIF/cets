@@ -111,6 +111,15 @@ def parse_inspection_note(filepath):
     return result
 
 
+def batch_id_from_path(filepath):
+    """`.../batch_03192026/BNL_FEMB_.../femb_parts_00002.txt` -> "03192026".
+
+    Mirrors the `Batch ID:` field of inspection_note.txt (no `batch_` prefix).
+    """
+    batch_dir = os.path.basename(os.path.dirname(os.path.dirname(filepath)))
+    return batch_dir[len("batch_"):] if batch_dir.startswith("batch_") else batch_dir
+
+
 def components_to_state(components):
     """
     Convert a list of component dicts (from parse_parts_file) to a state dict
@@ -199,6 +208,7 @@ class Command(BaseCommand):
         # ------------------------------------------------------------------ #
         new_fembs_to_create = []
         components_to_update = []
+        batch_backfills = []  # (femb_obj, batch_id) for FEMBs imported before batch_id existed
 
         for filepath in regular_files:
             filename = os.path.basename(filepath)
@@ -224,11 +234,15 @@ class Command(BaseCommand):
                 continue
 
             femb_obj = FEMB.objects.filter(serial_number=femb_sn, version=femb_version).first()
+            batch_id = batch_id_from_path(filepath)
 
             if not femb_obj:
                 new_fembs_to_create.append(
-                    {"serial_number": femb_sn, "version": femb_version, "status": "new"}
+                    {"serial_number": femb_sn, "version": femb_version, "status": "new",
+                     "batch_id": batch_id}
                 )
+            elif not femb_obj.batch_id:
+                batch_backfills.append((femb_obj, batch_id))
 
             for comp in components:
                 model = COMPONENT_MODELS.get(comp["type"])
@@ -365,6 +379,7 @@ class Command(BaseCommand):
             not new_fembs_to_create
             and not components_to_update
             and not repairs_to_record
+            and not batch_backfills
         )
         if nothing_to_do:
             self.stdout.write(
@@ -386,6 +401,13 @@ class Command(BaseCommand):
                 self.stdout.write(
                     f"  - {femb_data['version']}/{femb_data['serial_number']}"
                 )
+
+        if batch_backfills:
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"\nFound {len(batch_backfills)} existing FEMB(s) missing a batch id to backfill."
+                )
+            )
 
         if components_to_update:
             self.stdout.write(
@@ -438,7 +460,12 @@ class Command(BaseCommand):
                         serial_number=femb_data["serial_number"],
                         version=femb_data["version"],
                         status=femb_data["status"],
+                        batch_id=femb_data["batch_id"],
                     )
+
+                for femb_obj, batch_id in batch_backfills:
+                    femb_obj.batch_id = batch_id
+                    femb_obj.save(update_fields=["batch_id"])
 
                 for comp_data in components_to_update:
                     model = COMPONENT_MODELS.get(comp_data["type"])

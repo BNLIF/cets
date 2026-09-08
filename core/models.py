@@ -9,6 +9,13 @@ class FEMB(models.Model):
     status = models.CharField(max_length=20, default="testing")
     notes = models.TextField(blank=True, default="")
     last_update = models.DateTimeField(auto_now=True)
+    # OCR batch this FEMB was assembled in (the `batch_<id>` dir name under
+    # FEMB_OCR_DIR without the prefix, e.g. "03192026"). Groups the HWDB
+    # upload worklist and locates the assembly photos. Issue #137.
+    batch_id = models.CharField(max_length=50, blank=True, default="")
+    # HWDB part_id stamped after a successful PROD upload (prod-scoped, like
+    # LArASIC.is_in_hwdb — ADR-0003). Blank = not known to be in prod HWDB.
+    hwdb_part_id = models.CharField(max_length=30, blank=True, default="")
 
     class Meta:
         unique_together = [["version", "serial_number"]]
