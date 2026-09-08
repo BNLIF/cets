@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 
 from decouple import config as env_config
 from django.conf import settings
-from django.db.models import Count, Max, Q
+from django.db.models import Count, Exists, Max, OuterRef, Q
 from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -14,7 +14,7 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
-from core.models import LArASIC, FEMB, FembTest
+from core.models import COLDATA, ColdADC, LArASIC, FEMB, FembTest
 
 from .api_client import FnalDbApiClient
 from .fnal import flow
@@ -1092,12 +1092,32 @@ def femb_view(request):
         }
         for b in batches
     ]
+    # Stat cards, same shape as /hwdb/larasic/. A FEMB with no mounted chips
+    # locally (never imported from OCR) cannot be uploaded, so it is counted
+    # apart from the "to upload" backlog.
+    mounted = Q(removed_at_repair__isnull=True)
+    has_chips = (
+        Exists(LArASIC.objects.filter(mounted, femb=OuterRef("pk")))
+        | Exists(ColdADC.objects.filter(mounted, femb=OuterRef("pk")))
+        | Exists(COLDATA.objects.filter(mounted, femb=OuterRef("pk")))
+    )
+    fembs = FEMB.objects.annotate(has_chips=has_chips)
+    total = fembs.count()
+    in_hwdb = fembs.exclude(hwdb_part_id="").count()
+    no_chips = fembs.filter(has_chips=False).count()
+    to_upload = fembs.filter(hwdb_part_id="", has_chips=True).count()
+    last_synced = FEMB.objects.aggregate(Max("hwdb_checked_at"))["hwdb_checked_at__max"]
     profile = active_profile(request)
     return render(
         request,
         "hwdb/femb.html",
         {
             "batches": rows,
+            "total": total,
+            "in_hwdb": in_hwdb,
+            "to_upload": to_upload,
+            "no_chips": no_chips,
+            "last_synced": last_synced,
             "femb_part_types": profile["femb_part_types"],
             "active_instance": active_instance(request),
             "instances": list(settings.HWDB_PROFILES),

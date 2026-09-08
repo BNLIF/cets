@@ -9,7 +9,8 @@
         {% crumbs "CETS" "/" "Hardware Database" "/hwdb/" "FEMB" %}
         <h1 class="page-title">FEMB · HWDB upload</h1>
         <div class="page-subtitle">
-            Push assembled FEMBs and their chips to the <strong>{{ active_instance }}</strong> HWDB instance, one OCR batch at a time.
+            Local FEMBs vs the <strong>{{ active_instance }}</strong> HWDB ·
+            {% if last_synced %}last synced {{ last_synced|date:"Y-m-d H:i" }}{% else %}never synced{% endif %}
         </div>
     </div>
     <div class="page-head-actions">
@@ -24,6 +25,13 @@
             </div>
         </form>
     </div>
+</div>
+
+<div class="stats" style="margin-bottom: 20px;">
+    <div class="stat"><div class="stat-label">Local total</div><div class="stat-value">{{ total }}</div></div>
+    <div class="stat"><div class="stat-label">In HWDB</div><div class="stat-value">{{ in_hwdb }}</div><div class="stat-foot">prod, per last Sync HWDB</div></div>
+    <div class="stat"><div class="stat-label">To upload</div><div class="stat-value">{{ to_upload }}</div></div>
+    <div class="stat"><div class="stat-label">No chips locally</div><div class="stat-value">{{ no_chips }}</div><div class="stat-foot">not in OCR batches; cannot upload</div></div>
 </div>
 
 {% include "hwdb/_femb_progress.html" %}

@@ -338,6 +338,19 @@ class FembViewsTest(TestCase):
         self.assertContains(resp, "(no batch)")
         self.assertContains(resp, reverse("hwdb:femb_batch", args=["unbatched"]))
 
+    def test_index_stat_cards(self):
+        # 00002 has chips and no stamp -> to upload; 00003 has no chips.
+        stamped = _femb(sn="00004", batch="03192026", chips=False)
+        stamped.hwdb_part_id = "D08101100041-00001"
+        stamped.save()
+        resp = self.client.get(reverse("hwdb:femb"))
+        ctx = resp.context
+        self.assertEqual(ctx["total"], 3)
+        self.assertEqual(ctx["in_hwdb"], 1)
+        self.assertEqual(ctx["to_upload"], 1)
+        self.assertEqual(ctx["no_chips"], 2)
+        self.assertContains(resp, "never synced")
+
     def test_batch_page_lists_fembs_with_chip_counts(self):
         resp = self.client.get(reverse("hwdb:femb_batch", args=["03192026"]))
         self.assertEqual(resp.status_code, 200)
