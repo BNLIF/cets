@@ -107,7 +107,9 @@ results (serial path or 10-worker parallel path; see
   the production ones). A slot whose HWDB chip our db marks as
   `removed_at_repair` is swapped (old chip → 180 + comment); a slot holding a
   chip our db never saw is left alone. `FEMB.batch_id` (OCR batch) groups the
-  worklist; `FEMB.hwdb_part_id` is the prod-scoped upload stamp.
+  worklist; `FEMB.hwdb_part_id` / `hwdb_checked_at` are the prod-scoped stamps
+  written by "Sync HWDB" (read-only lookup by serial) or a prod upload — the
+  same Sync/Upload vocabulary as the LArASIC page.
 - **HWDB mirror** — a slice of CETS state tracking what the production HWDB
   says about each chip (existence + RT/LN latest-test dates), kept in a
   dedicated `HwdbChip` table separate from the BNL-tested chip models.

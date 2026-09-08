@@ -20,7 +20,9 @@ urlpatterns = [
     path("larasic/upload/<str:tray_id>/run/", views.upload_run_view, name="upload_run"),
     # FEMB assembly upload (issue #137).
     path("femb/", views.femb_view, name="femb"),
+    path("femb/check/", views.femb_check_view, name="femb_check_all"),
     path("femb/<str:batch_id>/", views.femb_batch_view, name="femb_batch"),
+    path("femb/<str:batch_id>/check/", views.femb_check_view, name="femb_check"),
     path("femb/<str:batch_id>/run/", views.femb_run_view, name="femb_run"),
     # The FD-VD explorer moved to its own app at /explore/ (ADR-0011, #32).
     # Permanent-redirect old bookmarks (the ?node= query string is preserved).

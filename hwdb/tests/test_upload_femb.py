@@ -344,6 +344,9 @@ class FembViewsTest(TestCase):
         self.assertContains(resp, "IO-1865-1L/00002")
         self.assertNotContains(resp, "00003")
         self.assertContains(resp, 'data-key="IO-1865-1L/00002"')
+        self.assertContains(resp, "Upload this FEMB")
+        self.assertContains(resp, "Sync HWDB")
+        self.assertContains(resp, reverse("hwdb:femb_check", args=["03192026"]))
 
     def test_home_card_links_to_femb_page(self):
         resp = self.client.get(reverse("hwdb:home"))
@@ -363,6 +366,7 @@ class FembViewsTest(TestCase):
         self.assertIn("Done: 1 ok, 0 failed.", body)
         self.femb.refresh_from_db()
         self.assertEqual(self.femb.hwdb_part_id, "D08101100041-00099")
+        self.assertIsNotNone(self.femb.hwdb_checked_at)
 
     @mock.patch("hwdb.views.mint_for", return_value="bearer")
     def test_run_on_dev_does_not_stamp(self, _mint):
@@ -373,3 +377,60 @@ class FembViewsTest(TestCase):
             b"".join(resp.streaming_content)
         self.femb.refresh_from_db()
         self.assertEqual(self.femb.hwdb_part_id, "")
+
+
+class FembCheckViewTest(TestCase):
+    """"Sync HWDB" — read-only lookup that stamps hwdb_part_id on prod."""
+
+    def setUp(self):
+        self.client.force_login(make_cets_user())
+        self.femb = _femb()
+        self.other = _femb(sn="00003", batch="07272026", chips=False)
+        self.other.hwdb_part_id = "D08101100041-00777"   # stale stamp, gone from HWDB
+        self.other.save()
+
+    def _api(self, found):
+        api = mock.Mock()
+        api.find_component_by_serial.side_effect = lambda type_id, serial: (
+            {"part_id": found[serial]} if serial in found else None
+        )
+        return api
+
+    @mock.patch("hwdb.views.mint_for", return_value="bearer")
+    def test_prod_check_stamps_found_and_clears_missing(self, _mint):
+        self.client.post(reverse("hwdb:set_instance"), {"instance": "prod"})
+        api = self._api({"BNL/FEMB/IO-1865-1L/00002": "D08101100041-00042"})
+        with mock.patch("hwdb.views.FnalDbApiClient", return_value=api):
+            resp = self.client.post(reverse("hwdb:femb_check_all"))
+            body = b"".join(resp.streaming_content).decode()
+        self.assertIn("IO-1865-1L/00002: D08101100041-00042", body)
+        self.assertIn("IO-1865-1L/00003: not in HWDB", body)
+        self.assertIn("Done: 1 in HWDB, 1 missing, 0 failed.", body)
+        self.femb.refresh_from_db()
+        self.other.refresh_from_db()
+        self.assertEqual(self.femb.hwdb_part_id, "D08101100041-00042")
+        self.assertIsNotNone(self.femb.hwdb_checked_at)
+        self.assertEqual(self.other.hwdb_part_id, "")
+        # looked up under the prod VD type, by the full HWDB serial
+        api.find_component_by_serial.assert_any_call("D08101100041", "BNL/FEMB/IO-1865-1L/00002")
+
+    @mock.patch("hwdb.views.mint_for", return_value="bearer")
+    def test_dev_check_reports_but_does_not_stamp(self, _mint):
+        self.client.post(reverse("hwdb:set_instance"), {"instance": "dev"})
+        api = self._api({"BNL/FEMB/IO-1865-1L/00002": "D08100400001-00093"})
+        with mock.patch("hwdb.views.FnalDbApiClient", return_value=api):
+            resp = self.client.post(reverse("hwdb:femb_check", args=["03192026"]))
+            body = b"".join(resp.streaming_content).decode()
+        self.assertIn("Checking 1 FEMB(s) of batch 03192026 against dev HWDB.", body)
+        self.assertIn("dev: local stamps unchanged", body)
+        self.femb.refresh_from_db()
+        self.assertEqual(self.femb.hwdb_part_id, "")
+        self.other.refresh_from_db()
+        self.assertEqual(self.other.hwdb_part_id, "D08101100041-00777")
+
+    def test_index_shows_last_check(self):
+        self.femb.hwdb_checked_at = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+        self.femb.save()
+        resp = self.client.get(reverse("hwdb:femb"))
+        self.assertContains(resp, "Last HWDB check")
+        self.assertContains(resp, reverse("hwdb:femb_check_all"))

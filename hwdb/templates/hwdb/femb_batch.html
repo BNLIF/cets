@@ -9,10 +9,12 @@
         {% crumbs "CETS" "/" "Hardware Database" "/hwdb/" "FEMB" "/hwdb/femb/" batch_label %}
         <h1 class="page-title">Batch {{ batch_label }}</h1>
         <div class="page-subtitle">
-            {{ femb_count }} FEMBs · {{ in_hwdb_count }} in prod HWDB · instance <strong>{{ active_instance }}</strong>
+            {{ femb_count }} FEMBs · {{ in_hwdb_count }} in prod HWDB{% if last_checked %} · checked {{ last_checked|date:"Y-m-d H:i" }}{% endif %} ·
+            instance <strong>{{ active_instance }}</strong>
         </div>
     </div>
     <div class="page-head-actions">
+        <button type="button" id="femb-sync-btn" class="btn btn-ghost" title="Look up each FEMB of this batch by serial in the {{ active_instance }} HWDB. Read-only. On prod, stamps the HWDB column.">Sync HWDB</button>
         <form method="post" action="{% url 'hwdb:set_instance' %}" style="display: inline;">
             {% csrf_token %}
             <input type="hidden" name="next" value="{{ request.path }}">
@@ -44,17 +46,10 @@
         <input type="checkbox" id="attach-photos" checked> Attach photos
     </label>
     <button type="button" id="upload-batch-btn" class="btn btn-primary"
-            title="Sync every FEMB in this batch: create missing FEMB and chip items, attach chips to their slots, record repairs, upload photos. Safe to re-run.">Sync batch ({{ femb_count }})</button>
+            title="Upload every FEMB in this batch: create missing FEMB and chip items, attach chips to their slots, record repairs, upload photos. Safe to re-run.">Upload batch ({{ femb_count }})</button>
 </div>
 
-<div id="upload-progress-panel" style="display: none; position: fixed; top: 80px; right: 16px; bottom: 16px; width: 520px; max-width: calc(100vw - 32px); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15); z-index: 50; flex-direction: column;">
-    <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg-subtle); border-radius: 8px 8px 0 0;">
-        <span style="font-size: 13px; color: var(--text-2); font-weight: 500;">Sync progress</span>
-        <button type="button" id="upload-progress-close" class="btn btn-sm btn-ghost" style="padding: 2px 8px; font-size: 16px; line-height: 1;" title="Minimize (re-open with the floating button — content is preserved)">−</button>
-    </div>
-    <pre id="upload-progress" style="flex: 1; margin: 0; padding: 12px 16px; overflow-y: auto; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; background: var(--bg-subtle); border-radius: 0 0 8px 8px;"></pre>
-</div>
-<button type="button" id="upload-progress-reopen" class="btn btn-primary" style="display: none; position: fixed; bottom: 24px; right: 24px; z-index: 50; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);" title="Re-open sync progress panel">Show progress</button>
+{% include "hwdb/_femb_progress.html" %}
 
 <div class="table-wrap">
     <table class="table">
@@ -78,7 +73,7 @@
                 <td>{{ row.repair_count|default:"—" }}</td>
                 <td>{{ row.photo_count|default:"—" }}</td>
                 <td>{% if row.hwdb_url %}<a href="{{ row.hwdb_url }}" target="_blank" rel="noopener" class="cell-mono" title="Open this FEMB's record in HWDB">{{ row.femb.hwdb_part_id }}</a>{% else %}<span class="cell-muted">—</span>{% endif %}</td>
-                <td><button type="button" class="btn btn-sm btn-ghost upload-femb-btn" data-key="{{ row.key }}">Sync this FEMB</button></td>
+                <td><button type="button" class="btn btn-sm btn-ghost upload-femb-btn" data-key="{{ row.key }}">Upload this FEMB</button></td>
             </tr>
             {% empty %}
             <tr><td colspan="7" class="cell-muted" style="text-align: center; padding: 36px;">No FEMBs in this batch.</td></tr>
@@ -87,85 +82,52 @@
     </table>
 </div>
 
-<form style="display: none;">{% csrf_token %}</form>
-
 <style>#prod-gauntlet::backdrop { background: rgba(0, 0, 0, 0.45); }</style>
 <dialog id="prod-gauntlet" style="border: 1px solid #d97706; border-radius: 8px; padding: 24px; max-width: 460px; background: var(--bg); color: var(--text);">
     <div style="display: inline-block; background: #fef3c7; color: #92400e; padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 12px;">⚠ PRODUCTION HWDB</div>
-    <h2 style="margin: 0 0 12px 0;">Confirm sync</h2>
+    <h2 style="margin: 0 0 12px 0;">Confirm upload</h2>
     <p id="gauntlet-message" style="color: var(--text-2); margin-bottom: 20px;"></p>
     <div style="display: flex; gap: 8px; justify-content: flex-end;">
         <button type="button" id="gauntlet-cancel" class="btn btn-ghost">Cancel</button>
-        <button type="button" id="gauntlet-confirm" class="btn btn-primary">Sync to prod</button>
+        <button type="button" id="gauntlet-confirm" class="btn btn-primary">Upload to prod</button>
     </div>
 </dialog>
 
 <script>
 (function () {
     const runUrl = "{% url 'hwdb:femb_run' batch_id %}";
+    const checkUrl = "{% url 'hwdb:femb_check' batch_id %}";
     const isProd = {{ is_dev|yesno:'false,true' }};
-    const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || "";
-    const out = document.getElementById('upload-progress');
-    const panel = document.getElementById('upload-progress-panel');
-    const reopenBtn = document.getElementById('upload-progress-reopen');
     const attachPhotos = document.getElementById('attach-photos');
     const dialog = document.getElementById('prod-gauntlet');
     const messageEl = document.getElementById('gauntlet-message');
     const confirmEl = document.getElementById('gauntlet-confirm');
     const cancelEl = document.getElementById('gauntlet-cancel');
 
-    document.getElementById('upload-progress-close')?.addEventListener('click', () => {
-        panel.style.display = 'none';
-        reopenBtn.style.display = 'block';
-    });
-    reopenBtn?.addEventListener('click', () => {
-        panel.style.display = 'flex';
-        reopenBtn.style.display = 'none';
-    });
-
-    async function streamSync(fembKey) {
-        panel.style.display = 'flex';
-        reopenBtn.style.display = 'none';
-        out.textContent = '';
+    function upload(fembKey) {
         const formData = new FormData();
-        formData.append('csrfmiddlewaretoken', csrf);
         if (fembKey) formData.append('femb', fembKey);
         formData.append('attach_photos', attachPhotos.checked ? 'on' : '');
-        let resp;
-        try {
-            resp = await fetch(runUrl, {method: 'POST', body: formData});
-        } catch (e) {
-            out.textContent = '*** network error: ' + e + ' ***';
-            return;
-        }
-        if (!resp.ok) {
-            out.textContent = '*** HTTP ' + resp.status + ' — ' + (await resp.text()).slice(0, 500) + ' ***';
-            return;
-        }
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        while (true) {
-            const {done, value} = await reader.read();
-            if (done) break;
-            out.textContent += decoder.decode(value, {stream: true});
-            out.scrollTop = out.scrollHeight;
-        }
+        window.fembStream(runUrl, formData, 'Upload progress');
     }
 
-    function maybePromptThenSync(fembKey) {
-        if (!isProd) { streamSync(fembKey); return; }
+    function maybePromptThenUpload(fembKey) {
+        if (!isProd) { upload(fembKey); return; }
         messageEl.textContent = fembKey
-            ? `Sync FEMB ${fembKey} and its chips to the production HWDB.`
-            : `Sync all {{ femb_count }} FEMB(s) of batch {{ batch_label|escapejs }} to the production HWDB.`;
-        confirmEl.onclick = () => { dialog.close('confirm'); streamSync(fembKey); };
+            ? `Upload FEMB ${fembKey} and its chips to the production HWDB.`
+            : `Upload all {{ femb_count }} FEMB(s) of batch {{ batch_label|escapejs }} to the production HWDB.`;
+        confirmEl.onclick = () => { dialog.close('confirm'); upload(fembKey); };
         cancelEl.onclick = () => dialog.close('cancel');
         dialog.showModal();
         setTimeout(() => cancelEl.focus(), 50);
     }
 
-    document.getElementById('upload-batch-btn')?.addEventListener('click', () => maybePromptThenSync(null));
+    document.getElementById('femb-sync-btn')?.addEventListener('click', () => {
+        window.fembStream(checkUrl, new FormData(), 'Sync HWDB');
+    });
+    document.getElementById('upload-batch-btn')?.addEventListener('click', () => maybePromptThenUpload(null));
     document.querySelectorAll('.upload-femb-btn').forEach(btn => {
-        btn.addEventListener('click', () => maybePromptThenSync(btn.dataset.key));
+        btn.addEventListener('click', () => maybePromptThenUpload(btn.dataset.key));
     });
 })();
 </script>

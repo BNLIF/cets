@@ -1069,13 +1069,15 @@ def femb_view(request):
     """FEMB → HWDB worklist, one row per OCR batch.
 
     Local-only (no HWDB call): the "In HWDB" count is the prod-scoped
-    ``hwdb_part_id`` stamp written by a successful prod upload.
+    ``hwdb_part_id`` stamp written by "Sync HWDB" (``femb_check_view``) or a
+    successful prod upload.
     """
     batches = (
         FEMB.objects.values("batch_id")
         .annotate(
             femb_count=Count("id"),
             in_hwdb=Count("id", filter=~Q(hwdb_part_id="")),
+            last_checked=Max("hwdb_checked_at"),
             newest=Max("id"),
         )
         .order_by("-newest")
@@ -1086,6 +1088,7 @@ def femb_view(request):
             "label": b["batch_id"] or "(no batch)",
             "femb_count": b["femb_count"],
             "in_hwdb": b["in_hwdb"],
+            "last_checked": b["last_checked"],
         }
         for b in batches
     ]
@@ -1130,12 +1133,76 @@ def femb_batch_view(request, batch_id):
             "rows": rows,
             "femb_count": len(rows),
             "in_hwdb_count": sum(1 for r in rows if r["femb"].hwdb_part_id),
+            "last_checked": max((f.hwdb_checked_at for f in fembs if f.hwdb_checked_at), default=None),
             "ocr_root": ocr_root,
             "active_instance": instance,
             "instances": list(settings.HWDB_PROFILES),
             "is_dev": instance == "dev",
             "page": "hwdb",
         },
+    )
+
+
+def _stream_headers(response):
+    response["Cache-Control"] = "no-cache"
+    response["X-Accel-Buffering"] = "no"
+    return response
+
+
+@require_POST
+def femb_check_view(request, batch_id=None):
+    """"Sync HWDB" for FEMBs: read-only lookup of each FEMB by serial on the
+    active instance, streamed one line per FEMB. On prod it stamps
+    ``hwdb_part_id`` (and clears a stale stamp), so the worklist can show
+    which batches are already in HWDB — including FEMBs uploaded by tools
+    other than CETS. Without ``batch_id`` it walks every FEMB (a few dozen
+    GETs — well within the light-mirror rule).
+    """
+    instance = active_instance(request)
+    back = reverse("hwdb:femb_batch", args=[batch_id]) if batch_id else reverse("hwdb:femb")
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': back})}")
+    except FnalUnavailable:
+        return render(request, "hwdb/error.html", {"error_message": FNAL_UNAVAILABLE})
+
+    profile = active_profile(request)
+    api = FnalDbApiClient(profile["api"], bearer)
+    fembs = list(_batch_fembs(batch_id) if batch_id else FEMB.objects.order_by("batch_id", "version", "serial_number"))
+
+    def _iter():
+        total = len(fembs)
+        scope = f"batch {batch_id}" if batch_id else "all batches"
+        yield f"Checking {total} FEMB(s) of {scope} against {instance} HWDB.\n"
+        found = missing = failed = 0
+        now = timezone.now()
+        for i, femb in enumerate(fembs, 1):
+            label = f"{femb.version}/{femb.serial_number}"
+            try:
+                type_id = femb_lib.femb_part_type(profile, femb)
+                item = api.find_component_by_serial(type_id, femb_lib.hwdb_serial(femb))
+            except Exception as e:
+                failed += 1
+                yield f"[{i}/{total}] {label}: *** {e} ***\n"
+                continue
+            pid = item["part_id"] if item else ""
+            if pid:
+                found += 1
+                yield f"[{i}/{total}] {label}: {pid}\n"
+            else:
+                missing += 1
+                yield f"[{i}/{total}] {label}: not in HWDB\n"
+            if instance == "prod":
+                femb.hwdb_part_id = pid
+                femb.hwdb_checked_at = now
+                femb.save(update_fields=["hwdb_part_id", "hwdb_checked_at"])
+        tail = "" if instance == "prod" else " (dev: local stamps unchanged)"
+        yield f"Done: {found} in HWDB, {missing} missing, {failed} failed{tail}.\n"
+
+    return _stream_headers(
+        StreamingHttpResponse(_iter(), content_type="text/plain; charset=utf-8")
     )
 
 
@@ -1169,7 +1236,7 @@ def femb_run_view(request, batch_id):
 
     def _iter():
         total = len(fembs)
-        yield f"Syncing {total} FEMB(s) of batch {batch_id} to {instance}.\n"
+        yield f"Uploading {total} FEMB(s) of batch {batch_id} to {instance}.\n"
         ok = failed = 0
         for i, femb in enumerate(fembs, 1):
             yield f"[{i}/{total}] {femb.version}/{femb.serial_number}\n"
@@ -1190,12 +1257,12 @@ def femb_run_view(request, batch_id):
                 failed += 1
                 continue
             ok += 1
-            if instance == "prod" and result.part_id and femb.hwdb_part_id != result.part_id:
+            if instance == "prod" and result.part_id:
                 femb.hwdb_part_id = result.part_id
-                femb.save(update_fields=["hwdb_part_id"])
+                femb.hwdb_checked_at = timezone.now()
+                femb.save(update_fields=["hwdb_part_id", "hwdb_checked_at"])
         yield f"Done: {ok} ok, {failed} failed.\n"
 
-    response = StreamingHttpResponse(_iter(), content_type="text/plain; charset=utf-8")
-    response["Cache-Control"] = "no-cache"
-    response["X-Accel-Buffering"] = "no"
-    return response
+    return _stream_headers(
+        StreamingHttpResponse(_iter(), content_type="text/plain; charset=utf-8")
+    )

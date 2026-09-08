@@ -1,0 +1,53 @@
+{# Streaming progress panel shared by the FEMB worklist and batch pages. Defines window.fembStream(url, formData). #}
+<div id="upload-progress-panel" style="display: none; position: fixed; top: 80px; right: 16px; bottom: 16px; width: 520px; max-width: calc(100vw - 32px); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15); z-index: 50; flex-direction: column;">
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg-subtle); border-radius: 8px 8px 0 0;">
+        <span id="upload-progress-title" style="font-size: 13px; color: var(--text-2); font-weight: 500;">Progress</span>
+        <button type="button" id="upload-progress-close" class="btn btn-sm btn-ghost" style="padding: 2px 8px; font-size: 16px; line-height: 1;" title="Minimize (re-open with the floating button — content is preserved)">−</button>
+    </div>
+    <pre id="upload-progress" style="flex: 1; margin: 0; padding: 12px 16px; overflow-y: auto; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; background: var(--bg-subtle); border-radius: 0 0 8px 8px;"></pre>
+</div>
+<button type="button" id="upload-progress-reopen" class="btn btn-primary" style="display: none; position: fixed; bottom: 24px; right: 24px; z-index: 50; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);" title="Re-open progress panel">Show progress</button>
+<form style="display: none;">{% csrf_token %}</form>
+<script>
+(function () {
+    const out = document.getElementById('upload-progress');
+    const panel = document.getElementById('upload-progress-panel');
+    const title = document.getElementById('upload-progress-title');
+    const reopenBtn = document.getElementById('upload-progress-reopen');
+    const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || "";
+    document.getElementById('upload-progress-close')?.addEventListener('click', () => {
+        panel.style.display = 'none';
+        reopenBtn.style.display = 'block';
+    });
+    reopenBtn?.addEventListener('click', () => {
+        panel.style.display = 'flex';
+        reopenBtn.style.display = 'none';
+    });
+    window.fembStream = async function (url, formData, panelTitle) {
+        panel.style.display = 'flex';
+        reopenBtn.style.display = 'none';
+        title.textContent = panelTitle || 'Progress';
+        out.textContent = '';
+        formData.append('csrfmiddlewaretoken', csrf);
+        let resp;
+        try {
+            resp = await fetch(url, {method: 'POST', body: formData});
+        } catch (e) {
+            out.textContent = '*** network error: ' + e + ' ***';
+            return;
+        }
+        if (!resp.ok) {
+            out.textContent = '*** HTTP ' + resp.status + ' — ' + (await resp.text()).slice(0, 500) + ' ***';
+            return;
+        }
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        while (true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            out.textContent += decoder.decode(value, {stream: true});
+            out.scrollTop = out.scrollHeight;
+        }
+    };
+})();
+</script>

@@ -16,6 +16,7 @@ class FEMB(models.Model):
     # HWDB part_id stamped after a successful PROD upload (prod-scoped, like
     # LArASIC.is_in_hwdb — ADR-0003). Blank = not known to be in prod HWDB.
     hwdb_part_id = models.CharField(max_length=30, blank=True, default="")
+    hwdb_checked_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = [["version", "serial_number"]]
