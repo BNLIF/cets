@@ -15,7 +15,7 @@ from unittest import mock
 import requests
 from django.test import SimpleTestCase
 
-from hwdb.fnal import crypto, flow
+from hwdb.fnal import bearer, crypto, flow
 
 
 class FakeResponse:
@@ -117,16 +117,73 @@ class FlowCompleteTest(SimpleTestCase):
         auth = {
             "client_token": "s.vault-token",
             "lease_duration": 2419200,
-            "metadata": {"credkey": "chaoz"},
+            "metadata": {"credkey": "chaoz", "oauth2_refresh_token": "rt.secret"},
         }
         result = flow.complete(auth)
         self.assertEqual(result.vault_token, "s.vault-token")
         self.assertEqual(result.vault_lease_seconds, 2419200)
         self.assertEqual(result.credkey, "chaoz")
+        self.assertEqual(result.refresh_token, "rt.secret")
+
+    def test_refresh_token_optional(self):
+        result = flow.complete({"client_token": "s.tok", "metadata": {"credkey": "chaoz"}})
+        self.assertIsNone(result.refresh_token)
 
     def test_missing_credkey_raises(self):
         with self.assertRaises(RuntimeError):
             flow.complete({"client_token": "s.tok", "metadata": {}})
+
+
+class StoreRefreshTokenTest(SimpleTestCase):
+    def test_posts_refresh_token_to_creds_path(self):
+        resp = FakeResponse(204, {})
+        with mock.patch.object(flow, "_vault_post", return_value=resp) as post:
+            flow.store_refresh_token("s.vault-token", "yubo", "rt.secret")
+
+        url, body = post.call_args.args
+        self.assertIn("secret/oauth/creds/fermilab/yubo:default", url)
+        self.assertEqual(body, {"server": "fermilab", "refresh_token": "rt.secret"})
+        self.assertEqual(post.call_args.kwargs["headers"], {"X-Vault-Token": "s.vault-token"})
+
+    def test_rejected_write_raises(self):
+        with mock.patch.object(flow, "_vault_post", return_value=FakeResponse(403, {})):
+            with self.assertRaises(requests.HTTPError):
+                flow.store_refresh_token("s.vault-token", "yubo", "rt.secret")
+
+
+class VerifyLinkTest(SimpleTestCase):
+    """The link must create the creds path before minting; six prod users
+    404'd when it did not (2026-09-09)."""
+
+    def _login(self, refresh_token="rt.secret"):
+        return flow.LoginResult(
+            vault_token="s.vault-token", vault_lease_seconds=100,
+            credkey="yubo", refresh_token=refresh_token,
+        )
+
+    def test_stores_refresh_token_then_mints(self):
+        calls = []
+        with mock.patch.object(flow, "store_refresh_token", side_effect=lambda *a: calls.append(("store", a))), \
+             mock.patch.object(flow, "mint_bearer", side_effect=lambda *a: calls.append(("mint", a)) or "jwt"):
+            self.assertIsNone(bearer.verify_link(self._login()))
+        self.assertEqual(calls, [
+            ("store", ("s.vault-token", "yubo", "rt.secret")),
+            ("mint", ("s.vault-token", "yubo")),
+        ])
+
+    def test_no_refresh_token_still_mints(self):
+        with mock.patch.object(flow, "store_refresh_token") as store, \
+             mock.patch.object(flow, "mint_bearer", return_value="jwt"):
+            self.assertIsNone(bearer.verify_link(self._login(refresh_token=None)))
+        store.assert_not_called()
+
+    def test_mint_404_returns_message(self):
+        err = requests.HTTPError(response=mock.Mock(status_code=404))
+        with mock.patch.object(flow, "store_refresh_token"), \
+             mock.patch.object(flow, "mint_bearer", side_effect=err):
+            msg = bearer.verify_link(self._login())
+        self.assertIn("yubo", msg)
+        self.assertIn("404", msg)
 
 
 class MintBearerTest(SimpleTestCase):

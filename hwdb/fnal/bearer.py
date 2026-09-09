@@ -72,13 +72,19 @@ def mint_for(request) -> str:
 
 
 def verify_link(login) -> str | None:
-    """Mint once right after a device flow completes. A 401/403/404 means
-    vault holds no HWDB token for this account even though CILogon succeeded
-    (prod user, 2026-09-04) — storing the link would only bounce the user
-    between the page and the re-link screen forever, so the caller shows this
-    message instead. Transient trouble returns None: the link is stored and
-    the pages report it as they do today."""
+    """Store the refresh token, then mint once, right after a device flow
+    completes. The store is what creates the vault creds path (2026-09-09:
+    six prod users 404'd because we skipped it — only accounts that had run
+    htgettoken themselves had a path). A 401/403/404 on the mint means vault
+    still holds no HWDB token for this account — storing the link would only
+    bounce the user between the page and the re-link screen forever, so the
+    caller shows this message instead. Transient trouble returns None: the
+    link is stored and the pages report it as they do today."""
     try:
+        if login.refresh_token:
+            flow.store_refresh_token(login.vault_token, login.credkey, login.refresh_token)
+        else:
+            logger.warning("FNAL poll for credkey %s carried no oauth2_refresh_token", login.credkey)
         flow.mint_bearer(login.vault_token, login.credkey)
         return None
     except requests.HTTPError as e:

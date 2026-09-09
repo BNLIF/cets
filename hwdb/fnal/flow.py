@@ -17,6 +17,9 @@ Split into composable halves:
   Django session between requests).
 - ``poll(poll_body)`` does one ``poll`` POST and classifies the result.
 - ``complete(auth)`` extracts what the session needs from a successful poll.
+- ``store_refresh_token(...)`` writes the poll's refresh token to the creds
+  path — the write that *creates* the path; without it every later mint 404s
+  (six prod users, 2026-09-09). htgettoken does the same POST after /poll.
 - ``mint_bearer(vault_token, credkey)`` reads the secret path and returns the
   bearer JWT (called per-request, not at link time).
 
@@ -46,8 +49,8 @@ _TIMEOUT = 10.0
 # ----- HTTP boundary (patched in tests) ------------------------------------
 
 
-def _vault_post(url: str, body: dict) -> requests.Response:
-    return requests.post(url, json=body, timeout=_TIMEOUT)
+def _vault_post(url: str, body: dict, headers: dict | None = None) -> requests.Response:
+    return requests.post(url, json=body, headers=headers, timeout=_TIMEOUT)
 
 
 def _vault_get(url: str, headers: dict, params: dict) -> requests.Response:
@@ -80,6 +83,7 @@ class LoginResult:
     vault_token: str
     vault_lease_seconds: int
     credkey: str  # vault metadata.credkey = lowercase Fermilab services username
+    refresh_token: str | None  # vault metadata.oauth2_refresh_token
 
 
 # ----- Public driver -------------------------------------------------------
@@ -135,12 +139,25 @@ def complete(auth: dict) -> LoginResult:
         vault_token=vault_token,
         vault_lease_seconds=lease,
         credkey=credkey,
+        refresh_token=metadata.get("oauth2_refresh_token"),
     )
 
 
 def creds_path(credkey: str) -> str:
     """Where vault keeps this user's HWDB token (logged when it is missing)."""
     return f"secret/oauth/creds/{ISSUER}/{credkey}:{ROLE}"
+
+
+def store_refresh_token(vault_token: str, credkey: str, refresh_token: str) -> None:
+    """Create the creds path by storing the refresh token from /poll (what
+    htgettoken does right after the flow completes). Until this runs the path
+    does not exist and ``mint_bearer`` gets 404."""
+    r = _vault_post(
+        f"{VAULT}/v1/{creds_path(credkey)}",
+        {"server": ISSUER, "refresh_token": refresh_token},
+        headers={"X-Vault-Token": vault_token},
+    )
+    r.raise_for_status()
 
 
 def mint_bearer(vault_token: str, credkey: str) -> str:
