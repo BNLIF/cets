@@ -285,10 +285,14 @@ def _norm_field(f: dict) -> dict | None:
         # — computed from the row's other cells, C<n> = 1-based column index —
         # and may carry its OWN tolerance (nominal/tol or min/max), overriding
         # the table-wide one (a computed Total has a different range).
-        cols, formulas, texts, col_tol, checks = [], {}, {}, {}, []
+        cols, formulas, texts, col_tol, checks, col_color = [], {}, {}, {}, [], {}
         for c in f.get("columns") or []:
             if isinstance(c, dict):
                 label = str(c.get("label") or "").strip()
+                # #139: a column tint (the "fill this in" column of a parts
+                # list) — its cells, header excluded, beating a row tint
+                if label and _tint(c.get("color")):
+                    col_color[label] = _tint(c.get("color"))
                 # #116: a pass/fail column — a compact tri-state per cell;
                 # no text, formula or range applies to it
                 if label and c.get("check") is True:
@@ -317,6 +321,10 @@ def _norm_field(f: dict) -> dict | None:
         # light hexes; anything else must be #rrggbb or it's dropped.
         if _tint(f.get("color")):
             out["color"] = _tint(f.get("color"))
+        # #139: cell borders like a real table — the default; a schema
+        # opts out with "grid": false
+        if f.get("grid") is not False:
+            out["grid"] = True
         if texts:
             out["texts"] = texts
         if formulas:
@@ -325,6 +333,8 @@ def _norm_field(f: dict) -> dict | None:
             out["col_tol"] = col_tol
         if checks:
             out["checks"] = checks
+        if col_color:
+            out["col_color"] = col_color
         # #119: named rows sharing the columns; each may carry its own
         # constants (an Expected column differs per row) and tint, which
         # override the table-wide ones. No rows = the single implicit row,
@@ -631,15 +641,17 @@ def _table_cells(f: dict, cells: dict, tx: dict, prefix: str, rr: dict | None = 
     ct = {**(f.get("col_tol") or {}), **(rr or {})}
     fx = f.get("formulas") or {}
     checks = f.get("checks") or []
+    cc = f.get("col_color") or {}
     out = []
     for i, c in enumerate(f["columns"]):
         v = cells.get(c)
         if c in checks:   # #116: tri-state cell
             out.append({"column": c, "name": f"{prefix}-c{i}", "check": True,
                         "value": "pass" if v is True else ("fail" if v is False else ""),
-                        "formula": "", "text": "", "min": None, "max": None, "range": ""})
+                        "formula": "", "text": "", "min": None, "max": None, "range": "",
+                        "color": cc.get(c, "")})
             continue
-        out.append({"column": c, "name": f"{prefix}-c{i}",
+        out.append({"column": c, "name": f"{prefix}-c{i}", "color": cc.get(c, ""),
                     "value": tx[c] if c in tx else _fmt("" if isinstance(v, dict) else v),
                     "formula": "" if c in tx else fx.get(c, ""),
                     "text": tx.get(c, ""),

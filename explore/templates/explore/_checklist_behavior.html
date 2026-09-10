@@ -98,12 +98,13 @@
     tbl.querySelectorAll("input[data-formula]").forEach(function (inp) {
       var row = inp.closest("tr");   // #119: C<n> addresses the cell's OWN row
       var v = evalFormula(inp.getAttribute("data-formula"), function (i) {
-        var el = row.querySelector('input[data-ci="' + i + '"]');
-        if (!el || el.value.trim() === "") return NaN;
+        var el = row.querySelector('[data-ci="' + i + '"]');   // an input, or a constant's span (#139)
+        var val = el ? (el.value !== undefined ? el.value : el.textContent) : "";
+        if (val.trim() === "") return NaN;
         // like the server: a plain number, or the value of "3 +- 1" /
         // "3.1±0.1" / "3 +/- 1"; anything else ("abc", "3 mm") is NaN
-        var tol = /^\s*(-?\d+(?:\.\d+)?|-?\.\d+)\s*(?:±|\+-|\+\/-)\s*\d*\.?\d+\s*$/.exec(el.value);
-        return tol ? Number(tol[1]) : Number(el.value);
+        var tol = /^\s*(-?\d+(?:\.\d+)?|-?\.\d+)\s*(?:±|\+-|\+\/-)\s*\d*\.?\d+\s*$/.exec(val);
+        return tol ? Number(tol[1]) : Number(val);
       });
       inp.value = isFinite(v) ? String(+v.toFixed(6)) : "";
       // re-fires the tolerance coloring on the computed value

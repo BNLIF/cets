@@ -1835,6 +1835,39 @@ class ConstantCellsTest(TestCase):
         self.assertIn("cl-tint", html)
         self.assertIn("--cl-tint: #fff2cc;", html)
 
+    def test_column_color_tints_its_cells_only(self):   # #139
+        user = get_user_model().objects.create_user("n", "n@n.io", "pw")
+        self.client.force_login(user)
+        schema = dict(SCHEMA)
+        cols = list(self.COLS) + [{"label": "Batch", "color": "yellow"}, {"label": "Bad", "color": "purple"}]
+        schema["sections"] = [{"title": "S", "fields": [
+            {"type": "table", "label": "M", "columns": cols}]}]
+        norm = checklistforms.normalize(schema, NAME)["sections"][0]["fields"][0]
+        self.assertEqual(norm["col_color"], {"Batch": "#fff2cc"})   # unknown name dropped
+        m1, m2 = _mocked(_api(schema=schema))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('<td class="cl-tint" style="--cl-tint: #fff2cc;"><input name="f0-0-c3"', html)
+        self.assertNotIn('<th class="cl-tint"', html)              # header stays plain
+        self.assertNotIn('<td class="cl-tint" style="--cl-tint: #fff2cc;"><input name="f0-0-c1"', html)
+
+    def test_cell_borders_default_on_and_opt_out(self):   # #139
+        user = get_user_model().objects.create_user("n", "n@n.io", "pw")
+        self.client.force_login(user)
+        schema = dict(SCHEMA)
+        schema["sections"] = [{"title": "S", "fields": [
+            {"type": "table", "label": "M", "columns": self.COLS}]}]
+        norm = checklistforms.normalize(schema, NAME)
+        self.assertTrue(norm["sections"][0]["fields"][0]["grid"])
+        m1, m2 = _mocked(_api(schema=schema))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('<table class="cl-table cl-gridlines"', html)
+        schema["sections"][0]["fields"][0]["grid"] = False   # only a real false opts out
+        self.assertNotIn("grid", checklistforms.normalize(schema, NAME)["sections"][0]["fields"][0])
+        schema["sections"][0]["fields"][0]["grid"] = "no"
+        self.assertTrue(checklistforms.normalize(schema, NAME)["sections"][0]["fields"][0]["grid"])
+
     def test_form_renders_the_constant_readonly(self):
         user = get_user_model().objects.create_user("n", "n@n.io", "pw")
         self.client.force_login(user)
@@ -1844,8 +1877,8 @@ class ConstantCellsTest(TestCase):
         m1, m2 = _mocked(_api(schema=schema))
         with m1, m2:
             html = self.client.get(PAGE).content.decode()
-        self.assertIn('value="3.1+-0.1"', html)
-        self.assertIn("data-const", html)
+        self.assertIn('<td class="cl-const"><span data-ci="0" data-const>3.1+-0.1</span></td>', html)
+        self.assertNotIn('value="3.1+-0.1"', html)   # #139: text, not a boxed input
 
 
 class StackedCellTest(TestCase):
@@ -2234,23 +2267,22 @@ class LegacyTableGoldenTest(TestCase):
         SCHEMA["sections"][2]]}
     NORM = {"col_tol": {"Diff": {"max": 0.1, "min": -0.1, "range": "-0.1 – 0.1"}},
             "color": "#fff2cc", "columns": ["P1", "Expected", "Diff"],
-            "formulas": {"Diff": "C1 - C2"}, "key": "f1-0", "label": "Thickness",
+            "formulas": {"Diff": "C1 - C2"}, "grid": True, "key": "f1-0", "label": "Thickness",
             "max": 1.7, "min": 1.5, "range": "1.5 – 1.7", "texts": {"Expected": "1.6"},
             "to_spec": False, "type": "table", "units": "mm"}
     BIND = [{"column": "P1", "formula": "", "max": 1.7, "min": 1.5, "name": "f1-0-c0",
-             "range": "", "text": "", "value": "1.7"},
+             "range": "", "text": "", "value": "1.7", "color": ""},
             {"column": "Expected", "formula": "", "max": None, "min": None,
-             "name": "f1-0-c1", "range": "", "text": "1.6", "value": "1.6"},
+             "name": "f1-0-c1", "range": "", "text": "1.6", "value": "1.6", "color": ""},
             {"column": "Diff", "formula": "C1 - C2", "max": 0.1, "min": -0.1,
-             "name": "f1-0-c2", "range": "-0.1 – 0.1", "text": "", "value": "0.1"}]
-    HTML = ('<table class="cl-table cl-tint" style="--cl-tint: #fff2cc;"> <thead><tr>'
+             "name": "f1-0-c2", "range": "-0.1 – 0.1", "text": "", "value": "0.1", "color": ""}]
+    HTML = ('<table class="cl-table cl-gridlines cl-tint" style="--cl-tint: #fff2cc;"> <thead><tr>'
             '<th title="">P1</th><th title="">Expected</th>'
             '<th title="= C1 - C2 · allowed -0.1 – 0.1">Diff <span aria-hidden="true">&fnof;</span> '
             '<span class="cl-hint">-0.1 – 0.1</span></th></tr></thead> <tbody><tr>'
             '<td><input name="f1-0-c0" value="1.7" inputmode="decimal" autocomplete="off" data-ci="0" '
             'data-min="1.5" data-max="1.7"></td>'
-            '<td><input name="f1-0-c1" value="1.6" inputmode="decimal" autocomplete="off" data-ci="1" '
-            'readonly tabindex="-1" data-const></td>'
+            '<td class="cl-const"><span data-ci="1" data-const>1.6</span></td>'
             '<td><input name="f1-0-c2" value="0.1" inputmode="decimal" autocomplete="off" data-ci="2" '
             'readonly tabindex="-1" data-formula="C1 - C2" title="= C1 - C2" data-min="-0.1" data-max="0.1">'
             '</td></tr></tbody> </table>')

@@ -84,10 +84,19 @@
   .cl-row .tbl-scroll, .cl-grid .tbl-scroll { margin-bottom: -8px; }
   .cl-table td input { width: 86px; text-align: center; }
   .cl-table td input[readonly] { background: var(--page); border-style: dashed; }  /* computed (#109) */
-  .cl-table td input[data-const] { background: none; border-color: transparent; }  /* fixed text (#114) */
+  /* #114/#139: fixed text is plain text, not a boxed input — the column
+     sizes to its content; short values (part numbers) never break, long
+     descriptions wrap past ~260px */
+  .cl-table td.cl-const { text-align: left; padding: 5px 10px; white-space: nowrap; }
+  .cl-table td.cl-const.cl-wrap { white-space: normal; max-width: 260px; }
+  /* #139: opt-in cell borders; inputs keep their own box inside the cell
+     so an entry cell still reads as one */
+  .cl-table.cl-gridlines th, .cl-table.cl-gridlines td { border: 1px solid var(--rule); }
+  .cl-table.cl-gridlines th.cl-rowlab { padding-right: 8px; }
   /* #115: table tint keyed to the reference drawing, painted as picked
-     across the whole row, inputs included (cells only, not the header) */
-  .cl-tint td { background: var(--cl-tint); --cl-input-bg: var(--cl-tint);
+     across the whole row, inputs included (cells only, not the header);
+     #139: a column tint paints its cells the same way and wins over the row */
+  .cl-tint td, .cl-table td.cl-tint { background: var(--cl-tint); --cl-input-bg: var(--cl-tint);
     --cl-input-rule: color-mix(in oklch, var(--cl-tint) 65%, var(--ink));
     print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .cl-steps { margin: 4px 0 0; padding-left: 4px; font-size: 13.5px; color: var(--ink);

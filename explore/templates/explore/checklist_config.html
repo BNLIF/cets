@@ -107,6 +107,11 @@
   .clc-tbl .tc-ops { white-space: nowrap; }
   .clc-tbl .tc-ops .ec-del, .clc-tbl thead .ec-del { padding: 3px 5px; }
   .clc-tbl tr.tinted td { background: var(--tc-tint); }
+  .clc-imp { border-top: 1px solid var(--rule); margin-top: 10px; padding-top: 8px; }
+  .clc-imp textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px;
+    font-family: var(--font-mono); color: var(--ink); background: var(--surface); }
+  .clc-imp-opts { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 12px; margin: 6px 0; }
+  .clc-imp-opts .imp-cols { display: flex; flex-wrap: wrap; gap: 4px 10px; }
   .clc-mz-scroll { overflow: auto; max-width: 90vw; max-height: 80vh; }
   .clc-mz-wrap { position: relative; width: fit-content; cursor: crosshair; }
   .clc-mz-wrap img { display: block; }
@@ -278,6 +283,7 @@
       <label class="ec-inline ff-color-w" title="cell background tint keyed to the reference drawing">tint
         <input type="color" class="ff-color" list="clc-tints"></label>
       <button type="button" class="ec-del ff-colorclear" style="display:none;" title="Remove the tint">&#x2715; tint</button>
+      <label class="ec-inline ff-grid-w" title="draw cell borders like a real table"><input type="checkbox" class="ff-grid" checked> borders</label>
       <button type="button" class="ec-del ff-tbl" title="named rows, each with its own fixed cells and tint">&#9636; rows&hellip;</button>
       <input type="hidden" class="ff-rows">
       <textarea class="ff-columns" rows="2" style="flex:1 1 100%;" placeholder="columns — comma- or line-separated; computed: Total = C1 + C2*(C3/C4) [11 ± 1]; fixed: Expected = &quot;3.1+-0.1&quot;; pass/fail: OK = check" title="label = formula makes a computed column (C1 = first column's value, formula/fixed cells count too); label = &quot;text&quot; makes a fixed non-editable cell (no commas in the text); [nominal ± tol] or [min..max] gives that column its own accepted range"></textarea>
@@ -374,6 +380,16 @@
   <div class="ec-row" style="margin-top:8px;">
     <button type="button" class="ec-del clc-tbl-addrow">+ row</button>
     <button type="button" class="ec-del clc-tbl-addcol">+ column</button>
+    <button type="button" class="ec-del clc-imp-open" title="Replace the rows with a block pasted from a spreadsheet or a .csv file">Import&hellip;</button>
+  </div>
+  <div class="clc-imp" hidden>{# #139: first line = headers; one column names the rows; blank cell = input #}
+    <textarea class="clc-imp-text" rows="6" spellcheck="false" placeholder="Paste cells copied from a spreadsheet — first line = column headers"></textarea>
+    <div class="ec-row"><input type="file" class="clc-imp-file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values"></div>
+    <div class="clc-imp-opts"></div>
+    <div class="ec-row">
+      <button type="button" class="ec-del clc-imp-apply" disabled>Replace rows</button>
+      <button type="button" class="ec-del clc-imp-cancel">Cancel</button>
+    </div>
   </div>
 </dialog>
 
@@ -400,6 +416,7 @@
     $(".ff-columns", r).style.display = t === "table" ? "" : "none";
     $(".ff-tbl", r).style.display = t === "table" ? "" : "none";
     $(".ff-color-w", r).style.display = t === "table" ? "" : "none";
+    $(".ff-grid-w", r).style.display = t === "table" ? "" : "none";       // #139
     $(".ff-colorclear", r).style.display =
       (t === "table" && $(".ff-color", r).dataset.on) ? "" : "none";
     $(".g-select", r).style.display = t === "select" ? "" : "none";
@@ -437,6 +454,7 @@
       $(".ff-color", r).value = f.color;  // "no tint" is tracked on data-on
       $(".ff-color", r).dataset.on = "1";
     }
+    $(".ff-grid", r).checked = f.grid !== false;                         // #139: on by default
     $(".ff-typeid", r).value = f.type_id || "";
     $(".ff-gcol", r).value = f.col ? String(f.col) : "auto";           // #120
     $(".ff-gspan", r).value = f.span ? String(f.span) : "1";
@@ -712,6 +730,7 @@
   function colObj(c) { return typeof c === "string" ? { label: c } : c; }
   function openTbl(r) {
     tblRow = r;
+    $(".clc-imp", tbl).hidden = true;
     tblM = { cols: list($(".ff-columns", r).value, /[,\n]/).map(parseCol).map(colObj),
              rows: rowsOf(r) };
     drawTbl();
@@ -721,6 +740,8 @@
     var h = "<thead><tr><th></th>";
     tblM.cols.forEach(function (c, j) {
       h += '<th><span class="tc-lab"><input class="tc-col" data-j="' + j + '" value="' + esc(colText(c)) + '">' +
+           '<input type="color" class="tc-colcolor" data-j="' + j + '" list="clc-tints" value="' + esc(c.color || "#ffffff") + '" title="column tint">' +
+           (c.color ? '<button type="button" class="ec-del tc-nocolcolor" data-j="' + j + '" title="Remove the tint">&#x2715;</button>' : '') +
            '<button type="button" class="ec-del tc-delcol" data-j="' + j + '" title="Remove column">&#x2715;</button></span></th>';
     });
     h += "<th></th></tr></thead><tbody>";
@@ -770,6 +791,11 @@
             if (rw[k] && was in rw[k]) { rw[k][now.label] = rw[k][was]; delete rw[k][was]; }
           });
         });
+    } else if (t.classList.contains("tc-colcolor")) {                // #139
+      tblM.cols[j] = colObj(tblM.cols[j]); tblM.cols[j].color = t.value;
+      $('.tc-col[data-j="' + j + '"]', tbl).value = colText(tblM.cols[j]);
+      if (!$('.tc-nocolcolor[data-j="' + j + '"]', tbl)) t.insertAdjacentHTML("afterend",
+        '<button type="button" class="ec-del tc-nocolcolor" data-j="' + j + '" title="Remove the tint">&#x2715;</button>');
     } else if (t.classList.contains("tc-label")) tblM.rows[i].label = t.value;
     else if (t.classList.contains("tc-cell")) {
       var rw = tblM.rows[i], lab = tblM.cols[j].label, pc = parseCell(t.value);
@@ -795,9 +821,99 @@
     else if (t.classList.contains("tc-up") && i > 0) rows.splice(i - 1, 0, rows.splice(i, 1)[0]);
     else if (t.classList.contains("tc-down") && i < rows.length - 1) rows.splice(i + 1, 0, rows.splice(i, 1)[0]);
     else if (t.classList.contains("tc-nocolor")) delete rows[i].color;
+    else if (t.classList.contains("tc-nocolcolor")) delete tblM.cols[j].color;   // #139
     else return;
     drawTbl();
     writeTbl();
+  });
+
+  // ---- #139: import the rows from a pasted spreadsheet block or a .csv.
+  // Tab-separated when the first line has a tab (what Excel / Sheets /
+  // Numbers put on the clipboard), else comma-separated; quoted cells and
+  // blank trailing cells honored. First line = headers; one column names
+  // the rows (dropped from the columns) — default the row number, since
+  // most sheets have no label column; non-empty cells become fixed
+  // text, empty ones inputs; "user fills in" blanks a whole column.
+  var imp = $(".clc-imp", tbl), impGrid = null;
+  function parseDelimited(text) {
+    var sep = text.split(/\r?\n/, 1)[0].indexOf("\t") !== -1 ? "\t" : ",";
+    var rows = [], row = [], cell = "", q = false, i, ch;
+    for (i = 0; i < text.length; i++) {
+      ch = text[i];
+      if (q) {
+        if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+        else if (ch === '"') q = false;
+        else cell += ch;
+      } else if (ch === '"') q = true;
+      else if (ch === sep) { row.push(cell); cell = ""; }
+      else if (ch === "\n" || ch === "\r") {
+        if (ch === "\r" && text[i + 1] === "\n") i++;
+        row.push(cell); rows.push(row); row = []; cell = "";
+      } else cell += ch;
+    }
+    if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
+    rows = rows.map(function (r) { return r.map(function (c) { return c.trim(); }); })
+               .filter(function (r) { return r.some(Boolean); });
+    if (!rows.length) return null;
+    var n = rows[0].length;
+    rows.forEach(function (r) { while (r.length < n) r.push(""); r.length = n; });
+    return rows;
+  }
+  function impRead() {
+    impGrid = parseDelimited($(".clc-imp-text", imp).value);
+    var opts = $(".clc-imp-opts", imp), ok = impGrid && impGrid.length > 1 && impGrid[0].some(Boolean);
+    $(".clc-imp-apply", imp).disabled = !ok;
+    if (!ok) { opts.innerHTML = impGrid ? '<span class="ec-hint">Need a header line and at least one row.</span>' : ""; return; }
+    var head = impGrid[0], body = impGrid.slice(1),
+        h = '<label>Row label <select class="imp-label"><option value="">row number</option>';
+    head.forEach(function (c, j) { h += '<option value="' + j + '">' + esc(c || "column " + (j + 1)) + "</option>"; });
+    h += '</select></label><span class="imp-cols">User fills in:';
+    head.forEach(function (c, j) {
+      var empty = body.every(function (r) { return !r[j]; });   // an all-blank column is an input column
+      h += '<label class="ec-inline"><input type="checkbox" class="imp-input" value="' + j + '"' +
+           (empty ? " checked" : "") + "> " + esc(c || "column " + (j + 1)) + "</label>";
+    });
+    opts.innerHTML = h + "</span><span class=\"ec-hint\">" + body.length + " rows</span>";
+  }
+  function impApply() {
+    var head = impGrid[0], body = impGrid.slice(1), lv = $(".imp-label", imp).value,
+        li = lv === "" ? -1 : +lv, inputs = {};
+    $$(".imp-input:checked", imp).forEach(function (cb) { inputs[+cb.value] = true; });
+    var keep = head.map(function (c, j) { return j; }).filter(function (j) { return j !== li && head[j]; });
+    tblM.cols = keep.map(function (j) { return colObj(parseCol(head[j])); });
+    var seen = {};
+    tblM.rows = body.map(function (r, i) {
+      var lab = (li >= 0 && r[li]) || String(i + 1), base = lab, k = 2;
+      while (seen[lab]) lab = base + " (" + k++ + ")";        // row labels must be unique
+      seen[lab] = true;
+      var o = { label: lab }, tx = {};
+      keep.forEach(function (j) { if (!inputs[j] && r[j]) tx[tblM.cols[keep.indexOf(j)].label] = r[j]; });
+      if (Object.keys(tx).length) o.texts = tx;
+      return o;
+    });
+    imp.hidden = true;
+    drawTbl();
+    writeTbl();
+  }
+  imp.addEventListener("input", function (e) {
+    if (e.target.classList.contains("clc-imp-text")) impRead();
+  });
+  $(".clc-imp-file", imp).addEventListener("change", function (e) {
+    var f = e.target.files[0];
+    if (!f) return;
+    var rd = new FileReader();
+    rd.onload = function () { $(".clc-imp-text", imp).value = rd.result; impRead(); };
+    rd.readAsText(f);
+    e.target.value = "";
+  });
+  imp.addEventListener("click", function (e) {
+    var t = e.target;
+    if (t.classList.contains("clc-imp-apply") && impGrid) impApply();
+    else if (t.classList.contains("clc-imp-cancel")) imp.hidden = true;
+  });
+  $(".clc-imp-open", tbl).addEventListener("click", function () {
+    imp.hidden = false;
+    $(".clc-imp-text", imp).focus();
   });
 
   var mz = document.getElementById("clc-mapzoom"), mzRow = null;
@@ -885,7 +1001,9 @@
     return out;
   }
   function parseCol(c) {
-    var out = {}, m = /^(.*?)\s*\[([^\]]*)\]\s*$/.exec(c);
+    var out = {}, k = /^(.*?)\s*\{([^}]*)\}\s*$/.exec(c);   // #139: trailing {color}
+    if (k) { c = k[1]; if (k[2].trim()) out.color = k[2].trim(); }
+    var m = /^(.*?)\s*\[([^\]]*)\]\s*$/.exec(c);
     if (m) { c = m[1]; Object.assign(out, parseSpec(m[2].trim())); }
     var i = c.indexOf("=");
     if (i !== -1) {
@@ -905,7 +1023,8 @@
     return c.label + (c.text ? ' = "' + c.text + '"'
                       : c.check ? " = check"
                       : (c.formula ? " = " + c.formula : ""))
-                   + (tol ? " [" + tol + "]" : "");
+                   + (tol ? " [" + tol + "]" : "")
+                   + (c.color ? " {" + c.color + "}" : "");
   }
   function colsText(cols) {   // long column lists read better one per line (the box parses both)
     var parts = cols.map(colText);
@@ -948,6 +1067,7 @@
       f.columns = list($(".ff-columns", r).value, /[,\n]/).map(parseCol);
       var ci = $(".ff-color", r);
       if (ci.dataset.on) f.color = ci.value;
+      if (!$(".ff-grid", r).checked) f.grid = false;                    // #139: off is the exception
       var rows = rowsOf(r);                                             // #119
       if (rows.length) f.rows = rows;
     }
