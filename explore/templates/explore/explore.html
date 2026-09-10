@@ -245,6 +245,12 @@
                     <button type="button" data-range="3month" class="chart-range-btn">Last 3 months · daily</button>
                     <button type="button" data-range="all" class="chart-range-btn is-active">All · monthly</button>
                 </div>
+                {# Date window (#140): clips every series to [from, to]; the cumulative restarts at 0 at "from". #}
+                <div class="chart-window" style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--faint);">
+                    <input type="date" class="chart-win-from" title="From" style="font: inherit; color: var(--ink); padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff);">
+                    <span>–</span>
+                    <input type="date" class="chart-win-to" title="To" style="font: inherit; color: var(--ink); padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff);">
+                </div>
                 {% if c.filters %}
                 <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--faint);">
                     <label style="display: flex; align-items: center; gap: 6px;">Overlay
@@ -614,6 +620,65 @@
             var panel = document.querySelector('[data-chart-panel="' + c.slug + '"]'); if (!panel) return;
             var sel = panel.querySelector('.chart-filter-sel');
             var flagBoxes = panel.querySelectorAll('.chart-filter-flag');
+            // Date window (#140): URL params <kind>_from / <kind>_to (kind =
+            // "comp" | "test", the slug's suffix) so a windowed view and its
+            // PNG are reproducible. Labels are ISO day or month strings, so
+            // the bounds compare lexicographically once cut to label length.
+            var kind = c.slug.split('_').pop();
+            var fromIn = panel.querySelector('.chart-win-from'), toIn = panel.querySelector('.chart-win-to');
+            var params = new URLSearchParams(location.search);
+            fromIn.value = params.get(kind + '_from') || ''; toIn.value = params.get(kind + '_to') || '';
+            // Until the user edits a picker (or the URL sets it) it shows the
+            // plotted range's own bounds and follows the range toggle.
+            var userSet = { from: !!fromIn.value, to: !!toIn.value };
+            function fullDate(label, last) {
+                if (label.length === 10) return label;
+                var y = +label.slice(0, 4), m = +label.slice(5, 7);
+                return label + '-' + (last ? String(new Date(Date.UTC(y, m, 0)).getUTCDate()) : '01');
+            }
+            function defaultPickers(labels) {
+                if (!labels.length) return;
+                if (!userSet.from) fromIn.value = fullDate(labels[0], false);
+                if (!userSet.to) toIn.value = fullDate(labels[labels.length - 1], true);
+            }
+            // Every label from start to end at the range's granularity (month
+            // "YYYY-MM" or day "YYYY-MM-DD"), so the axis spans the picked
+            // window even where the data has no events.
+            function labelSpan(start, end, monthly) {
+                var out = [], d = new Date(start + (monthly ? '-01' : '') + 'T00:00:00Z');
+                var last = new Date(end + (monthly ? '-01' : '') + 'T00:00:00Z');
+                while (d <= last && out.length < 20000) {
+                    out.push(d.toISOString().slice(0, monthly ? 7 : 10));
+                    if (monthly) d.setUTCMonth(d.getUTCMonth() + 1); else d.setUTCDate(d.getUTCDate() + 1);
+                }
+                return out;
+            }
+            function windowed(labels, bar, line) {
+                var from = fromIn.value, to = toIn.value;
+                if ((!from && !to) || !labels.length) return { labels: labels, bar: bar, line: line };
+                var n = labels[0].length, monthly = n === 7;
+                var start = from ? from.slice(0, n) : labels[0], end = to ? to.slice(0, n) : labels[labels.length - 1];
+                if (start > end) return { labels: [], bar: bar.map(function (d) { return Object.assign({}, d, { data: [] }); }), line: line.map(function (d) { return Object.assign({}, d, { data: [] }); }) };
+                var span = labelSpan(start, end, monthly), at = {};
+                labels.forEach(function (l, i) { at[l] = i; });
+                // bar[k] and line[k] come from the same series, so the windowed
+                // cumulative is the running sum of the windowed counts.
+                var wbar = bar.map(function (d) {
+                    return Object.assign({}, d, { data: span.map(function (l) { return l in at ? d.data[at[l]] : 0; }) });
+                });
+                var wline = line.map(function (d, k) {
+                    var run = 0;
+                    return Object.assign({}, d, { data: wbar[k].data.map(function (v) { run += v; return run; }) });
+                });
+                return { labels: span, bar: wbar, line: wline };
+            }
+            function syncUrl() {
+                var u = new URL(location.href);
+                [[kind + '_from', fromIn.value], [kind + '_to', toIn.value]].forEach(function (kv) {
+                    if (kv[1]) u.searchParams.set(kv[0], kv[1]); else u.searchParams.delete(kv[0]);
+                });
+                history.replaceState(null, '', u);
+            }
             // Selected overlays (#52): one status (dropdown) + any of the QC
             // flags (checkboxes). Every overlay's labels are precomputed to
             // align with the baseline, so composing is pure concatenation.
@@ -632,8 +697,10 @@
                     bar = bar.concat(f.ranges[rangeKey].bar_datasets);
                     line = line.concat(f.ranges[rangeKey].line_datasets);
                 });
-                barChart.data.labels = r.labels; barChart.data.datasets = bar; barChart.update();
-                lineChart.data.labels = r.labels; lineChart.data.datasets = line; lineChart.update();
+                defaultPickers(r.labels);
+                var w = windowed(r.labels, bar, line);
+                barChart.data.labels = w.labels; barChart.data.datasets = w.bar; barChart.update();
+                lineChart.data.labels = w.labels; lineChart.data.datasets = w.line; lineChart.update();
             }
             function currentRange() {
                 var cur = panel.querySelector('.chart-range-btn.is-active');
@@ -647,6 +714,9 @@
                 });
             });
             if (sel) sel.addEventListener('change', function () { apply(currentRange()); });
+            fromIn.addEventListener('change', function () { userSet.from = true; syncUrl(); apply(currentRange()); });
+            toIn.addEventListener('change', function () { userSet.to = true; syncUrl(); apply(currentRange()); });
+            apply('all');
             flagBoxes.forEach(function (b) { b.addEventListener('change', function () { apply(currentRange()); }); });
         });
     }
