@@ -251,6 +251,16 @@
                     <span>–</span>
                     <input type="date" class="chart-win-to" title="To" style="font: inherit; color: var(--ink); padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff);">
                 </div>
+                {# Expected points (#141): "N by date" → dashed line in the baseline color; kept in this browser only. #}
+                <div class="chart-expect" style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--faint);">
+                    <span>Expected</span>
+                    <input type="number" class="chart-exp-n" min="0" step="1" placeholder="count" style="font: inherit; color: var(--ink); width: 84px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff);">
+                    <span>by</span>
+                    <input type="date" class="chart-exp-date" style="font: inherit; color: var(--ink); padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff);">
+                    <select class="chart-exp-series" hidden style="font: inherit; color: var(--ink); padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff); max-width: 200px;"></select>
+                    <button type="button" class="chart-exp-add" style="font: inherit; color: var(--ink); border: 1px solid var(--rule); border-radius: 6px; padding: 2px 8px; background: var(--page); cursor: pointer;">+</button>
+                    <span class="chart-exp-list" style="display: inline-flex; gap: 6px; flex-wrap: wrap;"></span>
+                </div>
                 {% if c.filters %}
                 <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--faint);">
                     <label style="display: flex; align-items: center; gap: 6px;">Overlay
@@ -639,7 +649,81 @@
             function defaultPickers(labels) {
                 if (!labels.length) return;
                 if (!userSet.from) fromIn.value = fullDate(labels[0], false);
-                if (!userSet.to) toIn.value = fullDate(labels[labels.length - 1], true);
+                if (!userSet.to) {
+                    // Extend to the last expected point so the dashed line is visible.
+                    var end = fullDate(labels[labels.length - 1], true);
+                    expected.forEach(function (e) { if (e.d > end) end = e.d; });
+                    toIn.value = end;
+                }
+            }
+            // Expected points (#141): [{d: 'YYYY-MM-DD', n: count, s: series
+            // label}], this browser only (localStorage per page + chart).
+            var expKey = 'chartExpected:' + location.pathname + '#' + kind, expected = [];
+            try { expected = JSON.parse(localStorage.getItem(expKey) || '[]'); } catch (e) { expected = []; }
+            var expN = panel.querySelector('.chart-exp-n'), expDate = panel.querySelector('.chart-exp-date');
+            var expList = panel.querySelector('.chart-exp-list'), expSeries = panel.querySelector('.chart-exp-series');
+            // Series picker: the lines currently drawn (baseline + chosen
+            // overlays); hidden when there is only one.
+            function fillSeriesPicker(lineDs) {
+                var cur = expSeries.value;
+                expSeries.textContent = '';
+                lineDs.forEach(function (d) {
+                    var o = document.createElement('option'); o.value = d.label; o.textContent = d.label; expSeries.appendChild(o);
+                });
+                if (lineDs.some(function (d) { return d.label === cur; })) expSeries.value = cur;
+                expSeries.hidden = lineDs.length < 2;
+            }
+            function saveExpected() {
+                expected.sort(function (a, b) { return a.d < b.d ? -1 : a.d > b.d ? 1 : 0; });
+                try { if (expected.length) localStorage.setItem(expKey, JSON.stringify(expected)); else localStorage.removeItem(expKey); } catch (e) {}
+                expList.textContent = '';
+                expected.forEach(function (e, i) {
+                    var chip = document.createElement('span');
+                    chip.style.cssText = 'border: 1px solid var(--rule); border-radius: 6px; padding: 1px 6px; color: var(--ink);';
+                    chip.textContent = e.n.toLocaleString() + ' by ' + e.d + (e.s && expSeries.options.length > 1 ? ' · ' + e.s : '') + ' ';
+                    var x = document.createElement('a'); x.href = '#'; x.textContent = '×'; x.title = 'Remove';
+                    x.addEventListener('click', function (ev) { ev.preventDefault(); expected.splice(i, 1); saveExpected(); apply(currentRange()); });
+                    chip.appendChild(x); expList.appendChild(chip);
+                });
+            }
+            var dayMs = 86400000;
+            function dayOf(iso) { return Date.parse(iso + 'T00:00:00Z') / dayMs; }
+            // One dashed line per series that has expected points, in that
+            // series' color: piecewise-linear cumulative through (window
+            // start, 0) and the points, sampled at each label's bin end; null
+            // past the last point so the line stops there. Per-period = diffs.
+            function expectedDatasets(labels, lineDs) {
+                var out = { bar: [], line: [] };
+                if (!expected.length || !labels.length || !lineDs.length) return out;
+                var bySeries = {};
+                expected.forEach(function (e) { (bySeries[e.s || ''] = bySeries[e.s || ''] || []).push(e); });
+                Object.keys(bySeries).forEach(function (sName) {
+                    var ds = lineDs.find(function (d) { return d.label === sName; }) || lineDs[0];
+                    var one = expectedLine(labels, bySeries[sName], ds.borderColor, lineDs.length > 1 ? ' · ' + ds.label : '');
+                    out.bar = out.bar.concat(one.bar); out.line = out.line.concat(one.line);
+                });
+                return out;
+            }
+            function expectedLine(labels, points, color, suffix) {
+                var pts = [{ x: dayOf(fullDate(labels[0], false)), y: 0 }].concat(
+                    points.map(function (e) { return { x: dayOf(e.d), y: e.n }; }));
+                var cum = labels.map(function (l) {
+                    var x = dayOf(fullDate(l, true));
+                    if (x > pts[pts.length - 1].x) return null;
+                    for (var i = 1; i < pts.length; i++) {
+                        if (x <= pts[i].x) {
+                            var a = pts[i - 1], b = pts[i];
+                            return b.x === a.x ? b.y : a.y + (b.y - a.y) * (x - a.x) / (b.x - a.x);
+                        }
+                    }
+                    return pts[0].y;
+                });
+                var per = cum.map(function (v, i) { return v === null ? null : v - (i ? (cum[i - 1] || 0) : 0); });
+                var base = { borderColor: color, borderDash: [6, 4], borderWidth: 2, pointRadius: 0, fill: false, tension: 0 };
+                return {
+                    bar: [Object.assign({ type: 'line', label: 'Expected / period' + suffix, data: per }, base)],
+                    line: [Object.assign({ label: 'Expected' + suffix, data: cum }, base)],
+                };
             }
             // Every label from start to end at the range's granularity (month
             // "YYYY-MM" or day "YYYY-MM-DD"), so the axis spans the picked
@@ -699,8 +783,10 @@
                 });
                 defaultPickers(r.labels);
                 var w = windowed(r.labels, bar, line);
-                barChart.data.labels = w.labels; barChart.data.datasets = w.bar; barChart.update();
-                lineChart.data.labels = w.labels; lineChart.data.datasets = w.line; lineChart.update();
+                fillSeriesPicker(line);
+                var ex = expectedDatasets(w.labels, line);
+                barChart.data.labels = w.labels; barChart.data.datasets = w.bar.concat(ex.bar); barChart.update();
+                lineChart.data.labels = w.labels; lineChart.data.datasets = w.line.concat(ex.line); lineChart.update();
             }
             function currentRange() {
                 var cur = panel.querySelector('.chart-range-btn.is-active');
@@ -716,6 +802,15 @@
             if (sel) sel.addEventListener('change', function () { apply(currentRange()); });
             fromIn.addEventListener('change', function () { userSet.from = true; syncUrl(); apply(currentRange()); });
             toIn.addEventListener('change', function () { userSet.to = true; syncUrl(); apply(currentRange()); });
+            panel.querySelector('.chart-exp-add').addEventListener('click', function () {
+                var n = parseInt(expN.value, 10);
+                if (!expDate.value || isNaN(n) || n < 0) return;
+                var sName = expSeries.hidden ? '' : expSeries.value;
+                expected = expected.filter(function (e) { return !(e.d === expDate.value && (e.s || '') === sName); });
+                expected.push({ d: expDate.value, n: n, s: sName });
+                expN.value = ''; saveExpected(); apply(currentRange());
+            });
+            saveExpected();
             apply('all');
             flagBoxes.forEach(function (b) { b.addEventListener('change', function () { apply(currentRange()); }); });
         });
