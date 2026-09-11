@@ -834,8 +834,81 @@ def explore_plot_view(request, part_type_id):
         "n_items": n_items,
         "type_url": navigation.leaf_path_for(inst, part_type_id) or _rev(request, "explore:home"),
         "data_url": _rev(request, "explore:plot_data", args=[part_type_id]),
+        "sources_url": _rev(request, "explore:plot_sources", args=[part_type_id]),
+        "tests_sync_url": _rev(request, "explore:plot_test_data_sync", args=[part_type_id]),
+        # per-test-type endpoints; the page substitutes the id
+        "tests_base_url": _rev(request, "explore:plot_test_keys", args=[part_type_id, 0]).rsplit("/0/", 1)[0],
         "hwdb_instance": inst,
     })
+
+
+@login_not_required
+@fnal_login_required
+def explore_plot_sources_view(request, part_type_id):
+    """Test types with mirrored test_data for this type (#143) — the Plot
+    page's Source menu. Mirror-only."""
+    inst = instance_of(request)
+    return JsonResponse({"tests": plotting.test_sources(inst, part_type_id)})
+
+
+@login_not_required
+@fnal_login_required
+def explore_plot_test_keys_view(request, part_type_id, test_type_id):
+    inst = instance_of(request)
+    return JsonResponse(plotting.test_keys(inst, part_type_id, test_type_id))
+
+
+@login_not_required
+@fnal_login_required
+def explore_plot_test_items_view(request, part_type_id, test_type_id):
+    inst = instance_of(request)
+    return JsonResponse({"items": plotting.test_items(inst, part_type_id, test_type_id)})
+
+
+@login_not_required
+@fnal_login_required
+def explore_plot_test_values_view(request, part_type_id, test_type_id):
+    """``?key=<JSON list of path segments>`` → ``{"values": {pid: [...]}}``."""
+    inst = instance_of(request)
+    try:
+        path = json.loads(request.GET.get("key") or "")
+        if not isinstance(path, list) or not path:
+            raise ValueError
+    except (ValueError, TypeError):
+        return JsonResponse({"error": "key must be a non-empty JSON list"}, status=400)
+    return JsonResponse({"values": plotting.test_values(inst, part_type_id, test_type_id,
+                                                        [str(x) for x in path])})
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_plot_test_data_sync_view(request, part_type_id):
+    """Stream the user-triggered test_data sweep (#143): the latest record
+    per (item, test type), one detailed HWDB call each. FNAL-gated like the
+    type sync; ``mode`` = incremental (default) | full."""
+    inst = instance_of(request)
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        nxt = _rev(request, "explore:plot", args=[part_type_id])
+        return redirect(f"{link}?{urlencode({'next': nxt, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        return JsonResponse({"error": FNAL_UNAVAILABLE}, status=503)
+    mode = request.POST.get("mode", "incremental")
+    if mode not in ("incremental", "full"):
+        mode = "incremental"
+
+    def _iter():
+        try:
+            yield from events.sync_test_data(settings.HWDB_PROFILES[inst]["api"], bearer,
+                                             part_type_id, instance=inst, mode=mode)
+        except Exception as e:
+            logger.exception("explore_plot_test_data_sync_view(%s) crashed", part_type_id)
+            yield f"test data: CRASH · {e}\n"
+
+    return StreamingHttpResponse(_iter(), content_type="text/plain; charset=utf-8")
 
 
 @login_not_required

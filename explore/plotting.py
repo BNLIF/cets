@@ -14,8 +14,12 @@ from __future__ import annotations
 import json
 from typing import Iterator
 
+from django.core.cache import cache
+from django.db.models import Count, Max
+
 from . import parts
 from .events import _parse_created, _ref_name
+from .models import HwdbComponentEvent, HwdbTestData
 
 PAGE_SIZE = 500
 
@@ -81,3 +85,114 @@ def stream_specs(api, part_type_id: str) -> Iterator[str]:
         yield json.dumps({"error": f"{type(e).__name__}: {e}"}) + "\n"
         return
     yield json.dumps({"done": n}) + "\n"
+
+
+# ---- test_data source (#143): served per key from the HwdbTestData mirror ----
+
+def walk_keys(node, prefix: tuple, acc: dict) -> None:
+    """Every leaf path under ``node`` → ``acc[path] += 1`` once per call
+    (call once per item). Lists of dicts explode (their keys join the same
+    prefix); a list of scalars is one leaf. Mirrors the Plot page's JS walk,
+    so specs and test_data keys look the same to the user."""
+    if isinstance(node, list):
+        if any(isinstance(e, dict) for e in node):
+            seen: dict = {}
+            for e in node:
+                if isinstance(e, dict):
+                    walk_keys(e, prefix, seen)
+            for k in seen:
+                acc[k] = acc.get(k, 0) + 1
+        elif prefix:
+            acc[prefix] = acc.get(prefix, 0) + 1
+        return
+    if isinstance(node, dict):
+        for k, v in node.items():
+            walk_keys(v, prefix + (str(k),), acc)
+        return
+    if prefix:
+        acc[prefix] = acc.get(prefix, 0) + 1
+
+
+def values_at(node, segs: list, i: int = 0) -> list:
+    """All leaf values under a path; lists at any depth flatten (the JS
+    ``valuesAt``)."""
+    if isinstance(node, list):
+        out = []
+        for e in node:
+            out.extend(values_at(e, segs, i))
+        return out
+    if i == len(segs):
+        return [node] if node is not None and not isinstance(node, (dict, list)) else []
+    if isinstance(node, dict) and segs[i] in node:
+        return values_at(node[segs[i]], segs, i + 1)
+    return []
+
+
+def test_sources(instance: str, part_type_id: str) -> list[dict]:
+    """Test types with mirrored records for this type: ``[{id, name, n}]``."""
+    rows = (HwdbTestData.for_instance(instance).filter(part_type_id=part_type_id)
+            .values("test_type_id", "test_type_name").annotate(n=Count("id"))
+            .order_by("test_type_name"))
+    return [{"id": r["test_type_id"], "name": r["test_type_name"], "n": r["n"]} for r in rows]
+
+
+def _records(instance, part_type_id, test_type_id):
+    return HwdbTestData.for_instance(instance).filter(
+        part_type_id=part_type_id, test_type_id=test_type_id)
+
+
+def test_keys(instance: str, part_type_id: str, test_type_id: int) -> dict:
+    """``{"keys": [{"path": [...], "n": items-with-key}], "n_items": N}`` for
+    one test type, walked over every mirrored record and cached until the
+    next sync touches the type."""
+    qs = _records(instance, part_type_id, test_type_id)
+    stamp = qs.aggregate(m=Max("synced_at"))["m"]
+    ck = f"plot-keys:{instance}:{part_type_id}:{test_type_id}:{stamp.isoformat() if stamp else 0}"
+    hit = cache.get(ck)
+    if hit is not None:
+        return hit
+    acc: dict = {}
+    n = 0
+    for blob in qs.values_list("test_data", flat=True):
+        n += 1
+        walk_keys(blob, (), acc)
+    keys = sorted(acc.items(), key=lambda kv: (-kv[1], kv[0]))
+    out = {"keys": [{"path": list(k), "n": v} for k, v in keys], "n_items": n}
+    cache.set(ck, out, 3600)
+    return out
+
+
+def test_items(instance: str, part_type_id: str, test_type_id: int) -> list[dict]:
+    """One row per item holding this test type — the Plot page's item list:
+    pid + the component facets (from the component mirror) + the record's
+    HWDB created date."""
+    recs = list(_records(instance, part_type_id, test_type_id)
+                .values_list("part_id", "created"))
+    comps = {c.part_id: c for c in HwdbComponentEvent.for_instance(instance)
+             .filter(part_type_id=part_type_id, part_id__in=[p for p, _ in recs])}
+    out = []
+    for pid, created in sorted(recs):
+        c = comps.get(pid)
+        out.append({
+            "pid": pid,
+            "serial": c.serial_number if c else "",
+            "status": c.status if c else "",
+            "creator": c.created_by if c else "",
+            "manufacturer": c.manufacturer if c else "",
+            "institution": c.institution if c else "",
+            "created": c.created.date().isoformat() if c and c.created else "",
+            "updated": c.updated.date().isoformat() if c and c.updated else "",
+            "tested": created.date().isoformat() if created else "",
+        })
+    return out
+
+
+def test_values(instance: str, part_type_id: str, test_type_id: int, path: list) -> dict:
+    """``{pid: [leaf values]}`` for one key across every mirrored record
+    (items without the key are omitted)."""
+    out = {}
+    for pid, blob in _records(instance, part_type_id, test_type_id).values_list("part_id", "test_data"):
+        vals = values_at(blob, path)
+        if vals:
+            out[pid] = vals
+    return out

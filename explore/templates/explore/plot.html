@@ -32,27 +32,32 @@
   .pl-err { color: var(--bad, #a33); font-size: 12.5px; }
 </style>
 
-<div class="pl-page" id="pl" data-key="{{ hwdb_instance }}/{{ leaf.part_type_id }}/specs" data-url="{{ data_url }}" data-n="{{ n_items }}">
+<div class="pl-page" id="pl" data-key="{{ hwdb_instance }}/{{ leaf.part_type_id }}" data-url="{{ data_url }}" data-n="{{ n_items }}"
+     data-sources-url="{{ sources_url }}" data-tests-base-url="{{ tests_base_url }}" data-tests-sync-url="{{ tests_sync_url }}">
   <div class="pl-crumbs"><a href="{{ type_url }}">{{ leaf.name }}</a><span class="sep">›</span>Plot</div>
   <h1>{{ leaf.name }} <span class="mono">{{ leaf.part_type_id }}</span></h1>
   <p class="pl-sub">{{ leaf.system_name }} › {{ leaf.subsystem_name }} · {{ n_items }} items in HWDB</p>
   {% csrf_token %}
 
-  <div class="pl-card pl-row">
-    <span id="data-status">No data in this browser yet.</span>
-    <button type="button" class="pl-btn primary" id="fetch-btn">Fetch specifications</button>
-    <span id="fetch-progress"></span>
-    <span class="pl-err" id="fetch-error"></span>
+  <div class="pl-card">
+    <div class="pl-row">
+      <label>Source <select id="src"><option value="specs">Item Specifications</option></select></label>
+      <span id="data-status">No data in this browser yet.</span>
+      <button type="button" class="pl-btn primary" id="fetch-btn">Fetch specifications</button>
+      <button type="button" class="pl-btn" id="fetch-full-btn" hidden title="Re-fetch the latest test record for every item">Refresh all</button>
+      <span id="fetch-progress"></span>
+      <span class="pl-err" id="fetch-error"></span>
+    </div>
+    <pre id="td-log" hidden style="margin: 10px 0 0; max-height: 140px; overflow: auto; font-size: 11.5px; color: var(--dim); background: var(--surface); border-radius: 6px; padding: 8px 10px;"></pre>
   </div>
 
   <div class="pl-card" id="controls" hidden>
     <div class="pl-row">
-      <label>Source <select id="src" disabled><option>Item Specifications</option></select></label>
       <label>X <select id="xkey"></select></label>
       <label>Y <select id="ykey"><option value="">—</option></select></label>
       <label id="mode2d-l" hidden><select id="mode2d"><option value="scatter">scatter · size = multiplicity</option><option value="heat">2D histogram</option></select></label>
       <label id="bins-l">Bins <input type="number" id="bins" min="2" max="500" value="40"></label>
-      <label id="rare-l" hidden title="Keys present on fewer than 5% of items"><input type="checkbox" id="rare"> rare keys</label>
+      <label id="rare-l" hidden title="Keys present on fewer than 5% of items"><input type="checkbox" id="rare" checked> rare keys</label>
       <button type="button" class="pl-btn" id="png-btn" title="Save the plot as a PNG">⤓ PNG</button>
     </div>
     <div class="pl-row">
@@ -83,12 +88,21 @@
 <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2.0.1/dist/chartjs-chart-matrix.min.js"></script>
 <script>
 (function () {
-    var root = document.getElementById("pl"), KEY = root.dataset.key, DATA_URL = root.dataset.url, N_ITEMS = +root.dataset.n;
+    var root = document.getElementById("pl"), TYPE_KEY = root.dataset.key, DATA_URL = root.dataset.url, N_ITEMS = +root.dataset.n;
+    var SOURCES_URL = root.dataset.sourcesUrl, TESTS_BASE = root.dataset.testsBaseUrl, TESTS_SYNC_URL = root.dataset.testsSyncUrl;
     var csrf = document.querySelector("input[name=csrfmiddlewaretoken]").value;
     var $ = function (id) { return document.getElementById(id); };
-    var items = [], paths = [], chart = null;
     var FACETS = ["status", "creator", "manufacturer", "institution"];
     var OPS = ["=", "≠", "<", "≤", ">", "≥", "contains"];
+
+    // ---- State -------------------------------------------------------------
+    // source: "specs" (whole dataset, values walked from item.data) or a test
+    // type id (values fetched per key from the mirror into item.vals[path]).
+    var source = "specs", items = [], paths = [], pathCounts = {}, chart = null, cuts = [];
+    var testCache = null;          // the IndexedDB record for the current test source
+    var busy = false;              // a key fetch is in flight
+    function isTest() { return source !== "specs"; }
+    function cacheKey() { return TYPE_KEY + "/" + (isTest() ? "test:" + source : "specs"); }
 
     // ---- IndexedDB cache: one record per instance/type/source -----------
     function idb() {
@@ -106,44 +120,84 @@
     function idbPut(key, val) {
         return idb().then(function (db) { return new Promise(function (res, rej) {
             var tx = db.transaction("datasets", "readwrite"); tx.objectStore("datasets").put(val, key);
-            tx.oncomplete = res; tx.onerror = function () { rej(tx.error); }; }); });
+            tx.oncomplete = res; tx.onerror = function () { rej(tx.error); }; }); }).catch(function () {});
+    }
+    function idbDel(key) {
+        return idb().then(function (db) { return new Promise(function (res) {
+            var tx = db.transaction("datasets", "readwrite"); tx.objectStore("datasets").delete(key); tx.oncomplete = res; tx.onerror = res; }); }).catch(function () {});
     }
 
-    // ---- Fetch: NDJSON stream, progress per page -------------------------
-    async function fetchData() {
-        var btn = $("fetch-btn"), prog = $("fetch-progress"), err = $("fetch-error");
-        btn.disabled = true; err.textContent = ""; prog.textContent = "starting…";
+    // ---- Streams ---------------------------------------------------------
+    async function postStream(url, extra, onLine) {
         var fd = new FormData(); fd.append("csrfmiddlewaretoken", csrf);
-        var resp;
-        try { resp = await fetch(DATA_URL, { method: "POST", body: fd }); }
-        catch (e) { err.textContent = "network error: " + e; btn.disabled = false; return; }
-        if (resp.redirected) { window.location = resp.url; return; }
-        if (!resp.ok) { err.textContent = "HTTP " + resp.status; btn.disabled = false; return; }
-        var reader = resp.body.getReader(), dec = new TextDecoder(), buf = "", rows = [], pages = "?", failed = null;
-        function take(line) {
-            if (!line.trim()) return;
-            var o = JSON.parse(line);
-            if (o.pages) { pages = o.pages; }
-            else if (o.page) { prog.textContent = "page " + o.page + " / " + pages + " · " + rows.length + " items"; }
-            else if (o.error) { failed = o.error; }
-            else if (o.done !== undefined) { }
-            else rows.push(o);
-        }
+        Object.keys(extra || {}).forEach(function (k) { fd.append(k, extra[k]); });
+        var resp = await fetch(url, { method: "POST", body: fd });
+        if (resp.redirected) { window.location = resp.url; return false; }
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        var reader = resp.body.getReader(), dec = new TextDecoder(), buf = "";
         while (true) {
             var r = await reader.read(); if (r.done) break;
             buf += dec.decode(r.value, { stream: true });
-            var nl; while ((nl = buf.indexOf("\n")) >= 0) { take(buf.slice(0, nl)); buf = buf.slice(nl + 1); }
+            var nl; while ((nl = buf.indexOf("\n")) >= 0) { onLine(buf.slice(0, nl)); buf = buf.slice(nl + 1); }
         }
-        if (buf) take(buf);
-        btn.disabled = false;
-        if (failed) { err.textContent = failed; prog.textContent = ""; return; }
-        var rec = { fetched_at: new Date().toISOString(), items: rows };
-        try { await idbPut(KEY, rec); } catch (e) { /* no cache — still plot */ }
-        prog.textContent = "";
-        load(rec);
+        if (buf) onLine(buf);
+        return true;
     }
 
-    // ---- Keys: walk every item's spec DATA; lists of dicts explode -------
+    // Specifications: the NDJSON sweep, whole type in one go.
+    async function fetchSpecs() {
+        var btn = $("fetch-btn"), prog = $("fetch-progress"), err = $("fetch-error");
+        btn.disabled = true; err.textContent = ""; prog.textContent = "starting…";
+        var rows = [], pages = "?", failed = null;
+        try {
+            var ok = await postStream(DATA_URL, {}, function (line) {
+                if (!line.trim()) return;
+                var o = JSON.parse(line);
+                if (o.pages) pages = o.pages;
+                else if (o.page) prog.textContent = "page " + o.page + " / " + pages + " · " + rows.length + " items";
+                else if (o.error) failed = o.error;
+                else if (o.done === undefined) rows.push(o);
+            });
+            if (!ok) return;
+        } catch (e) { err.textContent = String(e); btn.disabled = false; prog.textContent = ""; return; }
+        btn.disabled = false; prog.textContent = "";
+        if (failed) { err.textContent = failed; return; }
+        var rec = { fetched_at: new Date().toISOString(), items: rows };
+        await idbPut(TYPE_KEY + "/specs", rec);
+        loadSpecs(rec);
+    }
+
+    // Test data: the HWDB sweep into the server mirror (progress log), then reload.
+    async function fetchTestData(mode) {
+        var log = $("td-log"), err = $("fetch-error");
+        $("fetch-btn").disabled = $("fetch-full-btn").disabled = true; err.textContent = "";
+        log.hidden = false; log.textContent = "Fetching test data (" + mode + ")…\n";
+        try {
+            var ok = await postStream(TESTS_SYNC_URL, { mode: mode }, function (line) { log.textContent += line + "\n"; log.scrollTop = log.scrollHeight; });
+            if (!ok) return;
+        } catch (e) { err.textContent = String(e); }
+        $("fetch-btn").disabled = $("fetch-full-btn").disabled = false;
+        // The mirror changed: drop every cached test source of this type, then reload.
+        var srcs = await loadSources();
+        await Promise.all(srcs.map(function (t) { return idbDel(TYPE_KEY + "/test:" + t.id); }));
+        if (isTest() && !srcs.some(function (t) { return String(t.id) === String(source); })) source = srcs.length ? String(srcs[0].id) : "specs";
+        if (!isTest() && srcs.length) source = String(srcs[0].id);
+        $("src").value = source;
+        await switchSource();
+    }
+
+    async function loadSources() {
+        var srcs = [];
+        try { srcs = (await (await fetch(SOURCES_URL)).json()).tests || []; } catch (e) { srcs = []; }
+        var sel = $("src"), cur = sel.value; sel.textContent = "";
+        var o = document.createElement("option"); o.value = "specs"; o.textContent = "Item Specifications"; sel.appendChild(o);
+        srcs.forEach(function (t) { var x = document.createElement("option"); x.value = String(t.id); x.textContent = t.name + " (" + t.n + " items)"; sel.appendChild(x); });
+        var g = document.createElement("option"); g.value = "__fetch__"; g.textContent = srcs.length ? "fetch test data for new items…" : "fetch test data from HWDB…"; sel.appendChild(g);
+        sel.value = Array.prototype.some.call(sel.options, function (op) { return op.value === cur; }) ? cur : "specs";
+        return srcs;
+    }
+
+    // ---- Keys and values ---------------------------------------------------
     function walk(node, prefix, acc) {
         if (Array.isArray(node)) {
             if (node.some(function (e) { return e && typeof e === "object" && !Array.isArray(e); })) {
@@ -157,7 +211,6 @@
         }
         if (prefix.length) acc.add(JSON.stringify(prefix));
     }
-    // All leaf values under a path (lists at any depth are flattened).
     function valuesAt(node, segs, i) {
         if (Array.isArray(node)) {
             var out = []; node.forEach(function (e) { out = out.concat(valuesAt(e, segs, i)); }); return out;
@@ -166,6 +219,12 @@
         if (node && typeof node === "object" && Object.prototype.hasOwnProperty.call(node, segs[i])) return valuesAt(node[segs[i]], segs, i + 1);
         return [];
     }
+    // The one accessor both sources share.
+    function valuesFor(item, pathJSON) {
+        if (!pathJSON) return [];
+        if (isTest()) return item.vals[pathJSON] || [];
+        return valuesAt(item.data, JSON.parse(pathJSON), 0);
+    }
     function toNum(v) {
         if (typeof v === "number") return isFinite(v) ? v : null;
         if (typeof v === "string" && v.trim() !== "") { var n = Number(v); return isFinite(n) ? n : null; }
@@ -173,11 +232,25 @@
     }
     function showPath(p) { return JSON.parse(p).join(" › "); }
 
-    // ---- Filters ---------------------------------------------------------
-    var cuts = [];   // [{p: pathJSON, o: op, v: text}]
+    // Test source: make sure every key the plot needs is in item.vals.
+    async function ensureKeys(pathJSONs) {
+        var need = pathJSONs.filter(function (p) { return p && !(p in testCache.values); });
+        if (!need.length) return;
+        busy = true; $("stats").textContent = "loading " + need.map(showPath).join(", ") + "…";
+        for (var i = 0; i < need.length; i++) {
+            var url = TESTS_BASE + "/" + source + "/values/?key=" + encodeURIComponent(need[i]);
+            var j = await (await fetch(url)).json();
+            testCache.values[need[i]] = j.values || {};
+            items.forEach(function (it) { if (j.values && j.values[it.pid]) it.vals[need[i]] = j.values[it.pid]; });
+        }
+        await idbPut(cacheKey(), testCache);
+        busy = false;
+    }
+
+    // ---- Filters -----------------------------------------------------------
     function passCut(item, c) {
         if (!c.p) return true;
-        var vals = valuesAt(item.data, JSON.parse(c.p), 0), want = toNum(c.v);
+        var vals = valuesFor(item, c.p), want = toNum(c.v);
         return vals.some(function (v) {
             var n = toNum(v);
             if (c.o === "contains") return String(v).toLowerCase().indexOf(String(c.v).toLowerCase()) >= 0;
@@ -201,8 +274,9 @@
         });
     }
 
-    // ---- Chart -----------------------------------------------------------
+    // ---- Chart -------------------------------------------------------------
     var ACCENT = "#1d4ed8", OVER = "#c2410c";
+    var PALETTE = ["#1d4ed8", "#c2410c", "#15803d", "#9333ea", "#dc2626", "#0891b2", "#ca8a04", "#4f46e5", "#db2777", "#65a30d", "#0d9488", "#7c3aed"];
     function opts(xTitle, yTitle) {
         return { responsive: true, maintainAspectRatio: false, animation: false,
             plugins: { legend: { labels: { boxWidth: 12, font: { size: 12 } } }, tooltip: { intersect: false } },
@@ -216,15 +290,6 @@
         nums.forEach(function (v) { var b = Math.min(nb - 1, Math.floor((v - lo) / w)); counts[b]++; });
         return counts;
     }
-    function overlayXY() {
-        var out = [];
-        $("ov").value.split(/\n/).forEach(function (line) {
-            var m = line.match(/^\s*(-?[\d.eE+-]+)\s*[,;:\t ]\s*(-?[\d.eE+-]+)\s*$/);
-            if (m && isFinite(+m[1]) && isFinite(+m[2])) out.push({ x: +m[1], y: +m[2] });
-        });
-        return out.sort(function (a, b) { return a.x - b.x; });
-    }
-    var PALETTE = ["#1d4ed8", "#c2410c", "#15803d", "#9333ea", "#dc2626", "#0891b2", "#ca8a04", "#4f46e5", "#db2777", "#65a30d", "#0d9488", "#7c3aed"];
     function isNumeric(vals) {
         var nums = vals.map(toNum).filter(function (v) { return v !== null; });
         return vals.length > 0 && nums.length > 0.8 * vals.length;
@@ -243,8 +308,8 @@
     }
     function clear(msg) { $("stats").textContent = msg; if (chart) { chart.destroy(); chart = null; } }
     // Which side controls apply to the plot being drawn: bins only to
-    // histograms; the overlay to single-key plots (numbers over a histogram,
-    // "label, count" lines over category bars).
+    // histograms; the overlay to single-key plots (x, y points over a
+    // histogram, "label, count" lines over category bars).
     function controls(bins, overlay) {
         $("bins").disabled = !bins; $("bins-l").classList.toggle("pl-off", !bins);
         $("bins-l").title = bins ? "" : "Bins apply to histograms only";
@@ -261,18 +326,31 @@
         });
         return out;
     }
+    function overlayXY() {
+        var out = [];
+        $("ov").value.split(/\n/).forEach(function (line) {
+            var m = line.match(/^\s*(-?[\d.eE+-]+)\s*[,;:\t ]\s*(-?[\d.eE+-]+)\s*$/);
+            if (m && isFinite(+m[1]) && isFinite(+m[2])) out.push({ x: +m[1], y: +m[2] });
+        });
+        return out.sort(function (a, b) { return a.x - b.x; });
+    }
+
     function render() {
         var xp = $("xkey").value, yp = $("ykey").value;
         if (!xp) return;
-        var sel = filtered(), xs = JSON.parse(xp), stats = $("stats");
+        if (isTest()) {
+            var need = [xp, yp].concat(cuts.map(function (c) { return c.p; })).filter(function (p) { return p && !(p in testCache.values); });
+            if (need.length) { if (!busy) ensureKeys(need).then(render); return; }
+        }
+        var sel = filtered(), stats = $("stats");
         var head = sel.length + " / " + items.length + " items";
         $("mode2d-l").hidden = true;
         if (yp) {
             // Two keys: values paired by position within each item (the
             // Dashboard's explode-two-lists rule); pairs missing either side drop.
-            var ys = JSON.parse(yp), pairs = [];
+            var pairs = [];
             sel.forEach(function (it) {
-                var a = valuesAt(it.data, xs, 0), b = valuesAt(it.data, ys, 0), n = Math.min(a.length, b.length);
+                var a = valuesFor(it, xp), b = valuesFor(it, yp), n = Math.min(a.length, b.length);
                 for (var i = 0; i < n; i++) pairs.push({ x: a[i], y: b[i], pid: it.pid });
             });
             if (!pairs.length) { clear(head + " · 0 (x, y) pairs — no item has values for both keys"); controls(false, null); return; }
@@ -349,7 +427,7 @@
             return;
         }
         var vals = [];
-        sel.forEach(function (it) { vals = vals.concat(valuesAt(it.data, xs, 0)); });
+        sel.forEach(function (it) { vals = vals.concat(valuesFor(it, xp)); });
         if (!vals.length) { clear(head + " · no values for this key on the selected items"); controls(false, null); return; }
         var nums = vals.map(toNum).filter(function (v) { return v !== null; });
         if (isNumeric(vals)) {
@@ -378,12 +456,25 @@
         controls(false, "cat");
     }
 
-    // ---- Controls --------------------------------------------------------
+    // ---- Controls ----------------------------------------------------------
     function fillSelect(sel, values, keep, blank) {
         var cur = keep ? sel.value : ""; sel.textContent = "";
         if (blank !== undefined) { var o0 = document.createElement("option"); o0.value = ""; o0.textContent = blank; sel.appendChild(o0); }
         values.forEach(function (v) { var o = document.createElement("option"); o.value = v.value; o.textContent = v.text; sel.appendChild(o); });
         if (values.some(function (v) { return v.value === cur; })) sel.value = cur;
+    }
+    // Rare = on fewer than 5% of items (and not all of a tiny type); hidden
+    // from the key pickers unless the toggle is on or the key is in use.
+    function isRare(p) { return pathCounts[p] < Math.max(2, 0.05 * items.length); }
+    function keyOptions(keep) {
+        var show = $("rare").checked;
+        return paths.filter(function (p) { return show || !isRare(p) || keep.indexOf(p) >= 0; })
+                    .map(function (p) { return { value: p, text: showPath(p) + " (" + pathCounts[p] + ")" }; });
+    }
+    function fillKeySelects(x, y) {
+        var keep = [x, y].concat(cuts.map(function (c) { return c.p; })).filter(Boolean);
+        fillSelect($("xkey"), keyOptions(keep), false, "key…"); fillSelect($("ykey"), keyOptions(keep), false, "—");
+        $("xkey").value = x || ""; $("ykey").value = y || "";
     }
     function cutRow(c) {
         var row = document.createElement("span"); row.className = "pl-cut";
@@ -398,42 +489,26 @@
         row.appendChild(ps); row.appendChild(os); row.appendChild(vi); row.appendChild(x);
         return row;
     }
-    // Rare = on fewer than 5% of items (and not all of a tiny type); hidden
-    // from the key pickers unless the toggle is on or the key is in use.
-    var pathCounts = {};
-    function isRare(p) { return pathCounts[p] < Math.max(2, 0.05 * items.length); }
-    function keyOptions(keep) {
-        var show = $("rare").checked;
-        return paths.filter(function (p) { return show || !isRare(p) || keep.indexOf(p) >= 0; })
-                    .map(function (p) { return { value: p, text: showPath(p) + " (" + pathCounts[p] + ")" }; });
-    }
-    function fillKeySelects(x, y) {
-        var keep = [x, y].concat(cuts.map(function (c) { return c.p; })).filter(Boolean);
-        fillSelect($("xkey"), keyOptions(keep), false, "key…"); fillSelect($("ykey"), keyOptions(keep), false, "—");
-        $("xkey").value = x || ""; $("ykey").value = y || "";
-    }
     function drawCuts() { var el = $("cuts"); el.textContent = ""; cuts.forEach(function (c) { el.appendChild(cutRow(c)); }); }
 
     // Plot config lives in the URL hash so a plot is bookmarkable/shareable.
     function readHash() { try { return JSON.parse(decodeURIComponent(location.hash.slice(1)) || "{}"); } catch (e) { return {}; } }
     function writeHash() {
         var f = {}; FACETS.forEach(function (k) { if ($("f-" + k).value) f[k] = $("f-" + k).value; });
-        var cfg = { x: $("xkey").value, y: $("ykey").value, bins: +$("bins").value, pid: $("pidf").value, f: f,
-                    cuts: cuts.filter(function (c) { return c.p; }), logic: $("logic").value, ov: $("ov").value, ovn: $("ovn").value, rare: $("rare").checked || undefined, m2: $("mode2d").value };
+        var cfg = { src: source, x: $("xkey").value, y: $("ykey").value, bins: +$("bins").value, pid: $("pidf").value, f: f,
+                    cuts: cuts.filter(function (c) { return c.p; }), logic: $("logic").value, ov: $("ov").value, ovn: $("ovn").value,
+                    rare: $("rare").checked ? undefined : false, m2: $("mode2d").value };
         history.replaceState(null, "", "#" + encodeURIComponent(JSON.stringify(cfg)));
     }
     function changed() { writeHash(); render(); }
 
-    function load(rec) {
-        items = rec.items || [];
-        $("data-status").textContent = items.length.toLocaleString() + " items · fetched " + new Date(rec.fetched_at).toLocaleString();
-        $("fetch-btn").textContent = "Refresh";
-        var acc = new Set(), counts = {};
-        items.forEach(function (it) { var s = new Set(); walk(it.data, [], s); s.forEach(function (p) { acc.add(p); counts[p] = (counts[p] || 0) + 1; }); });
-        paths = Array.from(acc).sort(function (a, b) { return (counts[b] - counts[a]) || (a < b ? -1 : 1); });
-        pathCounts = counts;
-        var cfg = readHash();
-        $("rare").checked = !!cfg.rare;
+    // Both sources land here: the item list + the key inventory → controls → plot.
+    function setDataset(newItems, counts, statusText) {
+        items = newItems; pathCounts = counts;
+        paths = Object.keys(counts).sort(function (a, b) { return (counts[b] - counts[a]) || (a < b ? -1 : 1); });
+        $("data-status").textContent = statusText;
+        var cfg = readHash(), acc = new Set(paths);
+        $("rare").checked = cfg.rare !== false;    // shown by default; the hash remembers an opt-out
         $("rare-l").hidden = !paths.some(isRare);
         cuts = (cfg.cuts || []).filter(function (c) { return acc.has(c.p); });
         fillKeySelects(cfg.x && acc.has(cfg.x) ? cfg.x : "", cfg.y && acc.has(cfg.y) ? cfg.y : "");
@@ -450,30 +525,79 @@
         });
         drawCuts();
         $("controls").hidden = false; $("plot-card").hidden = !paths.length;
-        $("stats").textContent = paths.length ? "" : "No specification keys on these items.";
+        $("stats").textContent = paths.length ? "" : "No keys on these items.";
+        writeHash();
         render();
+    }
+
+    function loadSpecs(rec) {
+        var rows = rec.items || [], counts = {};
+        rows.forEach(function (it) { var s = new Set(); walk(it.data, [], s); s.forEach(function (p) { counts[p] = (counts[p] || 0) + 1; }); });
+        $("fetch-btn").textContent = "Refresh"; $("fetch-full-btn").hidden = true;
+        setDataset(rows, counts, rows.length.toLocaleString() + " items · fetched " + new Date(rec.fetched_at).toLocaleString());
+    }
+
+    async function loadTest(ttid) {
+        var key = TYPE_KEY + "/test:" + ttid, rec = null;
+        try { rec = await idbGet(key); } catch (e) { rec = null; }
+        if (!rec) {
+            var base = TESTS_BASE + "/" + ttid;
+            var kj = await (await fetch(base + "/keys/")).json(), ij = await (await fetch(base + "/items/")).json();
+            rec = { fetched_at: new Date().toISOString(), keys: kj.keys || [], items: ij.items || [], values: {} };
+            await idbPut(key, rec);
+        }
+        testCache = rec;
+        var counts = {}; rec.keys.forEach(function (k) { counts[JSON.stringify(k.path)] = k.n; });
+        var rows = rec.items.map(function (it) {
+            var o = Object.assign({}, it, { vals: {} });
+            Object.keys(rec.values).forEach(function (p) { if (rec.values[p][it.pid]) o.vals[p] = rec.values[p][it.pid]; });
+            return o;
+        });
+        $("fetch-btn").textContent = "Fetch new"; $("fetch-full-btn").hidden = false;
+        setDataset(rows, counts, rows.length.toLocaleString() + " items with this test in the mirror");
+    }
+
+    async function switchSource() {
+        var v = $("src").value;
+        if (v === "__fetch__") { $("src").value = source; await fetchTestData("incremental"); return; }
+        source = v;
+        $("controls").hidden = true; $("plot-card").hidden = true; $("td-log").hidden = true; $("fetch-error").textContent = "";
+        if (isTest()) { await loadTest(source); return; }
+        var rec = null;
+        try { rec = await idbGet(TYPE_KEY + "/specs"); } catch (e) { rec = null; }
+        if (rec && rec.items) loadSpecs(rec);
+        else {
+            $("fetch-btn").textContent = "Fetch specifications"; $("fetch-full-btn").hidden = true;
+            $("data-status").textContent = "No data in this browser yet.";
+            var pages = Math.max(1, Math.ceil(N_ITEMS / 500));
+            $("fetch-btn").title = N_ITEMS.toLocaleString() + " items · " + pages + " page" + (pages > 1 ? "s" : "") + " from HWDB";
+            if (N_ITEMS <= 1000) fetchSpecs();
+            else $("fetch-progress").textContent = "~" + pages + " pages from HWDB — may take a while";
+        }
     }
 
     ["xkey", "ykey", "bins", "logic", "mode2d", "f-status", "f-creator", "f-manufacturer", "f-institution"].forEach(function (id) { $(id).addEventListener("change", changed); });
     ["pidf", "ov", "ovn"].forEach(function (id) { $(id).addEventListener("input", changed); });
     $("cut-add").addEventListener("click", function () { cuts.push({ p: "", o: "=", v: "" }); drawCuts(); });
     $("rare").addEventListener("change", function () { fillKeySelects($("xkey").value, $("ykey").value); drawCuts(); writeHash(); });
-    $("fetch-btn").addEventListener("click", fetchData);
+    $("src").addEventListener("change", switchSource);
+    $("fetch-btn").addEventListener("click", function () { if (isTest()) fetchTestData("incremental"); else fetchSpecs(); });
+    $("fetch-full-btn").addEventListener("click", function () { fetchTestData("full"); });
     $("png-btn").addEventListener("click", function () {
         if (!chart) return;
         var c = chart.canvas, out = document.createElement("canvas"); out.width = c.width; out.height = c.height;
         var ctx = out.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, out.width, out.height); ctx.drawImage(c, 0, 0);
         var a = document.createElement("a"); a.href = out.toDataURL("image/png");
-        a.download = (KEY.replace(/\//g, "_") + "_" + showPath($("xkey").value)).replace(/[^\w.-]+/g, "_") + ".png"; a.click();
+        a.download = (cacheKey().replace(/[\/:]/g, "_") + "_" + showPath($("xkey").value)).replace(/[^\w.-]+/g, "_") + ".png"; a.click();
     });
 
-    var pages = Math.max(1, Math.ceil(N_ITEMS / 500));
-    $("fetch-btn").title = N_ITEMS.toLocaleString() + " items · " + pages + " page" + (pages > 1 ? "s" : "") + " from HWDB";
-    idbGet(KEY).then(function (rec) {
-        if (rec && rec.items) load(rec);
-        else if (N_ITEMS <= 1000) fetchData();
-        else $("fetch-progress").textContent = "~" + pages + " pages from HWDB — may take a while";
-    }).catch(function () { if (N_ITEMS <= 1000) fetchData(); });
+    // Boot: sources first (mirror-only), then the hash's source or specs.
+    loadSources().then(function (srcs) {
+        var want = String(readHash().src || "specs");
+        if (want !== "specs" && !srcs.some(function (t) { return String(t.id) === want; })) want = "specs";
+        $("src").value = want;
+        return switchSource();
+    });
 })();
 </script>
 {% endblock %}

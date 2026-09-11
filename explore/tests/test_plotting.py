@@ -95,7 +95,7 @@ class PlotViewsTest(TestCase):
         for i in range(3):
             HwdbComponentEvent.objects.create(instance="dev", part_type_id=PTID, part_id=f"{PTID}-0000{i}")
         html = self.client.get(f"/hw/dev/plot/{PTID}/").content.decode()
-        self.assertIn(f'data-key="dev/{PTID}/specs"', html)
+        self.assertIn(f'data-key="dev/{PTID}"', html)
         self.assertIn(f'data-url="/hw/dev/plot/{PTID}/data/"', html)
         self.assertIn('data-n="3"', html)          # mirror count wins over n_components
 
@@ -151,3 +151,119 @@ class PlotsTabTest(TestCase):
         self.assertIn('class="eh-nav-item active" href="/hw/dev/plots/">Plots</a>', html)
         self.assertLess(html.index('>Shipments</a>'), html.index('>Plots</a>'))
         self.assertLess(html.index('>Plots</a>'), html.index('>Activities</a>'))
+
+
+# ---- test_data source (#143) -------------------------------------------------
+
+from explore import events
+from explore.models import HwdbTestData
+
+
+def _td(inst, ptid, pid, ttid, name, data, created="2026-02-03T10:00:00+00:00"):
+    return HwdbTestData.objects.create(
+        instance=inst, part_type_id=ptid, part_id=pid, test_type_id=ttid, test_type_name=name,
+        test_id=1, created=created, test_data=data)
+
+
+class WalkAndValuesTest(TestCase):
+    def test_walk_explodes_lists_of_dicts_and_counts_once_per_item(self):
+        acc = {}
+        plotting.walk_keys({"A": 1, "L": [{"b": 1}, {"b": 2, "c": 3}], "S": [1, 2, 3], "N": {"x": {"y": 0}}}, (), acc)
+        self.assertEqual(acc, {("A",): 1, ("L", "b"): 1, ("L", "c"): 1, ("S",): 1, ("N", "x", "y"): 1})
+
+    def test_values_at_flattens_lists_and_skips_containers(self):
+        d = {"L": [{"b": 1}, {"b": [2, 3]}, {"c": 4}], "S": [1, 2], "D": {"k": 1}}
+        self.assertEqual(plotting.values_at(d, ["L", "b"]), [1, 2, 3])
+        self.assertEqual(plotting.values_at(d, ["S"]), [1, 2])
+        self.assertEqual(plotting.values_at(d, ["D"]), [])          # a dict is not a leaf
+        self.assertEqual(plotting.values_at(d, ["nope"]), [])
+
+
+class TestDataMirrorTest(TestCase):
+    def test_registry_sync_stores_latest_record_per_test_type(self):
+        from django.conf import settings
+        ptid = settings.HWDB_PROFILES["prod"]["larasic_part_type"]
+        H.objects.create(instance="prod", level=H.LEVEL_TYPE, system_id=81, system_name="CE",
+                         subsystem_id=1, subsystem_name="ASIC", name="LArASIC", part_type_id=ptid)
+        client = mock.MagicMock()
+
+        def _make_request(method, endpoint, params=None, **kw):
+            if endpoint.endswith("/components"):
+                return {"data": [{"part_id": f"{ptid}-00001"}], "pagination": {"pages": 1}}
+            return {"data": {"part_id": f"{ptid}-00001", "created": "2026-01-01T00:00:00+00:00",
+                             "updated": "2026-01-02T00:00:00+00:00"}}
+        client._make_request.side_effect = _make_request
+        client.get_test_types.return_value = {"data": [{"name": "RoomT QC Test", "id": 38}]}
+        client.get_tests.return_value = {"data": [
+            {"id": 7, "created": "2026-01-05T00:00:00+00:00", "test_data": {"Test Date": "2026/01/05", "Noise": 1.5}},
+            {"id": 9, "created": "2026-01-09T00:00:00+00:00", "test_data": {"Test Date": "2026/01/09", "Noise": 1.7}},
+        ]}
+        with mock.patch("explore.events.FnalDbApiClient", return_value=client), \
+             mock.patch("explore.events.sweep_enabled", return_value=0):
+            log = "".join(events.sync_test_events("https://x", "b", ptid))
+        self.assertIn("1 latest test record(s) mirrored", log)
+        row = HwdbTestData.objects.get(instance="prod", part_id=f"{ptid}-00001", test_type_id=38)
+        self.assertEqual((row.test_id, row.test_data["Noise"]), (9, 1.7))   # the newer record wins
+
+    def test_store_replaces_only_the_pairs_given(self):
+        _td("dev", "T", "T-1", 5, "A", {"v": 1}); _td("dev", "T", "T-1", 6, "B", {"v": 2}); _td("prod", "T", "T-1", 5, "A", {"v": 3})
+        events.store_test_data("dev", "T", [{"part_id": "T-1", "test_type_id": 5, "test_type_name": "A",
+                                             "test_id": 2, "created": None, "test_data": {"v": 10}}])
+        vals = {(r.instance, r.test_type_id): r.test_data["v"] for r in HwdbTestData.objects.all()}
+        self.assertEqual(vals, {("dev", 5): 10, ("dev", 6): 2, ("prod", 5): 3})
+
+    def test_sync_test_data_incremental_skips_items_already_mirrored(self):
+        _td("dev", "T", "T-00001", 5, "A", {"v": 1})
+        client = mock.MagicMock()
+        client.get_test_types.return_value = {"data": [{"name": "A", "id": 5}, {"name": "B", "id": 6}]}
+        client._make_request.return_value = {"data": [{"part_id": "T-00001"}, {"part_id": "T-00002"}], "pagination": {"pages": 1}}
+        client.get_tests.side_effect = lambda pid, test_type_id=None, history=False: {
+            "data": [{"id": 1, "created": "2026-03-01T00:00:00+00:00", "test_data": {"v": test_type_id}}]}
+        with mock.patch("explore.events.FnalDbApiClient", return_value=client):
+            log = "".join(events.sync_test_data("https://x", "b", "T", instance="dev", workers=2))
+        self.assertIn("1 item(s) × 2 test type(s) = 2 call(s)", log)
+        self.assertIn("2 record(s) stored, 3 total", log)
+        self.assertEqual(sorted(HwdbTestData.objects.filter(part_id="T-00002").values_list("test_type_id", flat=True)), [5, 6])
+        with mock.patch("explore.events.FnalDbApiClient", return_value=client):
+            log = "".join(events.sync_test_data("https://x", "b", "T", instance="dev", mode="full", workers=2))
+        self.assertIn("2 item(s) × 2 test type(s)", log)
+        self.assertEqual(HwdbTestData.objects.filter(instance="dev", part_type_id="T").count(), 4)
+
+
+class TestDataEndpointsTest(TestCase):
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("t", "t@t.io", "pw"))
+        H.objects.create(instance="dev", level=H.LEVEL_TYPE, system_id=5, system_name="S", subsystem_id=1,
+                         subsystem_name="SS", name="T", part_type_id="T", n_components=2)
+        HwdbComponentEvent.objects.create(instance="dev", part_type_id="T", part_id="T-1", status="Ready", created_by="hm")
+        _td("dev", "T", "T-1", 5, "A", {"Noise": 1.5, "Ch": [1, 2, 3]})
+        _td("dev", "T", "T-2", 5, "A", {"Noise": 2.5})
+        _td("dev", "T", "T-1", 6, "B", {"Gain": 9})
+
+    def test_sources_keys_items_values(self):
+        j = self.client.get("/hw/dev/plot/T/sources/").json()
+        self.assertEqual(j["tests"], [{"id": 5, "name": "A", "n": 2}, {"id": 6, "name": "B", "n": 1}])
+        k = self.client.get("/hw/dev/plot/T/tests/5/keys/").json()
+        self.assertEqual(k["n_items"], 2)
+        self.assertEqual(k["keys"], [{"path": ["Noise"], "n": 2}, {"path": ["Ch"], "n": 1}])
+        it = self.client.get("/hw/dev/plot/T/tests/5/items/").json()["items"]
+        self.assertEqual([(i["pid"], i["status"], i["creator"], i["tested"]) for i in it],
+                         [("T-1", "Ready", "hm", "2026-02-03"), ("T-2", "", "", "2026-02-03")])
+        v = self.client.get("/hw/dev/plot/T/tests/5/values/", {"key": json.dumps(["Ch"])}).json()
+        self.assertEqual(v, {"values": {"T-1": [1, 2, 3]}})
+        self.assertEqual(self.client.get("/hw/dev/plot/T/tests/5/values/", {"key": "nope"}).status_code, 400)
+        self.assertEqual(self.client.get("/hw/plot/T/sources/").json(), {"tests": []})   # other instance
+
+    def test_page_carries_the_test_endpoints(self):
+        html = self.client.get("/hw/dev/plot/T/").content.decode()
+        self.assertIn('data-sources-url="/hw/dev/plot/T/sources/"', html)
+        self.assertIn('data-tests-base-url="/hw/dev/plot/T/tests"', html)
+        self.assertIn('data-tests-sync-url="/hw/dev/plot/T/test-data/"', html)
+
+    def test_sync_view_streams_and_takes_mode(self):
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.events.sync_test_data", return_value=iter(["hello\n"])) as m:
+            resp = self.client.post("/hw/dev/plot/T/test-data/", {"mode": "full"})
+            body = b"".join(resp.streaming_content)     # the generator runs on consumption
+        self.assertEqual(body, b"hello\n")
+        self.assertEqual(m.call_args.kwargs, {"instance": "dev", "mode": "full"})

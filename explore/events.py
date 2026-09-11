@@ -26,7 +26,8 @@ from django.utils import timezone
 from hwdb.api_client import FnalDbApiClient
 
 from . import activity, parts
-from .models import ActivityEvent, HierarchyNode, HwdbComponentEvent, HwdbTestEvent
+from .models import (ActivityEvent, HierarchyNode, HwdbComponentEvent, HwdbTestData,
+                     HwdbTestEvent)
 
 logger = logging.getLogger(__name__)
 
@@ -287,7 +288,7 @@ def _fetch_component(api, part_id: str, date_spec: dict | None,
       *detailed* call per defined test type, reading the physics date out of
       ``test_data`` per the spec, with a ``created`` fallback.
     """
-    tests = []
+    tests, test_data = [], []
     if need_tests:
         if date_spec is None:
             for t in (api.get_tests(part_id).get("data") or []):
@@ -298,11 +299,17 @@ def _fetch_component(api, part_id: str, date_spec: dict | None,
                 tests.append((name, dt))
         else:
             for name, ttid in test_type_ids.items():
-                for t in (api.get_tests(part_id, test_type_id=ttid).get("data") or []):
+                records = api.get_tests(part_id, test_type_id=ttid).get("data") or []
+                for t in records:
                     dt = (extract_test_date(t.get("test_data") or {}, date_spec)
                           or _parse_created(t.get("created")))
                     if dt is not None:
                         tests.append((name, dt))
+                # #143: the same records feed the plotting mirror — keep the
+                # latest per test type (no extra call).
+                latest = _latest_record(records)
+                if latest is not None:
+                    test_data.append(_test_data_row(part_id, ttid, name, latest))
 
     created = updated = None
     serial = created_by = status = manufacturer = institution = parent = ""
@@ -334,8 +341,112 @@ def _fetch_component(api, part_id: str, date_spec: dict | None,
         "manufacturer": manufacturer, "institution": institution,
         "is_installed": installed, "qaqc_uploaded": uploaded,
         "certified_qaqc": certified, "parent_part_id": parent,
-        "tests": tests, "has_detail": need_detail, "has_tests": need_tests,
+        "tests": tests, "test_data": test_data,
+        "has_detail": need_detail, "has_tests": need_tests,
     }
+
+
+def _latest_record(records: list) -> dict | None:
+    """The newest test record by HWDB ``created`` (the Dashboard's
+    ``history=False`` → first-record rule, made explicit)."""
+    dated = [(r.get("created") or "", r) for r in records if isinstance(r, dict)]
+    return max(dated, key=lambda x: x[0])[1] if dated else None
+
+
+def _test_data_row(part_id: str, ttid: int, name: str, rec: dict) -> dict:
+    return {
+        "part_id": part_id, "test_type_id": ttid, "test_type_name": name,
+        "test_id": rec.get("id"), "created": _parse_created(rec.get("created")),
+        "test_data": rec.get("test_data") if isinstance(rec.get("test_data"), dict) else {},
+    }
+
+
+def store_test_data(instance: str, part_type_id: str, rows: list[dict]) -> int:
+    """Upsert latest-record rows into ``HwdbTestData``: the (item, test type)
+    pairs present in ``rows`` are replaced, everything else is left alone."""
+    if not rows:
+        return 0
+    pairs = {(r["part_id"], r["test_type_id"]) for r in rows}
+    for pid in {p for p, _ in pairs}:
+        HwdbTestData.for_instance(instance).filter(
+            part_id=pid, test_type_id__in=[t for p, t in pairs if p == pid]).delete()
+    HwdbTestData.objects.bulk_create(
+        [HwdbTestData(instance=instance, part_type_id=part_type_id, **r) for r in rows],
+        batch_size=1000)
+    return len(rows)
+
+
+def sync_test_data(
+    api_base_url: str,
+    bearer: str,
+    part_type_id: str,
+    *,
+    instance: str = "prod",
+    mode: str = "incremental",
+    workers: int = _DEFAULT_WORKERS,
+) -> Iterator[str]:
+    """Mirror the latest test record per (item, test type) for one type
+    (#143) — the user-triggered sweep behind the Plot page's "Fetch test
+    data". One detailed call per test type per item (the summary endpoint
+    carries no test_data — 2026-09-11 probe), threaded like the type sync.
+
+    ``incremental``: only items with no row yet; ``full``: every item.
+    Registry types also get these rows for free from ``sync_test_events``.
+    """
+    api = FnalDbApiClient(api_base_url, bearer)
+    test_type_ids = _resolve_test_types(api, part_type_id)
+    if not test_type_ids:
+        yield f"test data: {part_type_id} has no test types\n"
+        return
+    part_ids = sorted(_list_part_ids(api, part_type_id))
+    if mode != "full":
+        have = set(HwdbTestData.for_instance(instance).filter(part_type_id=part_type_id)
+                   .values_list("part_id", flat=True))
+        part_ids = [p for p in part_ids if p not in have]
+    yield (f"test data ({mode}): {len(part_ids)} item(s) × {len(test_type_ids)} test type(s) "
+           f"= {len(part_ids) * len(test_type_ids)} call(s)\n")
+    if not part_ids:
+        yield "test data: nothing to fetch\n"
+        return
+
+    tls = _thread_local_cls()
+
+    def _init():
+        tls.client = FnalDbApiClient(api_base_url, bearer)
+
+    def _one(pid):
+        rows = []
+        for name, ttid in test_type_ids.items():
+            try:
+                body = tls.client.get_tests(pid, test_type_id=ttid)
+            except Exception:
+                # transient SSL/connection drops under 20 parallel connections
+                # (seen on dev 2026-09-11) — one retry before giving the item up
+                body = tls.client.get_tests(pid, test_type_id=ttid)
+            latest = _latest_record(body.get("data") or [])
+            if latest is not None:
+                rows.append(_test_data_row(pid, ttid, name, latest))
+        return rows
+
+    stored = done = failed = 0
+    with ThreadPoolExecutor(max_workers=workers, initializer=_init) as pool:
+        futs = {pool.submit(_one, pid): pid for pid in part_ids}
+        batch = []
+        for fut in as_completed(futs):
+            done += 1
+            try:
+                batch.extend(fut.result())
+            except Exception as e:
+                failed += 1
+                logger.warning("test data: %s failed: %s", futs[fut], e)
+            if len(batch) >= 500 or done == len(part_ids):
+                stored += store_test_data(instance, part_type_id, batch)
+                batch = []
+            if done % 100 == 0 or done == len(part_ids):
+                yield f"test data ({mode}): {done}/{len(part_ids)} item(s) · {stored} record(s)\n"
+    total = HwdbTestData.for_instance(instance).filter(part_type_id=part_type_id).count()
+    yield (f"done ({mode}): {stored} record(s) stored, {total} total"
+           + (f" · {failed} item(s) failed" if failed else "") + "\n")
 
 
 def sync_test_events(
@@ -451,6 +562,12 @@ def sync_test_events(
         ]
         if new_test_rows:
             HwdbTestEvent.objects.bulk_create(new_test_rows, batch_size=1000)
+        # #143: latest test record per (item, test type), from the detailed
+        # calls registry types already make (no extra cost).
+        td_rows = [row for r in results if r["has_tests"] for row in r["test_data"]]
+        if td_rows:
+            n_td = store_test_data(instance, part_type_id, td_rows)
+            yield f"sync tests: {n_td} latest test record(s) mirrored for plotting\n"
 
         # --- Component events ---
         # full/components fetch detail for ALL → rewrite wholesale; incremental

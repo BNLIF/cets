@@ -123,6 +123,38 @@ class HwdbTestEvent(InstanceScoped):
         return f"HwdbTestEvent({self.part_type_id}, {self.test_type_name}, {self.created:%Y-%m-%d})"
 
 
+class HwdbTestData(InstanceScoped):
+    """The LATEST test record per (item, test type), with its whole
+    ``test_data`` payload — the type-wide plotting source (#143, the FNAL
+    Dashboard's downloader in mirror form: ``get_hwitem_test(pid, type,
+    history=False)`` → first record).
+
+    Written by the per-type sync from the detailed ``components/{pid}/tests/
+    {type_id}`` records it already fetches for registry types (and for
+    types opted in via curation); ``full`` rewrites the type, ``incremental``
+    fills new items. Whole blobs, not pruned: per-channel arrays are exactly
+    what people plot. Served per key by the Plot view (``plotting``), never
+    as a whole-type download.
+    """
+
+    part_type_id = models.CharField(max_length=20, db_index=True)
+    part_id = models.CharField(max_length=50)
+    test_type_id = models.IntegerField()
+    test_type_name = models.CharField(max_length=100)
+    test_id = models.IntegerField(null=True, blank=True)     # HWDB test record id
+    created = models.DateTimeField(null=True, blank=True)    # HWDB record stamp
+    test_data = models.JSONField(default=dict, blank=True)
+    synced_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=["instance", "part_id", "test_type_id"], name="uniq_testdata_item_type")]
+        indexes = [models.Index(fields=["instance", "part_type_id", "test_type_id"])]
+
+    def __str__(self):
+        return f"HwdbTestData({self.part_id}, {self.test_type_name})"
+
+
 class HwdbComponentEvent(InstanceScoped):
     """One component registration for one component type, mirrored from HWDB.
 
