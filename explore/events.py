@@ -27,7 +27,7 @@ from hwdb.api_client import FnalDbApiClient
 
 from . import activity, parts
 from .models import (ActivityEvent, HierarchyNode, HwdbComponentEvent, HwdbTestData,
-                     HwdbTestEvent)
+                     HwdbTestEvent, HwdbTestValue)
 
 logger = logging.getLogger(__name__)
 
@@ -364,14 +364,21 @@ def _test_data_row(part_id: str, ttid: int, name: str, rec: dict) -> dict:
 def store_test_data(instance: str, part_type_id: str, rows: list[dict]) -> int:
     """Upsert latest-record rows into ``HwdbTestData``: the (item, test type)
     pairs present in ``rows`` are replaced, everything else is left alone."""
+    from .plotting import value_rows    # plotting imports this module
     if not rows:
         return 0
     pairs = {(r["part_id"], r["test_type_id"]) for r in rows}
     for pid in {p for p, _ in pairs}:
-        HwdbTestData.for_instance(instance).filter(
-            part_id=pid, test_type_id__in=[t for p, t in pairs if p == pid]).delete()
+        ttids = [t for p, t in pairs if p == pid]
+        HwdbTestData.for_instance(instance).filter(part_id=pid, test_type_id__in=ttids).delete()
+        HwdbTestValue.for_instance(instance).filter(part_id=pid, test_type_id__in=ttids).delete()
     HwdbTestData.objects.bulk_create(
         [HwdbTestData(instance=instance, part_type_id=part_type_id, **r) for r in rows],
+        batch_size=1000)
+    # The per-key serving rows (#143 — one indexed query per plotted key).
+    HwdbTestValue.objects.bulk_create(
+        [v for r in rows
+         for v in value_rows(instance, part_type_id, r["part_id"], r["test_type_id"], r["test_data"])],
         batch_size=1000)
     return len(rows)
 

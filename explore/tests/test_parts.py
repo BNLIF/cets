@@ -1158,3 +1158,22 @@ class LeafSidebarCtxTest(TestCase):
         self.assertTrue(sub["open"])
         leaf_node = next(l for l in sub["children"] if l["is_leaf"])
         self.assertTrue(leaf_node["current"])
+
+
+class PartPlotLinkTest(PartViewTest):
+    def test_header_links_to_the_type_plot_preset_to_this_item(self):
+        # #144: a Plot link on the item page → the type's Plot view with the
+        # PID filter anchored to this item in the URL hash
+        from explore.models import HierarchyNode as H
+        H.objects.create(instance="prod", level=H.LEVEL_TYPE, system_id=57, system_name="S",
+                         subsystem_id=2, subsystem_name="SS", name="AMC", part_type_id="D05700200099")
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=self._api()):
+            html = self.client.get(self.url).content.decode()
+        self.assertIn('href="/hw/plot/D05700200099/#%7B%22item%22%3A%22D05700200099-00007%22%7D"', html)
+
+    def test_no_plot_link_without_a_mirrored_type(self):
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=self._api()):
+            html = self.client.get(self.url).content.decode()
+        self.assertNotIn("/hw/plot/", html)

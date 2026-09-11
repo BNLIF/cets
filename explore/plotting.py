@@ -12,14 +12,14 @@ will arrive via #143 as a second source.
 from __future__ import annotations
 
 import json
+import re
 from typing import Iterator
 
-from django.core.cache import cache
-from django.db.models import Count, Max
+from django.db.models import Count, Sum
 
 from . import parts
 from .events import _parse_created, _ref_name
-from .models import HwdbComponentEvent, HwdbTestData
+from .models import HwdbComponentEvent, HwdbTestData, HwdbTestValue
 
 PAGE_SIZE = 500
 
@@ -87,30 +87,36 @@ def stream_specs(api, part_type_id: str) -> Iterator[str]:
     yield json.dumps({"done": n}) + "\n"
 
 
-# ---- test_data source (#143): served per key from the HwdbTestData mirror ----
+# ---- test_data source (#143): served per key from the HwdbTestValue table ----
 
-def walk_keys(node, prefix: tuple, acc: dict) -> None:
+def walk_keys(node, prefix: tuple, acc: dict, nvals: dict | None = None) -> None:
     """Every leaf path under ``node`` → ``acc[path] += 1`` once per call
-    (call once per item). Lists of dicts explode (their keys join the same
-    prefix); a list of scalars is one leaf. Mirrors the Plot page's JS walk,
-    so specs and test_data keys look the same to the user."""
+    (call once per item) and, when ``nvals`` is given, ``nvals[path]`` += the
+    number of leaf values (an array of 1960 points counts 1960). Lists of
+    dicts explode (their keys join the same prefix); a list of scalars is
+    one leaf. Mirrors the Plot page's JS walk, so specs and test_data keys
+    look the same to the user."""
     if isinstance(node, list):
         if any(isinstance(e, dict) for e in node):
             seen: dict = {}
             for e in node:
                 if isinstance(e, dict):
-                    walk_keys(e, prefix, seen)
+                    walk_keys(e, prefix, seen, nvals)
             for k in seen:
                 acc[k] = acc.get(k, 0) + 1
         elif prefix:
             acc[prefix] = acc.get(prefix, 0) + 1
+            if nvals is not None:
+                nvals[prefix] = nvals.get(prefix, 0) + len(node)
         return
     if isinstance(node, dict):
         for k, v in node.items():
-            walk_keys(v, prefix + (str(k),), acc)
+            walk_keys(v, prefix + (str(k),), acc, nvals)
         return
     if prefix:
         acc[prefix] = acc.get(prefix, 0) + 1
+        if nvals is not None:
+            nvals[prefix] = nvals.get(prefix, 0) + 1
 
 
 def values_at(node, segs: list, i: int = 0) -> list:
@@ -128,6 +134,49 @@ def values_at(node, segs: list, i: int = 0) -> list:
     return []
 
 
+def flatten(node, prefix: tuple = (), out: dict | None = None) -> dict:
+    """``{path tuple: [leaf values]}`` for a whole record — every key
+    ``walk_keys`` would list, with the values ``values_at`` would return.
+    One pass per record at store time (``events.store_test_data``)."""
+    if out is None:
+        out = {}
+    if isinstance(node, dict):
+        for k, v in node.items():
+            flatten(v, prefix + (str(k),), out)
+    elif isinstance(node, list):
+        if any(isinstance(e, dict) for e in node):
+            for e in node:
+                if isinstance(e, dict):
+                    flatten(e, prefix, out)
+                elif e is not None and not isinstance(e, list) and prefix:
+                    out.setdefault(prefix, []).append(e)
+        elif prefix:
+            vals = out.setdefault(prefix, [])
+            for e in node:
+                if isinstance(e, list):
+                    vals.extend(values_at(e, [], 0))
+                elif e is not None:
+                    vals.append(e)
+    elif node is not None and prefix:
+        out.setdefault(prefix, []).append(node)
+    return out
+
+
+def path_key(path) -> str:
+    """The stored ``HwdbTestValue.path`` text for a path (list or tuple)."""
+    return json.dumps([str(x) for x in path])
+
+
+def value_rows(instance: str, part_type_id: str, part_id: str, test_type_id: int,
+               test_data: dict) -> list:
+    """``HwdbTestValue`` instances (unsaved) for one record."""
+    return [
+        HwdbTestValue(instance=instance, part_type_id=part_type_id, part_id=part_id,
+                      test_type_id=test_type_id, path=path_key(p), values=v, nv=len(v))
+        for p, v in flatten(test_data).items() if v
+    ]
+
+
 def test_sources(instance: str, part_type_id: str) -> list[dict]:
     """Test types with mirrored records for this type: ``[{id, name, n}]``."""
     rows = (HwdbTestData.for_instance(instance).filter(part_type_id=part_type_id)
@@ -141,25 +190,52 @@ def _records(instance, part_type_id, test_type_id):
         part_type_id=part_type_id, test_type_id=test_type_id)
 
 
+def _values(instance, part_type_id, test_type_id):
+    return HwdbTestValue.for_instance(instance).filter(
+        part_type_id=part_type_id, test_type_id=test_type_id)
+
+
+# Cap on one values response. A per-SiPM IV curve is ~2000 points per
+# item; over the 8420-board type that key is 16.8M floats (2026-09-11) —
+# the page must narrow to an item (PID filter) for such keys.
+MAX_VALUES = 2_000_000
+BIG_PER_ITEM = 16       # a key with more values per item than this is an array key
+
+
+class TooManyValues(Exception):
+    def __init__(self, n):
+        super().__init__(f"{n:,} values exceed the {MAX_VALUES:,} limit — narrow the PID filter")
+        self.n = n
+
+
 def test_keys(instance: str, part_type_id: str, test_type_id: int) -> dict:
-    """``{"keys": [{"path": [...], "n": items-with-key}], "n_items": N}`` for
-    one test type, walked over every mirrored record and cached until the
-    next sync touches the type."""
-    qs = _records(instance, part_type_id, test_type_id)
-    stamp = qs.aggregate(m=Max("synced_at"))["m"]
-    ck = f"plot-keys:{instance}:{part_type_id}:{test_type_id}:{stamp.isoformat() if stamp else 0}"
-    hit = cache.get(ck)
-    if hit is not None:
-        return hit
-    acc: dict = {}
-    n = 0
-    for blob in qs.values_list("test_data", flat=True):
-        n += 1
-        walk_keys(blob, (), acc)
-    keys = sorted(acc.items(), key=lambda kv: (-kv[1], kv[0]))
-    out = {"keys": [{"path": list(k), "n": v} for k, v in keys], "n_items": n}
-    cache.set(ck, out, 3600)
-    return out
+    """``{"keys": [{"path": [...], "n": items-with-key, "nv": total values,
+    "big": array-like}], "n_items": N, "max_values": cap}`` for one test
+    type — a GROUP BY over the value table. ``big`` marks keys averaging
+    more than ``BIG_PER_ITEM`` values per item (per-channel arrays), as
+    opposed to a scalar that merely repeats across a record's list entries."""
+    rows = (_values(instance, part_type_id, test_type_id).values("path")
+            .annotate(n=Count("id"), nv=Sum("nv")).order_by("-n", "path"))
+    keys = [{"path": json.loads(r["path"]), "n": r["n"], "nv": r["nv"],
+             "big": r["nv"] > BIG_PER_ITEM * r["n"]} for r in rows]
+    return {"keys": keys, "n_items": _records(instance, part_type_id, test_type_id).count(),
+            "max_values": MAX_VALUES}
+
+
+def _pid_filtered(qs, pid_re: str | None):
+    """Push the page's PID filter into SQL: regex (case-insensitive), or a
+    substring match when the pattern is not a valid regex — same fallback
+    as the page."""
+    if not pid_re:
+        return qs
+    try:
+        re.compile(pid_re)
+    except re.error:
+        return qs.filter(part_id__icontains=pid_re)
+    m = re.fullmatch(r"\^([A-Za-z0-9-]+)\$", pid_re)      # the item-picker's anchored form
+    if m:
+        return qs.filter(part_id__iexact=m.group(1))
+    return qs.filter(part_id__iregex=pid_re)
 
 
 def test_items(instance: str, part_type_id: str, test_type_id: int) -> list[dict]:
@@ -187,12 +263,14 @@ def test_items(instance: str, part_type_id: str, test_type_id: int) -> list[dict
     return out
 
 
-def test_values(instance: str, part_type_id: str, test_type_id: int, path: list) -> dict:
-    """``{pid: [leaf values]}`` for one key across every mirrored record
-    (items without the key are omitted)."""
-    out = {}
-    for pid, blob in _records(instance, part_type_id, test_type_id).values_list("part_id", "test_data"):
-        vals = values_at(blob, path)
-        if vals:
-            out[pid] = vals
-    return out
+def test_values(instance: str, part_type_id: str, test_type_id: int, path: list,
+                pid_re: str | None = None) -> dict:
+    """``{pid: [leaf values]}`` for one key (items without it are omitted).
+    ``pid_re`` narrows to matching PIDs in SQL. Raises ``TooManyValues``
+    when the matching rows' ``nv`` sum passes ``MAX_VALUES`` — checked with
+    one aggregate before any row is read."""
+    qs = _pid_filtered(_values(instance, part_type_id, test_type_id).filter(path=path_key(path)), pid_re)
+    n = qs.aggregate(t=Sum("nv"))["t"] or 0
+    if n > MAX_VALUES:
+        raise TooManyValues(n)
+    return dict(qs.values_list("part_id", "values"))

@@ -160,12 +160,32 @@ from explore.models import HwdbTestData
 
 
 def _td(inst, ptid, pid, ttid, name, data, created="2026-02-03T10:00:00+00:00"):
-    return HwdbTestData.objects.create(
+    """A mirrored record + its per-key value rows (what store_test_data writes)."""
+    from explore.models import HwdbTestValue
+    row = HwdbTestData.objects.create(
         instance=inst, part_type_id=ptid, part_id=pid, test_type_id=ttid, test_type_name=name,
         test_id=1, created=created, test_data=data)
+    HwdbTestValue.objects.bulk_create(plotting.value_rows(inst, ptid, pid, ttid, data))
+    return row
 
 
 class WalkAndValuesTest(TestCase):
+    def test_flatten_matches_walk_and_values_at(self):
+        d = {"A": 1, "L": [{"b": 1}, {"b": [2, 3]}, {"c": 4}], "S": [1, 2, 3], "N": {"x": {"y": 0}}, "E": [], "Z": None}
+        flat = plotting.flatten(d)
+        acc = {}; plotting.walk_keys(d, (), acc)
+        # same keys, except those with no values at all (E is empty, Z is None):
+        # the walk lists them, the value table has no row for them
+        self.assertEqual({k for k, v in flat.items() if v}, {k for k in acc if plotting.values_at(d, list(k))})
+        for path, vals in flat.items():
+            self.assertEqual(vals, plotting.values_at(d, list(path)), path)
+        self.assertEqual(flat[("L", "b")], [1, 2, 3])
+
+    def test_value_rows_one_per_key_with_counts(self):
+        rows = plotting.value_rows("dev", "T", "T-1", 5, {"R": 5, "Ch": [1, 2, 3], "E": []})
+        self.assertEqual({(r.path, r.nv, tuple(r.values)) for r in rows},
+                         {('["R"]', 1, (5,)), ('["Ch"]', 3, (1, 2, 3))})
+
     def test_walk_explodes_lists_of_dicts_and_counts_once_per_item(self):
         acc = {}
         plotting.walk_keys({"A": 1, "L": [{"b": 1}, {"b": 2, "c": 3}], "S": [1, 2, 3], "N": {"x": {"y": 0}}}, (), acc)
@@ -211,6 +231,9 @@ class TestDataMirrorTest(TestCase):
                                              "test_id": 2, "created": None, "test_data": {"v": 10}}])
         vals = {(r.instance, r.test_type_id): r.test_data["v"] for r in HwdbTestData.objects.all()}
         self.assertEqual(vals, {("dev", 5): 10, ("dev", 6): 2, ("prod", 5): 3})
+        from explore.models import HwdbTestValue
+        self.assertEqual({(r.instance, r.test_type_id, r.values[0]) for r in HwdbTestValue.objects.all()},
+                         {("dev", 5, 10), ("dev", 6, 2), ("prod", 5, 3)})
 
     def test_sync_test_data_incremental_skips_items_already_mirrored(self):
         _td("dev", "T", "T-00001", 5, "A", {"v": 1})
@@ -245,7 +268,8 @@ class TestDataEndpointsTest(TestCase):
         self.assertEqual(j["tests"], [{"id": 5, "name": "A", "n": 2}, {"id": 6, "name": "B", "n": 1}])
         k = self.client.get("/hw/dev/plot/T/tests/5/keys/").json()
         self.assertEqual(k["n_items"], 2)
-        self.assertEqual(k["keys"], [{"path": ["Noise"], "n": 2}, {"path": ["Ch"], "n": 1}])
+        self.assertEqual(k["keys"], [{"path": ["Noise"], "n": 2, "nv": 2, "big": False},
+                                     {"path": ["Ch"], "n": 1, "nv": 3, "big": False}])   # 3/item is not an array key
         it = self.client.get("/hw/dev/plot/T/tests/5/items/").json()["items"]
         self.assertEqual([(i["pid"], i["status"], i["creator"], i["tested"]) for i in it],
                          [("T-1", "Ready", "hm", "2026-02-03"), ("T-2", "", "", "2026-02-03")])
@@ -267,3 +291,33 @@ class TestDataEndpointsTest(TestCase):
             body = b"".join(resp.streaming_content)     # the generator runs on consumption
         self.assertEqual(body, b"hello\n")
         self.assertEqual(m.call_args.kwargs, {"instance": "dev", "mode": "full"})
+
+
+class ValuesCapAndFilterTest(TestCase):
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("v", "v@v.io", "pw"))
+        _td("dev", "T", "T-00001", 5, "A", {"IV": {"I": [1, 2, 3], "V": [10, 20, 30]}, "R": 5})
+        _td("dev", "T", "T-00002", 5, "A", {"IV": {"I": [4, 5]}, "R": 6})
+
+    def test_keys_report_value_counts_for_arrays(self):
+        k = self.client.get("/hw/dev/plot/T/tests/5/keys/").json()
+        by = {tuple(x["path"]): x for x in k["keys"]}
+        self.assertEqual((by[("IV", "I")]["n"], by[("IV", "I")]["nv"]), (2, 5))
+        self.assertEqual((by[("R",)]["n"], by[("R",)]["nv"]), (2, 2))
+        self.assertEqual(k["max_values"], plotting.MAX_VALUES)
+
+    def test_pid_filter_regex_then_substring_fallback(self):
+        v = self.client.get("/hw/dev/plot/T/tests/5/values/", {"key": json.dumps(["IV", "I"]), "pid": "^T-00002$"}).json()
+        self.assertEqual(v, {"values": {"T-00002": [4, 5]}})
+        v = self.client.get("/hw/dev/plot/T/tests/5/values/", {"key": json.dumps(["IV", "I"]), "pid": "0001("}).json()  # bad regex → substring
+        self.assertEqual(list(v["values"]), [])
+        v = self.client.get("/hw/dev/plot/T/tests/5/values/", {"key": json.dumps(["IV", "I"]), "pid": "0001"}).json()
+        self.assertEqual(list(v["values"]), ["T-00001"])
+
+    def test_cap_returns_413_and_a_filter_gets_under_it(self):
+        with mock.patch.object(plotting, "MAX_VALUES", 4):
+            r = self.client.get("/hw/dev/plot/T/tests/5/values/", {"key": json.dumps(["IV", "I"])})
+            self.assertEqual(r.status_code, 413)
+            self.assertIn("exceed", r.json()["error"])
+            r = self.client.get("/hw/dev/plot/T/tests/5/values/", {"key": json.dumps(["IV", "I"]), "pid": "00001"})
+            self.assertEqual(r.json(), {"values": {"T-00001": [1, 2, 3]}})

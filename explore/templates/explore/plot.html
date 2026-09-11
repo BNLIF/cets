@@ -15,7 +15,7 @@
   .pl-row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; font-size: 12.5px; color: var(--dim); }
   .pl-row + .pl-row { margin-top: 10px; }
   .pl-row label { display: inline-flex; align-items: center; gap: 5px; }
-  .pl-page select, .pl-page input[type=text], .pl-page input[type=number], .pl-page textarea { font: inherit; font-size: 12.5px; color: var(--ink);
+  .pl-page select, .pl-page input[type=text], .pl-page input[type=search], .pl-page input[type=number], .pl-page textarea { font: inherit; font-size: 12.5px; color: var(--ink);
     background: var(--paper, #fff); border: 1px solid var(--border, var(--rule)); border-radius: 6px; padding: 3px 6px; }
   .pl-page select { max-width: 320px; }
   .pl-page input[type=number] { width: 64px; }
@@ -27,6 +27,14 @@
   .pl-cut { display: inline-flex; gap: 4px; align-items: center; }
   .pl-off { opacity: .35; }
   .pl-page [hidden] { display: none !important; }   /* the display rules above must not defeat hidden */
+  .pl-items { width: 100%; border-collapse: collapse; font-size: 12.5px; color: var(--ink); margin-top: 8px; }
+  .pl-items th { text-align: left; font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .03em; padding: 0 10px 4px 0; border-bottom: 1px solid var(--rule); }
+  .pl-items td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--rule); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+  .pl-items tbody tr { cursor: pointer; }
+  .pl-items tbody tr:hover { background: var(--surface); }
+  .pl-items tbody tr.is-on td { color: var(--accent-ink); font-weight: 600; }
+  .pl-items .mono { font-family: var(--font-mono); font-size: 12px; }
+  #items-card summary { cursor: pointer; font-size: 12.5px; color: var(--dim); }
   .pl-cut a { color: var(--faint); text-decoration: none; padding: 0 3px; }
   .pl-stats { font-size: 12px; color: var(--faint); font-family: var(--font-mono); margin-bottom: 6px; min-height: 16px; }
   .pl-err { color: var(--bad, #a33); font-size: 12.5px; }
@@ -55,13 +63,15 @@
     <div class="pl-row">
       <label>X <select id="xkey"></select></label>
       <label>Y <select id="ykey"><option value="">—</option></select></label>
+      <label id="mode1d-l" hidden><select id="mode1d"><option value="hist">histogram</option><option value="cum">cumulative</option><option value="line">line vs index</option></select></label>
+      <label id="logy-l" hidden><input type="checkbox" id="logy"> log y</label>
       <label id="mode2d-l" hidden><select id="mode2d"><option value="scatter">scatter · size = multiplicity</option><option value="heat">2D histogram</option></select></label>
       <label id="bins-l">Bins <input type="number" id="bins" min="2" max="500" value="40"></label>
       <label id="rare-l" hidden title="Keys present on fewer than 5% of items"><input type="checkbox" id="rare" checked> rare keys</label>
-      <button type="button" class="pl-btn" id="png-btn" title="Save the plot as a PNG">⤓ PNG</button>
     </div>
     <div class="pl-row">
-      <label>PID <input type="text" id="pidf" placeholder="contains / regex" style="width: 140px;"></label>
+      <label>Item <input type="text" id="item" placeholder="one PID" style="width: 170px;" title="Exactly one item — the Items table below fills this"></label>
+      <label>PID <input type="text" id="pidf" placeholder="contains / regex" style="width: 140px;" title="Any number of items, by substring or regex"></label>
       <label id="f-status-l">Status <select id="f-status"></select></label>
       <label id="f-creator-l">Creator <select id="f-creator"></select></label>
       <label id="f-manufacturer-l">Manufacturer <select id="f-manufacturer"></select></label>
@@ -78,14 +88,38 @@
     </div>
   </div>
 
+  <details class="pl-card" id="items-card" hidden>
+    <summary>Items <span id="items-n"></span> · click a row to plot one item</summary>
+    <div class="pl-row" style="margin-top: 8px;">
+      <input type="search" id="items-q" placeholder="filter PID / serial / status / creator" style="width: 240px;">
+      <a href="#" id="items-all" hidden>show all items</a>
+      <span id="items-page" style="margin-left: auto;"></span>
+      <button type="button" class="pl-btn" id="items-first" title="First page">«</button>
+      <button type="button" class="pl-btn" id="items-prev" title="Previous page">‹</button>
+      <button type="button" class="pl-btn" id="items-next" title="Next page">›</button>
+      <button type="button" class="pl-btn" id="items-last" title="Last page">»</button>
+    </div>
+    <div style="overflow-x: auto;"><table class="pl-items">
+      <thead><tr><th>PID</th><th>Serial</th><th>Status</th><th>Creator</th><th>Institution</th><th>Updated</th></tr></thead>
+      <tbody id="items-body"></tbody>
+    </table></div>
+  </details>
+
   <div class="pl-card" id="plot-card" hidden>
-    <div class="pl-stats" id="stats"></div>
+    <div class="pl-row" style="justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+      <div class="pl-stats" id="stats" style="margin-bottom: 0;"></div>
+      <span style="display: inline-flex; gap: 6px; flex: 0 0 auto;">
+        <button type="button" class="pl-btn" id="zoom-reset" title="Wheel or drag a box to zoom, shift-drag to pan, double-click to reset">Reset zoom</button>
+        <button type="button" class="pl-btn" id="png-btn" title="Save the plot as a PNG">⤓ PNG</button>
+      </span>
+    </div>
     <div style="position: relative; height: 440px;"><canvas id="plot"></canvas></div>
   </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2.0.1/dist/chartjs-chart-matrix.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
 <script>
 (function () {
     var root = document.getElementById("pl"), TYPE_KEY = root.dataset.key, DATA_URL = root.dataset.url, N_ITEMS = +root.dataset.n;
@@ -102,6 +136,8 @@
     var testCache = null;          // the IndexedDB record for the current test source
     var busy = false;              // a key fetch is in flight
     function isTest() { return source !== "specs"; }
+    // The effective PID filter: the Item box (exactly one PID) wins over the regex box.
+    function pidFilter() { var it = $("item").value.trim(); return it ? "^" + it.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$" : $("pidf").value.trim(); }
     function cacheKey() { return TYPE_KEY + "/" + (isTest() ? "test:" + source : "specs"); }
 
     // ---- IndexedDB cache: one record per instance/type/source -----------
@@ -222,9 +258,13 @@
     // The one accessor both sources share.
     function valuesFor(item, pathJSON) {
         if (!pathJSON) return [];
-        if (isTest()) return item.vals[pathJSON] || [];
+        if (isTest()) return item.vals[pathJSON] || item.vals[pathJSON + "|" + pidFilter()] || [];
         return valuesAt(item.data, JSON.parse(pathJSON), 0);
     }
+    // Test source: is this key loaded for the current PID filter? (a whole-type
+    // fetch, stored under the bare key, serves any filter)
+    function haveKey(p) { return (p in testCache.values) || ((p + "|" + pidFilter()) in testCache.values); }
+    function keyNV(p) { var k = testCache.keys.find(function (x) { return JSON.stringify(x.path) === p; }); return k ? (k.nv || k.n) : 0; }
     function toNum(v) {
         if (typeof v === "number") return isFinite(v) ? v : null;
         if (typeof v === "string" && v.trim() !== "") { var n = Number(v); return isFinite(n) ? n : null; }
@@ -232,19 +272,31 @@
     }
     function showPath(p) { return JSON.parse(p).join(" › "); }
 
-    // Test source: make sure every key the plot needs is in item.vals.
+    // Test source: make sure every key the plot needs is in item.vals. With
+    // a PID filter set, only the matching items' values are fetched — that is
+    // how a 2000-point-per-item array key stays plottable for one item.
     async function ensureKeys(pathJSONs) {
-        var need = pathJSONs.filter(function (p) { return p && !(p in testCache.values); });
-        if (!need.length) return;
-        busy = true; $("stats").textContent = "loading " + need.map(showPath).join(", ") + "…";
-        for (var i = 0; i < need.length; i++) {
-            var url = TESTS_BASE + "/" + source + "/values/?key=" + encodeURIComponent(need[i]);
-            var j = await (await fetch(url)).json();
-            testCache.values[need[i]] = j.values || {};
-            items.forEach(function (it) { if (j.values && j.values[it.pid]) it.vals[need[i]] = j.values[it.pid]; });
+        var pidf = pidFilter(), need = pathJSONs.filter(function (p) { return p && !haveKey(p); });
+        if (!need.length) return true;
+        var max = testCache.max_values || 2000000;
+        var big = need.filter(function (p) { return !pidf && keyNV(p) > max; });
+        if (big.length) {
+            clear(showPath(big[0]) + " has " + keyNV(big[0]).toLocaleString() + " values across the type — pick an item below or set a PID filter (limit " + max.toLocaleString() + ")");
+            return false;
         }
+        busy = true; $("stats").textContent = "loading " + need.map(showPath).join(", ") + "…";
+        try {
+            for (var i = 0; i < need.length; i++) {
+                var url = TESTS_BASE + "/" + source + "/values/?key=" + encodeURIComponent(need[i]) + (pidf ? "&pid=" + encodeURIComponent(pidf) : "");
+                var resp = await fetch(url), j = await resp.json();
+                if (!resp.ok) { clear(j.error || ("HTTP " + resp.status)); return false; }
+                var slot = pidf ? need[i] + "|" + pidf : need[i];
+                testCache.values[slot] = j.values || {};
+                items.forEach(function (it) { if (j.values && j.values[it.pid]) it.vals[slot] = j.values[it.pid]; });
+            }
+        } finally { busy = false; }
         await idbPut(cacheKey(), testCache);
-        busy = false;
+        return true;
     }
 
     // ---- Filters -----------------------------------------------------------
@@ -263,7 +315,7 @@
         });
     }
     function filtered() {
-        var pidf = $("pidf").value.trim(), re = null;
+        var pidf = pidFilter(), re = null;
         if (pidf) { try { re = new RegExp(pidf, "i"); } catch (e) { re = null; } }
         var any = $("logic").value === "or", live = cuts.filter(function (c) { return c.p && c.v !== ""; });
         return items.filter(function (it) {
@@ -279,7 +331,9 @@
     var PALETTE = ["#1d4ed8", "#c2410c", "#15803d", "#9333ea", "#dc2626", "#0891b2", "#ca8a04", "#4f46e5", "#db2777", "#65a30d", "#0d9488", "#7c3aed"];
     function opts(xTitle, yTitle) {
         return { responsive: true, maintainAspectRatio: false, animation: false,
-            plugins: { legend: { labels: { boxWidth: 12, font: { size: 12 } } }, tooltip: { intersect: false } },
+            plugins: { legend: { labels: { boxWidth: 12, font: { size: 12 } } }, tooltip: { intersect: false },
+                       zoom: { zoom: { wheel: { enabled: true }, drag: { enabled: true, backgroundColor: "rgba(29,78,216,.12)" }, mode: "xy" },
+                               pan: { enabled: true, modifierKey: "shift", mode: "xy" } } },
             scales: { x: { title: { display: true, text: xTitle }, ticks: { maxRotation: 45, autoSkipPadding: 12, font: { size: 11 } } },
                       y: { title: { display: true, text: yTitle }, beginAtZero: true, ticks: { precision: 0 } } } };
     }
@@ -339,12 +393,12 @@
         var xp = $("xkey").value, yp = $("ykey").value;
         if (!xp) return;
         if (isTest()) {
-            var need = [xp, yp].concat(cuts.map(function (c) { return c.p; })).filter(function (p) { return p && !(p in testCache.values); });
-            if (need.length) { if (!busy) ensureKeys(need).then(render); return; }
+            var need = [xp, yp].concat(cuts.map(function (c) { return c.p; })).filter(function (p) { return p && !haveKey(p); });
+            if (need.length) { if (!busy) ensureKeys(need).then(function (ok) { if (ok) render(); }); return; }
         }
         var sel = filtered(), stats = $("stats");
         var head = sel.length + " / " + items.length + " items";
-        $("mode2d-l").hidden = true;
+        $("mode2d-l").hidden = true; $("mode1d-l").hidden = true; $("logy-l").hidden = true;
         if (yp) {
             // Two keys: values paired by position within each item (the
             // Dashboard's explode-two-lists rule); pairs missing either side drop.
@@ -431,18 +485,38 @@
         if (!vals.length) { clear(head + " · no values for this key on the selected items"); controls(false, null); return; }
         var nums = vals.map(toNum).filter(function (v) { return v !== null; });
         if (isNumeric(vals)) {
-            var ov = overlayXY(), b1 = binSetup(nums), counts1 = histCounts(nums, b1.lo, b1.hi, b1.nb);
+            $("mode1d-l").hidden = false; $("logy-l").hidden = false;
+            var m1 = $("mode1d").value, logy = $("logy").checked, ov = overlayXY();
             var mean = nums.reduce(function (a, c) { return a + c; }, 0) / nums.length;
             stats.textContent = head + " · N=" + nums.length + "  mean=" + fmt(mean) + "  min=" + fmt(Math.min.apply(null, nums)) + "  max=" + fmt(Math.max.apply(null, nums));
+            var ovDs = ov.length ? [{ label: $("ovn").value || "Overlay", data: ov, type: "line", borderColor: OVER, borderDash: [6, 4], borderWidth: 2, pointRadius: 3, pointBackgroundColor: OVER, tension: 0 }] : [];
+            if (m1 === "line") {
+                // Values in item order (PID ascending), then array order within an
+                // item — the Dashboard's "Line": a waveform / curve for one item.
+                var seq = [];
+                sel.slice().sort(function (a, b) { return a.pid < b.pid ? -1 : 1; }).forEach(function (it) {
+                    valuesFor(it, xp).forEach(function (v) { var n = toNum(v); if (n !== null) seq.push({ x: seq.length, y: n, pid: it.pid }); });
+                });
+                var oL = opts("index", showPath(xp)); oL.scales.x.type = "linear"; oL.scales.y.beginAtZero = false; oL.scales.y.ticks = {};
+                if (logy) oL.scales.y.type = "logarithmic";
+                oL.plugins.tooltip.callbacks = { title: function (cs) { var q = cs[0].raw; return q.pid ? q.pid + "  [" + q.x + "]" : fmt(q.x); } };
+                draw({ type: "line", data: { datasets: [{ label: "Items", data: seq, borderColor: ACCENT, backgroundColor: ACCENT, borderWidth: 1.5, pointRadius: seq.length > 400 ? 0 : 2, tension: 0 }].concat(ovDs) }, options: oL });
+                controls(false, "num");
+                return;
+            }
+            var b1 = binSetup(nums), counts1 = histCounts(nums, b1.lo, b1.hi, b1.nb);
+            if (m1 === "cum") { var run = 0; counts1 = counts1.map(function (c) { run += c; return run; }); }
             // Bars at bin centres on a linear axis so overlay points land at their true x.
             var bars = counts1.map(function (c, i) { return { x: b1.lo + (i + 0.5) * b1.w, y: c }; });
-            var ds1 = [{ label: "Items", data: bars, backgroundColor: ACCENT + "cc", barPercentage: 1, categoryPercentage: 1 }];
-            if (ov.length) ds1.push({ label: $("ovn").value || "Overlay", data: ov, type: "line", borderColor: OVER, borderDash: [6, 4], borderWidth: 2, pointRadius: 3, pointBackgroundColor: OVER, tension: 0 });
-            var o1 = opts(showPath(xp) + "  (bin width " + fmt(b1.w) + ")", "count");
+            var ds1 = [m1 === "cum"
+                ? { label: "Items (cumulative)", data: bars, type: "line", borderColor: ACCENT, backgroundColor: ACCENT + "33", fill: true, stepped: "middle", pointRadius: 0, borderWidth: 2 }
+                : { label: "Items", data: bars, backgroundColor: ACCENT + "cc", barPercentage: 1, categoryPercentage: 1 }].concat(ovDs);
+            var o1 = opts(showPath(xp) + "  (bin width " + fmt(b1.w) + ")", m1 === "cum" ? "cumulative count" : "count");
             var xmin = Math.min.apply(null, [b1.lo].concat(ov.map(function (q) { return q.x; }))), xmax = Math.max.apply(null, [b1.hi].concat(ov.map(function (q) { return q.x; })));
             o1.scales.x = { type: "linear", min: xmin, max: xmax, offset: false, grid: { offset: false }, title: o1.scales.x.title,
                             ticks: { maxRotation: 45, autoSkipPadding: 12, font: { size: 11 }, callback: function (v) { return fmt(v); } } };
-            o1.plugins.tooltip.callbacks = { title: function (cs) { var q = cs[0].raw; return cs[0].dataset.type === "line" ? fmt(q.x) : fmt(q.x - b1.w / 2) + " – " + fmt(q.x + b1.w / 2); } };
+            if (logy) { o1.scales.y.type = "logarithmic"; delete o1.scales.y.beginAtZero; }
+            o1.plugins.tooltip.callbacks = { title: function (cs) { var q = cs[0].raw; return cs[0].dataset.label === ($("ovn").value || "Overlay") ? fmt(q.x) : fmt(q.x - b1.w / 2) + " – " + fmt(q.x + b1.w / 2); } };
             draw({ type: "bar", data: { datasets: ds1 }, options: o1 });
             controls(true, "num");
             return;
@@ -469,7 +543,10 @@
     function keyOptions(keep) {
         var show = $("rare").checked;
         return paths.filter(function (p) { return show || !isRare(p) || keep.indexOf(p) >= 0; })
-                    .map(function (p) { return { value: p, text: showPath(p) + " (" + pathCounts[p] + ")" }; });
+                    .map(function (p) {
+                        var nv = isTest() ? keyNV(p) : pathCounts[p];
+                        return { value: p, text: showPath(p) + " (" + pathCounts[p] + (nv > pathCounts[p] ? " · " + nv.toLocaleString() + " values" : "") + ")" };
+                    });
     }
     function fillKeySelects(x, y) {
         var keep = [x, y].concat(cuts.map(function (c) { return c.p; })).filter(Boolean);
@@ -495,12 +572,46 @@
     function readHash() { try { return JSON.parse(decodeURIComponent(location.hash.slice(1)) || "{}"); } catch (e) { return {}; } }
     function writeHash() {
         var f = {}; FACETS.forEach(function (k) { if ($("f-" + k).value) f[k] = $("f-" + k).value; });
-        var cfg = { src: source, x: $("xkey").value, y: $("ykey").value, bins: +$("bins").value, pid: $("pidf").value, f: f,
+        var cfg = { src: source, x: $("xkey").value, y: $("ykey").value, bins: +$("bins").value, pid: $("pidf").value, item: $("item").value.trim() || undefined, f: f,
                     cuts: cuts.filter(function (c) { return c.p; }), logic: $("logic").value, ov: $("ov").value, ovn: $("ovn").value,
-                    rare: $("rare").checked ? undefined : false, m2: $("mode2d").value };
+                    rare: $("rare").checked ? undefined : false, m2: $("mode2d").value, m1: $("mode1d").value, logy: $("logy").checked || undefined };
         history.replaceState(null, "", "#" + encodeURIComponent(JSON.stringify(cfg)));
     }
-    function changed() { writeHash(); render(); }
+    function changed() { writeHash(); render(); drawItems(); }
+
+    // ---- Items table: pick one item to plot (its arrays), or browse ---------
+    var ITEMS_PER = 25, itemsPage = 0;
+    function onePid() { return $("item").value.trim() || null; }
+    function drawItems() {
+        var q = $("items-q").value.trim().toLowerCase();
+        var list = (q ? items.filter(function (it) {
+            return [it.pid, it.serial, it.status, it.creator, it.institution].join(" ").toLowerCase().indexOf(q) >= 0; }) : items.slice())
+            .sort(function (a, b) { return a.pid < b.pid ? 1 : a.pid > b.pid ? -1 : 0; });     // newest (highest PID) first
+        var pages = Math.max(1, Math.ceil(list.length / ITEMS_PER)); itemsPage = Math.min(itemsPage, pages - 1);
+        $("items-n").textContent = "(" + list.length.toLocaleString() + ")";
+        $("items-page").textContent = list.length ? (itemsPage + 1) + " / " + pages : "";
+        $("items-prev").disabled = $("items-first").disabled = itemsPage === 0;
+        $("items-next").disabled = $("items-last").disabled = itemsPage >= pages - 1;
+        var one = onePid(); $("items-all").hidden = !one;
+        var body = $("items-body"); body.textContent = "";
+        list.slice(itemsPage * ITEMS_PER, (itemsPage + 1) * ITEMS_PER).forEach(function (it) {
+            var tr = document.createElement("tr"); if (it.pid === one) tr.className = "is-on";
+            [["mono", it.pid], ["", it.serial], ["", it.status], ["", it.creator], ["", it.institution], ["mono", it.updated || it.tested || ""]].forEach(function (c) {
+                var td = document.createElement("td"); td.className = c[0]; td.textContent = c[1] || ""; td.title = c[1] || ""; tr.appendChild(td);
+            });
+            tr.addEventListener("click", function () {
+                $("item").value = it.pid === one ? "" : it.pid;     // click again to release
+                changed();
+            });
+            body.appendChild(tr);
+        });
+    }
+    $("items-q").addEventListener("input", function () { itemsPage = 0; drawItems(); });
+    $("items-first").addEventListener("click", function () { itemsPage = 0; drawItems(); });
+    $("items-prev").addEventListener("click", function () { itemsPage--; drawItems(); });
+    $("items-next").addEventListener("click", function () { itemsPage++; drawItems(); });
+    $("items-last").addEventListener("click", function () { itemsPage = 1e9; drawItems(); });
+    $("items-all").addEventListener("click", function (e) { e.preventDefault(); $("item").value = ""; changed(); });
 
     // Both sources land here: the item list + the key inventory → controls → plot.
     function setDataset(newItems, counts, statusText) {
@@ -514,8 +625,9 @@
         fillKeySelects(cfg.x && acc.has(cfg.x) ? cfg.x : "", cfg.y && acc.has(cfg.y) ? cfg.y : "");
         if (!$("xkey").value && $("xkey").options[1]) $("xkey").value = $("xkey").options[1].value;
         if (cfg.bins) $("bins").value = cfg.bins;
-        $("pidf").value = cfg.pid || ""; $("logic").value = cfg.logic || "and"; $("ov").value = cfg.ov || ""; $("ovn").value = cfg.ovn || "";
+        $("pidf").value = cfg.pid || ""; $("item").value = cfg.item || ""; $("logic").value = cfg.logic || "and"; $("ov").value = cfg.ov || ""; $("ovn").value = cfg.ovn || "";
         $("mode2d").value = cfg.m2 === "heat" ? "heat" : "scatter";
+        $("mode1d").value = ["hist", "cum", "line"].indexOf(cfg.m1) >= 0 ? cfg.m1 : "hist"; $("logy").checked = !!cfg.logy;
         FACETS.forEach(function (k) {
             var vals = {}; items.forEach(function (it) { if (it[k]) vals[it[k]] = (vals[it[k]] || 0) + 1; });
             var keys = Object.keys(vals).sort(function (a, b) { return vals[b] - vals[a]; });
@@ -524,7 +636,8 @@
             if (cfg.f && cfg.f[k] && vals[cfg.f[k]]) $("f-" + k).value = cfg.f[k];
         });
         drawCuts();
-        $("controls").hidden = false; $("plot-card").hidden = !paths.length;
+        $("controls").hidden = false; $("plot-card").hidden = !paths.length; $("items-card").hidden = !items.length;
+        itemsPage = 0; drawItems();
         $("stats").textContent = paths.length ? "" : "No keys on these items.";
         writeHash();
         render();
@@ -543,14 +656,14 @@
         if (!rec) {
             var base = TESTS_BASE + "/" + ttid;
             var kj = await (await fetch(base + "/keys/")).json(), ij = await (await fetch(base + "/items/")).json();
-            rec = { fetched_at: new Date().toISOString(), keys: kj.keys || [], items: ij.items || [], values: {} };
+            rec = { fetched_at: new Date().toISOString(), keys: kj.keys || [], items: ij.items || [], values: {}, max_values: kj.max_values };
             await idbPut(key, rec);
         }
         testCache = rec;
         var counts = {}; rec.keys.forEach(function (k) { counts[JSON.stringify(k.path)] = k.n; });
         var rows = rec.items.map(function (it) {
             var o = Object.assign({}, it, { vals: {} });
-            Object.keys(rec.values).forEach(function (p) { if (rec.values[p][it.pid]) o.vals[p] = rec.values[p][it.pid]; });
+            Object.keys(rec.values).forEach(function (slot) { if (rec.values[slot][it.pid]) o.vals[slot] = rec.values[slot][it.pid]; });
             return o;
         });
         $("fetch-btn").textContent = "Fetch new"; $("fetch-full-btn").hidden = false;
@@ -561,7 +674,7 @@
         var v = $("src").value;
         if (v === "__fetch__") { $("src").value = source; await fetchTestData("incremental"); return; }
         source = v;
-        $("controls").hidden = true; $("plot-card").hidden = true; $("td-log").hidden = true; $("fetch-error").textContent = "";
+        $("controls").hidden = true; $("plot-card").hidden = true; $("items-card").hidden = true; $("td-log").hidden = true; $("fetch-error").textContent = "";
         if (isTest()) { await loadTest(source); return; }
         var rec = null;
         try { rec = await idbGet(TYPE_KEY + "/specs"); } catch (e) { rec = null; }
@@ -576,8 +689,10 @@
         }
     }
 
-    ["xkey", "ykey", "bins", "logic", "mode2d", "f-status", "f-creator", "f-manufacturer", "f-institution"].forEach(function (id) { $(id).addEventListener("change", changed); });
-    ["pidf", "ov", "ovn"].forEach(function (id) { $(id).addEventListener("input", changed); });
+    ["xkey", "ykey", "bins", "logic", "mode2d", "mode1d", "logy", "f-status", "f-creator", "f-manufacturer", "f-institution"].forEach(function (id) { $(id).addEventListener("change", changed); });
+    ["pidf", "item", "ov", "ovn"].forEach(function (id) { $(id).addEventListener("input", changed); });
+    $("zoom-reset").addEventListener("click", function () { if (chart && chart.resetZoom) chart.resetZoom(); });
+    $("plot").addEventListener("dblclick", function () { if (chart && chart.resetZoom) chart.resetZoom(); });
     $("cut-add").addEventListener("click", function () { cuts.push({ p: "", o: "=", v: "" }); drawCuts(); });
     $("rare").addEventListener("change", function () { fillKeySelects($("xkey").value, $("ykey").value); drawCuts(); writeHash(); });
     $("src").addEventListener("change", switchSource);

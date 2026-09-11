@@ -155,6 +155,38 @@ class HwdbTestData(InstanceScoped):
         return f"HwdbTestData({self.part_id}, {self.test_type_name})"
 
 
+class HwdbTestValue(InstanceScoped):
+    """One (record, key) of ``HwdbTestData``, flattened for serving: the
+    leaf values under one path of one item's latest test record (#143).
+
+    Why: a per-key request must not parse every item's whole test_data — a
+    SiPM board's record is ~50 KB (IV curves) and one scalar key across
+    8420 boards took 14 s that way. Here it is one indexed query of small
+    rows. ``path`` is the JSON list of segments in the ``plotting.walk_keys``
+    convention (lists of dicts add no segment); ``values`` is the flattened
+    leaf list (an array key holds the whole array); ``nv`` = len(values) so
+    the key inventory and the size cap are SUM/COUNT queries. Rewritten with
+    its record by ``events.store_test_data``.
+    """
+
+    part_type_id = models.CharField(max_length=20)
+    part_id = models.CharField(max_length=50)
+    test_type_id = models.IntegerField()
+    path = models.TextField()
+    values = models.JSONField(default=list, blank=True)
+    nv = models.IntegerField(default=0)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["instance", "part_type_id", "test_type_id", "path"],
+                         name="idx_testvalue_key"),
+            models.Index(fields=["instance", "part_id", "test_type_id"], name="idx_testvalue_item"),
+        ]
+
+    def __str__(self):
+        return f"HwdbTestValue({self.part_id}, {self.test_type_id}, {self.path})"
+
+
 class HwdbComponentEvent(InstanceScoped):
     """One component registration for one component type, mirrored from HWDB.
 

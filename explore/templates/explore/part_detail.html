@@ -176,6 +176,8 @@
   <div class="sd-head">
     <h1>{{ part_id }}</h1>
     <a class="hwdb" href="{{ hwdb_ui_base }}/edit/component/{{ part_id }}" target="_blank" rel="noopener">Open in FNAL HWDB &#x2197;</a>
+    {# Plot view (#144) preset to this item: the hash is encodeURIComponent('{"item":"<PID>"}') #}
+    {% if leaf %}<a class="hwdb" href="{% url 'explore:plot' part_type_id=ptid %}#%7B%22item%22%3A%22{{ part_id }}%22%7D" title="Plot this item’s specifications / test data">Plot</a>{% endif %}
     <form method="post" action="{% url 'explore:watch_toggle' %}" style="margin:0;">
       {% csrf_token %}
       <input type="hidden" name="part_id" value="{{ part_id }}">

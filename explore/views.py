@@ -868,7 +868,8 @@ def explore_plot_test_items_view(request, part_type_id, test_type_id):
 @login_not_required
 @fnal_login_required
 def explore_plot_test_values_view(request, part_type_id, test_type_id):
-    """``?key=<JSON list of path segments>`` → ``{"values": {pid: [...]}}``."""
+    """``?key=<JSON list of path segments>[&pid=<regex>]`` →
+    ``{"values": {pid: [...]}}``; 413 past ``plotting.MAX_VALUES``."""
     inst = instance_of(request)
     try:
         path = json.loads(request.GET.get("key") or "")
@@ -876,8 +877,12 @@ def explore_plot_test_values_view(request, part_type_id, test_type_id):
             raise ValueError
     except (ValueError, TypeError):
         return JsonResponse({"error": "key must be a non-empty JSON list"}, status=400)
-    return JsonResponse({"values": plotting.test_values(inst, part_type_id, test_type_id,
-                                                        [str(x) for x in path])})
+    try:
+        values = plotting.test_values(inst, part_type_id, test_type_id, [str(x) for x in path],
+                                      pid_re=request.GET.get("pid") or None)
+    except plotting.TooManyValues as e:
+        return JsonResponse({"error": str(e), "n": e.n}, status=413)
+    return JsonResponse({"values": values})
 
 
 @login_not_required
