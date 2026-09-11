@@ -1,0 +1,479 @@
+{% extends 'explore/base.html' %}
+{% block title %}Plot · {{ leaf.name }} · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .pl-page { padding: 22px 30px 56px; max-width: 1100px; }
+  .pl-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .pl-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .pl-crumbs a:hover { text-decoration: underline; }
+  .pl-crumbs .sep { color: var(--faint); margin: 0 7px; }
+  .pl-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 2px; }
+  .pl-page h1 .mono { font-family: var(--font-mono); }
+  .pl-sub { color: var(--dim); font-size: 13px; margin: 0 0 12px; }
+  .pl-card { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg); padding: 12px 16px; margin-bottom: 12px; }
+  .pl-row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; font-size: 12.5px; color: var(--dim); }
+  .pl-row + .pl-row { margin-top: 10px; }
+  .pl-row label { display: inline-flex; align-items: center; gap: 5px; }
+  .pl-page select, .pl-page input[type=text], .pl-page input[type=number], .pl-page textarea { font: inherit; font-size: 12.5px; color: var(--ink);
+    background: var(--paper, #fff); border: 1px solid var(--border, var(--rule)); border-radius: 6px; padding: 3px 6px; }
+  .pl-page select { max-width: 320px; }
+  .pl-page input[type=number] { width: 64px; }
+  .pl-page textarea { width: 260px; height: 46px; vertical-align: middle; }
+  .pl-btn { font: inherit; font-size: 12.5px; color: var(--ink); background: var(--page); border: 1px solid var(--rule); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+  .pl-btn:hover { background: var(--surface); }
+  .pl-btn.primary { color: #fff; background: var(--accent); border-color: var(--accent); }
+  .pl-btn[disabled] { opacity: .5; cursor: default; }
+  .pl-cut { display: inline-flex; gap: 4px; align-items: center; }
+  .pl-off { opacity: .35; }
+  .pl-page [hidden] { display: none !important; }   /* the display rules above must not defeat hidden */
+  .pl-cut a { color: var(--faint); text-decoration: none; padding: 0 3px; }
+  .pl-stats { font-size: 12px; color: var(--faint); font-family: var(--font-mono); margin-bottom: 6px; min-height: 16px; }
+  .pl-err { color: var(--bad, #a33); font-size: 12.5px; }
+</style>
+
+<div class="pl-page" id="pl" data-key="{{ hwdb_instance }}/{{ leaf.part_type_id }}/specs" data-url="{{ data_url }}" data-n="{{ n_items }}">
+  <div class="pl-crumbs"><a href="{{ type_url }}">{{ leaf.name }}</a><span class="sep">›</span>Plot</div>
+  <h1>{{ leaf.name }} <span class="mono">{{ leaf.part_type_id }}</span></h1>
+  <p class="pl-sub">{{ leaf.system_name }} › {{ leaf.subsystem_name }} · {{ n_items }} items in HWDB</p>
+  {% csrf_token %}
+
+  <div class="pl-card pl-row">
+    <span id="data-status">No data in this browser yet.</span>
+    <button type="button" class="pl-btn primary" id="fetch-btn">Fetch specifications</button>
+    <span id="fetch-progress"></span>
+    <span class="pl-err" id="fetch-error"></span>
+  </div>
+
+  <div class="pl-card" id="controls" hidden>
+    <div class="pl-row">
+      <label>Source <select id="src" disabled><option>Item Specifications</option></select></label>
+      <label>X <select id="xkey"></select></label>
+      <label>Y <select id="ykey"><option value="">—</option></select></label>
+      <label id="mode2d-l" hidden><select id="mode2d"><option value="scatter">scatter · size = multiplicity</option><option value="heat">2D histogram</option></select></label>
+      <label id="bins-l">Bins <input type="number" id="bins" min="2" max="500" value="40"></label>
+      <label id="rare-l" hidden title="Keys present on fewer than 5% of items"><input type="checkbox" id="rare"> rare keys</label>
+      <button type="button" class="pl-btn" id="png-btn" title="Save the plot as a PNG">⤓ PNG</button>
+    </div>
+    <div class="pl-row">
+      <label>PID <input type="text" id="pidf" placeholder="contains / regex" style="width: 140px;"></label>
+      <label id="f-status-l">Status <select id="f-status"></select></label>
+      <label id="f-creator-l">Creator <select id="f-creator"></select></label>
+      <label id="f-manufacturer-l">Manufacturer <select id="f-manufacturer"></select></label>
+      <label id="f-institution-l">Institution <select id="f-institution"></select></label>
+    </div>
+    <div class="pl-row">
+      <span>Cuts</span><span id="cuts" class="pl-row" style="gap: 8px;"></span>
+      <button type="button" class="pl-btn" id="cut-add">+ cut</button>
+      <select id="logic"><option value="and">all</option><option value="or">any</option></select>
+    </div>
+    <div class="pl-row">
+      <label id="ov-l">Overlay <textarea id="ov" placeholder="x, y — one per line"></textarea></label>
+      <input type="text" id="ovn" placeholder="overlay name" style="width: 120px;">
+    </div>
+  </div>
+
+  <div class="pl-card" id="plot-card" hidden>
+    <div class="pl-stats" id="stats"></div>
+    <div style="position: relative; height: 440px;"><canvas id="plot"></canvas></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2.0.1/dist/chartjs-chart-matrix.min.js"></script>
+<script>
+(function () {
+    var root = document.getElementById("pl"), KEY = root.dataset.key, DATA_URL = root.dataset.url, N_ITEMS = +root.dataset.n;
+    var csrf = document.querySelector("input[name=csrfmiddlewaretoken]").value;
+    var $ = function (id) { return document.getElementById(id); };
+    var items = [], paths = [], chart = null;
+    var FACETS = ["status", "creator", "manufacturer", "institution"];
+    var OPS = ["=", "≠", "<", "≤", ">", "≥", "contains"];
+
+    // ---- IndexedDB cache: one record per instance/type/source -----------
+    function idb() {
+        return new Promise(function (res, rej) {
+            var r = indexedDB.open("cets-plot", 1);
+            r.onupgradeneeded = function () { r.result.createObjectStore("datasets"); };
+            r.onsuccess = function () { res(r.result); }; r.onerror = function () { rej(r.error); };
+        });
+    }
+    function idbGet(key) {
+        return idb().then(function (db) { return new Promise(function (res, rej) {
+            var q = db.transaction("datasets").objectStore("datasets").get(key);
+            q.onsuccess = function () { res(q.result); }; q.onerror = function () { rej(q.error); }; }); });
+    }
+    function idbPut(key, val) {
+        return idb().then(function (db) { return new Promise(function (res, rej) {
+            var tx = db.transaction("datasets", "readwrite"); tx.objectStore("datasets").put(val, key);
+            tx.oncomplete = res; tx.onerror = function () { rej(tx.error); }; }); });
+    }
+
+    // ---- Fetch: NDJSON stream, progress per page -------------------------
+    async function fetchData() {
+        var btn = $("fetch-btn"), prog = $("fetch-progress"), err = $("fetch-error");
+        btn.disabled = true; err.textContent = ""; prog.textContent = "starting…";
+        var fd = new FormData(); fd.append("csrfmiddlewaretoken", csrf);
+        var resp;
+        try { resp = await fetch(DATA_URL, { method: "POST", body: fd }); }
+        catch (e) { err.textContent = "network error: " + e; btn.disabled = false; return; }
+        if (resp.redirected) { window.location = resp.url; return; }
+        if (!resp.ok) { err.textContent = "HTTP " + resp.status; btn.disabled = false; return; }
+        var reader = resp.body.getReader(), dec = new TextDecoder(), buf = "", rows = [], pages = "?", failed = null;
+        function take(line) {
+            if (!line.trim()) return;
+            var o = JSON.parse(line);
+            if (o.pages) { pages = o.pages; }
+            else if (o.page) { prog.textContent = "page " + o.page + " / " + pages + " · " + rows.length + " items"; }
+            else if (o.error) { failed = o.error; }
+            else if (o.done !== undefined) { }
+            else rows.push(o);
+        }
+        while (true) {
+            var r = await reader.read(); if (r.done) break;
+            buf += dec.decode(r.value, { stream: true });
+            var nl; while ((nl = buf.indexOf("\n")) >= 0) { take(buf.slice(0, nl)); buf = buf.slice(nl + 1); }
+        }
+        if (buf) take(buf);
+        btn.disabled = false;
+        if (failed) { err.textContent = failed; prog.textContent = ""; return; }
+        var rec = { fetched_at: new Date().toISOString(), items: rows };
+        try { await idbPut(KEY, rec); } catch (e) { /* no cache — still plot */ }
+        prog.textContent = "";
+        load(rec);
+    }
+
+    // ---- Keys: walk every item's spec DATA; lists of dicts explode -------
+    function walk(node, prefix, acc) {
+        if (Array.isArray(node)) {
+            if (node.some(function (e) { return e && typeof e === "object" && !Array.isArray(e); })) {
+                node.forEach(function (e) { if (e && typeof e === "object") walk(e, prefix, acc); });
+            } else if (prefix.length) acc.add(JSON.stringify(prefix));
+            return;
+        }
+        if (node && typeof node === "object") {
+            Object.keys(node).forEach(function (k) { walk(node[k], prefix.concat([k]), acc); });
+            return;
+        }
+        if (prefix.length) acc.add(JSON.stringify(prefix));
+    }
+    // All leaf values under a path (lists at any depth are flattened).
+    function valuesAt(node, segs, i) {
+        if (Array.isArray(node)) {
+            var out = []; node.forEach(function (e) { out = out.concat(valuesAt(e, segs, i)); }); return out;
+        }
+        if (i === segs.length) return (node !== null && typeof node !== "object") ? [node] : [];
+        if (node && typeof node === "object" && Object.prototype.hasOwnProperty.call(node, segs[i])) return valuesAt(node[segs[i]], segs, i + 1);
+        return [];
+    }
+    function toNum(v) {
+        if (typeof v === "number") return isFinite(v) ? v : null;
+        if (typeof v === "string" && v.trim() !== "") { var n = Number(v); return isFinite(n) ? n : null; }
+        return null;
+    }
+    function showPath(p) { return JSON.parse(p).join(" › "); }
+
+    // ---- Filters ---------------------------------------------------------
+    var cuts = [];   // [{p: pathJSON, o: op, v: text}]
+    function passCut(item, c) {
+        if (!c.p) return true;
+        var vals = valuesAt(item.data, JSON.parse(c.p), 0), want = toNum(c.v);
+        return vals.some(function (v) {
+            var n = toNum(v);
+            if (c.o === "contains") return String(v).toLowerCase().indexOf(String(c.v).toLowerCase()) >= 0;
+            if (n !== null && want !== null) {
+                return c.o === "=" ? n === want : c.o === "≠" ? n !== want : c.o === "<" ? n < want :
+                       c.o === "≤" ? n <= want : c.o === ">" ? n > want : n >= want;
+            }
+            var s = String(v), t = String(c.v);
+            return c.o === "=" ? s === t : c.o === "≠" ? s !== t : c.o === "<" ? s < t : c.o === "≤" ? s <= t : c.o === ">" ? s > t : s >= t;
+        });
+    }
+    function filtered() {
+        var pidf = $("pidf").value.trim(), re = null;
+        if (pidf) { try { re = new RegExp(pidf, "i"); } catch (e) { re = null; } }
+        var any = $("logic").value === "or", live = cuts.filter(function (c) { return c.p && c.v !== ""; });
+        return items.filter(function (it) {
+            if (pidf && !(re ? re.test(it.pid) : it.pid.toLowerCase().indexOf(pidf.toLowerCase()) >= 0)) return false;
+            for (var i = 0; i < FACETS.length; i++) { var f = $("f-" + FACETS[i]).value; if (f && it[FACETS[i]] !== f) return false; }
+            if (!live.length) return true;
+            return any ? live.some(function (c) { return passCut(it, c); }) : live.every(function (c) { return passCut(it, c); });
+        });
+    }
+
+    // ---- Chart -----------------------------------------------------------
+    var ACCENT = "#1d4ed8", OVER = "#c2410c";
+    function opts(xTitle, yTitle) {
+        return { responsive: true, maintainAspectRatio: false, animation: false,
+            plugins: { legend: { labels: { boxWidth: 12, font: { size: 12 } } }, tooltip: { intersect: false } },
+            scales: { x: { title: { display: true, text: xTitle }, ticks: { maxRotation: 45, autoSkipPadding: 12, font: { size: 11 } } },
+                      y: { title: { display: true, text: yTitle }, beginAtZero: true, ticks: { precision: 0 } } } };
+    }
+    function draw(cfg) { if (chart) chart.destroy(); chart = new Chart($("plot"), cfg); }
+    function fmt(n) { return Math.abs(n) >= 1000 || Number.isInteger(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 2 }) : n.toPrecision(4); }
+    function histCounts(nums, lo, hi, nb) {
+        var w = (hi - lo) / nb || 1, counts = new Array(nb).fill(0);
+        nums.forEach(function (v) { var b = Math.min(nb - 1, Math.floor((v - lo) / w)); counts[b]++; });
+        return counts;
+    }
+    function overlayXY() {
+        var out = [];
+        $("ov").value.split(/\n/).forEach(function (line) {
+            var m = line.match(/^\s*(-?[\d.eE+-]+)\s*[,;:\t ]\s*(-?[\d.eE+-]+)\s*$/);
+            if (m && isFinite(+m[1]) && isFinite(+m[2])) out.push({ x: +m[1], y: +m[2] });
+        });
+        return out.sort(function (a, b) { return a.x - b.x; });
+    }
+    var PALETTE = ["#1d4ed8", "#c2410c", "#15803d", "#9333ea", "#dc2626", "#0891b2", "#ca8a04", "#4f46e5", "#db2777", "#65a30d", "#0d9488", "#7c3aed"];
+    function isNumeric(vals) {
+        var nums = vals.map(toNum).filter(function (v) { return v !== null; });
+        return vals.length > 0 && nums.length > 0.8 * vals.length;
+    }
+    function catKey(v) { return v === true ? "True" : v === false ? "False" : String(v); }
+    function topCats(vals, n) {
+        var counts = {}; vals.forEach(function (v) { var k = catKey(v); counts[k] = (counts[k] || 0) + 1; });
+        return { keys: Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; }).slice(0, n), counts: counts, unique: Object.keys(counts).length };
+    }
+    function binSetup(nums) {
+        var lo = Math.min.apply(null, nums), hi = Math.max.apply(null, nums), nb = Math.max(2, Math.min(500, +$("bins").value || 40));
+        if (lo === hi) { lo -= 0.5; hi += 0.5; }
+        var w = (hi - lo) / nb, labels = [];
+        for (var i = 0; i < nb; i++) labels.push(fmt(lo + i * w));
+        return { lo: lo, hi: hi, nb: nb, w: w, labels: labels };
+    }
+    function clear(msg) { $("stats").textContent = msg; if (chart) { chart.destroy(); chart = null; } }
+    // Which side controls apply to the plot being drawn: bins only to
+    // histograms; the overlay to single-key plots (numbers over a histogram,
+    // "label, count" lines over category bars).
+    function controls(bins, overlay) {
+        $("bins").disabled = !bins; $("bins-l").classList.toggle("pl-off", !bins);
+        $("bins-l").title = bins ? "" : "Bins apply to histograms only";
+        $("ov").disabled = !overlay; $("ovn").disabled = !overlay;
+        $("ov-l").classList.toggle("pl-off", !overlay); $("ovn").classList.toggle("pl-off", !overlay);
+        $("ov").placeholder = overlay === "cat" ? "label, count — one per line" : "x, y — one per line";
+        $("ov-l").title = overlay ? "" : "Overlay applies to single-key plots only";
+    }
+    function overlayCats() {
+        var out = {};
+        $("ov").value.split(/\n/).forEach(function (line) {
+            var m = line.match(/^\s*(.+?)\s*[,;:\t]\s*(-?[\d.]+)\s*$/);
+            if (m && isFinite(+m[2])) out[m[1]] = +m[2];
+        });
+        return out;
+    }
+    function render() {
+        var xp = $("xkey").value, yp = $("ykey").value;
+        if (!xp) return;
+        var sel = filtered(), xs = JSON.parse(xp), stats = $("stats");
+        var head = sel.length + " / " + items.length + " items";
+        $("mode2d-l").hidden = true;
+        if (yp) {
+            // Two keys: values paired by position within each item (the
+            // Dashboard's explode-two-lists rule); pairs missing either side drop.
+            var ys = JSON.parse(yp), pairs = [];
+            sel.forEach(function (it) {
+                var a = valuesAt(it.data, xs, 0), b = valuesAt(it.data, ys, 0), n = Math.min(a.length, b.length);
+                for (var i = 0; i < n; i++) pairs.push({ x: a[i], y: b[i], pid: it.pid });
+            });
+            if (!pairs.length) { clear(head + " · 0 (x, y) pairs — no item has values for both keys"); controls(false, null); return; }
+            var xNum = isNumeric(pairs.map(function (q) { return q.x; })), yNum = isNumeric(pairs.map(function (q) { return q.y; }));
+            if (xNum && yNum) {
+                var pts = pairs.map(function (q) { return { x: toNum(q.x), y: toNum(q.y), pid: q.pid }; })
+                               .filter(function (q) { return q.x !== null && q.y !== null; });
+                $("mode2d-l").hidden = false;
+                var o = opts(showPath(xp), showPath(yp)); o.scales.x.type = "linear"; o.scales.y.beginAtZero = false; o.scales.y.ticks = {};
+                if ($("mode2d").value === "heat") {
+                    // 2D histogram: Bins × Bins cells, colour depth = count.
+                    var bx = binSetup(pts.map(function (q) { return q.x; })), by = binSetup(pts.map(function (q) { return q.y; })), cells = {}, vmax = 0;
+                    pts.forEach(function (q) {
+                        var i = Math.min(bx.nb - 1, Math.floor((q.x - bx.lo) / bx.w)), j = Math.min(by.nb - 1, Math.floor((q.y - by.lo) / by.w)), k = i + "," + j;
+                        cells[k] = (cells[k] || 0) + 1; if (cells[k] > vmax) vmax = cells[k];
+                    });
+                    var data = Object.keys(cells).map(function (k) {
+                        var ij = k.split(","), i = +ij[0], j = +ij[1];
+                        return { x: bx.lo + (i + 0.5) * bx.w, y: by.lo + (j + 0.5) * by.w, v: cells[k], x0: bx.lo + i * bx.w, y0: by.lo + j * by.w };
+                    });
+                    stats.textContent = head + " · " + pts.length + " (x, y) pairs · " + data.length + " occupied cells · max " + vmax;
+                    o.scales.x.min = bx.lo; o.scales.x.max = bx.hi; o.scales.x.offset = false; o.scales.x.grid = { offset: false };
+                    // The matrix controller reverses y by default (table layout); a histogram's y goes up.
+                    o.scales.y.min = by.lo; o.scales.y.max = by.hi; o.scales.y.offset = false; o.scales.y.grid = { offset: false }; o.scales.y.reverse = false;
+                    o.plugins.legend.display = false;
+                    o.plugins.tooltip = { callbacks: {
+                        title: function (cs) { var q = cs[0].raw; return fmt(q.x0) + " – " + fmt(q.x0 + bx.w) + " , " + fmt(q.y0) + " – " + fmt(q.y0 + by.w); },
+                        label: function (c) { return c.raw.v + " pair" + (c.raw.v > 1 ? "s" : ""); } } };
+                    draw({ type: "matrix", data: { datasets: [{ label: "Pairs", data: data,
+                        backgroundColor: function (c) { var v = c.raw ? c.raw.v : 0; return ACCENT + Math.round(40 + 215 * v / vmax).toString(16).padStart(2, "0"); },
+                        width: function (c) { var a = c.chart.chartArea; return a ? Math.max(1, a.width / bx.nb - 1) : 1; },
+                        height: function (c) { var a = c.chart.chartArea; return a ? Math.max(1, a.height / by.nb - 1) : 1; } }] }, options: o });
+                    controls(true, null);
+                } else {
+                    // Scatter: identical (x, y) pairs merge into one marker sized by multiplicity.
+                    var groups = {};
+                    pts.forEach(function (q) { var k = q.x + "," + q.y; (groups[k] = groups[k] || { x: q.x, y: q.y, n: 0, pids: [] }).n++; if (groups[k].pids.length < 8) groups[k].pids.push(q.pid); });
+                    var marks = Object.keys(groups).map(function (k) { var g = groups[k]; g.r = Math.min(20, 3 + 3 * Math.sqrt(g.n - 1)); return g; });
+                    var nmax = marks.reduce(function (m, g) { return Math.max(m, g.n); }, 0);
+                    stats.textContent = head + " · " + pts.length + " (x, y) pairs · " + marks.length + " distinct" + (nmax > 1 ? " · max multiplicity " + nmax : "");
+                    o.plugins.tooltip = { callbacks: {
+                        title: function (cs) { var g = cs[0].raw; return fmt(g.x) + ", " + fmt(g.y) + (g.n > 1 ? "  × " + g.n : ""); },
+                        label: function (c) { var g = c.raw; return g.pids.join(", ") + (g.n > g.pids.length ? ", …" : ""); } } };
+                    draw({ type: "bubble", data: { datasets: [{ label: "Items", data: marks, backgroundColor: ACCENT + "99", borderColor: ACCENT, borderWidth: 1 }] }, options: o });
+                    controls(false, null);
+                }
+            } else if (xNum || yNum) {
+                // One numeric side: its histogram, one stacked series per category of the other.
+                var numKey = xNum ? "x" : "y", catK = xNum ? "y" : "x", numPath = xNum ? xp : yp, catPath = xNum ? yp : xp;
+                var good = pairs.filter(function (q) { return toNum(q[numKey]) !== null; });
+                var cats = topCats(good.map(function (q) { return q[catK]; }), 12);
+                var b = binSetup(good.map(function (q) { return toNum(q[numKey]); }));
+                var ds = cats.keys.map(function (k, i) {
+                    return { label: k, data: histCounts(good.filter(function (q) { return catKey(q[catK]) === k; }).map(function (q) { return toNum(q[numKey]); }), b.lo, b.hi, b.nb),
+                             backgroundColor: PALETTE[i % PALETTE.length] + "aa", barPercentage: 1, categoryPercentage: 1 };
+                });
+                stats.textContent = head + " · N=" + good.length + " · " + cats.unique + " " + showPath(catPath) + " categories" + (cats.unique > 12 ? " (top 12 shown)" : "");
+                var o2 = opts(showPath(numPath) + "  (bin width " + fmt(b.w) + ")", "count"); o2.scales.x.stacked = true; o2.scales.y.stacked = true;
+                o2.plugins.legend.title = { display: true, text: showPath(catPath) };
+                draw({ type: "bar", data: { labels: b.labels, datasets: ds }, options: o2 });
+                controls(true, null);
+            } else {
+                // Both categorical: counts of Y category per X category, grouped bars.
+                var cx = topCats(pairs.map(function (q) { return q.x; }), 40), cy = topCats(pairs.map(function (q) { return q.y; }), 12);
+                var grid = {}; pairs.forEach(function (q) { var k = JSON.stringify([catKey(q.x), catKey(q.y)]); grid[k] = (grid[k] || 0) + 1; });
+                var ds2 = cy.keys.map(function (yk, i) {
+                    return { label: yk, data: cx.keys.map(function (xk) { return grid[JSON.stringify([xk, yk])] || 0; }), backgroundColor: PALETTE[i % PALETTE.length] + "cc" };
+                });
+                stats.textContent = head + " · N=" + pairs.length + " · " + cx.unique + " × " + cy.unique + " categories" + (cx.unique > 40 || cy.unique > 12 ? " (top 40 × 12 shown)" : "");
+                var o3 = opts(showPath(xp), "count"); o3.plugins.legend.title = { display: true, text: showPath(yp) };
+                draw({ type: "bar", data: { labels: cx.keys, datasets: ds2 }, options: o3 });
+                controls(false, null);
+            }
+            return;
+        }
+        var vals = [];
+        sel.forEach(function (it) { vals = vals.concat(valuesAt(it.data, xs, 0)); });
+        if (!vals.length) { clear(head + " · no values for this key on the selected items"); controls(false, null); return; }
+        var nums = vals.map(toNum).filter(function (v) { return v !== null; });
+        if (isNumeric(vals)) {
+            var ov = overlayXY(), b1 = binSetup(nums), counts1 = histCounts(nums, b1.lo, b1.hi, b1.nb);
+            var mean = nums.reduce(function (a, c) { return a + c; }, 0) / nums.length;
+            stats.textContent = head + " · N=" + nums.length + "  mean=" + fmt(mean) + "  min=" + fmt(Math.min.apply(null, nums)) + "  max=" + fmt(Math.max.apply(null, nums));
+            // Bars at bin centres on a linear axis so overlay points land at their true x.
+            var bars = counts1.map(function (c, i) { return { x: b1.lo + (i + 0.5) * b1.w, y: c }; });
+            var ds1 = [{ label: "Items", data: bars, backgroundColor: ACCENT + "cc", barPercentage: 1, categoryPercentage: 1 }];
+            if (ov.length) ds1.push({ label: $("ovn").value || "Overlay", data: ov, type: "line", borderColor: OVER, borderDash: [6, 4], borderWidth: 2, pointRadius: 3, pointBackgroundColor: OVER, tension: 0 });
+            var o1 = opts(showPath(xp) + "  (bin width " + fmt(b1.w) + ")", "count");
+            var xmin = Math.min.apply(null, [b1.lo].concat(ov.map(function (q) { return q.x; }))), xmax = Math.max.apply(null, [b1.hi].concat(ov.map(function (q) { return q.x; })));
+            o1.scales.x = { type: "linear", min: xmin, max: xmax, offset: false, grid: { offset: false }, title: o1.scales.x.title,
+                            ticks: { maxRotation: 45, autoSkipPadding: 12, font: { size: 11 }, callback: function (v) { return fmt(v); } } };
+            o1.plugins.tooltip.callbacks = { title: function (cs) { var q = cs[0].raw; return cs[0].dataset.type === "line" ? fmt(q.x) : fmt(q.x - b1.w / 2) + " – " + fmt(q.x + b1.w / 2); } };
+            draw({ type: "bar", data: { datasets: ds1 }, options: o1 });
+            controls(true, "num");
+            return;
+        }
+        var c1 = topCats(vals, 40), oc = overlayCats(), ocKeys = Object.keys(oc);
+        var labels1 = c1.keys.concat(ocKeys.filter(function (k) { return !(k in c1.counts); }));   // overlay-only labels get a slot too
+        stats.textContent = head + " · N=" + vals.length + "  unique=" + c1.unique + (c1.unique > 40 ? " (top 40 shown)" : "");
+        var dsc = [{ label: "Items", data: labels1.map(function (c) { return c1.counts[c] || 0; }), backgroundColor: ACCENT + "cc" }];
+        if (ocKeys.length) dsc.push({ label: $("ovn").value || "Overlay", data: labels1.map(function (c) { return c in oc ? oc[c] : null; }), type: "line", borderColor: OVER, borderDash: [6, 4], borderWidth: 2, pointRadius: 4, pointBackgroundColor: OVER, spanGaps: true });
+        draw({ type: "bar", data: { labels: labels1, datasets: dsc }, options: opts(showPath(xp), "count") });
+        controls(false, "cat");
+    }
+
+    // ---- Controls --------------------------------------------------------
+    function fillSelect(sel, values, keep, blank) {
+        var cur = keep ? sel.value : ""; sel.textContent = "";
+        if (blank !== undefined) { var o0 = document.createElement("option"); o0.value = ""; o0.textContent = blank; sel.appendChild(o0); }
+        values.forEach(function (v) { var o = document.createElement("option"); o.value = v.value; o.textContent = v.text; sel.appendChild(o); });
+        if (values.some(function (v) { return v.value === cur; })) sel.value = cur;
+    }
+    function cutRow(c) {
+        var row = document.createElement("span"); row.className = "pl-cut";
+        var ps = document.createElement("select"); fillSelect(ps, keyOptions([c.p]), false, "key…"); ps.value = c.p || "";
+        var os = document.createElement("select"); fillSelect(os, OPS.map(function (o) { return { value: o, text: o }; })); os.value = c.o || "=";
+        var vi = document.createElement("input"); vi.type = "text"; vi.style.width = "90px"; vi.placeholder = "value"; vi.value = c.v || "";
+        var x = document.createElement("a"); x.href = "#"; x.textContent = "×"; x.title = "Remove";
+        ps.addEventListener("change", function () { c.p = ps.value; changed(); });
+        os.addEventListener("change", function () { c.o = os.value; changed(); });
+        vi.addEventListener("input", function () { c.v = vi.value; changed(); });
+        x.addEventListener("click", function (e) { e.preventDefault(); cuts.splice(cuts.indexOf(c), 1); drawCuts(); changed(); });
+        row.appendChild(ps); row.appendChild(os); row.appendChild(vi); row.appendChild(x);
+        return row;
+    }
+    // Rare = on fewer than 5% of items (and not all of a tiny type); hidden
+    // from the key pickers unless the toggle is on or the key is in use.
+    var pathCounts = {};
+    function isRare(p) { return pathCounts[p] < Math.max(2, 0.05 * items.length); }
+    function keyOptions(keep) {
+        var show = $("rare").checked;
+        return paths.filter(function (p) { return show || !isRare(p) || keep.indexOf(p) >= 0; })
+                    .map(function (p) { return { value: p, text: showPath(p) + " (" + pathCounts[p] + ")" }; });
+    }
+    function fillKeySelects(x, y) {
+        var keep = [x, y].concat(cuts.map(function (c) { return c.p; })).filter(Boolean);
+        fillSelect($("xkey"), keyOptions(keep), false, "key…"); fillSelect($("ykey"), keyOptions(keep), false, "—");
+        $("xkey").value = x || ""; $("ykey").value = y || "";
+    }
+    function drawCuts() { var el = $("cuts"); el.textContent = ""; cuts.forEach(function (c) { el.appendChild(cutRow(c)); }); }
+
+    // Plot config lives in the URL hash so a plot is bookmarkable/shareable.
+    function readHash() { try { return JSON.parse(decodeURIComponent(location.hash.slice(1)) || "{}"); } catch (e) { return {}; } }
+    function writeHash() {
+        var f = {}; FACETS.forEach(function (k) { if ($("f-" + k).value) f[k] = $("f-" + k).value; });
+        var cfg = { x: $("xkey").value, y: $("ykey").value, bins: +$("bins").value, pid: $("pidf").value, f: f,
+                    cuts: cuts.filter(function (c) { return c.p; }), logic: $("logic").value, ov: $("ov").value, ovn: $("ovn").value, rare: $("rare").checked || undefined, m2: $("mode2d").value };
+        history.replaceState(null, "", "#" + encodeURIComponent(JSON.stringify(cfg)));
+    }
+    function changed() { writeHash(); render(); }
+
+    function load(rec) {
+        items = rec.items || [];
+        $("data-status").textContent = items.length.toLocaleString() + " items · fetched " + new Date(rec.fetched_at).toLocaleString();
+        $("fetch-btn").textContent = "Refresh";
+        var acc = new Set(), counts = {};
+        items.forEach(function (it) { var s = new Set(); walk(it.data, [], s); s.forEach(function (p) { acc.add(p); counts[p] = (counts[p] || 0) + 1; }); });
+        paths = Array.from(acc).sort(function (a, b) { return (counts[b] - counts[a]) || (a < b ? -1 : 1); });
+        pathCounts = counts;
+        var cfg = readHash();
+        $("rare").checked = !!cfg.rare;
+        $("rare-l").hidden = !paths.some(isRare);
+        cuts = (cfg.cuts || []).filter(function (c) { return acc.has(c.p); });
+        fillKeySelects(cfg.x && acc.has(cfg.x) ? cfg.x : "", cfg.y && acc.has(cfg.y) ? cfg.y : "");
+        if (!$("xkey").value && $("xkey").options[1]) $("xkey").value = $("xkey").options[1].value;
+        if (cfg.bins) $("bins").value = cfg.bins;
+        $("pidf").value = cfg.pid || ""; $("logic").value = cfg.logic || "and"; $("ov").value = cfg.ov || ""; $("ovn").value = cfg.ovn || "";
+        $("mode2d").value = cfg.m2 === "heat" ? "heat" : "scatter";
+        FACETS.forEach(function (k) {
+            var vals = {}; items.forEach(function (it) { if (it[k]) vals[it[k]] = (vals[it[k]] || 0) + 1; });
+            var keys = Object.keys(vals).sort(function (a, b) { return vals[b] - vals[a]; });
+            $("f-" + k + "-l").hidden = keys.length < 2;
+            fillSelect($("f-" + k), keys.map(function (v) { return { value: v, text: v + " (" + vals[v] + ")" }; }), false, "all");
+            if (cfg.f && cfg.f[k] && vals[cfg.f[k]]) $("f-" + k).value = cfg.f[k];
+        });
+        drawCuts();
+        $("controls").hidden = false; $("plot-card").hidden = !paths.length;
+        $("stats").textContent = paths.length ? "" : "No specification keys on these items.";
+        render();
+    }
+
+    ["xkey", "ykey", "bins", "logic", "mode2d", "f-status", "f-creator", "f-manufacturer", "f-institution"].forEach(function (id) { $(id).addEventListener("change", changed); });
+    ["pidf", "ov", "ovn"].forEach(function (id) { $(id).addEventListener("input", changed); });
+    $("cut-add").addEventListener("click", function () { cuts.push({ p: "", o: "=", v: "" }); drawCuts(); });
+    $("rare").addEventListener("change", function () { fillKeySelects($("xkey").value, $("ykey").value); drawCuts(); writeHash(); });
+    $("fetch-btn").addEventListener("click", fetchData);
+    $("png-btn").addEventListener("click", function () {
+        if (!chart) return;
+        var c = chart.canvas, out = document.createElement("canvas"); out.width = c.width; out.height = c.height;
+        var ctx = out.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, out.width, out.height); ctx.drawImage(c, 0, 0);
+        var a = document.createElement("a"); a.href = out.toDataURL("image/png");
+        a.download = (KEY.replace(/\//g, "_") + "_" + showPath($("xkey").value)).replace(/[^\w.-]+/g, "_") + ".png"; a.click();
+    });
+
+    var pages = Math.max(1, Math.ceil(N_ITEMS / 500));
+    $("fetch-btn").title = N_ITEMS.toLocaleString() + " items · " + pages + " page" + (pages > 1 ? "s" : "") + " from HWDB";
+    idbGet(KEY).then(function (rec) {
+        if (rec && rec.items) load(rec);
+        else if (N_ITEMS <= 1000) fetchData();
+        else $("fetch-progress").textContent = "~" + pages + " pages from HWDB — may take a while";
+    }).catch(function () { if (N_ITEMS <= 1000) fetchData(); });
+})();
+</script>
+{% endblock %}

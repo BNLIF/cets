@@ -32,7 +32,7 @@ from hwdb.fnal import session as fnal_session
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for, verify_link
 
 from . import (activity, charts, checklistforms, checklists, curation, events,
-               execsummary, navigation, parts, scanning, watches)
+               execsummary, navigation, parts, plotting, scanning, watches)
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, refresh_component_row, sync_test_events
 from .hierarchy import sync_hierarchy, sync_system
@@ -791,6 +791,73 @@ def explore_node_sync_view(request, part_type_id):
             yield f"test sync: CRASH · {e}\n"
 
     return StreamingHttpResponse(_iter(), content_type="text/plain; charset=utf-8")
+
+
+@login_not_required
+@fnal_login_required
+def explore_plots_view(request):
+    """The Plots tab (#144): every component type on this instance that has
+    items, grouped by system › subsystem, each linking to its Plot page.
+    Mirror-only; the client filters the list as you type."""
+    inst = instance_of(request)
+    leaves = (HierarchyNode.for_instance(inst)
+              .filter(level=HierarchyNode.LEVEL_TYPE, n_components__gt=0)
+              .order_by("system_name", "subsystem_name", "name"))
+    groups = [
+        {"system": sys_name, "subsystem": sub_name, "types": list(rows)}
+        for (sys_name, sub_name), rows in itertools.groupby(
+            leaves, key=lambda n: (n.system_name, n.subsystem_name))
+    ]
+    return render(request, "explore/plots.html", {
+        "active_nav": "plots",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "groups": groups,
+        "n_types": len(leaves),
+    })
+
+
+@login_not_required
+@fnal_login_required
+def explore_plot_view(request, part_type_id):
+    """Type-wide Plot view (#144): distributions over Item Specifications
+    keys for every item of a type. Mirror-only render; the data arrives
+    via ``explore_plot_data_view`` when the browser asks for it."""
+    inst = instance_of(request)
+    leaf = HierarchyNode.for_instance(inst).filter(
+        level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
+    if leaf is None:
+        raise Http404("unknown component type")
+    n_items = (HwdbComponentEvent.for_instance(inst)
+               .filter(part_type_id=part_type_id).count()) or leaf.n_components
+    return render(request, "explore/plot.html", {
+        "leaf": leaf,
+        "n_items": n_items,
+        "type_url": navigation.leaf_path_for(inst, part_type_id) or _rev(request, "explore:home"),
+        "data_url": _rev(request, "explore:plot_data", args=[part_type_id]),
+        "hwdb_instance": inst,
+    })
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_plot_data_view(request, part_type_id):
+    """Stream the type's Item Specifications as NDJSON (#144) — one live
+    paginated sweep (``plotting.stream_specs``), FNAL-gated like the syncs.
+    POST so the browser's CSRF-protected ``stream`` helper pattern applies
+    and the sweep is never triggered by a prefetch."""
+    inst = instance_of(request)
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        nxt = _rev(request, "explore:plot", args=[part_type_id])
+        return redirect(f"{link}?{urlencode({'next': nxt, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        return JsonResponse({"error": FNAL_UNAVAILABLE}, status=503)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    return StreamingHttpResponse(plotting.stream_specs(api, part_type_id),
+                                 content_type="application/x-ndjson")
 
 
 @login_not_required

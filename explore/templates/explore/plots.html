@@ -1,0 +1,55 @@
+{% extends 'explore/base.html' %}
+{% block title %}Plots · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .pls-page { padding: 26px 30px 56px; max-width: 860px; }
+  .pls-page h1 { font-size: 1.5rem; color: var(--ink); margin: 0 0 4px; letter-spacing: -0.01em; }
+  .pls-sub { color: var(--dim); font-size: 13.5px; margin: 0 0 14px; }
+  .pls-page input[type=search] { font: inherit; font-size: 13.5px; color: var(--ink); background: var(--paper, #fff);
+    border: 1px solid var(--border, var(--rule)); border-radius: 6px; padding: 6px 10px; width: 100%; max-width: 420px; margin-bottom: 18px; }
+  .pls-group h2 { font-size: 12px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; margin: 16px 0 8px; }
+  .pls-list { border: 1px solid var(--rule); border-radius: var(--r-lg); background: var(--page); overflow: hidden; }
+  .pls-row { display: flex; align-items: baseline; gap: 12px; padding: 9px 15px; border-top: 1px solid var(--rule); font-size: 13.5px; color: var(--ink); text-decoration: none; }
+  .pls-row:first-child { border-top: none; }
+  .pls-row:hover { background: var(--surface); }
+  .pls-row .mono { font-family: var(--font-mono); font-size: 12px; color: var(--faint); }
+  .pls-row .n { margin-left: auto; font-size: 12px; color: var(--faint); white-space: nowrap; }
+  .pls-empty { color: var(--faint); font-size: 13.5px; padding: 24px 15px; }
+  .pls-page [hidden] { display: none !important; }
+</style>
+<div class="pls-page">
+  <h1>Plots</h1>
+  <p class="pls-sub">Distributions over Item Specifications, per component type · {{ n_types }} types with items</p>
+  <input type="search" id="pls-filter" placeholder="filter types" autofocus>
+  {% for g in groups %}
+  <div class="pls-group">
+    <h2>{{ g.system }} <span aria-hidden="true">›</span> {{ g.subsystem }}</h2>
+    <div class="pls-list">
+      {% for t in g.types %}
+      <a class="pls-row" href="{% url 'explore:plot' part_type_id=t.part_type_id %}" data-q="{{ t.name|lower }} {{ t.part_type_id|lower }} {{ g.system|lower }} {{ g.subsystem|lower }}">
+        <span>{{ t.name }}</span><span class="mono">{{ t.part_type_id }}</span>
+        <span class="n">{{ t.n_components }} item{{ t.n_components|pluralize }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% empty %}
+  <div class="pls-list"><div class="pls-empty">No component types with items on this instance yet.</div></div>
+  {% endfor %}
+</div>
+<script>
+(function () {
+    var box = document.getElementById("pls-filter");
+    var groups = Array.prototype.slice.call(document.querySelectorAll(".pls-group"));
+    box.addEventListener("input", function () {
+        var q = box.value.trim().toLowerCase();
+        groups.forEach(function (g) {
+            var any = false;
+            g.querySelectorAll(".pls-row").forEach(function (r) { var hit = !q || r.dataset.q.indexOf(q) >= 0; r.hidden = !hit; any = any || hit; });
+            g.hidden = !any;
+        });
+    });
+})();
+</script>
+{% endblock %}

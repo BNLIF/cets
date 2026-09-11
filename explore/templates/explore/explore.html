@@ -173,6 +173,7 @@
                 <button class="btn btn-sm btn-ghost node-sync-btn" type="button" data-mode="full"
                         data-sync-url="{% url 'explore:node_sync' part_type_id=leaf.part_type_id %}"
                         title="Re-fetch everything incl. all tests (slow)">Full re-sync</button>
+                <a class="btn btn-sm btn-ghost" href="{% url 'explore:plot' part_type_id=leaf.part_type_id %}" title="Distributions over this type’s Item Specifications">Plot</a>
             </div>
         </div>
     </div>
