@@ -71,7 +71,7 @@
     </div>
     <div class="pl-row">
       <label>Item <input type="text" id="item" placeholder="one PID" style="width: 170px;" title="Exactly one item — the Items table below fills this"></label>
-      <label>PID <input type="text" id="pidf" placeholder="contains / regex" style="width: 140px;" title="Any number of items, by substring or regex"></label>
+      <label>PID <input type="text" id="pidf" placeholder="contains / regex / 00120..06000" style="width: 190px;" title="Any number of items, by substring, regex, or a range of the numeric suffix (00120..06000, 00120.., ..06000)"></label>
       <label id="f-status-l">Status <select id="f-status"></select></label>
       <label id="f-creator-l">Creator <select id="f-creator"></select></label>
       <label id="f-manufacturer-l">Manufacturer <select id="f-manufacturer"></select></label>
@@ -138,6 +138,12 @@
     function isTest() { return source !== "specs"; }
     // The effective PID filter: the Item box (exactly one PID) wins over the regex box.
     function pidFilter() { var it = $("item").value.trim(); return it ? "^" + it.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$" : $("pidf").value.trim(); }
+    // "00120..06000" / "D00400300001-00120..06000" / open ends → [lo, hi] on the numeric suffix, else null
+    function pidRange(s) {
+        var m = /^\s*(?:[A-Za-z]\d{11}-)?(\d*)\s*\.\.\s*(\d*)\s*$/.exec(s || "");
+        if (!m || !(m[1] || m[2])) return null;
+        return [m[1] ? +m[1] : -Infinity, m[2] ? +m[2] : Infinity];
+    }
     function cacheKey() { return TYPE_KEY + "/" + (isTest() ? "test:" + source : "specs"); }
 
     // ---- IndexedDB cache: one record per instance/type/source -----------
@@ -315,11 +321,12 @@
         });
     }
     function filtered() {
-        var pidf = pidFilter(), re = null;
-        if (pidf) { try { re = new RegExp(pidf, "i"); } catch (e) { re = null; } }
+        var pidf = pidFilter(), re = null, rng = pidRange(pidf);
+        if (pidf && !rng) { try { re = new RegExp(pidf, "i"); } catch (e) { re = null; } }
         var any = $("logic").value === "or", live = cuts.filter(function (c) { return c.p && c.v !== ""; });
         return items.filter(function (it) {
-            if (pidf && !(re ? re.test(it.pid) : it.pid.toLowerCase().indexOf(pidf.toLowerCase()) >= 0)) return false;
+            if (pidf && !(rng ? (function (n) { return n >= rng[0] && n <= rng[1]; })(+it.pid.split("-")[1])
+                          : re ? re.test(it.pid) : it.pid.toLowerCase().indexOf(pidf.toLowerCase()) >= 0)) return false;
             for (var i = 0; i < FACETS.length; i++) { var f = $("f-" + FACETS[i]).value; if (f && it[FACETS[i]] !== f) return false; }
             if (!live.length) return true;
             return any ? live.some(function (c) { return passCut(it, c); }) : live.every(function (c) { return passCut(it, c); });

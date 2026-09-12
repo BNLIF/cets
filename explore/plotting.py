@@ -222,11 +222,35 @@ def test_keys(instance: str, part_type_id: str, test_type_id: int) -> dict:
             "max_values": MAX_VALUES}
 
 
-def _pid_filtered(qs, pid_re: str | None):
-    """Push the page's PID filter into SQL: regex (case-insensitive), or a
+# #155: "00120..06000", "D00400300001-00120..06000", open ends ("00120..",
+# "..06000") — the digits are the PID's numeric suffix
+_RANGE = re.compile(r"^\s*(?:[A-Za-z]\d{11}-)?(\d*)\s*\.\.\s*(\d*)\s*$")
+
+
+def pid_range(text: str | None) -> tuple[str | None, str | None] | None:
+    """``(lo, hi)`` five-digit suffixes (either may be None for an open end)
+    when ``text`` is a PID range, else None. A lone ``..`` is not a range."""
+    m = _RANGE.match(text or "")
+    if not m or not (m.group(1) or m.group(2)):
+        return None
+    lo, hi = m.group(1), m.group(2)
+    return (lo.zfill(5) if lo else None, hi.zfill(5) if hi else None)
+
+
+def _pid_filtered(qs, pid_re: str | None, part_type_id: str | None = None):
+    """Push the page's PID filter into SQL: a range (#155) as a lexicographic
+    between on the fixed-width PID, else regex (case-insensitive), or a
     substring match when the pattern is not a valid regex — same fallback
     as the page."""
     if not pid_re:
+        return qs
+    rng = pid_range(pid_re)
+    if rng and part_type_id:
+        lo, hi = rng
+        if lo:
+            qs = qs.filter(part_id__gte=f"{part_type_id}-{lo}")
+        if hi:
+            qs = qs.filter(part_id__lte=f"{part_type_id}-{hi}")
         return qs
     try:
         re.compile(pid_re)
@@ -269,7 +293,8 @@ def test_values(instance: str, part_type_id: str, test_type_id: int, path: list,
     ``pid_re`` narrows to matching PIDs in SQL. Raises ``TooManyValues``
     when the matching rows' ``nv`` sum passes ``MAX_VALUES`` — checked with
     one aggregate before any row is read."""
-    qs = _pid_filtered(_values(instance, part_type_id, test_type_id).filter(path=path_key(path)), pid_re)
+    qs = _pid_filtered(_values(instance, part_type_id, test_type_id).filter(path=path_key(path)),
+                       pid_re, part_type_id)
     n = qs.aggregate(t=Sum("nv"))["t"] or 0
     if n > MAX_VALUES:
         raise TooManyValues(n)

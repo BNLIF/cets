@@ -314,6 +314,22 @@ class ValuesCapAndFilterTest(TestCase):
         v = self.client.get("/hw/dev/plot/T/tests/5/values/", {"key": json.dumps(["IV", "I"]), "pid": "0001"}).json()
         self.assertEqual(list(v["values"]), ["T-00001"])
 
+    def test_pid_range_syntax(self):
+        # #155: numeric-suffix ranges, full form, open ends; a lone ".." is not a range
+        self.assertEqual(plotting.pid_range("120..6000"), ("00120", "06000"))
+        self.assertEqual(plotting.pid_range(" D00400300001-00120 .. 06000 "), ("00120", "06000"))
+        self.assertEqual(plotting.pid_range("00120.."), ("00120", None))
+        self.assertEqual(plotting.pid_range("..06000"), (None, "06000"))
+        for bad in ("..", "a..b", "0001", "^T-00002$", "", None):
+            self.assertIsNone(plotting.pid_range(bad), bad)
+        get = lambda pid: list(self.client.get("/hw/dev/plot/T/tests/5/values/",
+                                               {"key": json.dumps(["IV", "I"]), "pid": pid}).json()["values"])
+        self.assertEqual(get("00002..00002"), ["T-00002"])
+        self.assertEqual(get("2..2"), ["T-00002"])
+        self.assertEqual(get("..00001"), ["T-00001"])
+        self.assertEqual(get("00001.."), ["T-00001", "T-00002"])
+        self.assertEqual(get("00003.."), [])
+
     def test_cap_returns_413_and_a_filter_gets_under_it(self):
         with mock.patch.object(plotting, "MAX_VALUES", 4):
             r = self.client.get("/hw/dev/plot/T/tests/5/values/", {"key": json.dumps(["IV", "I"])})
