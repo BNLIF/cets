@@ -179,7 +179,7 @@
         <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Test type</span>
           <input id="f-ttn" placeholder="test type the submission posts to (required)"></div>
         <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Instructions</span>
-          <input id="f-instr" placeholder="optional intro text shown under the title"></div>
+          <input id="f-instr" placeholder="optional intro text shown under the title — **bold**, *italic*"></div>
         <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Roles</span>
           <input id="f-roles" placeholder="HWDB role ids allowed to submit, comma-separated (blank = anyone)"></div>
         {# #103: HWDB's standard item fields — on by default, untick to drop from this checklist #}
@@ -214,7 +214,7 @@
 
     <div class="clc-preview-wrap">
       <div class="ec-card" style="background: var(--surface);">
-        <h2>Live preview — exactly what the fill-out page renders; click a field to find it in the editor</h2>
+        <h2 style="display:flex; align-items:center; gap:10px;">Live preview — exactly what the fill-out page renders; click a field to find it in the editor <span class="cl-scale"><button type="button" data-step="-0.1" title="Smaller text">A&minus;</button><button type="button" data-step="0.1" title="Larger text">A+</button><button type="button" data-set="1" title="Default text size">&#8634;</button></span></h2>
         <div id="clc-preview"><p class="es-hint">…</p></div>
       </div>
     </div>
@@ -292,12 +292,12 @@
       <input class="ff-options" placeholder="options, comma-separated">
     </div>
     <div class="ec-row g-steps" style="display:none;">
-      <span class="ec-hint" style="flex:1 1 100%;">One step per line. Tab / Shift+Tab indents the current line (2 spaces = 1 level).</span>
+      <span class="ec-hint" style="flex:1 1 100%;">One step per line. Tab / Shift+Tab indents the current line (2 spaces = 1 level). **bold**, *italic*.</span>
       <textarea class="ff-steps" rows="3" placeholder="one step per line" style="flex:1 1 100%;"></textarea>
       <label class="ec-check"><input type="checkbox" class="ff-reqall"> all steps required to submit</label>
     </div>
     <div class="ec-row g-static" style="display:none;">
-      <input class="ff-note" placeholder="note text">
+      <input class="ff-note" placeholder="note text — **bold**, *italic*">
       <input class="ff-url" placeholder="reference URL (e.g. EDMS drawing)">
       <input class="ff-image" placeholder="image URL (external)">
     </div>

@@ -1,11 +1,11 @@
 {% extends 'explore/base.html' %}
-{% load static %}
+{% load static checklist %}
 {% block title %}{{ schema.name }} · Checklist · {{ part_id }} · HWDB Explorer{% endblock %}
 
 {% block content %}
 <style>
   .es-page { padding: 22px 30px 56px; max-width: 1280px; }
-  .es-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .es-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; display: flex; align-items: center; flex-wrap: wrap; }
   .es-crumbs a { color: var(--accent-ink); text-decoration: none; }
   .es-crumbs a:hover { text-decoration: underline; }
   .es-crumbs .sep { color: var(--faint); margin: 0 7px; }
@@ -25,6 +25,7 @@
     <a href="{% url 'explore:home' %}">Explorer</a>
     <span class="sep">›</span><a href="{% url 'explore:part' part_id=part_id %}">{{ part_id }}</a>
     <span class="sep">›</span>{{ schema.name }}
+    <span class="cl-scale"><button type="button" data-step="-0.1" title="Smaller text">A&minus;</button><button type="button" data-step="0.1" title="Larger text">A+</button><button type="button" data-set="1" title="Default text size">&#8634;</button></span>
   </div>
 
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
@@ -35,7 +36,7 @@
     to HWDB as <span class="mono">{{ schema.test_type_name }}</span> test records; this page keeps no
     local state.{% if prefilled %} Pre-filled from the latest submission — edit and re-submit to
     supersede it.{% endif %}</p>
-  {% if schema.instructions %}<p class="es-sub">{{ schema.instructions }}</p>{% endif %}
+  {% if schema.instructions %}<p class="es-sub">{{ schema.instructions|clmd }}</p>{% endif %}
   {% if schema.roles %}<p class="es-sub">Submitting requires HWDB role id{{ schema.roles|pluralize }}
     <span class="mono">{{ schema.roles|join:", " }}</span>.</p>{% endif %}
 

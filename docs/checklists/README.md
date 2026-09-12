@@ -23,6 +23,14 @@ app's two scenes (Hajime, 2026-08-07) and are the format reference.
 }
 ```
 
+`instructions`, field labels, a `static` field's `note` and each `steps`
+line accept a markdown-lite subset (#148): `**bold**`, `*italic*` and line
+breaks. Any HTML stays escaped; stored keys (a field's label, a step's
+text) are the raw text, markers included. The fill page and the editor
+preview carry an A−/A+/↺ control (#147) that scales every checklist font
+together; the choice is remembered per device (browser storage) and
+ignored when printing.
+
 Order is the layout — fields render top to bottom; there are no coordinates.
 A `{"type": "row", "fields": [ … ]}` entry renders its children side by side
 (stacked on phones). Inside a row, `{"type": "column", "fields": [ … ]}`

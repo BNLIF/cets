@@ -1,7 +1,8 @@
 {# One checklist leaf field (#95) — dispatched on f.type, closed vocabulary. #}
+{% load checklist %}
 <div class="cl-field cl-{{ f.type }}" data-key="{{ f.key }}"{% if f.g %} style="grid-area: {{ f.g.r }} / {{ f.g.c }} / auto / span {{ f.g.s }};{% if f.g.a %} align-self: {{ f.g.a }};{% endif %}"{% endif %}>
 {% if f.type == "check" %}
-  <span class="cl-lab">{{ f.label }}</span>
+  <span class="cl-lab">{{ f.label|clmd }}</span>
   <div class="cl-tri" role="radiogroup" aria-label="{{ f.label }}">
     <label class="cl-tri-opt"><input type="radio" name="{{ f.key }}" value=""
       {% if not f.value %}checked{% endif %}><span>&mdash;</span></label>
@@ -11,12 +12,12 @@
       {% if f.value == "fail" %}checked{% endif %}><span>&#10007;</span></label>
   </div>
 {% elif f.type == "number" %}
-  <label class="cl-lab" for="{{ f.key }}">{{ f.label }}{% if f.units %} <span class="cl-units">({{ f.units }})</span>{% endif %}{% if f.range %} <span class="cl-hint">allowed {{ f.range }}</span>{% endif %}</label>
+  <label class="cl-lab" for="{{ f.key }}">{{ f.label|clmd }}{% if f.units %} <span class="cl-units">({{ f.units }})</span>{% endif %}{% if f.range %} <span class="cl-hint">allowed {{ f.range }}</span>{% endif %}</label>
   <input id="{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}" inputmode="decimal" autocomplete="off"
     {% if f.min != None %}data-min="{{ f.min|stringformat:"g" }}"{% endif %}
     {% if f.max != None %}data-max="{{ f.max|stringformat:"g" }}"{% endif %}>
 {% elif f.type == "table" %}
-  <span class="cl-lab">{{ f.label }}{% if f.units %} <span class="cl-units">({{ f.units }})</span>{% endif %}{% if f.range %} <span class="cl-hint">allowed {{ f.range }}</span>{% endif %}</span>
+  <span class="cl-lab">{{ f.label|clmd }}{% if f.units %} <span class="cl-units">({{ f.units }})</span>{% endif %}{% if f.range %} <span class="cl-hint">allowed {{ f.range }}</span>{% endif %}</span>
   <div class="tbl-scroll"><table class="cl-table{% if f.grid %} cl-gridlines{% endif %}{% if f.color and not f.trows %} cl-tint{% endif %}"{% if f.color and not f.trows %} style="--cl-tint: {{ f.color }};"{% endif %}>
     <thead><tr>{% if f.trows %}<th></th>{% endif %}{% for c in f.cells %}<th title="{% if c.formula %}= {{ c.formula }}{% endif %}{% if c.formula and c.range %} · {% endif %}{% if c.range %}allowed {{ c.range }}{% endif %}">{{ c.column }}{% if c.formula %} <span aria-hidden="true">&fnof;</span>{% endif %}{% if c.range %} <span class="cl-hint">{{ c.range }}</span>{% endif %}</th>{% endfor %}</tr></thead>
     <tbody>{% if f.trows %}{# #119: named rows, each with its own tint/constants #}
@@ -24,19 +25,19 @@
     {% endfor %}{% else %}<tr>{% for c in f.cells %}{% include "explore/_checklist_cell.html" %}{% endfor %}</tr>{% endif %}</tbody>
   </table></div>
 {% elif f.type == "textarea" %}
-  <label class="cl-lab" for="{{ f.key }}">{{ f.label }}</label>
+  <label class="cl-lab" for="{{ f.key }}">{{ f.label|clmd }}</label>
   <textarea id="{{ f.key }}" name="{{ f.key }}" rows="3">{{ f.value }}</textarea>
 {% elif f.type == "datetime" %}
-  <label class="cl-lab" for="{{ f.key }}">{{ f.label }}</label>
+  <label class="cl-lab" for="{{ f.key }}">{{ f.label|clmd }}</label>
   <input id="{{ f.key }}" type="datetime-local" name="{{ f.key }}" value="{{ f.value }}">
 {% elif f.type == "select" %}
-  <label class="cl-lab" for="{{ f.key }}">{{ f.label }}</label>
+  <label class="cl-lab" for="{{ f.key }}">{{ f.label|clmd }}</label>
   <select id="{{ f.key }}" name="{{ f.key }}">
     <option value="">&mdash;</option>
     {% for o in f.options %}<option{% if o == f.value %} selected{% endif %}>{{ o }}</option>{% endfor %}
   </select>
 {% elif f.type == "qr" or f.type == "link" %}
-  <label class="cl-lab" for="{{ f.key }}">{{ f.label }}{% if f.type == "link" %} <span class="cl-hint">links a sub-component{% if f.position %} into “{{ f.position }}”{% endif %}</span>{% endif %}{% if f.type_id %} <span class="cl-hint">type {{ f.type_id }}</span>{% endif %}</label>
+  <label class="cl-lab" for="{{ f.key }}">{{ f.label|clmd }}{% if f.type == "link" %} <span class="cl-hint">links a sub-component{% if f.position %} into “{{ f.position }}”{% endif %}</span>{% endif %}{% if f.type_id %} <span class="cl-hint">type {{ f.type_id }}</span>{% endif %}</label>
   {# a link field on an item's page links live like an imagemap slot: the container carries the state URL, its position is the slot #}
   <span class="{% if f.type == "link" and part_id %}cl-lnk{% endif %}"{% if f.type == "link" and part_id %} data-link-url="{% url 'explore:checklist_map' part_id=part_id %}"{% endif %} style="display:inline-flex; gap:8px; align-items:center; max-width:100%; flex-wrap:wrap;">
     <input id="{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}" autocomplete="off"
@@ -48,7 +49,7 @@
     <span class="cl-hint cl-lnk-in" data-for="{{ f.key }}"></span>{% endif %}
   </span>
 {% elif f.type == "photo" %}
-  <span class="cl-lab">{{ f.label }}</span>
+  <span class="cl-lab">{{ f.label|clmd }}</span>
   <span class="cl-photo">
     {% if f.existing %}<span class="cl-photo-cur">
       <img class="cl-photo-prev" alt="{{ f.existing.image_name }}" data-lightbox data-lb-src="{% url 'explore:shipment_image' image_id=f.existing.image_id %}?name={{ f.existing.image_name|urlencode }}&amp;inline=1" src="{% url 'explore:shipment_image' image_id=f.existing.image_id %}?thumb=1">
@@ -62,12 +63,12 @@
     <input class="cl-photo-note" name="{{ f.key }}-note" value="{{ f.existing.comment|default:'' }}" placeholder="comment" autocomplete="off" maxlength="500">
   </span>
 {% elif f.type == "steps" %}
-  <span class="cl-lab">{{ f.label }}{% if f.require_all %} <span class="cl-hint">all required</span>{% endif %}</span>
+  <span class="cl-lab">{{ f.label|clmd }}{% if f.require_all %} <span class="cl-hint">all required</span>{% endif %}</span>
   <ol class="cl-steps">
-    {% for it in f.items %}<li{% if it.level %} class="cl-step-l{{ it.level }}"{% endif %}><label><input type="checkbox" name="{{ it.name }}"{% if it.done %} checked{% endif %}{% if f.require_all %} required data-req{% endif %}> {{ it.label }}</label></li>{% endfor %}
+    {% for it in f.items %}<li{% if it.level %} class="cl-step-l{{ it.level }}"{% endif %}><label><input type="checkbox" name="{{ it.name }}"{% if it.done %} checked{% endif %}{% if f.require_all %} required data-req{% endif %}> {{ it.label|clmd }}</label></li>{% endfor %}
   </ol>
 {% elif f.type == "imagemap" %}
-  <span class="cl-lab">{{ f.label }}{% if f.type_id %} <span class="cl-hint">type {{ f.type_id }}</span>{% endif %}</span>
+  <span class="cl-lab">{{ f.label|clmd }}{% if f.type_id %} <span class="cl-hint">type {{ f.type_id }}</span>{% endif %}</span>
   {% if f.link and part_id %}<div class="cl-map-cols"><div>{% endif %}
   <div class="cl-map"{% if f.link and part_id %} data-link-url="{% url 'explore:checklist_map' part_id=part_id %}"{% endif %}>
     <img src="{% url 'explore:shipment_image' image_id=f.image_id %}" alt="{{ f.label }}">
@@ -94,19 +95,19 @@
     <div class="cl-map-err"></div></div></div>{% endif %}
 {% elif f.type == "static" %}
   {% if f.thumb is False %}{# #122: the label opens the figure, no thumbnail #}
-  <div><a class="cl-static-link" data-lightbox href="{% if f.image_id %}{% url 'explore:shipment_image' image_id=f.image_id %}{% else %}{{ f.image }}{% endif %}">&#128196; {{ f.label|default:'view drawing' }}</a></div>
+  <div><a class="cl-static-link" data-lightbox href="{% if f.image_id %}{% url 'explore:shipment_image' image_id=f.image_id %}{% else %}{{ f.image }}{% endif %}">&#128196; {{ f.label|default:'view drawing'|clmd }}</a></div>
   {% else %}
-  {% if f.label %}<span class="cl-lab">{{ f.label }}</span>{% endif %}
+  {% if f.label %}<span class="cl-lab">{{ f.label|clmd }}</span>{% endif %}
   {% if f.image_id %}<img class="cl-static-img" data-lightbox data-lb-src="{% url 'explore:shipment_image' image_id=f.image_id %}" src="{% url 'explore:shipment_image' image_id=f.image_id %}?thumb=1" alt="{{ f.label|default:'reference' }}">
   {% elif f.image %}<img class="cl-static-img" data-lightbox src="{{ f.image }}" alt="{{ f.label|default:'reference' }}">{% endif %}
   {% endif %}
-  {% if f.note %}<div class="cl-note">{{ f.note }}</div>{% endif %}
+  {% if f.note %}<div class="cl-note">{{ f.note|clmd }}</div>{% endif %}
   {% if f.url %}<div><a href="{{ f.url }}" target="_blank" rel="noopener">{{ f.url }} <span aria-hidden="true">&#x2197;</span></a></div>{% endif %}
   {% if f.checklist %}{# #118: jump to another checklist — this item's, or another type's chooser #}
   <div><a href="{% if f.checklist_type %}{% url 'explore:type_checklist' part_type_id=f.checklist_type name=f.checklist %}{% elif part_id %}{% url 'explore:checklist' part_id=part_id name=f.checklist %}{% else %}{% url 'explore:type_checklist' part_type_id=part_type_id name=f.checklist %}{% endif %}"
     target="_blank" rel="noopener">&#9745; {{ f.checklist }} <span aria-hidden="true">&#x2197;</span></a></div>{% endif %}
 {% else %}
-  <label class="cl-lab" for="{{ f.key }}">{{ f.label }}</label>
+  <label class="cl-lab" for="{{ f.key }}">{{ f.label|clmd }}</label>
   <input id="{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}" autocomplete="off">
 {% endif %}
 {% if f.to_spec %}<div class="cl-hint">&#8594; also saved to the item&#8217;s Specifications</div>{% endif %}

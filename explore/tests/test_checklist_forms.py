@@ -467,6 +467,50 @@ SCHEMA96 = {
 }
 
 
+class TextFormattingTest(TestCase):
+    """#147 font scale control, #148 markdown-lite in schema text."""
+    SCHEMA = {"name": "S", "test_type_name": "S",
+              "instructions": "Read **carefully**.\nThen start.",
+              "sections": [{"title": "T", "fields": [
+                  {"type": "static", "note": "*tilt* the board <b>now</b>"},
+                  {"type": "steps", "label": "P", "steps": ["Check **torque**", "Done"]},
+                  {"type": "number", "label": "Gap *min*", "units": "mm"}]}]}
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("t", "t@t.io", "pw"))
+
+    def _page(self):
+        m1, m2 = _mocked(_api(schema=self.SCHEMA))
+        with m1, m2:
+            return self.client.get(PAGE).content.decode()
+
+    def test_filter_bold_italic_breaks_and_escaping(self):
+        from explore.templatetags.checklist import clmd
+        self.assertEqual(clmd("a **b** *c*\nd <i>x</i> 2*3"),
+                         "a <strong>b</strong> <em>c</em><br>d &lt;i&gt;x&lt;/i&gt; 2*3")
+        self.assertEqual(clmd(None), "")
+
+    def test_instructions_notes_and_steps_render_markdown_lite(self):
+        html = self._page()
+        self.assertIn("Read <strong>carefully</strong>.<br>Then start.", html)
+        self.assertIn("<em>tilt</em> the board &lt;b&gt;now&lt;/b&gt;", html)
+        self.assertIn("Check <strong>torque</strong>", html)
+        self.assertIn(">Gap <em>min</em> <span class=\"cl-units\">", html)   # visible label
+        self.assertIn('for="f0-2"', html)                                     # key untouched
+
+    def test_step_keys_keep_the_raw_text(self):
+        s = checklistforms.normalize(self.SCHEMA, NAME)
+        data = checklistforms.parse(s, {"f0-1-s0": "on"})
+        self.assertEqual(data["T"]["P"], {"Check **torque**": True, "Done": False})
+
+    def test_font_scale_control_on_the_page(self):
+        html = self._page()
+        self.assertIn('class="cl-scale"', html)
+        self.assertIn('data-set="1"', html)
+        self.assertIn("var(--cl-scale, 1)", html)
+        self.assertIn('var KEY = "cl-scale"', html)
+
+
 class SpecAndLinkTest(TestCase):
     """#96 runtime: ``to_spec`` values fold into the item's specifications;
     ``link`` fields patch the item's subcomponents ahead of the record."""
