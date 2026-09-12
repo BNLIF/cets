@@ -199,6 +199,63 @@ class WalkAndValuesTest(TestCase):
         self.assertEqual(plotting.values_at(d, ["nope"]), [])
 
 
+class NestedValuesTest(TestCase):
+    """#154: value rows keep the list structure; one index per level can be pinned."""
+    # a SiPM-like record: runs (with a header entry) × SiPM entries (with a header) × sweep
+    REC = {"TR": [{"_meta": True},
+                  {"Loc": [{"_meta": True}, {"i": 1, "I": [1, 2]}, {"i": 2, "I": [3, 4]}], "T": "cold"},
+                  {"Loc": [{"i": 1, "I": [5, 6]}, {"i": 2, "I": [7, 8]}], "T": "warm"}],
+           "R": 5, "Ch": [1, 2, 3], "L": [{"b": 1}, {"b": [2, 3]}, {"c": 4}]}
+
+    def test_nested_flattens_to_values_at(self):
+        for p in plotting.flatten(self.REC):
+            self.assertEqual(plotting.leaves(plotting.nested(self.REC, list(p))),
+                             plotting.values_at(self.REC, list(p)), p)
+        self.assertEqual(plotting.nested(self.REC, ["TR", "Loc", "I"]), [[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
+        self.assertEqual(plotting.nested(self.REC, ["TR", "T"]), ["cold", "warm"])
+        self.assertEqual(plotting.nested(self.REC, ["R"]), 5)
+        self.assertEqual(plotting.nested(self.REC, ["L", "b"]), [1, [2, 3]])
+
+    def test_dims_labels_and_select(self):
+        v = plotting.nested(self.REC, ["TR", "Loc", "I"])
+        self.assertEqual(plotting.dims(v), [2, 2, 2])
+        self.assertEqual(plotting.dim_labels(self.REC, ["TR", "Loc", "I"]), ["TR", "Loc", "I"])
+        self.assertEqual(plotting.dims([5]), [1])
+        self.assertEqual(plotting.dims(plotting.nested(self.REC, ["L", "b"])), [2, 2])
+        self.assertEqual(plotting.select(v, [None, 1, None]), [3, 4, 7, 8])     # SiPM #2 of every run
+        self.assertEqual(plotting.select(v, [0, None, None]), [1, 2, 3, 4])     # first run
+        self.assertEqual(plotting.select(v, [None, None, 0]), [1, 3, 5, 7])     # first sweep point
+        self.assertEqual(plotting.select(v, [None, 5, None]), [])               # past the end
+        self.assertEqual(plotting.select(v, []), [1, 2, 3, 4, 5, 6, 7, 8])
+        self.assertEqual(plotting.select([1, 2, 3], [1]), [2])                  # a flat (pre-#154) row
+
+    def test_value_rows_keep_structure_and_count_leaves(self):
+        rows = {r.path: r for r in plotting.value_rows("dev", "T", "T-1", 5, self.REC)}
+        self.assertEqual(rows['["TR", "Loc", "I"]'].values, [[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
+        self.assertEqual(rows['["TR", "Loc", "I"]'].nv, 8)
+        self.assertEqual((rows['["R"]'].values, rows['["Ch"]'].values), ([5], [1, 2, 3]))
+
+    def test_keys_report_shape_and_values_take_idx(self):
+        self.client.force_login(get_user_model().objects.create_user("n", "n@n.io", "pw"))
+        _td("dev", "T", "T-00001", 5, "A", self.REC)
+        _td("dev", "T", "T-00002", 5, "A", {"TR": [{"Loc": [{"i": 1, "I": [9]}]}], "R": 6})
+        by = {tuple(x["path"]): x for x in self.client.get("/hw/dev/plot/T/tests/5/keys/").json()["keys"]}
+        self.assertEqual(by[("TR", "Loc", "I")]["dims"], [{"seg": "TR", "n": 2}, {"seg": "Loc", "n": 2}, {"seg": "I", "n": 2}])
+        self.assertNotIn("dims", by[("R",)])                                    # a scalar has no shape
+        url, key = "/hw/dev/plot/T/tests/5/values/", json.dumps(["TR", "Loc", "I"])
+        self.assertEqual(self.client.get(url, {"key": key}).json()["values"],
+                         {"T-00001": [1, 2, 3, 4, 5, 6, 7, 8], "T-00002": [9]})    # flat, as before
+        self.assertEqual(self.client.get(url, {"key": key, "idx": "[null, 1, null]"}).json()["values"],
+                         {"T-00001": [3, 4, 7, 8]})                              # T-00002 has no SiPM #2
+        self.assertEqual(self.client.get(url, {"key": key, "idx": "[0, 0, 0]", "pid": "00002..00002"}).json()["values"],
+                         {"T-00002": [9]})
+        self.assertEqual(self.client.get(url, {"key": key, "idx": "[-1]"}).status_code, 400)
+        with mock.patch.object(plotting, "MAX_VALUES", 3):
+            self.assertEqual(self.client.get(url, {"key": key}).status_code, 413)
+            self.assertEqual(self.client.get(url, {"key": key, "idx": "[null, 1, null]"}).status_code, 413)   # 4 > 3
+            self.assertEqual(self.client.get(url, {"key": key, "idx": "[0, 1, null]"}).status_code, 200)     # 2
+
+
 class TestDataMirrorTest(TestCase):
     def test_registry_sync_stores_latest_record_per_test_type(self):
         from django.conf import settings
@@ -269,7 +326,8 @@ class TestDataEndpointsTest(TestCase):
         k = self.client.get("/hw/dev/plot/T/tests/5/keys/").json()
         self.assertEqual(k["n_items"], 2)
         self.assertEqual(k["keys"], [{"path": ["Noise"], "n": 2, "nv": 2, "big": False},
-                                     {"path": ["Ch"], "n": 1, "nv": 3, "big": False}])   # 3/item is not an array key
+                                     {"path": ["Ch"], "n": 1, "nv": 3, "big": False,
+                                      "dims": [{"seg": "Ch", "n": 3}]}])   # 3/item is not an array key; #154 shape
         it = self.client.get("/hw/dev/plot/T/tests/5/items/").json()["items"]
         self.assertEqual([(i["pid"], i["status"], i["creator"], i["tested"]) for i in it],
                          [("T-1", "Ready", "hm", "2026-02-03"), ("T-2", "", "", "2026-02-03")])
@@ -277,6 +335,11 @@ class TestDataEndpointsTest(TestCase):
         self.assertEqual(v, {"values": {"T-1": [1, 2, 3]}})
         self.assertEqual(self.client.get("/hw/dev/plot/T/tests/5/values/", {"key": "nope"}).status_code, 400)
         self.assertEqual(self.client.get("/hw/plot/T/sources/").json(), {"tests": []})   # other instance
+
+    def test_page_has_the_index_pin_row(self):
+        html = self.client.get("/hw/dev/plot/T/").content.decode()
+        self.assertIn('id="idx-row"', html)
+        self.assertIn('id="xidx"', html)
 
     def test_page_carries_the_test_endpoints(self):
         html = self.client.get("/hw/dev/plot/T/").content.decode()

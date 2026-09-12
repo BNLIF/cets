@@ -162,6 +162,82 @@ def flatten(node, prefix: tuple = (), out: dict | None = None) -> dict:
     return out
 
 
+def nested(node, segs: list, i: int = 0):
+    """Leaf values under a path with the list structure kept (#154): a list
+    per list level holding only the elements that contribute, a scalar at
+    the leaf, None for nothing. ``leaves(nested(...))`` == ``values_at``."""
+    if isinstance(node, list):
+        out = []
+        for e in node:
+            r = nested(e, segs, i)
+            if r is not None and r != []:
+                out.append(r)
+        return out
+    if i == len(segs):
+        return None if node is None or isinstance(node, (dict, list)) else node
+    if isinstance(node, dict) and segs[i] in node:
+        return nested(node[segs[i]], segs, i + 1)
+    return None
+
+
+def leaves(v) -> list:
+    """Flatten a nested value."""
+    if not isinstance(v, list):
+        return [v]
+    out = []
+    for e in v:
+        out.extend(leaves(e))
+    return out
+
+
+def dims(v) -> list[int]:
+    """Max length per list level of a nested value — ``[6, 6, 1960]`` for a
+    per-run, per-SiPM sweep; ``[1]`` for a scalar; ``[]`` for a bare leaf."""
+    if not isinstance(v, list):
+        return []
+    sub: list[int] = []
+    for e in v:
+        for k, n in enumerate(dims(e)):
+            if k < len(sub):
+                sub[k] = max(sub[k], n)
+            else:
+                sub.append(n)
+    return [len(v)] + sub
+
+
+def dim_labels(node, segs: list) -> list[str]:
+    """The path segment at which each list level of ``nested(node, segs)``
+    occurs, following the first contributing branch."""
+    out, i = [], 0
+    while True:
+        if isinstance(node, list):
+            out.append(segs[i - 1] if i else "")
+            node = next((e for e in node if nested(e, segs, i) not in (None, [])), None)
+            if node is None:
+                return out
+            continue
+        if i == len(segs):
+            return out
+        if isinstance(node, dict) and segs[i] in node:
+            node, i = node[segs[i]], i + 1
+            continue
+        return out
+
+
+def select(v, idx: list, d: int = 0) -> list:
+    """Pin one index per list level (None = every element) and flatten the
+    rest; an index past a level's end contributes nothing."""
+    if not isinstance(v, list):
+        return [v]
+    i = idx[d] if d < len(idx) else None
+    if i is None:
+        out = []
+        for e in v:
+            out.extend(select(e, idx, d + 1))
+        return out
+    return select(v[i], idx, d + 1) if 0 <= i < len(v) else []
+
+
 def path_key(path) -> str:
     """The stored ``HwdbTestValue.path`` text for a path (list or tuple)."""
     return json.dumps([str(x) for x in path])
@@ -169,12 +245,20 @@ def path_key(path) -> str:
 
 def value_rows(instance: str, part_type_id: str, part_id: str, test_type_id: int,
                test_data: dict) -> list:
-    """``HwdbTestValue`` instances (unsaved) for one record."""
-    return [
-        HwdbTestValue(instance=instance, part_type_id=part_type_id, part_id=part_id,
-                      test_type_id=test_type_id, path=path_key(p), values=v, nv=len(v))
-        for p, v in flatten(test_data).items() if v
-    ]
+    """``HwdbTestValue`` instances (unsaved) for one record. ``values`` keeps
+    the list structure (#154) — a flat list for one-level data, so rows
+    written before look the same."""
+    rows = []
+    for p in flatten(test_data):
+        v = nested(test_data, list(p))
+        if v is None or v == []:
+            continue
+        if not isinstance(v, list):
+            v = [v]
+        rows.append(HwdbTestValue(instance=instance, part_type_id=part_type_id, part_id=part_id,
+                                  test_type_id=test_type_id, path=path_key(p), values=v,
+                                  nv=len(leaves(v))))
+    return rows
 
 
 def test_sources(instance: str, part_type_id: str) -> list[dict]:
@@ -218,6 +302,35 @@ def test_keys(instance: str, part_type_id: str, test_type_id: int) -> dict:
             .annotate(n=Count("id"), nv=Sum("nv")).order_by("-n", "path"))
     keys = [{"path": json.loads(r["path"]), "n": r["n"], "nv": r["nv"],
              "big": r["nv"] > BIG_PER_ITEM * r["n"]} for r in rows]
+    # #154: array keys' shapes — [{seg, n}] per list level, labelled by the
+    # path segment the list sits at — read off ONE sample item (the one with
+    # the largest row): two queries, not one per key. Keys the sample lacks
+    # (rare keys) report no shape.
+    vals = _values(instance, part_type_id, test_type_id)
+    pid = vals.order_by("-nv").values_list("part_id", flat=True).first()
+    if pid:
+        samples = {pid: dict(vals.filter(part_id=pid).values_list("path", "values"))}
+        records: dict = {}
+
+        def record(p):
+            if p not in records:
+                records[p] = (_records(instance, part_type_id, test_type_id).filter(part_id=p)
+                              .values_list("test_data", flat=True).first()) or {}
+            return records[p]
+
+        for k in keys:
+            pk, spid = path_key(k["path"]), pid
+            if pk not in samples[pid]:      # a key the sample item lacks: its own largest row
+                row = vals.filter(path=pk).order_by("-nv").values_list("part_id", "values").first()
+                if not row:
+                    continue
+                spid = row[0]
+                samples.setdefault(spid, {})[pk] = row[1]
+            d = dims(samples[spid][pk])
+            if max(d, default=0) <= 1:
+                continue
+            labels = dim_labels(record(spid), k["path"])
+            k["dims"] = [{"seg": labels[j] if j < len(labels) else "", "n": n} for j, n in enumerate(d)]
     return {"keys": keys, "n_items": _records(instance, part_type_id, test_type_id).count(),
             "max_values": MAX_VALUES}
 
@@ -288,14 +401,34 @@ def test_items(instance: str, part_type_id: str, test_type_id: int) -> list[dict
 
 
 def test_values(instance: str, part_type_id: str, test_type_id: int, path: list,
-                pid_re: str | None = None) -> dict:
+                pid_re: str | None = None, idx: list | None = None) -> dict:
     """``{pid: [leaf values]}`` for one key (items without it are omitted).
-    ``pid_re`` narrows to matching PIDs in SQL. Raises ``TooManyValues``
-    when the matching rows' ``nv`` sum passes ``MAX_VALUES`` — checked with
-    one aggregate before any row is read."""
+    ``pid_re`` narrows to matching PIDs in SQL; ``idx`` (#154) pins one
+    index per list level (None = all). Raises ``TooManyValues`` when the
+    matching rows' ``nv`` sum passes ``MAX_VALUES`` — checked with one
+    aggregate before any row is read; with ``idx`` the sum is scaled by the
+    pinned dimensions' sizes first, and the true count is checked as rows
+    are read."""
     qs = _pid_filtered(_values(instance, part_type_id, test_type_id).filter(path=path_key(path)),
                        pid_re, part_type_id)
     n = qs.aggregate(t=Sum("nv"))["t"] or 0
+    if idx and any(i is not None for i in idx):
+        sample = qs.order_by("-nv").values_list("values", flat=True).first()
+        est = float(n)
+        for d, size in enumerate(dims(sample) if sample is not None else []):
+            if d < len(idx) and idx[d] is not None and size > 1:
+                est /= size
+        if est > MAX_VALUES:
+            raise TooManyValues(int(est))
+        out, total = {}, 0
+        for pid, v in qs.values_list("part_id", "values").iterator():
+            sel = select(v, idx)
+            if sel:
+                out[pid] = sel
+                total += len(sel)
+                if total > MAX_VALUES:
+                    raise TooManyValues(total)
+        return out
     if n > MAX_VALUES:
         raise TooManyValues(n)
-    return dict(qs.values_list("part_id", "values"))
+    return {pid: leaves(v) for pid, v in qs.values_list("part_id", "values")}

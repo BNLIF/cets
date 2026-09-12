@@ -868,8 +868,9 @@ def explore_plot_test_items_view(request, part_type_id, test_type_id):
 @login_not_required
 @fnal_login_required
 def explore_plot_test_values_view(request, part_type_id, test_type_id):
-    """``?key=<JSON list of path segments>[&pid=<regex>]`` →
-    ``{"values": {pid: [...]}}``; 413 past ``plotting.MAX_VALUES``."""
+    """``?key=<JSON list of path segments>[&pid=<regex>][&idx=<JSON list>]``
+    → ``{"values": {pid: [...]}}``; ``idx`` pins one index per list level
+    of an array key (null = all, #154); 413 past ``plotting.MAX_VALUES``."""
     inst = instance_of(request)
     try:
         path = json.loads(request.GET.get("key") or "")
@@ -877,9 +878,17 @@ def explore_plot_test_values_view(request, part_type_id, test_type_id):
             raise ValueError
     except (ValueError, TypeError):
         return JsonResponse({"error": "key must be a non-empty JSON list"}, status=400)
+    idx = None
+    if request.GET.get("idx"):
+        try:
+            idx = json.loads(request.GET["idx"])
+            if not isinstance(idx, list) or not all(i is None or (isinstance(i, int) and i >= 0) for i in idx):
+                raise ValueError
+        except (ValueError, TypeError):
+            return JsonResponse({"error": "idx must be a JSON list of non-negative ints or nulls"}, status=400)
     try:
         values = plotting.test_values(inst, part_type_id, test_type_id, [str(x) for x in path],
-                                      pid_re=request.GET.get("pid") or None)
+                                      pid_re=request.GET.get("pid") or None, idx=idx)
     except plotting.TooManyValues as e:
         return JsonResponse({"error": str(e), "n": e.n}, status=413)
     return JsonResponse({"values": values})

@@ -15,6 +15,7 @@
   .pl-row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; font-size: 12.5px; color: var(--dim); }
   .pl-row + .pl-row { margin-top: 10px; }
   .pl-row label { display: inline-flex; align-items: center; gap: 5px; }
+  .pl-idx { display: inline-flex; align-items: center; gap: 8px; }   /* #154: index pins of an array key */
   .pl-page select, .pl-page input[type=text], .pl-page input[type=search], .pl-page input[type=number], .pl-page textarea { font: inherit; font-size: 12.5px; color: var(--ink);
     background: var(--paper, #fff); border: 1px solid var(--border, var(--rule)); border-radius: 6px; padding: 3px 6px; }
   .pl-page select { max-width: 320px; }
@@ -68,6 +69,10 @@
       <label id="mode2d-l" hidden><select id="mode2d"><option value="scatter">scatter · size = multiplicity</option><option value="heat">2D histogram</option></select></label>
       <label id="bins-l">Bins <input type="number" id="bins" min="2" max="500" value="40"></label>
       <label id="rare-l" hidden title="Keys present on fewer than 5% of items"><input type="checkbox" id="rare" checked> rare keys</label>
+    </div>
+    <div class="pl-row" id="idx-row" hidden title="Array key: pin one index per level (0-based); blank = every element">
+      <span class="pl-idx" id="xidx-l">X index <span id="xidx" class="pl-idx"></span></span>
+      <span class="pl-idx" id="yidx-l">Y index <span id="yidx" class="pl-idx"></span></span>
     </div>
     <div class="pl-row">
       <label>Item <input type="text" id="item" placeholder="one PID" style="width: 170px;" title="Exactly one item — the Items table below fills this"></label>
@@ -261,15 +266,122 @@
         if (node && typeof node === "object" && Object.prototype.hasOwnProperty.call(node, segs[i])) return valuesAt(node[segs[i]], segs, i + 1);
         return [];
     }
+    // #154: an array key's shape ([{seg, n}] per list level, test source only)
+    // and the per-axis index pins — one entry per level, null = every element.
+    // Pinned values live in their own cache slot (key@[…]).
+    var xi = [], yi = [], idxKeys = { x: null, y: null };
+    function keyDims(p) {
+        if (!p) return [];
+        if (!isTest()) return specKeyDims(p);
+        var k = testCache ? testCache.keys.find(function (x) { return JSON.stringify(x.path) === p; }) : null;
+        return k && k.dims ? k.dims : [];
+    }
+    function idxOf(p) {
+        var a = p && p === $("xkey").value ? xi : p && p === $("ykey").value ? yi : null;
+        return a && a.some(function (i) { return i !== null && i !== undefined; }) ? a.map(function (i) { return i === undefined ? null : i; }) : null;
+    }
+    function slotBase(p) { var ix = idxOf(p); return ix ? p + "@" + JSON.stringify(ix) : p; }
+    function idxScale(p) { var ix = idxOf(p), d = keyDims(p), s = 1; if (ix) ix.forEach(function (i, j) { if (i !== null && d[j] && d[j].n > 1) s *= d[j].n; }); return s; }
+    function idxNote() {
+        return ["x", "y"].map(function (ax) { var p = $(ax + "key").value, ix = idxOf(p); return ix ? " · " + showPath(p) + " [" + ix.map(function (i) { return i === null ? "·" : i; }).join(", ") + "]" : ""; }).join("");
+    }
+    function drawIdx() {
+        ["x", "y"].forEach(function (ax) {
+            var p = $(ax + "key").value, dims = keyDims(p), box = $(ax + "idx"), arr = ax === "x" ? xi : yi;
+            if (idxKeys[ax] !== p) {
+                idxKeys[ax] = p; arr.length = 0;
+                if (ax === "y") xi.forEach(function (v, j) { if (v !== null && dims[j] && dims[j].n > 1) arr[j] = v; });   // Y follows X
+            }
+            while (arr.length < dims.length) arr.push(null);
+            if (box.getAttribute("data-key") !== p) {       // rebuild only on a key change — typing keeps focus
+                box.setAttribute("data-key", p); box.textContent = "";
+                dims.forEach(function (d, j) {
+                    if (d.n <= 1) return;
+                    var lab = document.createElement("label"); lab.textContent = (d.seg || "level " + (j + 1)) + " ";
+                    var inp = document.createElement("input"); inp.type = "number"; inp.min = 0; inp.max = d.n - 1;
+                    inp.placeholder = "all"; inp.title = "0 – " + (d.n - 1); inp.style.width = "62px"; inp.setAttribute("data-level", j);
+                    inp.value = arr[j] === null || arr[j] === undefined ? "" : arr[j];
+                    inp.addEventListener("input", function () {
+                        var v = inp.value.trim(); arr[j] = v === "" ? null : Math.max(0, Math.floor(+v));
+                        if (ax === "x") {                       // Y follows X at the same level; Y stays editable
+                            var yd = keyDims($("ykey").value), yin = $("yidx").querySelector('input[data-level="' + j + '"]');
+                            if (yd[j] && yd[j].n > 1 && yin) { while (yi.length <= j) yi.push(null); yi[j] = arr[j]; yin.value = inp.value; }
+                        }
+                        changed();
+                    });
+                    lab.appendChild(inp); box.appendChild(lab);
+                });
+            }
+            $(ax + "idx-l").hidden = !box.children.length;
+        });
+        $("idx-row").hidden = $("xidx-l").hidden && $("yidx-l").hidden;
+    }
+    // [154-pure] The specs source keeps records in the browser, so the server's
+    // nested / dims / dim_labels / select (plotting.py) are mirrored here.
+    function nestedAt(node, segs, i) {
+        if (Array.isArray(node)) {
+            var out = [];
+            node.forEach(function (e) { var r = nestedAt(e, segs, i); if (r !== null && !(Array.isArray(r) && !r.length)) out.push(r); });
+            return out;
+        }
+        if (i === segs.length) return (node !== null && node !== undefined && typeof node !== "object") ? node : null;
+        if (node && typeof node === "object" && Object.prototype.hasOwnProperty.call(node, segs[i])) return nestedAt(node[segs[i]], segs, i + 1);
+        return null;
+    }
+    function dimsOf(v) {
+        if (!Array.isArray(v)) return [];
+        var sub = [];
+        v.forEach(function (e) { dimsOf(e).forEach(function (n, k) { sub[k] = Math.max(sub[k] || 0, n); }); });
+        return [v.length].concat(sub);
+    }
+    function dimLabels(node, segs) {
+        var out = [], i = 0;
+        for (;;) {
+            if (Array.isArray(node)) {
+                out.push(i ? segs[i - 1] : "");
+                var nxt = null;
+                for (var k = 0; k < node.length; k++) { var r = nestedAt(node[k], segs, i); if (r !== null && !(Array.isArray(r) && !r.length)) { nxt = node[k]; break; } }
+                if (nxt === null) return out;
+                node = nxt; continue;
+            }
+            if (i === segs.length) return out;
+            if (node && typeof node === "object" && Object.prototype.hasOwnProperty.call(node, segs[i])) { node = node[segs[i]]; i++; continue; }
+            return out;
+        }
+    }
+    function selectAt(v, idx, d) {
+        d = d || 0;
+        if (!Array.isArray(v)) return [v];
+        var i = d < idx.length ? idx[d] : null;
+        if (i === null || i === undefined) { var out = []; v.forEach(function (e) { out = out.concat(selectAt(e, idx, d + 1)); }); return out; }
+        return (i >= 0 && i < v.length) ? selectAt(v[i], idx, d + 1) : [];
+    }
+    // [/154-pure]
+    // Specs: a key's shape from up to 200 items holding it (reset with the dataset).
+    var specDims = {};
+    function specKeyDims(p) {
+        if (p in specDims) return specDims[p];
+        var segs = JSON.parse(p), d = [], labels = null, seen = 0;
+        for (var k = 0; k < items.length && seen < 200; k++) {
+            var v = nestedAt(items[k].data, segs, 0);
+            if (v === null || (Array.isArray(v) && !v.length)) continue;
+            seen++;
+            if (!labels) labels = dimLabels(items[k].data, segs);
+            dimsOf(v).forEach(function (n, j) { d[j] = Math.max(d[j] || 0, n); });
+        }
+        specDims[p] = Math.max.apply(null, d.concat([0])) > 1 ? d.map(function (n, j) { return { seg: (labels && labels[j]) || "", n: n }; }) : [];
+        return specDims[p];
+    }
     // The one accessor both sources share.
     function valuesFor(item, pathJSON) {
         if (!pathJSON) return [];
-        if (isTest()) return item.vals[pathJSON] || item.vals[pathJSON + "|" + pidFilter()] || [];
-        return valuesAt(item.data, JSON.parse(pathJSON), 0);
+        if (isTest()) { var b = slotBase(pathJSON); return item.vals[b] || item.vals[b + "|" + pidFilter()] || []; }
+        var v = nestedAt(item.data, JSON.parse(pathJSON), 0);
+        return v === null ? [] : selectAt(v, idxOf(pathJSON) || []);
     }
     // Test source: is this key loaded for the current PID filter? (a whole-type
     // fetch, stored under the bare key, serves any filter)
-    function haveKey(p) { return (p in testCache.values) || ((p + "|" + pidFilter()) in testCache.values); }
+    function haveKey(p) { var b = slotBase(p); return (b in testCache.values) || ((b + "|" + pidFilter()) in testCache.values); }
     function keyNV(p) { var k = testCache.keys.find(function (x) { return JSON.stringify(x.path) === p; }); return k ? (k.nv || k.n) : 0; }
     function toNum(v) {
         if (typeof v === "number") return isFinite(v) ? v : null;
@@ -285,7 +397,7 @@
         var pidf = pidFilter(), need = pathJSONs.filter(function (p) { return p && !haveKey(p); });
         if (!need.length) return true;
         var max = testCache.max_values || 2000000;
-        var big = need.filter(function (p) { return !pidf && keyNV(p) > max; });
+        var big = need.filter(function (p) { return !pidf && keyNV(p) / idxScale(p) > max; });
         if (big.length) {
             clear(showPath(big[0]) + " has " + keyNV(big[0]).toLocaleString() + " values across the type — pick an item below or set a PID filter (limit " + max.toLocaleString() + ")");
             return false;
@@ -293,10 +405,12 @@
         busy = true; $("stats").textContent = "loading " + need.map(showPath).join(", ") + "…";
         try {
             for (var i = 0; i < need.length; i++) {
-                var url = TESTS_BASE + "/" + source + "/values/?key=" + encodeURIComponent(need[i]) + (pidf ? "&pid=" + encodeURIComponent(pidf) : "");
+                var ix = idxOf(need[i]);
+                var url = TESTS_BASE + "/" + source + "/values/?key=" + encodeURIComponent(need[i]) + (pidf ? "&pid=" + encodeURIComponent(pidf) : "")
+                        + (ix ? "&idx=" + encodeURIComponent(JSON.stringify(ix)) : "");
                 var resp = await fetch(url), j = await resp.json();
                 if (!resp.ok) { clear(j.error || ("HTTP " + resp.status)); return false; }
-                var slot = pidf ? need[i] + "|" + pidf : need[i];
+                var slot = pidf ? slotBase(need[i]) + "|" + pidf : slotBase(need[i]);
                 testCache.values[slot] = j.values || {};
                 items.forEach(function (it) { if (j.values && j.values[it.pid]) it.vals[slot] = j.values[it.pid]; });
             }
@@ -404,7 +518,7 @@
             if (need.length) { if (!busy) ensureKeys(need).then(function (ok) { if (ok) render(); }); return; }
         }
         var sel = filtered(), stats = $("stats");
-        var head = sel.length + " / " + items.length + " items";
+        var head = sel.length + " / " + items.length + " items" + idxNote();
         $("mode2d-l").hidden = true; $("mode1d-l").hidden = true; $("logy-l").hidden = true;
         if (yp) {
             // Two keys: values paired by position within each item (the
@@ -552,7 +666,9 @@
         return paths.filter(function (p) { return show || !isRare(p) || keep.indexOf(p) >= 0; })
                     .map(function (p) {
                         var nv = isTest() ? keyNV(p) : pathCounts[p];
-                        return { value: p, text: showPath(p) + " (" + pathCounts[p] + (nv > pathCounts[p] ? " · " + nv.toLocaleString() + " values" : "") + ")" };
+                        var shape = keyDims(p).filter(function (d) { return d.n > 1; }).map(function (d) { return d.n.toLocaleString(); });
+                        return { value: p, text: showPath(p) + " (" + pathCounts[p] + (nv > pathCounts[p] ? " · " + nv.toLocaleString() + " values" : "") + ")"
+                                                + (shape.length ? " [" + shape.join(" × ") + "]" : "") };
                     });
     }
     function fillKeySelects(x, y) {
@@ -580,11 +696,12 @@
     function writeHash() {
         var f = {}; FACETS.forEach(function (k) { if ($("f-" + k).value) f[k] = $("f-" + k).value; });
         var cfg = { src: source, x: $("xkey").value, y: $("ykey").value, bins: +$("bins").value, pid: $("pidf").value, item: $("item").value.trim() || undefined, f: f,
+                    xi: idxOf($("xkey").value) || undefined, yi: idxOf($("ykey").value) || undefined,
                     cuts: cuts.filter(function (c) { return c.p; }), logic: $("logic").value, ov: $("ov").value, ovn: $("ovn").value,
                     rare: $("rare").checked ? undefined : false, m2: $("mode2d").value, m1: $("mode1d").value, logy: $("logy").checked || undefined };
         history.replaceState(null, "", "#" + encodeURIComponent(JSON.stringify(cfg)));
     }
-    function changed() { writeHash(); render(); drawItems(); }
+    function changed() { drawIdx(); writeHash(); render(); drawItems(); }
 
     // ---- Items table: pick one item to plot (its arrays), or browse ---------
     var ITEMS_PER = 25, itemsPage = 0;
@@ -622,7 +739,7 @@
 
     // Both sources land here: the item list + the key inventory → controls → plot.
     function setDataset(newItems, counts, statusText) {
-        items = newItems; pathCounts = counts;
+        items = newItems; pathCounts = counts; specDims = {};
         paths = Object.keys(counts).sort(function (a, b) { return (counts[b] - counts[a]) || (a < b ? -1 : 1); });
         $("data-status").textContent = statusText;
         var cfg = readHash(), acc = new Set(paths);
@@ -642,6 +759,11 @@
             fillSelect($("f-" + k), keys.map(function (v) { return { value: v, text: v + " (" + vals[v] + ")" }; }), false, "all");
             if (cfg.f && cfg.f[k] && vals[cfg.f[k]]) $("f-" + k).value = cfg.f[k];
         });
+        // #154: index pins from the hash belong to the keys it names
+        xi = Array.isArray(cfg.xi) ? cfg.xi.map(function (i) { return i === null ? null : +i; }) : []; idxKeys.x = $("xkey").value;
+        yi = Array.isArray(cfg.yi) ? cfg.yi.map(function (i) { return i === null ? null : +i; }) : []; idxKeys.y = $("ykey").value;
+        $("xidx").removeAttribute("data-key"); $("yidx").removeAttribute("data-key");
+        drawIdx();
         drawCuts();
         $("controls").hidden = false; $("plot-card").hidden = !paths.length; $("items-card").hidden = !items.length;
         itemsPage = 0; drawItems();
@@ -660,10 +782,10 @@
     async function loadTest(ttid) {
         var key = TYPE_KEY + "/test:" + ttid, rec = null;
         try { rec = await idbGet(key); } catch (e) { rec = null; }
-        if (!rec) {
+        if (!rec || rec.v !== 2) {          // v2 (#154): keys carry dims, value slots may carry index pins
             var base = TESTS_BASE + "/" + ttid;
             var kj = await (await fetch(base + "/keys/")).json(), ij = await (await fetch(base + "/items/")).json();
-            rec = { fetched_at: new Date().toISOString(), keys: kj.keys || [], items: ij.items || [], values: {}, max_values: kj.max_values };
+            rec = { v: 2, fetched_at: new Date().toISOString(), keys: kj.keys || [], items: ij.items || [], values: {}, max_values: kj.max_values };
             await idbPut(key, rec);
         }
         testCache = rec;
