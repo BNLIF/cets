@@ -17,6 +17,9 @@
     border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule)); }
   .es-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
     border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+  /* #152: offline — what needs the server is paused */
+  .cl-offline .cl-need-net, .cl-offline .cl-pick, .cl-offline .cl-map-lnk, .cl-offline .cl-map-unl {
+    pointer-events: none; opacity: .45; }
 </style>
 {% include "explore/_checklist_style.html" %}
 
@@ -28,6 +31,10 @@
     <span class="cl-scale"><button type="button" data-step="-0.1" title="Smaller text">A&minus;</button><button type="button" data-step="0.1" title="Larger text">A+</button><button type="button" data-set="1" title="Default text size">&#8634;</button></span>
   </div>
 
+  {# #152: shown while the browser is offline (the page itself came from the service worker's cache) #}
+  <div id="cl-offline" class="es-flash error" hidden>Offline — this is the page as last seen online. Keep
+    filling: everything stays on this device. Submit and Save draft need the connection; Pick, link and
+    lookups are paused.</div>
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
 
   {# the schema's display title and the checklist's (file)name can differ — show both so the link text that got you here is recognizable #}
@@ -72,11 +79,11 @@
     {% include "explore/_checklist_sections.html" %}
     {% if not no_test_type %}
     <div class="es-row" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-      <button class="es-btn">Submit to HWDB</button>
-      <button class="es-btn quiet" name="action" value="draft" formnovalidate title="Saves the values on the server for you (any device); nothing goes to HWDB — photos stay on this device until you submit">Save draft</button>
+      <button class="es-btn cl-need-net">Submit to HWDB</button>
+      <button class="es-btn quiet cl-need-net" name="action" value="draft" formnovalidate title="Saves the values on the server for you (any device); nothing goes to HWDB — photos stay on this device until you submit">Save draft</button>
       <button type="button" class="es-btn quiet" onclick="window.print()" title="print, or save as PDF from the print dialog — useful for procedure sheets">&#9113; Print</button>
-      {% if prefilled %}<a class="es-btn quiet" style="text-decoration:none;" href="?export=csv">Download CSV</a>
-      <a class="es-btn quiet" style="text-decoration:none;" href="{{ email_href }}" title="opens your mail client with the latest submission as text — attach the CSV yourself if the full data is needed">&#9993; Email</a>{% endif %}
+      {% if prefilled %}<a class="es-btn quiet cl-need-net" style="text-decoration:none;" href="?export=csv">Download CSV</a>
+      <a class="es-btn quiet cl-need-net" style="text-decoration:none;" href="{{ email_href }}" title="opens your mail client with the latest submission as text — attach the CSV yourself if the full data is needed">&#9993; Email</a>{% endif %}
       <span class="es-hint">Every submission is a new version — old ones are preserved.</span>
     </div>
     {% endif %}
@@ -128,19 +135,21 @@
   function resolveSerial(el, serial, tid) {
     fetch(el.getAttribute("data-serial-url") + "?serial=" + encodeURIComponent(serial), { credentials: "same-origin" })
       .then(function (r) { return r.ok ? r.json() : { pid: null }; })
-      .catch(function () { return { pid: null }; })
+      .catch(function () { return { pid: null, failed: true }; })   // no server reached (offline?)
       .then(function (d) {
         if (el.value.trim() !== serial) return;   // edited meanwhile
         var n = document.createElement("span");
         n.className = "cl-hint cl-serial";
         n.setAttribute("data-for", el.id);
         n.setAttribute("data-pid", d.pid || "");
-        n.textContent = d.pid ? serial + " \u2192 " + d.pid : "no item of type " + tid + " has serial " + serial;
+        n.textContent = d.pid ? serial + " \u2192 " + d.pid
+                      : d.failed ? "serial number lookup failed — offline? try again later"
+                      : "no item of type " + tid + " has serial " + serial;
         el.parentNode.appendChild(n);
         if (d.pid) {
           el.value = d.pid;
           el.dispatchEvent(new Event("input", { bubbles: true }));   // paints green; when-rules and link buttons follow
-        } else {
+        } else if (!d.failed) {
           el.classList.add("cl-bad");
         }
       });
@@ -150,9 +159,34 @@
   // confirm the real submit (not draft/discard) — after the browser's own
   // validation, naming the item so a wrong page is caught (Hajime, 2026-09-03)
   document.addEventListener("submit", function (e) {
+    if (document.documentElement.classList.contains("cl-offline")) { e.preventDefault(); return; }   // #152: submitting is online-only
     var b = e.submitter;
     if (b && b.classList.contains("es-btn") && !b.name && !confirm("Submit to HWDB for {{ part_id }}?")) e.preventDefault();
   });
+
+  // #152: visited fill pages come back offline through the service worker
+  // (sw.js); here the page says so and pauses what needs the server. "Offline"
+  // is decided by probing the server (a tiny no-store request for the worker
+  // script, which the worker never answers itself), not by navigator.onLine
+  // alone — a dead server on a live network counts too.
+  var SW_URL = "{% url 'explore:sw' %}", offT = null;
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register(SW_URL).catch(function () {});
+  }
+  function setOffline(off) {
+    document.documentElement.classList.toggle("cl-offline", off);
+    document.getElementById("cl-offline").hidden = !off;
+    clearTimeout(offT);
+    offT = setTimeout(probe, 30000);   // re-checked every half minute either way
+  }
+  function probe() {
+    if (!navigator.onLine) { setOffline(true); return; }
+    fetch(SW_URL, { method: "HEAD", cache: "no-store", credentials: "same-origin" })
+      .then(function (r) { setOffline(!r.ok); }, function () { setOffline(true); });
+  }
+  window.addEventListener("online", probe);
+  window.addEventListener("offline", function () { setOffline(true); });
+  probe();
 
   // #151: photos are cached on this device (IndexedDB holds a File across
   // reloads) and put back into their inputs on load — nothing reaches HWDB
@@ -229,37 +263,61 @@
       try { ls.removeItem(KEY); } catch (e) {}
       history.replaceState(null, "", location.pathname);
     }
-    var saved = null;
+    var muted = false;   // apply() fires input events; they must not re-save
+    function apply(v) {
+      muted = true;
+      Array.prototype.forEach.call(form.elements, function (el) {
+        if (!el.name || el.type === "file" || el.type === "hidden" || el.name === "csrfmiddlewaretoken") return;
+        var val = v[el.name];
+        if (el.type === "checkbox" || el.type === "radio") el.checked = val !== undefined && val === el.value;
+        else el.value = val === undefined ? "" : val;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      muted = false;
+    }
+    var saved = null, rendered = snapshot();
     try { saved = JSON.parse(ls.getItem(KEY) || "null"); } catch (e) {}
-    if (saved && saved.v && !same(saved.v, snapshot())) {
+    if (saved && saved.v && !same(saved.v, rendered)) {
+      // newer than anything the server holds → put it back at once (an
+      // ignored banner used to lose it on the next keystroke); older — the
+      // checklist was saved or submitted since — → only offered
+      var STATE_AT = {{ state_at }}, newer = !STATE_AT || saved.t > STATE_AT;
       var bar = document.createElement("div");
       bar.className = "es-flash success";
       bar.style.cssText = "display:flex; align-items:center; gap:12px; flex-wrap:wrap;";
-      var when = new Date(saved.t);
-      bar.innerHTML = '<span>Unsaved changes from ' + when.toLocaleString() + ' on this device.</span>'
-        + '<button type="button" class="es-btn" data-restore>Restore</button>'
-        + '<button type="button" class="es-btn quiet" data-drop>Discard</button>';
+      var when = new Date(saved.t).toLocaleString();
+      var restoredMsg = '<span>Restored unsaved changes from ' + when + ' on this device.</span>'
+          + '<button type="button" class="es-btn quiet" data-undo>Undo</button>';
+      bar.innerHTML = newer ? restoredMsg
+        : '<span>Unsaved changes from ' + when + ' on this device — older than what is loaded.</span>'
+          + '<button type="button" class="es-btn" data-restore>Restore</button>'
+          + '<button type="button" class="es-btn quiet" data-drop>Discard</button>';
       form.parentNode.insertBefore(bar, form);
+      if (newer) apply(saved.v);
       bar.addEventListener("click", function (e) {
+        if (e.target.hasAttribute("data-restore")) { apply(saved.v); bar.remove(); }
+        if (e.target.hasAttribute("data-undo")) {   // back to the page's own values; Redo stays offered
+          apply(rendered);
+          try { ls.removeItem(KEY); } catch (x) {}
+          bar.innerHTML = '<span>Undone — the page shows what the server holds.</span>'
+            + '<button type="button" class="es-btn quiet" data-redo>Redo</button>';
+        }
+        if (e.target.hasAttribute("data-redo")) {
+          apply(saved.v);
+          try { ls.setItem(KEY, JSON.stringify(saved)); } catch (x) {}
+          bar.innerHTML = restoredMsg;
+        }
         if (e.target.hasAttribute("data-drop")) {
           try { ls.removeItem(KEY); } catch (x) {}
           if (window.clDropPhotos) window.clDropPhotos();
           bar.remove();
         }
-        if (!e.target.hasAttribute("data-restore")) return;
-        Array.prototype.forEach.call(form.elements, function (el) {
-          if (!el.name || el.type === "file" || el.type === "hidden" || el.name === "csrfmiddlewaretoken") return;
-          var val = saved.v[el.name];
-          if (el.type === "checkbox" || el.type === "radio") el.checked = val !== undefined && val === el.value;
-          else el.value = val === undefined ? "" : val;
-          el.dispatchEvent(new Event("input", { bubbles: true }));
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-        });
-        bar.remove();
       });
     }
     var t = null;
     function save() {
+      if (muted) return;
       clearTimeout(t);
       t = setTimeout(function () {
         try { ls.setItem(KEY, JSON.stringify({ t: Date.now(), v: snapshot() })); } catch (e) {}

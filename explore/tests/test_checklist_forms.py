@@ -2790,7 +2790,48 @@ class PendingSubmitTest(TestCase):
         # escapejs writes the PID's hyphen as \u002D — the same string once the browser parses it
         self.assertIn(f'"cl-auto:dev:{PART.replace("-", "\\u002D")}:{NAME}:o"', html)
         self.assertIn('id="cl-form">', html)             # no clear flag on a plain visit
+        self.assertIn("var STATE_AT = 0,", html)          # nothing on the server yet → any copy restores
+        self.assertIn("if (newer) apply(saved.v);", html)
+        self.assertIn('data-redo>Redo</button>', html)     # an Undo can be undone
+        d = ChecklistDraft.objects.create(instance="dev", part_id=PART, name=NAME, username="o", data={})
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn(f"var STATE_AT = {int(d.updated_at.timestamp() * 1000)},", html)
         self.assertIn('id="cl-form" data-cl-clear="1"', cleared)
         with m1, m2:   # a discard also clears the browser copy
             r = self.client.post(PAGE, {"action": "discard_draft"})
         self.assertRedirects(r, PAGE + "?clear=1", fetch_redirect_response=False)
+
+
+class OfflineTest(TestCase):
+    """#152: the service worker script, its registration from the fill page
+    only, and the page's offline banner / paused controls."""
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("f", "f@f.io", "pw"))
+
+    def test_service_worker_script(self):
+        r = self.client.get("/hw/dev/sw.js")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r["Content-Type"], "application/javascript")
+        self.assertEqual(r["Cache-Control"], "no-cache")
+        js = r.content.decode()
+        self.assertIn('addEventListener("fetch"', js)
+        self.assertIn("/checklist\\/[^\\/]+\\/$/", js)          # only fill pages are cached
+        self.assertIn('req.mode === "navigate"', js)
+        self.assertIn("cl-offline-v2", js)
+        self.assertIn("var copy = res.clone();", js)   # cloned before the body is handed to the page
+
+    def test_fill_page_registers_it_and_carries_the_offline_banner(self):
+        m1, m2 = _mocked(_api())
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('var SW_URL = "/hw/dev/sw.js"', html)
+        self.assertIn("serviceWorker.register(SW_URL)", html)
+        self.assertIn('id="cl-offline" class="es-flash error" hidden', html)
+        self.assertIn('<button class="es-btn cl-need-net">Submit to HWDB</button>', html)
+        self.assertIn('if (document.documentElement.classList.contains("cl-offline")) { e.preventDefault(); return; }', html)
+        self.assertIn('fetch(SW_URL, { method: "HEAD", cache: "no-store"', html)   # server probe, not just onLine
+        # other pages leave the browser alone
+        other = self.client.get("/hw/dev/docs/").content.decode()
+        self.assertNotIn("serviceWorker", other)

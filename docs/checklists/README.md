@@ -288,10 +288,13 @@ which HWDB accepts once the type has it.
   the browser, per instance / item / checklist / user — values in local
   storage, picked photos in IndexedDB (no timer — nothing is written while
   idle). Reopening the page after a dropped connection, a closed tab or an
-  expired login puts cached photos back into their fields and offers the
-  values back (**Restore** / **Discard**) when they differ from what the
-  page shows; a successful submit or a discard drops both. A draft resumed
-  on another device has no photos — pick them again there.
+  expired login puts cached photos back into their fields and restores the
+  values when they differ from what the page shows — automatically, with
+  an **Undo** (and a **Redo** after it), when the copy is newer than the
+  last submission / server draft; offered (**Restore** / **Discard**) when it is older, i.e. the
+  checklist was saved or submitted since. A successful submit or a discard
+  drops both. A draft resumed on another device has no photos — pick them
+  again there.
 - **Pending submission** (#151): when HWDB or the FNAL token service is
   unreachable at submit (connection error, timeout, 5xx — not a refusal),
   the submission's values are kept server-side as a *pending* draft with
@@ -311,6 +314,22 @@ which HWDB accepts once the type has it.
   lines for the filled fields. The dashboard never sends mail itself, and
   `mailto:` can't attach files — so the body is cut at ~1.8 kB with a
   pointer to the CSV, which you attach yourself when the full data matters.
+
+## Offline (#152)
+
+A checklist page you have opened while online comes back when the network
+is gone: a service worker (registered by the fill page only, scoped to the
+Explorer's mount) keeps the last online copy of every fill page you visit
+and of the assets it loads — styles, scanner library, htmx, fonts,
+reference drawings and thumbnails through the image proxy. Reloading
+offline shows that copy with a red *Offline* banner; filling continues,
+with #151's autosave keeping values and photos on the device. What needs
+the server is paused until the connection returns: Submit and Save draft,
+Pick, live link/unlink, when-rule and serial-number lookups, CSV and
+Email. Submitting is online-only by design — there is no queued submit.
+A page never opened online shows the browser's own offline page; no other
+Explorer page is affected. The cached copy is a snapshot: its Item card
+and draft banner refresh on the next online load.
 
 ## For consortium users (quickstart)
 

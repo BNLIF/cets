@@ -4,6 +4,7 @@ import json
 import logging
 import re
 from datetime import datetime, timedelta
+from datetime import timezone as dt_timezone
 from urllib.parse import urlencode
 
 import requests
@@ -3095,6 +3096,24 @@ def _checklist_pending(request, inst, part_id, name, page_url, err):
     return redirect(page_url)
 
 
+def _checklist_state_at(rec, draft) -> int:
+    """#151: when what the page renders was last written — the newer of the
+    latest submission and the user's server draft — as epoch ms (0 when
+    neither exists). The browser autosave restores its copy automatically
+    only when the copy is newer than this; an older one is just offered."""
+    times = []
+    created = (rec or {}).get("created")
+    if created:
+        try:
+            dt = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+            times.append(dt if dt.tzinfo else dt.replace(tzinfo=dt_timezone.utc))
+        except ValueError:
+            pass
+    if draft:
+        times.append(draft.updated_at)
+    return int(max(times).timestamp() * 1000) if times else 0
+
+
 @login_not_required
 @fnal_login_required
 def explore_checklist_view(request, part_id, name):
@@ -3250,7 +3269,20 @@ def explore_checklist_view(request, part_id, name):
         "draft": draft,
         "no_test_type": not schema["test_type_name"],
         "clear_local": request.GET.get("clear") == "1",   # #151
+        "state_at": _checklist_state_at(rec, draft),
     })
+
+
+@login_not_required
+def explore_sw_view(request):
+    """#152: the checklist offline service worker. Registered from the fill
+    page only; scoped to this mount (``/hw/`` or ``/hw/dev/``), it serves
+    already-visited fill pages and the assets they load when the network
+    is gone and passes every other request straight through. Served
+    no-cache so a deploy's changes reach browsers on the next check."""
+    resp = render(request, "explore/sw.js", content_type="application/javascript")
+    resp["Cache-Control"] = "no-cache"
+    return resp
 
 
 @login_not_required

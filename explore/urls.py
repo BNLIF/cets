@@ -54,6 +54,7 @@ urlpatterns = [
          views.explore_checklist_names_view, name="checklist_names"),
     path("checklist-bookmark/", views.explore_checklist_bookmark_view,
          name="checklist_bookmark"),
+    path("sw.js", views.explore_sw_view, name="sw"),
     path("profile/", views.explore_profile_view, name="profile"),
     path("login/", views.login_view, name="login"),
     path("login/poll/", views.login_poll_view, name="login_poll"),
