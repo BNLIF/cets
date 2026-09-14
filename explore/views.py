@@ -1508,16 +1508,34 @@ def _after_subcomponent_write(api, instance, part_type_id, part_id, state: dict)
         _mirror_positions(instance, part_id, state)
 
 
+class _HwdbDown(str):
+    """#151: an error message from a write that failed because HWDB was
+    unreachable (connection error, timeout, 5xx) rather than refused —
+    the checklist submit keeps such a submission as a pending draft. A
+    plain ``str`` everywhere else."""
+
+
+def _mark(msg: str, cause) -> str:
+    """``msg`` as ``_HwdbDown`` when ``cause`` — an exception, or an
+    earlier error string being wrapped — says HWDB was down."""
+    status = getattr(getattr(cause, "response", None), "status_code", None)
+    down = (isinstance(cause, _HwdbDown)
+            or isinstance(cause, (requests.ConnectionError, requests.Timeout))
+            or (isinstance(status, int) and status >= 500))
+    return _HwdbDown(msg) if down else msg
+
+
 def _hwdb_error_detail(e) -> str:
     """The useful part of an HWDB write error: the JSON body's ``data``
     message when the response carries one (e.g. "The component '…' is
-    already in use"), else the exception text."""
+    already in use"), else the exception text. ``_HwdbDown`` when the
+    failure was an outage (#151)."""
     resp = getattr(e, "response", None)
     try:
         detail = (resp.json() or {}).get("data") if resp is not None else None
     except ValueError:
         detail = None
-    return str(detail) if detail else str(e)
+    return _mark(str(detail) if detail else str(e), e)
 
 
 def _spec_template(type_record: dict) -> dict:
@@ -2700,7 +2718,7 @@ def _checklist_photos(request, api, part_id, name, schema, prev_td, data) -> str
                     part_id, img, fname,
                     comments=note or f"Checklist “{schema['name']}”: {f['label']}")
             except requests.RequestException as e:
-                return f"HWDB rejected “{f['label']}” — {_hwdb_error_detail(e)}"
+                return _mark(f"HWDB rejected “{f['label']}” — {_hwdb_error_detail(e)}", e)
             if body.get("status") != "OK":
                 return f"HWDB rejected “{f['label']}” — {body.get('data') or body}"
             ref = {"image_id": str(body.get("image_id") or ""),
@@ -2937,7 +2955,7 @@ def _checklist_role_gate(api, schema) -> str | None:
                 (api.whoami().get("data") or {}).get("roles") or []
                 if isinstance(r, dict)}
     except Exception as e:
-        return f"couldn’t verify your HWDB roles — {e}"
+        return _mark(f"couldn’t verify your HWDB roles — {e}", e)
     if mine & set(schema["roles"]):
         return None
     return ("your HWDB account lacks the role required to submit this "
@@ -2983,7 +3001,8 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
                       item=None, opts=None) -> str | None:
     """The whole submit pipeline (#95/#96/#103): photos → subcomponent links
     → item PATCH + location (standard HWDB fields) → to_spec fold → test
-    record. Returns an error string or None."""
+    record. Returns an error string or None — a ``_HwdbDown`` string when
+    HWDB was unreachable (#151)."""
     missing = checklistforms.unchecked_required(schema, request.POST)   # #131
     if missing:
         return "every step must be checked first: " + ", ".join(f"“{m}”" for m in missing)
@@ -3005,7 +3024,7 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
                 if body.get("status") != "OK":
                     return f"item not updated — {body.get('data') or body}"
             except requests.RequestException as e:
-                return f"item not updated — {_hwdb_error_detail(e)}"
+                return _mark(f"item not updated — {_hwdb_error_detail(e)}", e)
         if iv["location"]:
             try:
                 arrived = datetime.fromisoformat(iv["arrived"]) if iv["arrived"] else timezone.localtime()
@@ -3018,7 +3037,7 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
                 if body.get("status") != "OK":
                     return f"location not updated — {body.get('data') or body}"
             except requests.RequestException as e:
-                return f"location not updated — {_hwdb_error_detail(e)}"
+                return _mark(f"location not updated — {_hwdb_error_detail(e)}", e)
             _remember_institution(request, instance_of(request), iv["location"]["id"])
         if iv["record"]:
             data["Item"] = iv["record"]
@@ -3027,11 +3046,11 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
     for req in checklistforms.link_requests(schema, data):
         lerr = _checklist_link(api, instance_of(request), part_id, req["pid"], req["position"])
         if lerr:
-            return f"“{req['label']}”: {req['pid']} not linked — {lerr}"
+            return _mark(f"“{req['label']}”: {req['pid']} not linked — {lerr}", lerr)
     for req in checklistforms.imagemap_link_requests(schema, data):   # #133
         lerr = _checklist_link_map(api, instance_of(request), part_id, req["slots"])
         if lerr:
-            return f"“{req['label']}”: not linked — {lerr}"
+            return _mark(f"“{req['label']}”: not linked — {lerr}", lerr)
     # to_spec values (#96) also fold into the item's specifications. A
     # checklist OWNS the DATA sections named after its sections — this
     # submission replaces them, and sections its previous submission wrote
@@ -3045,13 +3064,13 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
         serr = ((_ensure_spec_data(request, api, part_id.rsplit("-", 1)[0]) if sv else None)
                 or _patch_spec_data(api, part_id, sv, owned))
         if serr:
-            return f"item specifications not updated — {serr}"
+            return _mark(f"item specifications not updated — {serr}", serr)
     err = _ensure_test_type(
         api, part_id.rsplit("-", 1)[0], schema["test_type_name"],
         "Consortium checklist records (auto-created by HWDB Explorer)")
     if err:
-        return (f"couldn’t create the “{schema['test_type_name']}” "
-                f"test type — {err}")
+        return _mark(f"couldn’t create the “{schema['test_type_name']}” "
+                     f"test type — {err}", err)
     try:
         body = api.post_test(part_id, checklistforms.test_payload(
             schema, data,
@@ -3059,8 +3078,21 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
         if body.get("status") != "OK":
             return f"HWDB rejected the checklist — {body.get('data') or body}"
     except requests.RequestException as e:
-        return f"HWDB rejected the checklist — {_hwdb_error_detail(e)}"
+        return _mark(f"HWDB rejected the checklist — {_hwdb_error_detail(e)}", e)
     return None
+
+
+def _checklist_pending(request, inst, part_id, name, page_url, err):
+    """#151: HWDB (or FNAL) was down at submit — keep the submission as a
+    pending draft: the raw form values (the schema may not even have been
+    loadable) so the page re-fills for a Retry, and why it failed."""
+    ChecklistDraft.objects.update_or_create(
+        instance=inst, part_id=part_id, name=name, username=activity.actor_of(request),
+        defaults={"data": {}, "pending_error": str(err)[:500],
+                  "pending_post": request.POST.dict()})
+    messages.error(request, f"HWDB not reachable — {err}. Your submission is kept "
+                            "here as a pending draft: press Retry submit once HWDB is back.")
+    return redirect(page_url)
 
 
 @login_not_required
@@ -3082,12 +3114,16 @@ def explore_checklist_view(request, part_id, name):
         link = reverse("hwdb:link")
         return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
     except FnalUnavailable:
+        if request.method == "POST" and (request.POST.get("action") or "submit") == "submit":
+            return _checklist_pending(request, inst, part_id, name, page_url, FNAL_UNAVAILABLE)   # #151
         messages.error(request, FNAL_UNAVAILABLE)
         return redirect(_rev(request, "explore:part", args=[part_id]))
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
     ptid = part_id.rsplit("-", 1)[0]
     schema, msg = checklistforms.load(api, ptid, name)
     if schema is None:
+        if request.method == "POST" and (request.POST.get("action") or "submit") == "submit":
+            return _checklist_pending(request, inst, part_id, name, page_url, msg)   # #151
         raise Http404(msg)
     # This checklist's latest submission on the item pre-fills the form and
     # keeps photo references alive across re-submissions.
@@ -3102,6 +3138,14 @@ def explore_checklist_view(request, part_id, name):
     # #103: the Item card's prefill + option lists (only what the schema asks for)
     item = _checklist_item(api, part_id, schema)
     item_opts = _checklist_item_opts(api, ptid, schema)
+    if draft and draft.pending_post:
+        # #151: a pending draft's prefill IS the failed submission, parsed
+        # now that the schema is at hand (in memory; Retry submits the form)
+        draft.data = checklistforms.parse(schema, draft.pending_post,
+                                          lambda tid, sn: _serial_to_pid(api, inst, tid, sn))
+        iv = checklistforms.item_values(schema, draft.pending_post, item, item_opts)
+        if iv and iv["record"]:
+            draft.data["Item"] = iv["record"]
 
     # what the form showed: draft values win; untouched sections (photo
     # references!) survive — the base both draft-save and submit keep
@@ -3114,29 +3158,27 @@ def explore_checklist_view(request, part_id, name):
     if request.method == "POST":
         action = request.POST.get("action") or "submit"
         if action == "draft":
-            # #97: server-side draft — parsed DATA, nothing to HWDB except
-            # photos (#127 follow-up): files can't be drafted, so they post to
-            # the item now and the draft keeps their references like a
-            # previous submission would.
+            # #97: server-side draft — parsed DATA, nothing to HWDB. Photos
+            # are NOT uploaded here (#151, reversing #127: an upload is
+            # permanent, a draft isn't) — the browser keeps a picked file on
+            # the device until Submit; previous photo references survive
+            # through the revive merge.
             ddata = checklistforms.parse(schema, request.POST,
                                          lambda tid, sn: _serial_to_pid(api, inst, tid, sn))
             iv = checklistforms.item_values(schema, request.POST, item, item_opts)
             if iv and iv["record"]:
                 ddata["Item"] = iv["record"]
-            err = _checklist_photos(request, api, part_id, name, schema, display_td, ddata)
             ChecklistDraft.objects.update_or_create(
                 instance=inst, part_id=part_id, name=name, username=actor,
-                defaults={"data": ddata})
-            if err:
-                messages.error(request, f"Draft saved, but {err}")
-            else:
-                messages.success(request, "Draft saved — only photos went to HWDB.")
+                defaults={"data": ddata, "pending_post": None, "pending_error": ""})
+            messages.success(request, "Draft saved on the server for you — resume from any "
+                                      "device. Photos stay on this device until you submit.")
             return redirect(page_url)
         if action == "discard_draft":
             if draft:
                 draft.delete()
             messages.success(request, "Draft discarded.")
-            return redirect(page_url)
+            return redirect(page_url + "?clear=1")   # the browser copy goes too (#151)
         if not schema["test_type_name"]:
             messages.error(request, "This checklist schema names no "
                                     "test_type_name — fix the schema JSON.")
@@ -3145,6 +3187,8 @@ def explore_checklist_view(request, part_id, name):
         if err is None:
             err = _checklist_submit(request, api, part_id, name, schema,
                                     display_td, item=item, opts=item_opts)
+        if isinstance(err, _HwdbDown):   # #151: keep it, don't lose it
+            return _checklist_pending(request, inst, part_id, name, page_url, err)
         if err:
             messages.error(request, err)
         else:
@@ -3167,6 +3211,7 @@ def explore_checklist_view(request, part_id, name):
             messages.success(
                 request, f"Checklist “{schema['name']}” submitted — every "
                          f"submission is a new version, old ones are preserved.")
+            return redirect(page_url + "?clear=1")   # drops the browser autosave copy (#151)
         return redirect(page_url)
 
     if request.GET.get("export") == "csv":
@@ -3204,6 +3249,7 @@ def explore_checklist_view(request, part_id, name):
         "email_href": email_href,
         "draft": draft,
         "no_test_type": not schema["test_type_name"],
+        "clear_local": request.GET.get("clear") == "1",   # #151
     })
 
 

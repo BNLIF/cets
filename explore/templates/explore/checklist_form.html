@@ -45,24 +45,35 @@
     so it cannot be submitted — fix the schema JSON on the component type.</div>
   {% endif %}
 
-  {% if draft %}
+  {% if draft and draft.pending_post %}{# #151: a submission HWDB could not take #}
+  <div class="es-flash error" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+    <span>Submission from {{ draft.updated_at|date:"Y-m-d H:i" }} did not reach HWDB
+      ({{ draft.pending_error }}). Its values are loaded below, photos too if this device
+      still has them. Retry submits the form below.</span>
+    {# the Retry button submits the main form (form=) — the same values, edited or not #}
+    <form method="post" style="margin:0; display:flex; gap:8px;">{% csrf_token %}
+      <button class="es-btn" form="cl-form">Retry submit</button>
+      <button class="es-btn quiet" name="action" value="discard_draft">Discard</button>
+    </form>
+  </div>
+  {% elif draft %}
   <div class="es-flash success" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-    <span>Draft from {{ draft.updated_at|date:"Y-m-d H:i" }} loaded below — it lives on this server
-      only until you submit.</span>
+    <span>Draft from {{ draft.updated_at|date:"Y-m-d H:i" }} loaded below — saved on the server for
+      you, open it from any device. Photos stay on the device they were taken on until you submit.</span>
     <form method="post" style="margin:0;">{% csrf_token %}
       <button class="es-btn quiet" name="action" value="discard_draft">Discard draft</button>
     </form>
   </div>
   {% endif %}
 
-  <form method="post" enctype="multipart/form-data">
+  <form method="post" enctype="multipart/form-data" id="cl-form"{% if clear_local %} data-cl-clear="1"{% endif %}>
     {% csrf_token %}
     {% include "explore/_checklist_item_card.html" %}
     {% include "explore/_checklist_sections.html" %}
     {% if not no_test_type %}
     <div class="es-row" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
       <button class="es-btn">Submit to HWDB</button>
-      <button class="es-btn quiet" name="action" value="draft" formnovalidate>Save draft</button>
+      <button class="es-btn quiet" name="action" value="draft" formnovalidate title="Saves the values on the server for you (any device); nothing goes to HWDB — photos stay on this device until you submit">Save draft</button>
       <button type="button" class="es-btn quiet" onclick="window.print()" title="print, or save as PDF from the print dialog — useful for procedure sheets">&#9113; Print</button>
       {% if prefilled %}<a class="es-btn quiet" style="text-decoration:none;" href="?export=csv">Download CSV</a>
       <a class="es-btn quiet" style="text-decoration:none;" href="{{ email_href }}" title="opens your mail client with the latest submission as text — attach the CSV yourself if the full data is needed">&#9993; Email</a>{% endif %}
@@ -142,6 +153,121 @@
     var b = e.submitter;
     if (b && b.classList.contains("es-btn") && !b.name && !confirm("Submit to HWDB for {{ part_id }}?")) e.preventDefault();
   });
+
+  // #151: photos are cached on this device (IndexedDB holds a File across
+  // reloads) and put back into their inputs on load — nothing reaches HWDB
+  // before Submit. Same key as the autosave below; cleared with it.
+  (function () {
+    var form = document.getElementById("cl-form");
+    if (!form || !window.indexedDB) return;
+    var KEY = "cl-auto:{{ hwdb_instance|escapejs }}:{{ part_id|escapejs }}:{{ cl_name|escapejs }}:{{ user.get_username|escapejs }}";
+    function db() {
+      return new Promise(function (res, rej) {
+        var r = indexedDB.open("cl-photos", 1);
+        r.onupgradeneeded = function () { r.result.createObjectStore("files"); };
+        r.onsuccess = function () { res(r.result); };
+        r.onerror = function () { rej(r.error); };
+      });
+    }
+    function op(mode, fn) {
+      return db().then(function (d) {
+        return new Promise(function (res, rej) {
+          var tx = d.transaction("files", mode), req = fn(tx.objectStore("files"));
+          tx.oncomplete = function () { res(req && req.result); };
+          tx.onerror = function () { rej(tx.error); };
+        });
+      }).catch(function () {});
+    }
+    var inputs = Array.prototype.filter.call(form.elements, function (el) { return el.type === "file" && el.name; });
+    function drop() { inputs.forEach(function (el) { op("readwrite", function (st) { return st.delete(KEY + ":" + el.name); }); }); }
+    window.clDropPhotos = drop;
+    if (form.hasAttribute("data-cl-clear")) { drop(); return; }
+    function note(el, text) {
+      var n = document.createElement("span"); n.className = "cl-hint"; n.textContent = text;
+      el.parentNode.appendChild(n);
+    }
+    inputs.forEach(function (el) {
+      op("readonly", function (st) { return st.get(KEY + ":" + el.name); }).then(function (f) {
+        if (!f) return;
+        try { var dt = new DataTransfer(); dt.items.add(f); el.files = dt.files; }
+        catch (e) { note(el, "“" + f.name + "” is cached on this device but this browser can’t restore it — pick it again"); return; }
+        el.dispatchEvent(new Event("change", { bubbles: true }));   // preview follows
+        note(el, "restored from this device");
+      });
+    });
+    form.addEventListener("change", function (e) {
+      var el = e.target;
+      if (el.type !== "file" || !el.name) return;
+      var f = el.files && el.files[0];
+      op("readwrite", function (st) { return f ? st.put(f, KEY + ":" + el.name) : st.delete(KEY + ":" + el.name); });
+    });
+  })();
+
+  // #151: browser autosave — the form's values go to localStorage on every
+  // change (no timer, nothing written while idle), keyed per instance /
+  // item / checklist / user. On load, a copy that differs from what the page
+  // shows is offered back; a successful submit or a discard drops it.
+  (function () {
+    var form = document.getElementById("cl-form");
+    var KEY = "cl-auto:{{ hwdb_instance|escapejs }}:{{ part_id|escapejs }}:{{ cl_name|escapejs }}:{{ user.get_username|escapejs }}";
+    function store() { try { return window.localStorage; } catch (e) { return null; } }
+    var ls = store();
+    if (!form || !ls) return;
+    function snapshot() {
+      var v = {};
+      new FormData(form).forEach(function (val, k) {
+        if (typeof val === "string" && k !== "csrfmiddlewaretoken" && k !== "action") v[k] = val;
+      });
+      return v;
+    }
+    function same(a, b) {
+      var ka = Object.keys(a).sort(), kb = Object.keys(b).sort();
+      if (ka.join("\u0000") !== kb.join("\u0000")) return false;
+      return ka.every(function (k) { return a[k] === b[k]; });
+    }
+    if (form.hasAttribute("data-cl-clear")) {
+      try { ls.removeItem(KEY); } catch (e) {}
+      history.replaceState(null, "", location.pathname);
+    }
+    var saved = null;
+    try { saved = JSON.parse(ls.getItem(KEY) || "null"); } catch (e) {}
+    if (saved && saved.v && !same(saved.v, snapshot())) {
+      var bar = document.createElement("div");
+      bar.className = "es-flash success";
+      bar.style.cssText = "display:flex; align-items:center; gap:12px; flex-wrap:wrap;";
+      var when = new Date(saved.t);
+      bar.innerHTML = '<span>Unsaved changes from ' + when.toLocaleString() + ' on this device.</span>'
+        + '<button type="button" class="es-btn" data-restore>Restore</button>'
+        + '<button type="button" class="es-btn quiet" data-drop>Discard</button>';
+      form.parentNode.insertBefore(bar, form);
+      bar.addEventListener("click", function (e) {
+        if (e.target.hasAttribute("data-drop")) {
+          try { ls.removeItem(KEY); } catch (x) {}
+          if (window.clDropPhotos) window.clDropPhotos();
+          bar.remove();
+        }
+        if (!e.target.hasAttribute("data-restore")) return;
+        Array.prototype.forEach.call(form.elements, function (el) {
+          if (!el.name || el.type === "file" || el.type === "hidden" || el.name === "csrfmiddlewaretoken") return;
+          var val = saved.v[el.name];
+          if (el.type === "checkbox" || el.type === "radio") el.checked = val !== undefined && val === el.value;
+          else el.value = val === undefined ? "" : val;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        bar.remove();
+      });
+    }
+    var t = null;
+    function save() {
+      clearTimeout(t);
+      t = setTimeout(function () {
+        try { ls.setItem(KEY, JSON.stringify({ t: Date.now(), v: snapshot() })); } catch (e) {}
+      }, 800);
+    }
+    form.addEventListener("input", save);
+    form.addEventListener("change", save);
+  })();
 
   // (QR/barcode scanning into PID fields lives in _checklist_scan.html)
 

@@ -277,13 +277,28 @@ which HWDB accepts once the type has it.
 ## Drafts, exports (#97)
 
 - **Save draft** stores the parsed values server-side per (item, checklist,
-  user) — start on the shop floor, finish at a desk. Only photos go to
-  HWDB (they post to the item at draft time; the draft keeps the
-  references and submit reuses them unless a new file is picked — HWDB is
-  append-only, so a retaken photo leaves the first one on the item). The
-  draft pre-fills the
-  next visit (winning over the last submission) and is deleted the moment a
-  submission lands. **Discard draft** drops it.
+  user) — start on the shop floor, finish at a desk, from any device.
+  Nothing goes to HWDB (#151, reversing #127): a picked photo stays on the
+  device it was taken on (see autosave below) until Submit, since an HWDB
+  upload is permanent — append-only, a retaken photo leaves the first one
+  on the item. The draft pre-fills the next visit (winning over the last
+  submission) and is deleted the moment a submission lands. **Discard
+  draft** drops it.
+- **Browser autosave** (#151): every change to the form is also kept in
+  the browser, per instance / item / checklist / user — values in local
+  storage, picked photos in IndexedDB (no timer — nothing is written while
+  idle). Reopening the page after a dropped connection, a closed tab or an
+  expired login puts cached photos back into their fields and offers the
+  values back (**Restore** / **Discard**) when they differ from what the
+  page shows; a successful submit or a discard drops both. A draft resumed
+  on another device has no photos — pick them again there.
+- **Pending submission** (#151): when HWDB or the FNAL token service is
+  unreachable at submit (connection error, timeout, 5xx — not a refusal),
+  the submission's values are kept server-side as a *pending* draft with
+  the error. The page re-fills from them and shows a red banner with
+  **Retry submit** (submits the form below, edited or not, with this
+  device's cached photos) and **Discard**. A plain Save draft turns it
+  back into an ordinary draft.
 - **Download CSV** exports the latest submission as section/field/value
   rows (the iPad's "send via email" payload); photos flatten to their HWDB
   image name/id.

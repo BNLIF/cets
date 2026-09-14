@@ -9,10 +9,12 @@ from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+import requests
 from django.test import TestCase, override_settings
 
 from explore import checklistforms
 from explore.models import ChecklistDraft, HwdbComponentEvent, InstitutionPref
+from hwdb.fnal.bearer import FnalUnavailable
 
 PART = "Z00100300041-00150"
 PTID = "Z00100300041"
@@ -873,27 +875,23 @@ class DraftAndExportTest(TestCase):
         self.assertEqual(d.data["Identification"]["PCB Batch PID"], "PCB0001")
         self.assertEqual(d.data["Measurements"]["Dim 1"], 1709.5)
 
-    def test_save_draft_posts_photos_and_keeps_their_references(self):
+    def test_save_draft_uploads_no_photo(self):
+        """#151 (reversing #127): an HWDB upload is permanent, a draft isn't —
+        the picked file stays on the device (the page caches it) until Submit."""
         api = _api()
         m1, m2 = _mocked(api)
         with m1, m2:
-            self.client.post(PAGE, {"action": "draft", "f0-0": "PCB0001",
-                                    "f2-2": SimpleUploadedFile(
-                                        "shot.png", PNG, content_type="image/png")})
+            r = self.client.post(PAGE, {"action": "draft", "f0-0": "PCB0001",
+                                        "f2-2": SimpleUploadedFile(
+                                            "shot.png", PNG, content_type="image/png")}, follow=True)
         api.post_test.assert_not_called()
-        img_name = api.post_component_image.call_args.args[2]
-        d = ChecklistDraft.objects.get()
-        self.assertEqual(d.data["Visual Inspection"]["Photo 1"],
-                         {"image_id": "img-77", "image_name": img_name})
-        # a later submit without a new file reuses the drafted photo
-        api.post_component_image.reset_mock()
-        api.get_test_types.return_value = {"data": [
-            {"name": "ES"}, {"name": "PCB Segments Interface"}]}
-        with m1, m2:
-            self.client.post(PAGE, {"f0-0": "PCB0001"})
         api.post_component_image.assert_not_called()
-        data = api.post_test.call_args.args[1]["test_data"]["DATA"]
-        self.assertEqual(data["Visual Inspection"]["Photo 1"]["image_id"], "img-77")
+        d = ChecklistDraft.objects.get()
+        self.assertNotIn("Photo 1", d.data.get("Visual Inspection", {}))   # no photo reference drafted
+        html = r.content.decode()
+        self.assertIn("Photos stay on this device until you submit.", html)
+        self.assertIn("open it from any device", html)   # the draft banner says where it lives
+        self.assertIn('"cl-photos"', html)               # the device photo cache
 
     def test_draft_prefills_and_wins_over_the_last_submission(self):
         api = _api(prev={"DATA": {
@@ -2704,3 +2702,95 @@ class PidPickTest(TestCase):
         self.assertEqual(d["rows"][1]["part_type_id"], "D08100100003")
         self.assertEqual(d["parented"], 1)                                        # -00002 sits inside an item
         self.assertEqual(self._pids()[1]["parented"], 0)
+
+
+class PendingSubmitTest(TestCase):
+    """#151 (Hajime, offline request): a submission HWDB could not take is
+    kept as a pending draft with a manual Retry; the page also carries the
+    browser-autosave key and the clear flag after a successful submit."""
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("o", "o@o.io", "pw"))
+
+    def test_outage_at_submit_keeps_a_pending_draft_and_retry_submits_it(self):
+        api = _api()
+        api.post_test.side_effect = requests.ConnectionError("HWDB down")
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            r = self.client.post(PAGE, {"f0-0": "PCB0001", "f1-0-0": "1709.5"}, follow=True)
+            html = r.content.decode()
+        self.assertIn("HWDB not reachable", html)
+        self.assertIn("Retry submit", html)
+        self.assertIn('value="PCB0001"', html)              # the failed values prefill the form
+        d = ChecklistDraft.objects.get()
+        self.assertEqual(d.pending_post["f0-0"], "PCB0001")
+        self.assertIn("HWDB down", d.pending_error)
+        self.assertIn('<button class="es-btn" form="cl-form">Retry submit</button>', html)
+        # HWDB is back: Retry submits the re-filled form
+        api.post_test.side_effect = None
+        with m1, m2:
+            r = self.client.post(PAGE, {"f0-0": "PCB0001", "f1-0-0": "1709.5"})
+        self.assertRedirects(r, PAGE + "?clear=1", fetch_redirect_response=False)
+        data = api.post_test.call_args.args[1]["test_data"]["DATA"]
+        self.assertEqual(data["Identification"]["PCB Batch PID"], "PCB0001")
+        self.assertEqual(data["Measurements"]["Dim 1"], 1709.5)
+        self.assertFalse(ChecklistDraft.objects.exists())
+
+    def test_a_refusal_is_not_pending(self):
+        api = _api()
+        api.post_test.side_effect = requests.HTTPError(
+            response=mock.Mock(status_code=400, json=lambda: {"data": "bad value"}))
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.post(PAGE, {"f0-0": "PCB0001"}, follow=True).content.decode()
+        self.assertIn("HWDB rejected the checklist — bad value", html)
+        self.assertNotIn("Retry submit", html)
+        self.assertFalse(ChecklistDraft.objects.exists())
+        # a 5xx IS an outage
+        api.post_test.side_effect = requests.HTTPError(
+            response=mock.Mock(status_code=503, json=lambda: {}))
+        with m1, m2:
+            self.client.post(PAGE, {"f0-0": "PCB0001"})
+        self.assertIsNotNone(ChecklistDraft.objects.get().pending_post)
+
+    def test_fnal_unavailable_at_submit_keeps_the_raw_values(self):
+        api = _api()
+        m2 = mock.patch("explore.views.FnalDbApiClient", return_value=api)
+        with mock.patch("explore.views.mint_for", side_effect=FnalUnavailable("vault")), m2:
+            r = self.client.post(PAGE, {"f0-0": "PCB0002"})
+        self.assertRedirects(r, PAGE, fetch_redirect_response=False)
+        d = ChecklistDraft.objects.get()
+        self.assertEqual(d.pending_post["f0-0"], "PCB0002")
+        api.post_test.assert_not_called()
+        m1, m2 = _mocked(api)                                # FNAL back: the values prefill
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('value="PCB0002"', html)
+        self.assertIn("Retry submit", html)
+        # a GET while FNAL is down still just bounces to the part page
+        with mock.patch("explore.views.mint_for", side_effect=FnalUnavailable("vault")):
+            self.assertEqual(self.client.get(PAGE).status_code, 302)
+
+    def test_save_draft_turns_a_pending_draft_back_into_an_ordinary_one(self):
+        ChecklistDraft.objects.create(instance="dev", part_id=PART, name=NAME, username="o",
+                                      pending_post={"f0-0": "X"}, pending_error="down")
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"action": "draft", "f0-0": "PCB0003"})
+        d = ChecklistDraft.objects.get()
+        self.assertIsNone(d.pending_post)
+        self.assertEqual(d.data["Identification"]["PCB Batch PID"], "PCB0003")
+
+    def test_page_carries_the_autosave_key_and_the_clear_flag(self):
+        m1, m2 = _mocked(_api())
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+            cleared = self.client.get(PAGE + "?clear=1").content.decode()
+        # escapejs writes the PID's hyphen as \u002D — the same string once the browser parses it
+        self.assertIn(f'"cl-auto:dev:{PART.replace("-", "\\u002D")}:{NAME}:o"', html)
+        self.assertIn('id="cl-form">', html)             # no clear flag on a plain visit
+        self.assertIn('id="cl-form" data-cl-clear="1"', cleared)
+        with m1, m2:   # a discard also clears the browser copy
+            r = self.client.post(PAGE, {"action": "discard_draft"})
+        self.assertRedirects(r, PAGE + "?clear=1", fetch_redirect_response=False)

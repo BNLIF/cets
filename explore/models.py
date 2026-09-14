@@ -470,14 +470,19 @@ class ChecklistDraft(InstanceScoped):
     everything permanent, this table only in-progress state. Photos are NOT
     drafted (files can't be); previous photo references survive via the
     revive merge. ``username`` is the FNAL credkey (``activity.actor_of``).
-    Photos picked when a draft is saved DO post to the item right away
-    (HWDB is the only place a file can live); the draft keeps their
-    references and submit reuses them unless a new file is picked."""
+    A photo picked before Save draft stays on the user's device (the fill
+    page caches it in IndexedDB, #151) — nothing reaches HWDB before
+    Submit, since an upload there is permanent."""
 
     part_id = models.CharField(max_length=50, db_index=True)
     name = models.CharField(max_length=120)
     username = models.CharField(max_length=150, db_index=True)
     data = models.JSONField(default=dict, blank=True)
+    # #151: a submission HWDB (or FNAL) could not take — the RAW form values
+    # (the schema may not even have been loadable when it failed), which
+    # re-fill the page for a Retry, and why. NULL = an ordinary draft.
+    pending_post = models.JSONField(null=True, blank=True)
+    pending_error = models.CharField(max_length=500, blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
