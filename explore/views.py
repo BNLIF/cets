@@ -2959,7 +2959,9 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
     missing = checklistforms.unchecked_required(schema, request.POST)   # #131
     if missing:
         return "every step must be checked first: " + ", ".join(f"“{m}”" for m in missing)
-    data = checklistforms.parse(schema, request.POST)
+    inst = instance_of(request)
+    data = checklistforms.parse(schema, request.POST,   # #149: serial → PID
+                                lambda tid, sn: _serial_to_pid(api, inst, tid, sn))
     err = _checklist_photos(request, api, part_id, name, schema, prev_td, data)
     if err:
         return err
@@ -3088,7 +3090,8 @@ def explore_checklist_view(request, part_id, name):
             # photos (#127 follow-up): files can't be drafted, so they post to
             # the item now and the draft keeps their references like a
             # previous submission would.
-            ddata = checklistforms.parse(schema, request.POST)
+            ddata = checklistforms.parse(schema, request.POST,
+                                         lambda tid, sn: _serial_to_pid(api, inst, tid, sn))
             iv = checklistforms.item_values(schema, request.POST, item, item_opts)
             if iv and iv["record"]:
                 ddata["Item"] = iv["record"]
@@ -3326,6 +3329,50 @@ def explore_lookup_view(request, part_id):
     if isinstance(node, (dict, list)):
         node = json.dumps(node, ensure_ascii=False)
     return JsonResponse({"value": None if node is None else str(node)})
+
+
+def _mirror_serial(inst, type_id: str, serial: str) -> str | None:
+    return (HwdbComponentEvent.for_instance(inst)
+            .filter(part_type_id=type_id, serial_number=serial)
+            .values_list("part_id", flat=True).first())
+
+
+def _hwdb_serial(api, type_id: str, serial: str) -> str | None:
+    try:
+        row = api.find_component_by_serial(type_id, serial)
+    except requests.RequestException as e:
+        logger.info("serial lookup %s/%s failed: %s", type_id, serial, e)
+        return None
+    pid = (row or {}).get("part_id")
+    return pid if isinstance(pid, str) and pid else None
+
+
+def _serial_to_pid(api, inst, type_id: str, serial: str) -> str | None:
+    """#149: the PID of the item of ``type_id`` whose serial number is
+    ``serial`` (a SiPM strip ID is stored as the item's serial number) —
+    the mirror first, then HWDB's per-type serial filter, one call. None
+    when neither knows it."""
+    return _mirror_serial(inst, type_id, serial) or _hwdb_serial(api, type_id, serial)
+
+
+@login_not_required
+def explore_serial_view(request, part_type_id):
+    """#149: ``?serial=`` → ``{"pid": "<PID>"}`` for the item of this type
+    with that serial number, ``{"pid": null}`` when none has it. The fill
+    page asks when a non-PID lands in a type-guarded box (typed, barcoded
+    or Scan Text) and swaps the PID in. A mirror hit costs no HWDB call
+    (and no bearer)."""
+    serial = (request.GET.get("serial") or "").strip()
+    inst = instance_of(request)
+    pid = _mirror_serial(inst, part_type_id, serial) if serial else None
+    if serial and pid is None:
+        try:
+            bearer = mint_for(request)
+        except (FnalLinkRequired, FnalUnavailable):
+            return JsonResponse({"pid": None}, status=401)
+        api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+        pid = _hwdb_serial(api, part_type_id, serial)
+    return JsonResponse({"pid": pid})
 
 
 def _walk(node, segs):

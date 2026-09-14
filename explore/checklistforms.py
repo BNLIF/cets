@@ -255,6 +255,18 @@ def _norm_field(f: dict) -> dict | None:
         tid = str(f.get("type_id") or "").strip().upper()
         if re.fullmatch(r"[A-Z]\d{11}", tid):
             out["type_id"] = tid
+            # #149: ``sn`` — a regex a value must match in full to be looked
+            # up as the serial number of an item of that type (and swapped
+            # for its PID); anything else is a plain type mismatch. Nothing
+            # is resolved without it. Meaningless without a type; a pattern
+            # that doesn't compile is dropped.
+            sn = str(f.get("sn") or "").strip()
+            if sn:
+                try:
+                    re.compile(sn)
+                    out["sn"] = sn
+                except re.error:
+                    pass
     if t == "imagemap":
         # #113 (Top CRP): a background drawing with tappable slots — tap a
         # slot to scan the board mounted there. Slots are percent coordinates
@@ -767,11 +779,27 @@ def _parse_table_row(f: dict, post, prefix: str, texts: dict):
     return cells
 
 
-def parse(schema: dict, post) -> dict:
+def _guarded(tid: str | None, raw: str, resolve, sn: str | None = None):
+    """#112/#149: the value a type-guarded box keeps. A PID of the required
+    type (or any value with no guard) stands; a value matching the field's
+    ``sn`` pattern in full is a serial number the view's
+    ``resolve(type_id, serial)`` turns into the PID of the item of that
+    type carrying it; anything else — a PID of another type, a string the
+    pattern doesn't cover, an unknown serial — is dropped (None)."""
+    if not tid or raw.upper().startswith(tid + "-"):
+        return raw
+    if resolve is None or not sn or not re.fullmatch(sn, raw):
+        return None
+    return resolve(tid, raw)
+
+
+def parse(schema: dict, post, resolve=None) -> dict:
     """The submitted form as the test record's ``DATA``
     (``{section: {label: value}}``). Blank inputs are omitted; an untouched
     tri-state check is omitted too (blank = "not inspected", the iPad
-    convention). Photos are merged in by the view after uploading."""
+    convention). Photos are merged in by the view after uploading.
+    ``resolve`` (#149) maps a serial number typed into a type-guarded box
+    to its PID — see ``_guarded``."""
     data = {}
     for title, f in leaf_fields(schema):
         t, key = f["type"], f["key"]
@@ -815,9 +843,9 @@ def parse(schema: dict, post) -> dict:
             vals = {}
             for i, s in enumerate(f["slots"]):
                 raw = (post.get(f"{key}-m{i}") or "").strip()
-                if not raw or (tid and not raw.upper().startswith(tid + "-")):
-                    continue
-                vals[s["label"]] = raw
+                raw = _guarded(tid, raw, resolve, f.get("sn")) if raw else None
+                if raw:
+                    vals[s["label"]] = raw
             if not vals:
                 continue
             value = vals
@@ -826,11 +854,11 @@ def parse(schema: dict, post) -> dict:
             if not raw:
                 continue
             # #112: a type-guarded qr/link box drops a wrong-type PID —
-            # the server backstop behind the scan modal's refusal.
-            tid = f.get("type_id")
-            if tid and not raw.upper().startswith(tid + "-"):
+            # the server backstop behind the scan modal's refusal (#149:
+            # and resolves a serial number to its PID).
+            value = _guarded(f.get("type_id"), raw, resolve, f.get("sn"))
+            if value is None:
                 continue
-            value = raw
         data.setdefault(title, {})[f["label"]] = value
     return data
 

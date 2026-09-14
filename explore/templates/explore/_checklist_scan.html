@@ -77,9 +77,12 @@
         if (target) {
           var pid = extractPid(text);
           // #112: a type-guarded box refuses a wrong-type code — the modal
-          // stays open and keeps scanning (the callback fires per frame)
-          var tid = target.getAttribute("data-type-id");
-          if (tid && pid.toUpperCase().indexOf(tid + "-") !== 0) {
+          // stays open and keeps scanning (the callback fires per frame).
+          // #149: a code matching the box's serial-number pattern goes
+          // through — the fill page resolves it to the PID within the type.
+          var tid = target.getAttribute("data-type-id"), sn = target.getAttribute("data-sn"), isSn = false;
+          try { isSn = !!sn && new RegExp("^(?:" + sn + ")$").test(pid); } catch (e) {}
+          if (tid && pid.toUpperCase().indexOf(tid + "-") !== 0 && !isSn) {
             status.textContent = "Scanned " + pid + " — expected type " + tid + ".";
             return;
           }

@@ -321,6 +321,8 @@
     <div class="ec-row g-pid" style="display:none;">
       <input class="ff-typeid" placeholder="required Type ID (blank = any)" style="flex:0 0 220px;"
         title="e.g. D00300100002 — a scan of any other type won&#8217;t fill this box">
+      <input class="ff-sn" placeholder="serial-number pattern (regex, blank = PIDs only)"
+        title="e.g. HPK\d{5} — a scanned or typed value matching it in full is looked up as the serial number of an item of the Type ID and swapped for its PID">
     </div>
     <div class="ec-row g-grid" style="display:none;">
       <label class="ec-inline" title="start column (auto = next free slot)">col
@@ -456,6 +458,7 @@
     }
     $(".ff-grid", r).checked = f.grid !== false;                         // #139: on by default
     $(".ff-typeid", r).value = f.type_id || "";
+    $(".ff-sn", r).value = f.sn || "";                                 // #149
     $(".ff-gcol", r).value = f.col ? String(f.col) : "auto";           // #120
     $(".ff-gspan", r).value = f.span ? String(f.span) : "1";
     $(".ff-gnl", r).checked = !!f.newline;
@@ -1083,8 +1086,9 @@
       if (pos) f.position = pos;
     }
     if (t === "qr" || t === "link" || t === "imagemap") {
-      var tid = $(".ff-typeid", r).value.trim().toUpperCase();
+      var tid = $(".ff-typeid", r).value.trim().toUpperCase(), sn = $(".ff-sn", r).value.trim();
       if (tid) f.type_id = tid;
+      if (tid && sn) f.sn = sn;   // #149
     }
     if (t === "imagemap") {
       var mid = $(".ff-imageid", r).value.trim();

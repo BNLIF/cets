@@ -94,12 +94,45 @@
   });
   document.querySelectorAll("input[data-min], input[data-max]").forEach(paint);
 
-  // #112: type-guarded PID boxes — red when the value isn't of the required type
+  // #112: type-guarded PID boxes — red when the value isn't of the required
+  // type. #149: a value matching the field's serial-number pattern (typed,
+  // barcoded, Scan Text) is resolved within the type (mirror, then HWDB)
+  // and swapped for the PID, the serial noted beside the box; unknown = red.
+  var serialT = {};
+  function snMatch(el, v) {
+    var sn = el.getAttribute("data-sn");
+    try { return !!sn && new RegExp("^(?:" + sn + ")$").test(v); } catch (e) { return false; }
+  }
+  function serialNote(el) { return el.parentNode.querySelector('.cl-serial[data-for="' + el.id + '"]'); }
   function paintPid(el) {
     el.classList.remove("cl-bad", "cl-ok");
-    var v = el.value.trim().toUpperCase();
+    var v = el.value.trim().toUpperCase(), tid = el.getAttribute("data-type-id"), n = serialNote(el);
+    clearTimeout(serialT[el.id]);
+    if (n && n.getAttribute("data-pid") !== v) n.remove();   // the "serial → PID" note follows its PID
     if (!v) return;
-    el.classList.add(v.indexOf(el.getAttribute("data-type-id") + "-") === 0 ? "cl-ok" : "cl-bad");
+    if (v.indexOf(tid + "-") === 0) { el.classList.add("cl-ok"); return; }
+    if (!snMatch(el, el.value.trim())) { el.classList.add("cl-bad"); return; }
+    serialT[el.id] = setTimeout(function () { resolveSerial(el, el.value.trim(), tid); }, 500);
+  }
+  function resolveSerial(el, serial, tid) {
+    fetch(el.getAttribute("data-serial-url") + "?serial=" + encodeURIComponent(serial), { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : { pid: null }; })
+      .catch(function () { return { pid: null }; })
+      .then(function (d) {
+        if (el.value.trim() !== serial) return;   // edited meanwhile
+        var n = document.createElement("span");
+        n.className = "cl-hint cl-serial";
+        n.setAttribute("data-for", el.id);
+        n.setAttribute("data-pid", d.pid || "");
+        n.textContent = d.pid ? serial + " \u2192 " + d.pid : "no item of type " + tid + " has serial " + serial;
+        el.parentNode.appendChild(n);
+        if (d.pid) {
+          el.value = d.pid;
+          el.dispatchEvent(new Event("input", { bubbles: true }));   // paints green; when-rules and link buttons follow
+        } else {
+          el.classList.add("cl-bad");
+        }
+      });
   }
   document.querySelectorAll("input[data-type-id]").forEach(paintPid);
 

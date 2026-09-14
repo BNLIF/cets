@@ -1565,6 +1565,106 @@ class TypeGuardTest(TestCase):
         self.assertIn("expected type", html)   # the scan modal's refusal
 
 
+
+class SerialResolveTest(TestCase):
+    """#149 (Hajime, Anselmo's PDS checklist): a serial number typed or
+    barcoded into a type-guarded box resolves to the PID of the item of
+    that type carrying it — mirror first, then one HWDB call."""
+    TID = "Z00100300029"
+
+    def _schema(self, **field):
+        return checklistforms.normalize(
+            {"name": "t", "test_type_name": "T",
+             "sections": [{"title": "S", "fields": [field]}]}, "t")
+
+    def test_normalize_keeps_sn_only_with_a_type_and_a_valid_regex(self):
+        f = self._schema(type="qr", label="S", type_id=self.TID, sn=r"HPK\d{5}")["sections"][0]["fields"][0]
+        self.assertEqual(f["sn"], r"HPK\d{5}")
+        for bad in ({"type_id": self.TID, "sn": "HPK("}, {"type_id": self.TID, "sn": ""}, {"sn": r"HPK\d{5}"}):
+            self.assertNotIn("sn", self._schema(type="qr", label="S", **bad)["sections"][0]["fields"][0], bad)
+
+    def test_parse_resolves_a_serial_and_drops_an_unknown_one(self):
+        schema = self._schema(type="link", label="Strip", type_id=self.TID, sn=r"HPK\d{5}")
+        key = schema["sections"][0]["fields"][0]["key"]
+        known = {("Z00100300029", "HPK19877"): "Z00100300029-05316"}
+        calls = []
+        def resolve(tid, sn):
+            calls.append((tid, sn)); return known.get((tid, sn))
+        self.assertEqual(checklistforms.parse(schema, {key: "HPK19877"}, resolve),
+                         {"S": {"Strip": "Z00100300029-05316"}})
+        self.assertEqual(checklistforms.parse(schema, {key: "HPK00000"}, resolve), {})
+        # a right-type PID, a wrong-type PID and a string outside the
+        # pattern never hit the resolver (the last two are dropped)
+        checklistforms.parse(schema, {key: "Z00100300029-00001"}, resolve)
+        self.assertEqual(checklistforms.parse(schema, {key: "D00300100002-00001"}, resolve), {})
+        self.assertEqual(checklistforms.parse(schema, {key: "ABC19877"}, resolve), {})
+        self.assertEqual(checklistforms.parse(schema, {key: "xHPK19877"}, resolve), {})   # full match only
+        self.assertEqual(calls, [(self.TID, "HPK19877"), (self.TID, "HPK00000")])
+        # without ``sn`` nothing is looked up
+        nosn = self._schema(type="link", label="Strip", type_id=self.TID)
+        self.assertEqual(checklistforms.parse(nosn, {key: "HPK19877"}, resolve), {})
+        self.assertEqual(len(calls), 2)
+        # without a resolver (or a type) parse behaves as before
+        self.assertEqual(checklistforms.parse(schema, {key: "HPK19877"}), {})
+        plain = self._schema(type="qr", label="Any")
+        self.assertEqual(checklistforms.parse(plain, {plain["sections"][0]["fields"][0]["key"]: "HPK19877"}, resolve),
+                         {"S": {"Any": "HPK19877"}})
+
+    def test_parse_resolves_imagemap_slots_too(self):
+        schema = self._schema(type="imagemap", label="Strips", image_id="i", type_id=self.TID, sn=r"HPK\d+",
+                              slots=[{"label": "A", "x": 1, "y": 1}, {"label": "B", "x": 2, "y": 2}])
+        key = schema["sections"][0]["fields"][0]["key"]
+        resolve = lambda tid, sn: {"HPK1": "Z00100300029-00001"}.get(sn)
+        self.assertEqual(checklistforms.parse(schema, {f"{key}-m0": "HPK1", f"{key}-m1": "HPK2"}, resolve),
+                         {"S": {"Strips": {"A": "Z00100300029-00001"}}})
+
+    def test_endpoint_mirror_hit_costs_no_hwdb_call(self):
+        self.client.force_login(get_user_model().objects.create_user("s", "s@s.io", "pw"))
+        HwdbComponentEvent.objects.create(instance="dev", part_type_id=self.TID,
+                                          part_id=f"{self.TID}-05316", serial_number="HPK19877")
+        HwdbComponentEvent.objects.create(instance="prod", part_type_id=self.TID,
+                                          part_id=f"{self.TID}-00001", serial_number="HPK00001")
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            d = self.client.get(f"/hw/dev/serial/{self.TID}/?serial=HPK19877").json()
+            self.assertEqual(d, {"pid": "Z00100300029-05316"})
+            api.find_component_by_serial.assert_not_called()
+            # a mirror miss → exactly one HWDB call, scoped to the type
+            api.find_component_by_serial.return_value = {"part_id": f"{self.TID}-00007", "serial_number": "HPK7"}
+            d = self.client.get(f"/hw/dev/serial/{self.TID}/?serial=HPK7").json()
+            self.assertEqual(d, {"pid": "Z00100300029-00007"})
+            api.find_component_by_serial.assert_called_once_with(self.TID, "HPK7")
+            api.find_component_by_serial.return_value = None
+            self.assertEqual(self.client.get(f"/hw/dev/serial/{self.TID}/?serial=nope").json(), {"pid": None})
+            # the other instance's mirror row is not ours
+            self.assertEqual(self.client.get(f"/hw/dev/serial/{self.TID}/?serial=HPK00001").json(), {"pid": None})
+            self.assertEqual(self.client.get(f"/hw/dev/serial/{self.TID}/").json(), {"pid": None})
+
+    def test_submit_stores_the_pid_for_a_typed_serial(self):
+        self.client.force_login(get_user_model().objects.create_user("s", "s@s.io", "pw"))
+        HwdbComponentEvent.objects.create(instance="dev", part_type_id=self.TID,
+                                          part_id=f"{self.TID}-05316", serial_number="HPK19877")
+        schema = dict(SCHEMA)
+        schema["sections"] = [{"title": "S", "fields": [
+            {"type": "qr", "label": "Strip", "type_id": self.TID, "sn": r"HPK\d{5}"},
+            {"type": "qr", "label": "Other", "type_id": self.TID, "sn": r"HPK\d{5}"},
+            {"type": "qr", "label": "Plain", "type_id": self.TID}]}]
+        api = _api(schema=schema)
+        api.find_component_by_serial.return_value = None
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+            self.assertIn(f'data-type-id="{self.TID}" data-sn="HPK\\d{{5}}" data-serial-url="/hw/dev/serial/{self.TID}/"', html)
+            self.assertIn(f'id="f0-2" name="f0-2" value="" autocomplete="off"\n      autocapitalize="characters" spellcheck="false" data-type-id="{self.TID}">', html)
+            self.assertIn("SN HPK\\d{5}", html)         # the label's hint
+            self.assertIn("no item of type", html)   # the fill page's refusal text
+            self.client.post(PAGE, {"f0-0": "HPK19877", "f0-1": "HPK00000", "f0-2": "HPK19877"})
+        data = api.post_test.call_args.args[1]["test_data"]["DATA"]
+        self.assertEqual(data["S"], {"Strip": "Z00100300029-05316"})   # the unknown serial is dropped
+        api.find_component_by_serial.assert_called_once_with(self.TID, "HPK00000")
+
+
 class ImageMapTest(TestCase):
     """#113 (Top CRP): clickable image map — a drawing with tappable slots,
     each scanning one board's PID; values store {slot label: PID}."""
