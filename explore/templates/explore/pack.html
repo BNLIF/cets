@@ -75,6 +75,9 @@
     padding: 4px 12px; cursor: pointer; white-space: nowrap; }
   .pk-sync:hover { border-color: var(--rule-hard); }
   .pk-sync:disabled { opacity: .5; cursor: default; }
+  .pk-cl { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
+  .pk-cl a { color: var(--accent-ink); text-decoration: none; font-weight: 600; }
+  .pk-cl-no { color: var(--faint); font-size: 12px; }
   .pk-sync-log { display: none; margin: 8px 0 4px; background: #1c1812; color: #e7dfce;
     border-radius: 8px; padding: 10px; font-family: var(--font-mono); font-size: 11.5px;
     white-space: pre-wrap; max-height: 160px; overflow: auto; }
@@ -96,6 +99,17 @@
     error reports its live status flags.</p>
 
   {% include "explore/_pack_body.html" %}
+
+  {% if ship_checklists %}{# #150: the type's checklists flagged for packing/shipping, with the box's submission state #}
+  <div class="pk-group">
+    <h2>{% if is_box %}Packing / shipping{% else %}Assembly{% endif %} checklists</h2>
+    <ul class="pk-cl">
+      {% for c in ship_checklists %}<li><a href="{{ c.url }}">&#9745; {{ c.name }}</a>
+        {% if c.filled_on %}<span class="pk-qc-ok" title="This {{ noun }} has a submission of this checklist">✓</span> submitted {{ c.filled_on }}{% else %}<span class="pk-cl-no">not submitted yet</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
 
   {% if groups %}
   <div class="pk-group pk-phone">

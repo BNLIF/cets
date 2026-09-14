@@ -495,6 +495,10 @@ def normalize(cfg: dict, name: str) -> dict:
               # signee convention).
               "roles": [r for r in (cfg.get("roles") or [])
                         if isinstance(r, int) and not isinstance(r, bool)],
+              # #150: a packing/shipping procedure — linked from the box's
+              # pack page and the pre-shipping checklist, which asks for a
+              # confirmation that it has been completed
+              "shipping": bool(cfg.get("shipping")),
               # #103: absent = every standard field; a list = that subset
               "item_fields": ([f for f in cfg["item_fields"] if f in ITEM_FIELDS]
                               if isinstance(cfg.get("item_fields"), list)

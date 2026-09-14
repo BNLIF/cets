@@ -46,7 +46,7 @@ from .queries import (
     component_breakdowns, component_qc_flags, component_type_progress,
     component_update_filters, component_update_progress,
 )
-from .parts import assembly_children, current_container, part_detail, subtree_rows
+from .parts import assembly_children, current_container, part_detail, subtree_rows, test_summary
 from .shipments import (_mirror_box_parent, _spec_data, current_manifest, refresh_box,
                         sync_shipments)
 
@@ -1872,6 +1872,33 @@ def _scan_link(api, inst, box_pid, pid) -> tuple[bool, str]:
     return True, f"added to “{pos}”"
 
 
+def _shipping_checklists(request, api, inst, part_id, ptid) -> list[dict]:
+    """#150: the type's consortium checklists flagged ``shipping`` (the
+    packing procedure), each with this item's fill-page URL and the date of
+    the item's latest submission of it — ``[{name, url, filled_on}]``. Any
+    type with positions gets them on its pack page, box or not (Chao
+    2026-09-14: people link items into an assembly and want the list too).
+    Costs the type's image listing, one small schema download per
+    checklist and, when any is flagged, the box's tests listing."""
+    out = []
+    for c in checklistforms.available(api, ptid):
+        try:
+            cfg = json.loads(api.get_image_response(c["image_id"]).content)
+        except Exception:
+            continue
+        if not isinstance(cfg, dict) or not cfg.get("shipping"):
+            continue
+        out.append({"name": c["name"],
+                    "test_type_name": str(cfg.get("test_type_name") or "").strip(),
+                    "url": _rev(request, "explore:checklist", args=[part_id, c["name"]])})
+    if out:
+        latest = {t["test_type"]: (t.get("created") or "")[:10]
+                  for t in test_summary(_safe_get_data(api.get_tests, part_id))}
+        for c in out:
+            c["filled_on"] = latest.get(c["test_type_name"], "")
+    return out
+
+
 @login_not_required
 @fnal_login_required
 def explore_box_pack_view(request, part_id):
@@ -1969,6 +1996,7 @@ def explore_box_pack_view(request, part_id):
             "scan_qr_svg": scanning.qr_svg(scan_url),
             "scan_feed_url": _rev(request, "explore:scan_feed"),
             "scan_since": scan_since,
+            "ship_checklists": _shipping_checklists(request, api, inst, part_id, ptid),   # #150
         })
 
     # POST. htmx requests (the pack page's per-group, add-by-PID and unlink
@@ -4538,6 +4566,16 @@ def explore_preship_view(request, part_id):
             messages.error(request, err)
             return redirect(page_url)
         if scene == 1:  # server-side gate re-check, like the Dashboard
+            # #150: every shipping-flagged checklist must be confirmed complete
+            ship = _shipping_checklists(request, api, inst, part_id, ptid)
+            done = set(request.POST.getlist("checklist_done"))
+            missing = [c["name"] for c in ship if c["name"] not in done]
+            if missing:
+                messages.error(request, "Confirm that the " + ", ".join(f"“{m}”" for m in missing)
+                               + (" checklists are" if len(missing) > 1 else " checklist is")
+                               + " complete.")
+                return redirect(page_url)
+            cleaned["checklists_done"] = [c["name"] for c in ship]
             gate = _preship_gate(api, part_id)
             if not (gate["qaqc_ready"] and gate["summary_name"]):
                 messages.error(request,
@@ -4625,6 +4663,7 @@ def explore_preship_view(request, part_id):
                     "saved": _form_saved(cl.state.get(checklists.scene_key(scene), {}))})
         if scene == 1:
             ctx["gate"] = _preship_gate(api, part_id)
+            ctx["ship_checklists"] = _shipping_checklists(request, api, inst, part_id, ptid)   # #150
         if scene == 4:
             # The procedure's stated default destination for the SURF route.
             ctx["dest_default"] = "SD Warehouse/SURF" if cl.is_surf else ""

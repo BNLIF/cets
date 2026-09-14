@@ -207,6 +207,16 @@ Colors:
   write-instance user — schemas are versioned in HWDB, so a bad edit is
   always recoverable, and dev culture favors low friction.
 
+- `shipping: true` (#150) — marks a packing / shipping / assembly
+  procedure (editor: the *Shipping* checkbox). Such a checklist is linked
+  from the *Add items* (box) or *Link items* (any type with functional
+  positions) page of every item of the type, with the item's submission
+  state (✓ submitted ‹date› / not submitted yet, from its test records).
+  On a shipping box it is also listed in step 1 of the pre-shipping
+  checklist, which cannot advance until every flagged checklist is ticked
+  as complete (the ticked names are kept in the run's `PreShipping1`
+  state).
+
 ## Reaching a checklist from the type page (#110)
 
 The type page's meta panel lists the type's checklists (filled in lazily —

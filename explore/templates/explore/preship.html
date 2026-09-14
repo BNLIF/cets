@@ -118,6 +118,11 @@
       <div class="ps-gate">Executive summary:
         {% if gate.summary_name %}<span class="ps-ok">✓</span> <span class="mono" style="font-size:11.5px;">{{ gate.summary_name }}</span>{% if gate.summary_uploader %} (by {{ gate.summary_uploader }}){% endif %}
         {% else %}<span class="ps-bad">✗ none</span> — <a href="{% url 'explore:exec_summary' part_id=part_id %}">create one</a>{% endif %}</div>
+      {% for c in ship_checklists %}{# #150: shipping-flagged checklists — each must be confirmed complete #}
+      <div class="ps-gate"><a href="{{ c.url }}" target="_blank" rel="noopener">&#9745; {{ c.name }}</a>:
+        {% if c.filled_on %}<span class="ps-ok">✓</span> submitted {{ c.filled_on }}{% else %}<span class="ps-bad">✗ not submitted yet</span>{% endif %}
+        <label class="inline" style="display:inline-flex; margin-left:12px;"><input type="checkbox" name="checklist_done" value="{{ c.name }}" required{% if c.name in saved.checklists_done %} checked{% endif %}> complete</label></div>
+      {% endfor %}
       <label class="inline" style="margin-top:12px;"><input type="checkbox" name="confirm_list" required>
         I confirm the box contents and QC state are correct and ready to ship.</label>
 

@@ -182,6 +182,8 @@
           <input id="f-instr" placeholder="optional intro text shown under the title — **bold**, *italic*"></div>
         <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Roles</span>
           <input id="f-roles" placeholder="HWDB role ids allowed to submit, comma-separated (blank = anyone)"></div>
+        <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Shipping</span>
+          <label class="ec-inline" title="Linked from the Add-items / Link-items page of every item of this type; on a shipping box also from the pre-shipping checklist, which asks for a confirmation that it has been completed"><input type="checkbox" id="f-shipping"> packing / shipping / assembly checklist</label></div>
         {# #103: HWDB's standard item fields — on by default, untick to drop from this checklist #}
         <div class="ec-row" style="align-items:flex-start;"><span class="ec-label" style="flex:0 0 90px;" title="HWDB’s own fields on the item — shown as an “Item” card at the top and written to the item record on submit">Item fields</span>
           <div id="f-itemf" style="display:flex; flex-wrap:wrap; gap:4px 14px; flex:1;">
@@ -1113,6 +1115,7 @@
     var roles = $("#f-roles").value.split(",").map(function (x) { return parseInt(x, 10); })
                   .filter(function (x) { return !isNaN(x); });
     if (roles.length) cfg.roles = roles;
+    if ($("#f-shipping").checked) cfg.shipping = true;   // #150
     cfg.item_fields = $$(".f-itemf").filter(function (c) { return c.checked; })
                         .map(function (c) { return c.value; });
     cfg.sections = $$("#clc-sections > .clc-sec").map(function (s) {
@@ -1241,6 +1244,7 @@
     $("#f-ttn").value = cfg.test_type_name || "";
     $("#f-instr").value = cfg.instructions || "";
     $("#f-roles").value = (cfg.roles || []).join(", ");
+    $("#f-shipping").checked = !!cfg.shipping;   // #150
     $$(".f-itemf").forEach(function (c) {      // absent = every field on
       c.checked = !Array.isArray(cfg.item_fields) || cfg.item_fields.indexOf(c.value) !== -1;
     });
