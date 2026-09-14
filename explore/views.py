@@ -41,7 +41,7 @@ from .instances import instance_of, namespace_of
 from .models import (
     ActivityEvent, BoxChecklist, ChecklistBookmark, ChecklistDraft, HierarchyNode,
     InstitutionPref, ShippingTypeOverride,
-    HierarchySyncState, HwdbComponentEvent, HwdbTestEvent, PackScan, ShipmentItem,
+    HierarchySyncState, HwdbComponentEvent, HwdbTestEvent, PackScan, ShipmentItem, TestDateSetting,
 )
 from .queries import (
     component_breakdowns, component_qc_flags, component_type_progress,
@@ -194,6 +194,8 @@ def explore_view(request, trail=None):
     view = navigation.resolve(inst, trail)  # raises Http404 on an unknown path
 
     charts = []
+    phys = date_setting = None       # #146: the Tests chart's date field + its Type View setting
+    date_candidates = []
     leaf = view.get("leaf")
     is_shipping = bool(leaf and curation.is_shipping_type(inst, leaf.part_type_id))
     shipments = shipment_synced_at = shipment_summary = empty_boxes_page = None
@@ -263,7 +265,11 @@ def explore_view(request, trail=None):
             "By HWDB record date (upload time, not physics test date), "
             "faceted by test type."
         )
+        test_chart["date_field"] = True    # #146: the card carries the test-date-field control
         charts = [comp_chart, test_chart]
+        date_setting = TestDateSetting.for_instance(inst).filter(part_type_id=ptid).first()
+        if can_edit_type:
+            date_candidates = events.test_date_candidates(inst, ptid)
 
     # Paginated parts table for a synced non-shipping leaf — every component of
     # the type from the mirror (HwdbComponentEvent), each row opening its part
@@ -313,6 +319,11 @@ def explore_view(request, trail=None):
             "can_create_box": can_create_box,
             "can_edit_es": can_edit_es,
             "can_edit_type": can_edit_type,
+            "phys_label": phys,                       # #146
+            "date_setting": date_setting,
+            "date_setting_path": list(date_setting.path) if date_setting else None,
+            "date_candidates": date_candidates,
+            "date_styles": TestDateSetting.STYLES,
         "shipping_override": shipping_override,
             "empty_pids": empty_pids,
             # Deep-link the part type to this instance's FNAL web UI.
@@ -3801,6 +3812,54 @@ def _ensure_spec_data(request, api, part_type_id) -> str | None:
                 f"which “→ Specs” fields need — an HWDB architect must define it "
                 f"first (the type's New-item page offers this)")
     return _define_type_spec_data(api, part_type_id, type_record)
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_test_date_view(request, part_type_id):
+    """#146: set (``path`` JSON list, ``style``, ``day_first``) or clear
+    (``action=clear``) the type's physics test-date field from the Type
+    View — architects on write instances, like the other type-level edits.
+    The Tests chart re-bins on the next Full re-sync (the date is stamped
+    at sync time); the code registry stays as the fallback."""
+    inst = instance_of(request)
+    nxt = request.POST.get("next") or ""
+    back = nxt if url_has_allowed_host_and_scheme(nxt, allowed_hosts={request.get_host()}) \
+        else _rev(request, "explore:home")
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return HttpResponseForbidden("Type settings are not enabled here.")
+    if not _is_architect(request, inst):
+        return HttpResponseForbidden("Setting the test-date field needs the HWDB architect role.")
+    actor = activity.actor_of(request)
+    if request.POST.get("action") == "clear":
+        TestDateSetting.for_instance(inst).filter(part_type_id=part_type_id).delete()
+        spec = events.test_date_spec(inst, part_type_id)
+        activity.log(inst, ActivityEvent.KIND_CURATION,
+                     f"{part_type_id}: test-date field cleared",
+                     part_type_id=part_type_id, actor=actor)
+        messages.success(request, "Test-date field cleared — a Full re-sync re-bins the Tests chart on "
+                         + (f"the built-in “{spec['label']}”." if spec else "the HWDB record date."))
+        return redirect(back)
+    try:
+        path = json.loads(request.POST.get("path") or "")
+    except ValueError:
+        path = None
+    style = request.POST.get("style") or ""
+    if (not isinstance(path, list) or not path or not all(isinstance(seg, str) and seg for seg in path)
+            or style not in dict(TestDateSetting.STYLES)):
+        messages.error(request, "Pick a date field and its format.")
+        return redirect(back)
+    row, _ = TestDateSetting.objects.update_or_create(
+        instance=inst, part_type_id=part_type_id,
+        defaults={"path": path, "style": style, "day_first": bool(request.POST.get("day_first")),
+                  "updated_by": actor})
+    activity.log(inst, ActivityEvent.KIND_CURATION,
+                 f"{part_type_id}: test-date field set to “{row.label}”",
+                 part_type_id=part_type_id, actor=actor)
+    messages.success(request, f"Test-date field set to “{row.label}” — run a Full re-sync to "
+                              f"re-bin the Tests chart.")
+    return redirect(back)
 
 
 @login_not_required

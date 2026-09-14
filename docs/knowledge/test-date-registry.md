@@ -49,3 +49,21 @@ sync via the cheap summary endpoint (`components/{pid}/tests` — which returns
    think before mapping very large families.
 4. Existing mirrors keep binning by `created` until a **full** re-sync of the
    type re-fetches the dates.
+
+
+## Setting the field from the Type View (#146)
+
+Since 2026-09-14 architects on a write instance set the field on the type
+page itself: the **Test date field** card under the charts lists the
+date-looking `test_data` keys seen in the newest mirrored records per test
+type (with a sample value), the format (`ymd` or `dm-or-md` + day-first)
+and Save / Clear. The setting (`TestDateSetting`) wins over the code
+registry above, which remains the seed/fallback; a type with neither bins
+on the HWDB record date. The date is stamped at sync time, so a change
+applies on the next **Full re-sync**, whose log counts the records whose
+field was missing or unparseable (they bin on the record date). A
+settings path has no list indices — the first list entry carrying the key
+stands for the list — so `Test Results → Date` reads the SiPM board's
+`Test Results[0].Date`. Types outside the registry have no mirrored
+records until someone runs the Plot page's *Fetch test data*; the card
+says so and links there.

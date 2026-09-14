@@ -182,6 +182,8 @@
     <div class="banner banner-warn" style="margin: 10px 0;">Last test sync error: {{ leaf.tests_sync_error }}</div>
     {% endif %}
     <pre id="node-sync-log"></pre>
+    {# flash messages from the type-level edits (shipping-container toggle, test-date field, new box) — every leaf, not just shipping types (#146) #}
+    {% for m in messages %}<div class="ex-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
 
     <dl class="panel-meta">
         <dt>Part type ID</dt><dd><a href="{{ hwdb_ui_base }}/view/components?pa={{ leaf.part_type_id }}" target="_blank" rel="noopener" title="Open this component type in the FNAL HWDB">{{ leaf.part_type_id }} <span aria-hidden="true">&#x2197;</span></a></dd>
@@ -282,8 +284,78 @@
             </div>
             {% endif %}
             <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">{{ c.caption }}</p>
+            {% if c.date_field %}
+            {# #146: which test_data field this chart bins on — architects set it here; the date is stamped at sync time #}
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--rule); font-size: 12px; color: var(--faint);">
+                <div style="margin-bottom: 6px;">
+                    {% if date_setting %}Test date field: <span class="mono">{{ date_setting.label }}</span> — {{ date_setting.get_style_display }}{% if date_setting.style == "dm-or-md" %}, {% if date_setting.day_first %}day{% else %}month{% endif %} first when ambiguous{% endif %}; set by {{ date_setting.updated_by }} on {{ date_setting.updated_at|date:"Y-m-d" }}.
+                    {% elif phys_label %}Test date field: <span class="mono">{{ phys_label }}</span> (built in for this type).
+                    {% else %}Test date field: none — records bin on their HWDB upload time.{% endif %}
+                    A change applies on the next Full re-sync.</div>
+                {% if can_edit_type %}
+                <form method="post" action="{% url 'explore:test_date' part_type_id=leaf.part_type_id %}" id="test-date-form"
+                      style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ request.path }}">
+                    <input type="hidden" name="path" value="">
+                    {% if date_candidates %}
+                    <select id="td-source" title="Test type whose records list the fields" style="font: inherit; color: var(--ink); padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff); max-width: 260px;">{% for c2 in date_candidates %}<option value="{{ forloop.counter0 }}">{{ c2.test_type }}</option>{% endfor %}</select>
+                    <select id="td-key" title="Date-looking fields seen in the newest mirrored records" style="font: inherit; color: var(--ink); padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff); max-width: 260px;"><option value="">field…</option></select>
+                    <select name="style" id="td-style" style="font: inherit; color: var(--ink); padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff); max-width: 260px;">{% for v, l in date_styles %}<option value="{{ v }}"{% if date_setting.style == v %} selected{% endif %}>{{ l }}</option>{% endfor %}</select>
+                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;"><input type="checkbox" name="day_first"{% if not date_setting or date_setting.day_first %} checked{% endif %}> day first when ambiguous</label>
+                    <button class="btn btn-sm btn-primary">Save</button>
+                    {% else %}
+                    <span>No mirrored test records to list fields from — <a href="{% url 'explore:plot' part_type_id=leaf.part_type_id %}">fetch test data on the Plot page</a> first.</span>
+                    {% endif %}
+                    {% if date_setting %}<button class="btn btn-sm btn-ghost" name="action" value="clear" formnovalidate>Clear</button>{% endif %}
+                    <a href="{% url 'explore:plot' part_type_id=leaf.part_type_id %}" title="Histogram the candidate field to see how many records carry it and in which format">check on the Plot page</a>
+                </form>
+                {{ date_candidates|json_script:"td-candidates" }}
+                {{ date_setting_path|json_script:"td-current" }}
+                <script>
+                (function () {
+                  var src = document.getElementById("td-source"), key = document.getElementById("td-key");
+                  var form = document.getElementById("test-date-form"), style = document.getElementById("td-style");
+                  if (!src || !key) return;
+                  var cands = JSON.parse(document.getElementById("td-candidates").textContent);
+                  var current = JSON.stringify(JSON.parse(document.getElementById("td-current").textContent));
+                  function fill() {
+                    key.innerHTML = '<option value="">field…</option>';
+                    (cands[+src.value] || { keys: [] }).keys.forEach(function (k) {
+                      var o = document.createElement("option");
+                      o.value = JSON.stringify(k.path);
+                      o.textContent = k.path.join(" → ") + "  ·  " + k.n + " rec.  ·  e.g. " + k.sample;
+                      o.setAttribute("data-sample", k.sample);
+                      if (o.value === current) o.selected = true;
+                      key.appendChild(o);
+                    });
+                  }
+                  // a fresh pick suggests the format from the sample value
+                  key.addEventListener("change", function () {
+                    var o = key.options[key.selectedIndex], smp = o && o.getAttribute("data-sample") || "";
+                    if (smp) style.value = /^\d{4}[-/]/.test(smp) ? "ymd" : "dm-or-md";
+                  });
+                  src.addEventListener("change", fill);
+                  // open on the test type whose records hold the saved field
+                  cands.some(function (c, i) {
+                    var hit = c.keys.some(function (k) { return JSON.stringify(k.path) === current; });
+                    if (hit) src.value = String(i);
+                    return hit;
+                  });
+                  fill();
+                  form.addEventListener("submit", function (e) {
+                    if (e.submitter && e.submitter.value === "clear") return;
+                    form.elements.path.value = key.value;
+                    if (!key.value) { e.preventDefault(); key.focus(); }
+                  });
+                })();
+                </script>
+                {% endif %}
+            </div>
+            {% endif %}
         </div>
         {% endfor %}
+
 
         {% if breakdowns or qc_flags %}
         <div class="chart-card" id="breakdown-card">
@@ -356,8 +428,6 @@
         </div>
     </div>
     <pre id="shipment-sync-log"></pre>
-
-    {% for m in messages %}<div class="ex-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
 
     {% if can_create_box %}
     {% include "explore/_inst_pick.html" with pick=None only %}

@@ -26,7 +26,7 @@ from django.utils import timezone
 from hwdb.api_client import FnalDbApiClient
 
 from . import activity, parts
-from .models import (ActivityEvent, HierarchyNode, HwdbComponentEvent, HwdbTestData,
+from .models import (ActivityEvent, HierarchyNode, HwdbComponentEvent, HwdbTestData, TestDateSetting,
                      HwdbTestEvent, HwdbTestValue)
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,11 @@ _CE_CHIP_SPEC = {"label": "Test Date", "path": ["Test Date"], "style": "ymd"}
 def test_date_spec(instance: str, part_type_id: str) -> dict | None:
     """The registry entry for this component type, or ``None`` (→ the type's
     chart bins on the HWDB record ``created`` stamp and syncs via the cheap
-    summary endpoint). The deferred refinement of ADR-0010."""
+    summary endpoint). The deferred refinement of ADR-0010. #146: a
+    ``TestDateSetting`` made from the Type View wins over the code registry."""
+    row = TestDateSetting.for_instance(instance).filter(part_type_id=part_type_id).first()
+    if row:
+        return row.spec()
     profile = settings.HWDB_PROFILES[instance]
     ce_chip_types = {
         profile["larasic_part_type"],
@@ -94,6 +98,10 @@ def _walk(data, path):
             cur = cur[step] if isinstance(cur, list) and 0 <= step < len(cur) else None
         elif isinstance(cur, dict):
             cur = cur.get(step)
+        elif isinstance(cur, list):
+            # #146: a Type View setting names no list indices — the first
+            # entry carrying the key stands for the list
+            cur = next((e.get(step) for e in cur if isinstance(e, dict) and step in e), None)
         else:
             cur = None
         if cur is None:
@@ -138,6 +146,45 @@ def extract_test_date(test_data: dict, spec: dict) -> datetime | None:
     if as_dm and as_md:
         return as_dm if spec.get("day_first", True) else as_md
     return as_dm or as_md
+
+
+_DATEISH = re.compile(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4}")
+
+
+def _date_keys(node, prefix: tuple, acc: dict) -> None:
+    """Collect key paths (dict keys, list levels implicit) whose leaf is a
+    date-looking string: ``{path: (count, sample)}``."""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            _date_keys(v, prefix + (str(k),), acc)
+    elif isinstance(node, list):
+        for e in node:
+            _date_keys(e, prefix, acc)
+    elif isinstance(node, str) and _DATEISH.search(node):
+        n, sample = acc.get(prefix, (0, node))
+        acc[prefix] = (n + 1, sample)
+
+
+def test_date_candidates(instance: str, part_type_id: str, sample: int = 25) -> list[dict]:
+    """#146: the date-looking ``test_data`` fields the mirror has seen for
+    each of the type's test types — what the Type View's picker offers.
+    ``[{test_type, keys: [{path, n, sample}]}]`` from the newest ``sample``
+    mirrored records per test type (#143's rows; the Plot page's "Fetch
+    test data" fills them for types outside the registry)."""
+    out = []
+    types = (HwdbTestData.for_instance(instance).filter(part_type_id=part_type_id)
+             .values_list("test_type_id", "test_type_name").distinct().order_by("test_type_name"))
+    for ttid, name in types:
+        acc: dict = {}
+        rows = (HwdbTestData.for_instance(instance)
+                .filter(part_type_id=part_type_id, test_type_id=ttid)
+                .order_by("-created").values_list("test_data", flat=True)[:sample])
+        for td in rows:
+            _date_keys(td or {}, (), acc)
+        keys = [{"path": list(pth), "n": n, "sample": smp}
+                for pth, (n, smp) in sorted(acc.items(), key=lambda kv: (-kv[1][0], kv[0]))]
+        out.append({"test_type": name, "keys": keys})
+    return out
 
 
 def _resolve_test_types(api, part_type_id: str) -> dict[str, int]:
@@ -288,7 +335,7 @@ def _fetch_component(api, part_id: str, date_spec: dict | None,
       *detailed* call per defined test type, reading the physics date out of
       ``test_data`` per the spec, with a ``created`` fallback.
     """
-    tests, test_data = [], []
+    tests, test_data, fallbacks = [], [], 0
     if need_tests:
         if date_spec is None:
             for t in (api.get_tests(part_id).get("data") or []):
@@ -301,8 +348,10 @@ def _fetch_component(api, part_id: str, date_spec: dict | None,
             for name, ttid in test_type_ids.items():
                 records = api.get_tests(part_id, test_type_id=ttid).get("data") or []
                 for t in records:
-                    dt = (extract_test_date(t.get("test_data") or {}, date_spec)
-                          or _parse_created(t.get("created")))
+                    dt = extract_test_date(t.get("test_data") or {}, date_spec)
+                    if dt is None:          # #146: counted in the sync log
+                        fallbacks += 1
+                        dt = _parse_created(t.get("created"))
                     if dt is not None:
                         tests.append((name, dt))
                 # #143: the same records feed the plotting mirror — keep the
@@ -341,7 +390,7 @@ def _fetch_component(api, part_id: str, date_spec: dict | None,
         "manufacturer": manufacturer, "institution": institution,
         "is_installed": installed, "qaqc_uploaded": uploaded,
         "certified_qaqc": certified, "parent_part_id": parent,
-        "tests": tests, "test_data": test_data,
+        "tests": tests, "test_data": test_data, "date_fallbacks": fallbacks,
         "has_detail": need_detail, "has_tests": need_tests,
     }
 
@@ -569,6 +618,10 @@ def sync_test_events(
         ]
         if new_test_rows:
             HwdbTestEvent.objects.bulk_create(new_test_rows, batch_size=1000)
+        n_fb = sum(r.get("date_fallbacks", 0) for r in results if r["has_tests"])
+        if n_fb:   # #146
+            yield (f"sync tests: {n_fb} record(s) without a parseable "
+                   f"'{date_spec['label']}' — binned on the record date\n")
         # #143: latest test record per (item, test type), from the detailed
         # calls registry types already make (no extra cost).
         td_rows = [row for r in results if r["has_tests"] for row in r["test_data"]]

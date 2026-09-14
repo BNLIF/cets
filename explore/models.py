@@ -460,6 +460,42 @@ class ShippingTypeOverride(InstanceScoped):
         return f"{self.instance}:{self.part_type_id}"
 
 
+class TestDateSetting(InstanceScoped):
+    """#146: which ``test_data`` field holds a type's real (physics) test
+    date, set by architects from the Type View — the runtime overlay over
+    the code registry ``events.TEST_DATE_SPECS`` (seed data now). ``path``
+    is the key path as the Plot view lists it: dict keys only, list levels
+    implicit (the first entry carrying the key stands for the list).
+    Applied at sync time to every test type's records of the type; a
+    record without a parseable value bins on its HWDB ``created`` stamp."""
+
+    STYLES = [("ymd", "YYYY-MM-DD / YYYY/MM/DD"),
+              ("dm-or-md", "DD-MM-YYYY or MM-DD-YYYY (each record settles itself)")]
+
+    part_type_id = models.CharField(max_length=20, db_index=True)
+    path = models.JSONField(default=list)
+    style = models.CharField(max_length=12, choices=STYLES, default="ymd")
+    day_first = models.BooleanField(default=True)    # dm-or-md: ambiguous days
+    updated_by = models.CharField(max_length=150, blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=["instance", "part_type_id"], name="uniq_test_date_setting")]
+
+    @property
+    def label(self) -> str:
+        return " → ".join(str(seg) for seg in self.path)
+
+    def spec(self) -> dict:
+        """The registry-shaped entry ``events.extract_test_date`` reads."""
+        return {"label": self.label, "path": list(self.path),
+                "style": self.style, "day_first": self.day_first}
+
+    def __str__(self):
+        return f"{self.instance}:{self.part_type_id} → {self.label}"
+
+
 class ChecklistDraft(InstanceScoped):
     """A partially-filled consortium checklist (#97).
 
