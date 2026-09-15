@@ -3,122 +3,211 @@
 
 {% block content %}
 <style>
-  .pl-page { padding: 22px 30px 56px; max-width: 1100px; }
-  .pl-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .pl-page { padding: 16px 0 0; }
+  .pl-head { padding: 0 26px 10px; }
+  .pl-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 8px; }
   .pl-crumbs a { color: var(--accent-ink); text-decoration: none; }
   .pl-crumbs a:hover { text-decoration: underline; }
   .pl-crumbs .sep { color: var(--faint); margin: 0 7px; }
-  .pl-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 2px; }
-  .pl-page h1 .mono { font-family: var(--font-mono); }
-  .pl-sub { color: var(--dim); font-size: 13px; margin: 0 0 12px; }
-  .pl-card { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg); padding: 12px 16px; margin-bottom: 12px; }
-  .pl-row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; font-size: 12.5px; color: var(--dim); }
-  .pl-row + .pl-row { margin-top: 10px; }
-  .pl-row label { display: inline-flex; align-items: center; gap: 5px; }
-  .pl-idx { display: inline-flex; align-items: center; gap: 8px; }   /* #154: index pins of an array key */
+  .pl-head h1 { font-size: 1.15rem; color: var(--ink); margin: 0; }
+  .pl-head h1 .mono { font-family: var(--font-mono); font-weight: 500; color: var(--dim); font-size: 1rem; margin-left: 6px; }
+  .pl-head h1 .pl-sub { color: var(--dim); font-size: 13px; font-weight: 400; margin-left: 8px; }
+  /* workbench: tab strip · control panel · main */
+  .pl-wb { display: grid; grid-template-columns: 46px 264px minmax(0, 1fr); border-top: 1px solid var(--rule); min-height: calc(100vh - 150px); }
+  .pl-tabs { border-right: 1px solid var(--rule); background: var(--surface); display: flex; flex-direction: column; padding-top: 6px; }
+  .pl-tab { appearance: none; border: 0; background: none; width: 46px; height: 52px; display: grid; place-items: center; gap: 2px; color: var(--dim); cursor: pointer;
+            font: 600 9px/1 var(--font-sans); letter-spacing: .04em; text-transform: uppercase; border-left: 3px solid transparent; }
+  .pl-tab svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .pl-tab.on { color: var(--accent-ink); background: var(--page); border-left-color: var(--accent); }
+  .pl-tab:hover:not(.on):not([disabled]) { color: var(--ink); }
+  .pl-tab[disabled] { opacity: .4; cursor: default; }
+  .pl-panel { border-right: 1px solid var(--rule); padding: 12px 14px 20px; background: var(--page); font-size: 12.5px; color: var(--dim); }
+  .pl-panel [data-pane] { display: grid; gap: 10px; align-content: start; }
+  .pl-panel h2 { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); margin: 0; display: flex; align-items: center; gap: 8px; min-height: 24px; }
+  .pl-panel h2 .for { font-weight: 400; text-transform: none; letter-spacing: 0; font-size: 11.5px; color: var(--faint); }
+  .pl-panel h2 .for b { font-weight: 600; }
+  .pl-panel h2 .pl-btn { margin-left: auto; }
+  .pl-grp { display: grid; gap: 7px; padding-bottom: 10px; border-bottom: 1px solid var(--rule-soft); }
+  .pl-grp:last-child { border-bottom: 0; }
+  .pl-f { display: grid; grid-template-columns: 62px minmax(0, 1fr); align-items: center; gap: 6px 8px; }
+  .pl-f > span:first-child { white-space: nowrap; }
+  .pl-row { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+  .pl-row label { display: inline-flex; align-items: center; gap: 4px; }
+  .pl-hint { font-size: 11.5px; color: var(--faint); }
   .pl-page select, .pl-page input[type=text], .pl-page input[type=search], .pl-page input[type=number], .pl-page textarea { font: inherit; font-size: 12.5px; color: var(--ink);
-    background: var(--paper, #fff); border: 1px solid var(--border, var(--rule)); border-radius: 6px; padding: 3px 6px; }
-  .pl-page select { max-width: 320px; }
+    background: var(--paper, #fff); border: 1px solid var(--border, var(--rule)); border-radius: 6px; padding: 3px 6px; min-width: 0; }
+  .pl-panel select, .pl-panel input[type=text], .pl-panel textarea { width: 100%; }
   .pl-page input[type=number] { width: 64px; }
-  .pl-page textarea { width: 260px; height: 46px; vertical-align: middle; }
-  .pl-btn { font: inherit; font-size: 12.5px; color: var(--ink); background: var(--page); border: 1px solid var(--rule); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+  .pl-panel textarea { height: 46px; }
+  .pl-btn { font: inherit; font-size: 12.5px; color: var(--ink); background: var(--page); border: 1px solid var(--rule); border-radius: 6px; padding: 3px 10px; cursor: pointer; white-space: nowrap; }
   .pl-btn:hover { background: var(--surface); }
   .pl-btn.primary { color: #fff; background: var(--accent); border-color: var(--accent); }
+  .pl-btn.sm { font-size: 11.5px; padding: 2px 8px; }
   .pl-btn[disabled] { opacity: .5; cursor: default; }
-  .pl-cut { display: inline-flex; gap: 4px; align-items: center; }
+  .pl-cut { display: grid; grid-template-columns: minmax(0, 1fr) 52px 64px 16px; gap: 4px; align-items: center; }
+  .pl-cut a { color: var(--faint); text-decoration: none; text-align: center; }
+  .pl-idx { display: grid; grid-template-columns: 62px 1fr; gap: 6px 8px; align-items: center; }
+  .pl-idx input { width: 60px; }
   .pl-off { opacity: .35; }
   .pl-page [hidden] { display: none !important; }   /* the display rules above must not defeat hidden */
-  .pl-items { width: 100%; border-collapse: collapse; font-size: 12.5px; color: var(--ink); margin-top: 8px; }
-  .pl-items th { text-align: left; font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .03em; padding: 0 10px 4px 0; border-bottom: 1px solid var(--rule); }
-  .pl-items td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--rule); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+  /* series list (Series pane) */
+  .pl-ser { display: grid; grid-template-columns: 12px minmax(0, 1fr) 16px; gap: 6px; align-items: center; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+  .pl-ser:hover, .pl-ser.on { background: var(--surface); }
+  .pl-ser .dot { width: 9px; height: 9px; border-radius: 50%; }
+  .pl-ser input { background: none; border: 1px solid transparent; padding: 1px 4px; font-weight: 600; color: var(--ink); width: 100%; }
+  .pl-ser input:focus { background: var(--paper, #fff); border-color: var(--rule); }
+  .pl-ser .k { grid-column: 2; font-family: var(--font-mono); font-size: 11px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 4px; }
+  .pl-ser a { color: var(--faint); text-decoration: none; text-align: center; }
+  /* main */
+  .pl-main { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; background: var(--bg); min-width: 0; }
+  .pl-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--rule); background: var(--page); }
+  .pl-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 2px 9px 2px 7px; border-radius: 999px; border: 1px solid var(--rule); background: var(--page); color: var(--ink); cursor: pointer; }
+  .pl-chip.on { background: var(--surface); border-color: var(--rule-hard); }
+  .pl-chip.dim { opacity: .5; }
+  .pl-chip .dot { width: 9px; height: 9px; border-radius: 50%; }
+  .pl-chip .k { font-family: var(--font-mono); font-size: 11.5px; color: var(--dim); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pl-chip .x { color: var(--faint); margin-left: 2px; }
+  .pl-chip .x:hover { color: var(--bad, #a33); }
+  .pl-chip.add { color: var(--accent-ink); border-style: dashed; }
+  .pl-bar .right { margin-left: auto; display: inline-flex; gap: 6px; }
+  .pl-plotwrap { position: relative; height: 440px; margin: 10px 14px 0; }
+  .pl-split { height: 10px; margin: 4px 14px 0; cursor: row-resize; display: grid; place-items: center; }
+  .pl-split::before { content: ""; width: 44px; height: 3px; border-radius: 2px; background: var(--rule-hard); }
+  .pl-grid { margin: 0 14px 12px; border: 1px solid var(--rule); border-radius: var(--r-md, 7px); background: var(--page); align-self: start; }
+  .pl-grid .gh { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--rule); font-size: 12.5px; color: var(--dim); }
+  .pl-grid .gh b { color: var(--ink); font-weight: 600; }
+  .pl-grid .gh input[type=search] { width: 230px; }
+  .pl-grid .gh .pager { margin-left: auto; display: inline-flex; gap: 4px; align-items: center; font-size: 12px; color: var(--faint); }
+  .pl-items { width: 100%; border-collapse: collapse; font-size: 12.5px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .pl-items th { text-align: left; font-size: 10.5px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; padding: 5px 0 5px 12px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+  .pl-items td { padding: 5px 0 5px 12px; border-bottom: 1px solid var(--rule-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
   .pl-items tbody tr { cursor: pointer; }
   .pl-items tbody tr:hover { background: var(--surface); }
   .pl-items tbody tr.is-on td { color: var(--accent-ink); font-weight: 600; }
   .pl-items .mono { font-family: var(--font-mono); font-size: 12px; }
-  #items-card summary { cursor: pointer; font-size: 12.5px; color: var(--dim); }
-  .pl-cut a { color: var(--faint); text-decoration: none; padding: 0 3px; }
-  .pl-stats { font-size: 12px; color: var(--faint); font-family: var(--font-mono); margin-bottom: 6px; min-height: 16px; }
+  .pl-items th.v, .pl-items td.v { text-align: right; padding-right: 12px; font-family: var(--font-mono); font-size: 12px; }
+  .pl-items th.v .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
+  .pl-status { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 5px 14px; font-family: var(--font-mono); font-size: 11px; color: var(--faint); border-top: 1px solid var(--rule); background: var(--page); min-height: 26px; }
+  .pl-status #stats { color: var(--dim); }
+  .pl-status .hint { margin-left: auto; }
   .pl-err { color: var(--bad, #a33); font-size: 12.5px; }
+  @media (max-width: 960px) {
+    .pl-wb { grid-template-columns: 1fr; }
+    .pl-tabs { flex-direction: row; border-right: 0; border-bottom: 1px solid var(--rule); padding-top: 0; }
+    .pl-tab { border-left: 0; border-bottom: 3px solid transparent; height: 46px; flex: 1; width: auto; }
+    .pl-tab.on { border-bottom-color: var(--accent); }
+    .pl-panel { border-right: 0; border-bottom: 1px solid var(--rule); }
+  }
 </style>
 
 <div class="pl-page" id="pl" data-key="{{ hwdb_instance }}/{{ leaf.part_type_id }}" data-url="{{ data_url }}" data-n="{{ n_items }}"
      data-sources-url="{{ sources_url }}" data-tests-base-url="{{ tests_base_url }}" data-tests-sync-url="{{ tests_sync_url }}">
-  <div class="pl-crumbs"><a href="{{ type_url }}">{{ leaf.name }}</a><span class="sep">›</span>Plot</div>
-  <h1>{{ leaf.name }} <span class="mono">{{ leaf.part_type_id }}</span></h1>
-  <p class="pl-sub">{{ leaf.system_name }} › {{ leaf.subsystem_name }} · {{ n_items }} items in HWDB</p>
+  <div class="pl-head">
+    <div class="pl-crumbs"><a href="{{ type_url }}">{{ leaf.name }}</a><span class="sep">›</span>Plot</div>
+    <h1>{{ leaf.name }} <span class="mono">{{ leaf.part_type_id }}</span><span class="pl-sub">{{ leaf.system_name }} › {{ leaf.subsystem_name }} · {{ n_items }} items in HWDB</span></h1>
+  </div>
   {% csrf_token %}
 
-  <div class="pl-card">
-    <div class="pl-row">
-      <label>Source <select id="src"><option value="specs">Item Specifications</option></select></label>
-      <span id="data-status">No data in this browser yet.</span>
-      <button type="button" class="pl-btn primary" id="fetch-btn">Fetch specifications</button>
-      <button type="button" class="pl-btn" id="fetch-full-btn" hidden title="Re-fetch the latest test record for every item">Refresh all</button>
-      <span id="fetch-progress"></span>
-      <span class="pl-err" id="fetch-error"></span>
-    </div>
-    <pre id="td-log" hidden style="margin: 10px 0 0; max-height: 140px; overflow: auto; font-size: 11.5px; color: var(--dim); background: var(--surface); border-radius: 6px; padding: 8px 10px;"></pre>
-  </div>
+  <div class="pl-wb">
+    <nav class="pl-tabs" aria-label="plot controls">
+      <button type="button" class="pl-tab on" data-tab="data"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></svg>Data</button>
+      <button type="button" class="pl-tab" data-tab="cuts" disabled><svg viewBox="0 0 24 24"><circle cx="7" cy="7" r="3"/><circle cx="7" cy="17" r="3"/><path d="M9.5 8.8 20 18M9.5 15.2 20 6"/></svg>Cuts</button>
+      <button type="button" class="pl-tab" data-tab="series" disabled><svg viewBox="0 0 24 24"><path d="M3 12l9-5 9 5-9 5z"/><path d="M3 16l9 5 9-5"/></svg>Series</button>
+    </nav>
 
-  <div class="pl-card" id="controls" hidden>
-    <div class="pl-row">
-      <label>X <select id="xkey"></select></label>
-      <label>Y <select id="ykey"><option value="">—</option></select></label>
-      <label id="mode1d-l" hidden><select id="mode1d"><option value="hist">histogram</option><option value="cum">cumulative</option><option value="line">line vs index</option></select></label>
-      <label id="logy-l" hidden><input type="checkbox" id="logy"> log y</label>
-      <label id="mode2d-l" hidden><select id="mode2d"><option value="scatter">scatter · size = multiplicity</option><option value="heat">2D histogram</option></select></label>
-      <label id="bins-l">Bins <input type="number" id="bins" min="2" max="500" value="40"></label>
-      <label id="rare-l" hidden title="Keys present on fewer than 5% of items"><input type="checkbox" id="rare" checked> rare keys</label>
-    </div>
-    <div class="pl-row" id="idx-row" hidden title="Array key: pin one index per level (0-based); blank = every element">
-      <span class="pl-idx" id="xidx-l">X index <span id="xidx" class="pl-idx"></span></span>
-      <span class="pl-idx" id="yidx-l">Y index <span id="yidx" class="pl-idx"></span></span>
-    </div>
-    <div class="pl-row">
-      <label>Item <input type="text" id="item" placeholder="one PID" style="width: 170px;" title="Exactly one item — the Items table below fills this"></label>
-      <label>PID <input type="text" id="pidf" placeholder="contains / regex / 00120..06000" style="width: 190px;" title="Any number of items, by substring, regex, or a range of the numeric suffix (00120..06000, 00120.., ..06000)"></label>
-      <label id="f-status-l">Status <select id="f-status"></select></label>
-      <label id="f-creator-l">Creator <select id="f-creator"></select></label>
-      <label id="f-manufacturer-l">Manufacturer <select id="f-manufacturer"></select></label>
-      <label id="f-institution-l">Institution <select id="f-institution"></select></label>
-    </div>
-    <div class="pl-row">
-      <span>Cuts</span><span id="cuts" class="pl-row" style="gap: 8px;"></span>
-      <button type="button" class="pl-btn" id="cut-add">+ cut</button>
-      <select id="logic"><option value="and">all</option><option value="or">any</option></select>
-    </div>
-    <div class="pl-row">
-      <label id="ov-l">Overlay <textarea id="ov" placeholder="x, y — one per line"></textarea></label>
-      <input type="text" id="ovn" placeholder="overlay name" style="width: 120px;">
-    </div>
-  </div>
+    <aside class="pl-panel">
+      <div data-pane="data">
+        <h2>Data</h2>
+        <div class="pl-grp">
+          <select id="src"><option value="specs">Item Specifications</option></select>
+          <span class="pl-hint" id="data-status">No data in this browser yet.</span>
+          <div class="pl-row">
+            <button type="button" class="pl-btn primary sm" id="fetch-btn">Fetch specifications</button>
+            <button type="button" class="pl-btn sm" id="fetch-full-btn" hidden title="Re-fetch the latest test record for every item">Refresh all</button>
+          </div>
+          <span class="pl-hint" id="fetch-progress"></span>
+          <span class="pl-err" id="fetch-error"></span>
+        </div>
+        <div id="axes-grp" hidden style="display: grid; gap: 10px;">
+          <h2 style="margin-top: 2px;">Axes <span class="for pl-for"></span></h2>
+        <div class="pl-grp">
+          <div class="pl-f"><span>X</span><select id="xkey"></select></div>
+          <div class="pl-f"><span>Y</span><select id="ykey"><option value="">—</option></select></div>
+          <label id="rare-l" hidden class="pl-hint" title="Keys present on fewer than 5% of items"><input type="checkbox" id="rare" checked> rare keys</label>
+        </div>
+        <div class="pl-grp">
+          <div class="pl-f" id="mode1d-l" hidden><span>Mode</span><select id="mode1d"><option value="hist">histogram</option><option value="cum">cumulative</option><option value="line">line vs index</option></select></div>
+          <div class="pl-f" id="mode2d-l" hidden><span>Mode</span><select id="mode2d"><option value="scatter">scatter · size = multiplicity</option><option value="heat">2D histogram</option></select></div>
+          <div class="pl-f" id="bins-l"><span>Bins</span><div class="pl-row"><input type="number" id="bins" min="2" max="500" value="40"><label id="logy-l" hidden><input type="checkbox" id="logy"> log y</label></div></div>
+        </div>
+        <div class="pl-grp" id="idx-row" hidden title="Array key: pin one index per level (0-based); blank = every element">
+          <span class="pl-hint">Index pins</span>
+          <div class="pl-idx" id="xidx-l"><span>X</span><span id="xidx" class="pl-row"></span></div>
+          <div class="pl-idx" id="yidx-l"><span>Y</span><span id="yidx" class="pl-row"></span></div>
+        </div>
+        </div>
+        <pre id="td-log" hidden style="margin: 0; max-height: 260px; overflow: auto; font-size: 11px; color: var(--dim); background: var(--surface); border-radius: 6px; padding: 8px 10px; white-space: pre-wrap;"></pre>
+      </div>
 
-  <details class="pl-card" id="items-card" hidden>
-    <summary>Items <span id="items-n"></span> · click a row to plot one item</summary>
-    <div class="pl-row" style="margin-top: 8px;">
-      <input type="search" id="items-q" placeholder="filter PID / serial / status / creator" style="width: 240px;">
-      <a href="#" id="items-all" hidden>show all items</a>
-      <span id="items-page" style="margin-left: auto;"></span>
-      <button type="button" class="pl-btn" id="items-first" title="First page">«</button>
-      <button type="button" class="pl-btn" id="items-prev" title="Previous page">‹</button>
-      <button type="button" class="pl-btn" id="items-next" title="Next page">›</button>
-      <button type="button" class="pl-btn" id="items-last" title="Last page">»</button>
-    </div>
-    <div style="overflow-x: auto;"><table class="pl-items">
-      <thead><tr><th>PID</th><th>Serial</th><th>Status</th><th>Creator</th><th>Institution</th><th>Updated</th></tr></thead>
-      <tbody id="items-body"></tbody>
-    </table></div>
-  </details>
+      <div data-pane="cuts" hidden>
+        <h2>Cuts <span class="for pl-for"></span></h2>
+        <div class="pl-grp">
+          <div class="pl-f"><span>Item</span><input type="text" id="item" placeholder="one PID" title="Exactly one item — click a row in the items grid"></div>
+          <div class="pl-f"><span>PID</span><input type="text" id="pidf" placeholder="contains / regex / 00120..06000" title="Any number of items, by substring, regex, or a range of the numeric suffix (00120..06000, 00120.., ..06000)"></div>
+          <div class="pl-f" id="f-status-l"><span>Status</span><select id="f-status"></select></div>
+          <div class="pl-f" id="f-creator-l"><span>Creator</span><select id="f-creator"></select></div>
+          <div class="pl-f" id="f-manufacturer-l"><span>Manuf.</span><select id="f-manufacturer"></select></div>
+          <div class="pl-f" id="f-institution-l"><span>Institution</span><select id="f-institution"></select></div>
+        </div>
+        <div class="pl-grp">
+          <div class="pl-f"><span>On values</span><button type="button" class="pl-btn sm" id="cut-add" style="justify-self: start;">+ cut</button></div>
+          <div id="cuts" style="display: grid; gap: 6px;"></div>
+          <div class="pl-f"><span>Match</span><select id="logic"><option value="and">all cuts</option><option value="or">any cut</option></select></div>
+        </div>
+      </div>
 
-  <div class="pl-card" id="plot-card" hidden>
-    <div class="pl-row" style="justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
-      <div class="pl-stats" id="stats" style="margin-bottom: 0;"></div>
-      <span style="display: inline-flex; gap: 6px; flex: 0 0 auto;">
-        <button type="button" class="pl-btn" id="zoom-reset" title="Wheel or drag a box to zoom, shift-drag to pan, double-click to reset">Reset zoom</button>
-        <button type="button" class="pl-btn" id="png-btn" title="Save the plot as a PNG">⤓ PNG</button>
-      </span>
-    </div>
-    <div style="position: relative; height: 440px;"><canvas id="plot"></canvas></div>
+      <div data-pane="series" hidden>
+        <h2>Series <button type="button" class="pl-btn sm" id="ser-add" title="Add a copy of the current series">+ series</button></h2>
+        <div class="pl-grp">
+          <div id="ser-list" style="display: grid; gap: 2px;"></div>
+          <span class="pl-hint">X / Y and Cuts edit the highlighted series. All series read this type and source.</span>
+        </div>
+        <div class="pl-grp">
+          <div class="pl-f"><span>Y scale</span><select id="norm"><option value="count">items</option><option value="frac">fraction of items</option></select></div>
+          <div class="pl-f" id="ov-l"><span>Reference</span><textarea id="ov" placeholder="x, y — one per line"></textarea></div>
+          <div class="pl-f"><span></span><input type="text" id="ovn" placeholder="reference name"></div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="pl-main">
+      <div class="pl-bar">
+        <span id="chips" style="display: contents;"></span>
+        <button type="button" class="pl-chip add" id="chip-add" hidden title="Add a copy of the current series">+ series</button>
+        <span class="right">
+          <button type="button" class="pl-btn sm" id="zoom-reset" title="Drag a box to zoom, shift-drag to pan, double-click to reset">Reset zoom</button>
+          <button type="button" class="pl-btn sm" id="png-btn" title="Save the plot as a PNG">⤓ PNG</button>
+        </span>
+      </div>
+      <div class="pl-plotwrap" id="plot-card"><canvas id="plot"></canvas></div>
+      <div class="pl-split" id="split" title="drag to resize the plot"></div>
+      <div class="pl-grid" id="items-card" hidden>
+        <div class="gh"><b>Items</b> <span id="items-n"></span> <span>click a row to plot one item</span>
+          <input type="search" id="items-q" placeholder="filter PID / serial / status / creator">
+          <a href="#" id="items-all" hidden>show all items</a>
+          <span class="pager"><span id="items-page"></span>
+            <button type="button" class="pl-btn sm" id="items-first" title="First page">«</button>
+            <button type="button" class="pl-btn sm" id="items-prev" title="Previous page">‹</button>
+            <button type="button" class="pl-btn sm" id="items-next" title="Next page">›</button>
+            <button type="button" class="pl-btn sm" id="items-last" title="Last page">»</button></span>
+        </div>
+        <div style="overflow-x: auto;"><table class="pl-items">
+          <thead><tr id="items-head"></tr></thead>
+          <tbody id="items-body"></tbody>
+        </table></div>
+      </div>
+      <div class="pl-status"><span id="stats"></span><span class="hint">drag a box to zoom · shift-drag pans · double-click resets</span></div>
+    </main>
   </div>
 </div>
 
@@ -137,15 +226,23 @@
     // ---- State -------------------------------------------------------------
     // source: "specs" (whole dataset, values walked from item.data) or a test
     // type id (values fetched per key from the mirror into item.vals[path]).
-    var source = "specs", items = [], paths = [], pathCounts = {}, chart = null, cuts = [];
+    // series (#156): each carries its own keys, index pins, selection and
+    // cuts; source, mode, bins, log y, Y scale and the reference are shared.
+    // The Axes / Select / Cuts panes edit series[cur].
+    var source = "specs", items = [], paths = [], pathCounts = {}, chart = null;
+    var series = [], cur = 0;
     var testCache = null;          // the IndexedDB record for the current test source
     var busy = false;              // a key fetch is in flight
     function isTest() { return source !== "specs"; }
-    // The effective PID filter: the Item box (exactly one PID) wins over the regex box.
-    function pidFilter() { var it = $("item").value.trim(); return it ? "^" + it.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$" : $("pidf").value.trim(); }
+    function S() { return series[cur]; }
+    function blankSeries() { return { name: "", x: "", y: "", xi: [], yi: [], item: "", pid: "", f: {}, cuts: [], logic: "and" }; }
+    function copySeries(s) { return JSON.parse(JSON.stringify(s)); }
+    function nextName() { var n = series.length + 1; while (series.some(function (s) { return s.name === "Series " + n; })) n++; return "Series " + n; }
+    // The effective PID filter of a series: its Item box (exactly one PID) wins over the regex box.
+    function pidFilter(s) { var it = (s.item || "").trim(); return it ? "^" + it.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$" : (s.pid || "").trim(); }
     // "00120..06000" / "D00400300001-00120..06000" / open ends → [lo, hi] on the numeric suffix, else null
-    function pidRange(s) {
-        var m = /^\s*(?:[A-Za-z]\d{11}-)?(\d*)\s*\.\.\s*(\d*)\s*$/.exec(s || "");
+    function pidRange(str) {
+        var m = /^\s*(?:[A-Za-z]\d{11}-)?(\d*)\s*\.\.\s*(\d*)\s*$/.exec(str || "");
         if (!m || !(m[1] || m[2])) return null;
         return [m[1] ? +m[1] : -Infinity, m[2] ? +m[2] : Infinity];
     }
@@ -236,11 +333,11 @@
     async function loadSources() {
         var srcs = [];
         try { srcs = (await (await fetch(SOURCES_URL)).json()).tests || []; } catch (e) { srcs = []; }
-        var sel = $("src"), cur = sel.value; sel.textContent = "";
+        var sel = $("src"), curv = sel.value; sel.textContent = "";
         var o = document.createElement("option"); o.value = "specs"; o.textContent = "Item Specifications"; sel.appendChild(o);
         srcs.forEach(function (t) { var x = document.createElement("option"); x.value = String(t.id); x.textContent = t.name + " (" + t.n + " items)"; sel.appendChild(x); });
         var g = document.createElement("option"); g.value = "__fetch__"; g.textContent = srcs.length ? "fetch test data for new items…" : "fetch test data from HWDB…"; sel.appendChild(g);
-        sel.value = Array.prototype.some.call(sel.options, function (op) { return op.value === cur; }) ? cur : "specs";
+        sel.value = Array.prototype.some.call(sel.options, function (op) { return op.value === curv; }) ? curv : "specs";
         return srcs;
     }
 
@@ -258,54 +355,47 @@
         }
         if (prefix.length) acc.add(JSON.stringify(prefix));
     }
-    function valuesAt(node, segs, i) {
-        if (Array.isArray(node)) {
-            var out = []; node.forEach(function (e) { out = out.concat(valuesAt(e, segs, i)); }); return out;
-        }
-        if (i === segs.length) return (node !== null && typeof node !== "object") ? [node] : [];
-        if (node && typeof node === "object" && Object.prototype.hasOwnProperty.call(node, segs[i])) return valuesAt(node[segs[i]], segs, i + 1);
-        return [];
-    }
     // #154: an array key's shape ([{seg, n}] per list level, test source only)
-    // and the per-axis index pins — one entry per level, null = every element.
-    // Pinned values live in their own cache slot (key@[…]).
-    var xi = [], yi = [], idxKeys = { x: null, y: null };
+    // and a series' per-axis index pins — one entry per level, null = every
+    // element. Pinned values live in their own cache slot (key@[…]).
     function keyDims(p) {
         if (!p) return [];
         if (!isTest()) return specKeyDims(p);
         var k = testCache ? testCache.keys.find(function (x) { return JSON.stringify(x.path) === p; }) : null;
         return k && k.dims ? k.dims : [];
     }
-    function idxOf(p) {
-        var a = p && p === $("xkey").value ? xi : p && p === $("ykey").value ? yi : null;
+    function idxOf(p, s) {
+        var a = p && p === s.x ? s.xi : p && p === s.y ? s.yi : null;
         return a && a.some(function (i) { return i !== null && i !== undefined; }) ? a.map(function (i) { return i === undefined ? null : i; }) : null;
     }
-    function slotBase(p) { var ix = idxOf(p); return ix ? p + "@" + JSON.stringify(ix) : p; }
-    function idxScale(p) { var ix = idxOf(p), d = keyDims(p), s = 1; if (ix) ix.forEach(function (i, j) { if (i !== null && d[j] && d[j].n > 1) s *= d[j].n; }); return s; }
-    function idxNote() {
-        return ["x", "y"].map(function (ax) { var p = $(ax + "key").value, ix = idxOf(p); return ix ? " · " + showPath(p) + " [" + ix.map(function (i) { return i === null ? "·" : i; }).join(", ") + "]" : ""; }).join("");
+    function slotBase(p, s) { var ix = idxOf(p, s); return ix ? p + "@" + JSON.stringify(ix) : p; }
+    function idxScale(p, s) { var ix = idxOf(p, s), d = keyDims(p), sc = 1; if (ix) ix.forEach(function (i, j) { if (i !== null && d[j] && d[j].n > 1) sc *= d[j].n; }); return sc; }
+    function idxNote(s) {
+        return ["x", "y"].map(function (ax) { var p = s[ax], ix = idxOf(p, s); return ix ? " · " + showPath(p) + " [" + ix.map(function (i) { return i === null ? "·" : i; }).join(", ") + "]" : ""; }).join("");
     }
+    // The index-pin inputs, for series[cur].
     function drawIdx() {
+        var s = S();
         ["x", "y"].forEach(function (ax) {
-            var p = $(ax + "key").value, dims = keyDims(p), box = $(ax + "idx"), arr = ax === "x" ? xi : yi;
-            if (idxKeys[ax] !== p) {
-                idxKeys[ax] = p; arr.length = 0;
-                if (ax === "y") xi.forEach(function (v, j) { if (v !== null && dims[j] && dims[j].n > 1) arr[j] = v; });   // Y follows X
+            var p = s[ax], dims = keyDims(p), box = $(ax + "idx"), arr = s[ax + "i"];
+            if (s[ax + "k"] !== p) {
+                s[ax + "k"] = p; arr.length = 0;
+                if (ax === "y") s.xi.forEach(function (v, j) { if (v !== null && dims[j] && dims[j].n > 1) arr[j] = v; });   // Y follows X
             }
             while (arr.length < dims.length) arr.push(null);
-            if (box.getAttribute("data-key") !== p) {       // rebuild only on a key change — typing keeps focus
-                box.setAttribute("data-key", p); box.textContent = "";
+            if (box.getAttribute("data-key") !== p + "#" + cur) {       // rebuild only on a key / series change — typing keeps focus
+                box.setAttribute("data-key", p + "#" + cur); box.textContent = "";
                 dims.forEach(function (d, j) {
                     if (d.n <= 1) return;
                     var lab = document.createElement("label"); lab.textContent = (d.seg || "level " + (j + 1)) + " ";
                     var inp = document.createElement("input"); inp.type = "number"; inp.min = 0; inp.max = d.n - 1;
-                    inp.placeholder = "all"; inp.title = "0 – " + (d.n - 1); inp.style.width = "62px"; inp.setAttribute("data-level", j);
+                    inp.placeholder = "all"; inp.title = "0 – " + (d.n - 1); inp.setAttribute("data-level", j);
                     inp.value = arr[j] === null || arr[j] === undefined ? "" : arr[j];
                     inp.addEventListener("input", function () {
                         var v = inp.value.trim(); arr[j] = v === "" ? null : Math.max(0, Math.floor(+v));
                         if (ax === "x") {                       // Y follows X at the same level; Y stays editable
-                            var yd = keyDims($("ykey").value), yin = $("yidx").querySelector('input[data-level="' + j + '"]');
-                            if (yd[j] && yd[j].n > 1 && yin) { while (yi.length <= j) yi.push(null); yi[j] = arr[j]; yin.value = inp.value; }
+                            var yd = keyDims(s.y), yin = $("yidx").querySelector('input[data-level="' + j + '"]');
+                            if (yd[j] && yd[j].n > 1 && yin) { while (s.yi.length <= j) s.yi.push(null); s.yi[j] = arr[j]; yin.value = inp.value; }
                         }
                         changed();
                     });
@@ -373,15 +463,15 @@
         return specDims[p];
     }
     // The one accessor both sources share.
-    function valuesFor(item, pathJSON) {
+    function valuesFor(item, pathJSON, s) {
         if (!pathJSON) return [];
-        if (isTest()) { var b = slotBase(pathJSON); return item.vals[b] || item.vals[b + "|" + pidFilter()] || []; }
+        if (isTest()) { var b = slotBase(pathJSON, s); return item.vals[b] || item.vals[b + "|" + pidFilter(s)] || []; }
         var v = nestedAt(item.data, JSON.parse(pathJSON), 0);
-        return v === null ? [] : selectAt(v, idxOf(pathJSON) || []);
+        return v === null ? [] : selectAt(v, idxOf(pathJSON, s) || []);
     }
-    // Test source: is this key loaded for the current PID filter? (a whole-type
+    // Test source: is this key loaded for the series' PID filter? (a whole-type
     // fetch, stored under the bare key, serves any filter)
-    function haveKey(p) { var b = slotBase(p); return (b in testCache.values) || ((b + "|" + pidFilter()) in testCache.values); }
+    function haveKey(p, s) { var b = slotBase(p, s); return (b in testCache.values) || ((b + "|" + pidFilter(s)) in testCache.values); }
     function keyNV(p) { var k = testCache.keys.find(function (x) { return JSON.stringify(x.path) === p; }); return k ? (k.nv || k.n) : 0; }
     function toNum(v) {
         if (typeof v === "number") return isFinite(v) ? v : null;
@@ -389,28 +479,29 @@
         return null;
     }
     function showPath(p) { return JSON.parse(p).join(" › "); }
+    function lastSeg(p) { try { var a = JSON.parse(p); return a[a.length - 1]; } catch (e) { return ""; } }
 
-    // Test source: make sure every key the plot needs is in item.vals. With
-    // a PID filter set, only the matching items' values are fetched — that is
-    // how a 2000-point-per-item array key stays plottable for one item.
-    async function ensureKeys(pathJSONs) {
-        var pidf = pidFilter(), need = pathJSONs.filter(function (p) { return p && !haveKey(p); });
+    // Test source: make sure every key a series' plot needs is in item.vals.
+    // With a PID filter set, only the matching items' values are fetched —
+    // that is how a 2000-point-per-item array key stays plottable for one item.
+    async function ensureKeys(pathJSONs, s) {
+        var pidf = pidFilter(s), need = pathJSONs.filter(function (p) { return p && !haveKey(p, s); });
         if (!need.length) return true;
         var max = testCache.max_values || 2000000;
-        var big = need.filter(function (p) { return !pidf && keyNV(p) / idxScale(p) > max; });
+        var big = need.filter(function (p) { return !pidf && keyNV(p) / idxScale(p, s) > max; });
         if (big.length) {
-            clear(showPath(big[0]) + " has " + keyNV(big[0]).toLocaleString() + " values across the type — pick an item below or set a PID filter (limit " + max.toLocaleString() + ")");
+            clear(s.name + ": " + showPath(big[0]) + " has " + keyNV(big[0]).toLocaleString() + " values across the type — pick an item below or set a PID filter (limit " + max.toLocaleString() + ")");
             return false;
         }
-        busy = true; $("stats").textContent = "loading " + need.map(showPath).join(", ") + "…";
+        busy = true; $("stats").textContent = "loading " + need.map(showPath).join(", ") + (series.length > 1 ? " for " + s.name : "") + "…";
         try {
             for (var i = 0; i < need.length; i++) {
-                var ix = idxOf(need[i]);
+                var ix = idxOf(need[i], s);
                 var url = TESTS_BASE + "/" + source + "/values/?key=" + encodeURIComponent(need[i]) + (pidf ? "&pid=" + encodeURIComponent(pidf) : "")
                         + (ix ? "&idx=" + encodeURIComponent(JSON.stringify(ix)) : "");
                 var resp = await fetch(url), j = await resp.json();
                 if (!resp.ok) { clear(j.error || ("HTTP " + resp.status)); return false; }
-                var slot = pidf ? slotBase(need[i]) + "|" + pidf : slotBase(need[i]);
+                var slot = pidf ? slotBase(need[i], s) + "|" + pidf : slotBase(need[i], s);
                 testCache.values[slot] = j.values || {};
                 items.forEach(function (it) { if (j.values && j.values[it.pid]) it.vals[slot] = j.values[it.pid]; });
             }
@@ -418,11 +509,16 @@
         await idbPut(cacheKey(), testCache);
         return true;
     }
+    function seriesKeys(s) { return [s.x, s.y].concat(s.cuts.map(function (c) { return c.p; })).filter(Boolean); }
+    async function ensureAll(list) {           // [series, …] → every series' keys, one series at a time
+        for (var i = 0; i < list.length; i++) { if (!(await ensureKeys(seriesKeys(list[i]), list[i]))) return false; }
+        return true;
+    }
 
     // ---- Filters -----------------------------------------------------------
-    function passCut(item, c) {
+    function passCut(item, c, s) {
         if (!c.p) return true;
-        var vals = valuesFor(item, c.p), want = toNum(c.v);
+        var vals = valuesFor(item, c.p, s), want = toNum(c.v);
         return vals.some(function (v) {
             var n = toNum(v);
             if (c.o === "contains") return String(v).toLowerCase().indexOf(String(c.v).toLowerCase()) >= 0;
@@ -430,35 +526,57 @@
                 return c.o === "=" ? n === want : c.o === "≠" ? n !== want : c.o === "<" ? n < want :
                        c.o === "≤" ? n <= want : c.o === ">" ? n > want : n >= want;
             }
-            var s = String(v), t = String(c.v);
-            return c.o === "=" ? s === t : c.o === "≠" ? s !== t : c.o === "<" ? s < t : c.o === "≤" ? s <= t : c.o === ">" ? s > t : s >= t;
+            var str = String(v), t = String(c.v);
+            return c.o === "=" ? str === t : c.o === "≠" ? str !== t : c.o === "<" ? str < t : c.o === "≤" ? str <= t : c.o === ">" ? str > t : str >= t;
         });
     }
-    function filtered() {
-        var pidf = pidFilter(), re = null, rng = pidRange(pidf);
+    function filtered(s) {
+        var pidf = pidFilter(s), re = null, rng = pidRange(pidf);
         if (pidf && !rng) { try { re = new RegExp(pidf, "i"); } catch (e) { re = null; } }
-        var any = $("logic").value === "or", live = cuts.filter(function (c) { return c.p && c.v !== ""; });
+        var any = s.logic === "or", live = s.cuts.filter(function (c) { return c.p && c.v !== ""; });
         return items.filter(function (it) {
             if (pidf && !(rng ? (function (n) { return n >= rng[0] && n <= rng[1]; })(+it.pid.split("-")[1])
                           : re ? re.test(it.pid) : it.pid.toLowerCase().indexOf(pidf.toLowerCase()) >= 0)) return false;
-            for (var i = 0; i < FACETS.length; i++) { var f = $("f-" + FACETS[i]).value; if (f && it[FACETS[i]] !== f) return false; }
+            for (var i = 0; i < FACETS.length; i++) { var f = s.f[FACETS[i]]; if (f && it[FACETS[i]] !== f) return false; }
             if (!live.length) return true;
-            return any ? live.some(function (c) { return passCut(it, c); }) : live.every(function (c) { return passCut(it, c); });
+            return any ? live.some(function (c) { return passCut(it, c, s); }) : live.every(function (c) { return passCut(it, c, s); });
         });
     }
 
     // ---- Chart -------------------------------------------------------------
-    var ACCENT = "#1d4ed8", OVER = "#c2410c";
+    // Series colours (amber first, the Explorer's accent); categories keep their own palette.
+    var SERIES_COLORS = ["#b5722f", "#2f7f8a", "#7a4d8c", "#3f7f3a", "#a8403f", "#4b5fa6", "#8a6d1f", "#c2607a"];
+    var OVER = "#c2410c";
     var PALETTE = ["#1d4ed8", "#c2410c", "#15803d", "#9333ea", "#dc2626", "#0891b2", "#ca8a04", "#4f46e5", "#db2777", "#65a30d", "#0d9488", "#7c3aed"];
+    function color(i) { return SERIES_COLORS[i % SERIES_COLORS.length]; }
     function opts(xTitle, yTitle) {
         return { responsive: true, maintainAspectRatio: false, animation: false,
             plugins: { legend: { labels: { boxWidth: 12, font: { size: 12 } } }, tooltip: { intersect: false },
-                       zoom: { zoom: { wheel: { enabled: true }, drag: { enabled: true, backgroundColor: "rgba(29,78,216,.12)" }, mode: "xy" },
+                       zoom: { zoom: { wheel: { enabled: false }, drag: { enabled: true, backgroundColor: "rgba(181,114,47,.12)" }, mode: "xy" },
                                pan: { enabled: true, modifierKey: "shift", mode: "xy" } } },
             scales: { x: { title: { display: true, text: xTitle }, ticks: { maxRotation: 45, autoSkipPadding: 12, font: { size: 11 } } },
                       y: { title: { display: true, text: yTitle }, beginAtZero: true, ticks: { precision: 0 } } } };
     }
-    function draw(cfg) { if (chart) chart.destroy(); chart = new Chart($("plot"), cfg); }
+    // ROOT-style stats box, one per drawn numeric series: Entries / Mean / Std Dev.
+    var statsBox = { id: "statsBox", afterDatasetsDraw: function (ch) {
+        var rows = (ch.options.plugins.statsBox || {}).rows; if (!rows || !rows.length) return;
+        var ctx = ch.ctx, a = ch.chartArea, w = 168, h = 58, x = a.right - w - 6, y = a.top + 6;
+        ctx.save();
+        rows.forEach(function (r) {
+            ctx.fillStyle = "rgba(254,252,247,.92)"; ctx.strokeStyle = r.color; ctx.lineWidth = 1;
+            ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
+            ctx.textBaseline = "middle"; ctx.textAlign = "left";
+            ctx.font = "600 11px 'IBM Plex Mono', ui-monospace, monospace"; ctx.fillStyle = r.color; ctx.fillText(r.name, x + 8, y + 12);
+            ctx.font = "11px 'IBM Plex Mono', ui-monospace, monospace"; ctx.fillStyle = "#2a241b";
+            [["Entries", r.n.toLocaleString()], ["Mean", fmt(r.mean)], ["Std Dev", fmt(r.sd)]].forEach(function (row, k) {
+                ctx.textAlign = "left"; ctx.fillText(row[0], x + 8, y + 26 + k * 13);
+                ctx.textAlign = "right"; ctx.fillText(row[1], x + w - 8, y + 26 + k * 13);
+            });
+            y += h + 6;
+        });
+        ctx.restore();
+    } };
+    function draw(cfg) { if (chart) chart.destroy(); cfg.plugins = [statsBox]; chart = new Chart($("plot"), cfg); }
     function fmt(n) { return Math.abs(n) >= 1000 || Number.isInteger(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 2 }) : n.toPrecision(4); }
     function histCounts(nums, lo, hi, nb) {
         var w = (hi - lo) / nb || 1, counts = new Array(nb).fill(0);
@@ -481,17 +599,22 @@
         for (var i = 0; i < nb; i++) labels.push(fmt(lo + i * w));
         return { lo: lo, hi: hi, nb: nb, w: w, labels: labels };
     }
+    function meanSd(nums) {
+        var n = nums.length, mean = nums.reduce(function (a, c) { return a + c; }, 0) / n;
+        var sd = Math.sqrt(nums.reduce(function (a, c) { return a + (c - mean) * (c - mean); }, 0) / n);
+        return { n: n, mean: mean, sd: sd };
+    }
     function clear(msg) { $("stats").textContent = msg; if (chart) { chart.destroy(); chart = null; } }
     // Which side controls apply to the plot being drawn: bins only to
-    // histograms; the overlay to single-key plots (x, y points over a
-    // histogram, "label, count" lines over category bars).
+    // histograms; the reference overlay to single-key plots (x, y points over
+    // a histogram, "label, count" lines over category bars).
     function controls(bins, overlay) {
         $("bins").disabled = !bins; $("bins-l").classList.toggle("pl-off", !bins);
         $("bins-l").title = bins ? "" : "Bins apply to histograms only";
         $("ov").disabled = !overlay; $("ovn").disabled = !overlay;
         $("ov-l").classList.toggle("pl-off", !overlay); $("ovn").classList.toggle("pl-off", !overlay);
         $("ov").placeholder = overlay === "cat" ? "label, count — one per line" : "x, y — one per line";
-        $("ov-l").title = overlay ? "" : "Overlay applies to single-key plots only";
+        $("ov-l").title = overlay ? "" : "Reference applies to single-key plots only";
     }
     function overlayCats() {
         var out = {};
@@ -509,34 +632,54 @@
         });
         return out.sort(function (a, b) { return a.x - b.x; });
     }
+    // Which series the plot draws: every series with an X key when the active
+    // series' plot family overlays (one key, or a numeric scatter); otherwise
+    // the active series alone — heat maps and category breakdowns stay single.
+    function drawnSeries() {
+        var a = S();
+        if (a.y && $("mode2d").value !== "scatter") return [a];
+        return series.filter(function (s) { return s.x; });
+    }
+    function seriesLabel(s) { return series.length > 1 ? s.name : "Items"; }
 
     function render() {
-        var xp = $("xkey").value, yp = $("ykey").value;
-        if (!xp) return;
+        var a = S(), xp = a.x, yp = a.y;
+        if (!xp) { clear("Pick an X key."); return; }
+        var drawn = drawnSeries();
         if (isTest()) {
-            var need = [xp, yp].concat(cuts.map(function (c) { return c.p; })).filter(function (p) { return p && !haveKey(p); });
-            if (need.length) { if (!busy) ensureKeys(need).then(function (ok) { if (ok) render(); }); return; }
+            var need = drawn.filter(function (s) { return seriesKeys(s).some(function (p) { return !haveKey(p, s); }); });
+            if (need.length) { if (!busy) ensureAll(need).then(function (ok) { if (ok) { render(); drawItems(); } }); return; }
         }
-        var sel = filtered(), stats = $("stats");
-        var head = sel.length + " / " + items.length + " items" + idxNote();
+        var stats = $("stats");
+        var sels = drawn.map(function (s) { return filtered(s); });
+        var head = drawn.map(function (s, i) { return (series.length > 1 ? s.name + " " : "") + sels[i].length + " / " + items.length + " items" + idxNote(s); }).join(" · ");
+        var skipped = [];       // series not drawn in this family
+        function noteSkipped() { return skipped.length ? " · not drawn: " + skipped.join(", ") : ""; }
         $("mode2d-l").hidden = true; $("mode1d-l").hidden = true; $("logy-l").hidden = true;
         if (yp) {
             // Two keys: values paired by position within each item (the
             // Dashboard's explode-two-lists rule); pairs missing either side drop.
-            var pairs = [];
-            sel.forEach(function (it) {
-                var a = valuesFor(it, xp), b = valuesFor(it, yp), n = Math.min(a.length, b.length);
-                for (var i = 0; i < n; i++) pairs.push({ x: a[i], y: b[i], pid: it.pid });
-            });
+            var pairsOf = function (s, sel) {
+                var pairs = [];
+                sel.forEach(function (it) {
+                    var xa = valuesFor(it, s.x, s), yb = valuesFor(it, s.y, s), n = Math.min(xa.length, yb.length);
+                    for (var i = 0; i < n; i++) pairs.push({ x: xa[i], y: yb[i], pid: it.pid });
+                });
+                return pairs;
+            };
+            var pairs = pairsOf(a, sels[drawn.indexOf(a)]);
             if (!pairs.length) { clear(head + " · 0 (x, y) pairs — no item has values for both keys"); controls(false, null); return; }
             var xNum = isNumeric(pairs.map(function (q) { return q.x; })), yNum = isNumeric(pairs.map(function (q) { return q.y; }));
             if (xNum && yNum) {
-                var pts = pairs.map(function (q) { return { x: toNum(q.x), y: toNum(q.y), pid: q.pid }; })
-                               .filter(function (q) { return q.x !== null && q.y !== null; });
+                var numPts = function (ps) {
+                    return ps.map(function (q) { return { x: toNum(q.x), y: toNum(q.y), pid: q.pid }; }).filter(function (q) { return q.x !== null && q.y !== null; });
+                };
+                var pts = numPts(pairs);
                 $("mode2d-l").hidden = false;
                 var o = opts(showPath(xp), showPath(yp)); o.scales.x.type = "linear"; o.scales.y.beginAtZero = false; o.scales.y.ticks = {};
                 if ($("mode2d").value === "heat") {
-                    // 2D histogram: Bins × Bins cells, colour depth = count.
+                    // 2D histogram: Bins × Bins cells, colour depth = count. Active series only.
+                    var ACCENT = color(cur);
                     var bx = binSetup(pts.map(function (q) { return q.x; })), by = binSetup(pts.map(function (q) { return q.y; })), cells = {}, vmax = 0;
                     pts.forEach(function (q) {
                         var i = Math.min(bx.nb - 1, Math.floor((q.x - bx.lo) / bx.w)), j = Math.min(by.nb - 1, Math.floor((q.y - by.lo) / by.w)), k = i + "," + j;
@@ -546,7 +689,7 @@
                         var ij = k.split(","), i = +ij[0], j = +ij[1];
                         return { x: bx.lo + (i + 0.5) * bx.w, y: by.lo + (j + 0.5) * by.w, v: cells[k], x0: bx.lo + i * bx.w, y0: by.lo + j * by.w };
                     });
-                    stats.textContent = head + " · " + pts.length + " (x, y) pairs · " + data.length + " occupied cells · max " + vmax;
+                    stats.textContent = head + " · " + pts.length + " (x, y) pairs · " + data.length + " occupied cells · max " + vmax + (series.length > 1 ? " · 2D histogram draws one series" : "");
                     o.scales.x.min = bx.lo; o.scales.x.max = bx.hi; o.scales.x.offset = false; o.scales.x.grid = { offset: false };
                     // The matrix controller reverses y by default (table layout); a histogram's y goes up.
                     o.scales.y.min = by.lo; o.scales.y.max = by.hi; o.scales.y.offset = false; o.scales.y.grid = { offset: false }; o.scales.y.reverse = false;
@@ -556,20 +699,28 @@
                         label: function (c) { return c.raw.v + " pair" + (c.raw.v > 1 ? "s" : ""); } } };
                     draw({ type: "matrix", data: { datasets: [{ label: "Pairs", data: data,
                         backgroundColor: function (c) { var v = c.raw ? c.raw.v : 0; return ACCENT + Math.round(40 + 215 * v / vmax).toString(16).padStart(2, "0"); },
-                        width: function (c) { var a = c.chart.chartArea; return a ? Math.max(1, a.width / bx.nb - 1) : 1; },
-                        height: function (c) { var a = c.chart.chartArea; return a ? Math.max(1, a.height / by.nb - 1) : 1; } }] }, options: o });
+                        width: function (c) { var ar = c.chart.chartArea; return ar ? Math.max(1, ar.width / bx.nb - 1) : 1; },
+                        height: function (c) { var ar = c.chart.chartArea; return ar ? Math.max(1, ar.height / by.nb - 1) : 1; } }] }, options: o });
                     controls(true, null);
                 } else {
-                    // Scatter: identical (x, y) pairs merge into one marker sized by multiplicity.
-                    var groups = {};
-                    pts.forEach(function (q) { var k = q.x + "," + q.y; (groups[k] = groups[k] || { x: q.x, y: q.y, n: 0, pids: [] }).n++; if (groups[k].pids.length < 8) groups[k].pids.push(q.pid); });
-                    var marks = Object.keys(groups).map(function (k) { var g = groups[k]; g.r = Math.min(20, 3 + 3 * Math.sqrt(g.n - 1)); return g; });
-                    var nmax = marks.reduce(function (m, g) { return Math.max(m, g.n); }, 0);
-                    stats.textContent = head + " · " + pts.length + " (x, y) pairs · " + marks.length + " distinct" + (nmax > 1 ? " · max multiplicity " + nmax : "");
+                    // Scatter, one dataset per series: identical (x, y) pairs merge into one marker sized by multiplicity.
+                    var dsS = [], info = [];
+                    drawn.forEach(function (s, si) {
+                        var sp = s === a ? pts : numPts(pairsOf(s, sels[si]));
+                        if (s !== a && !sp.length) { skipped.push(s.name); return; }
+                        var groups = {};
+                        sp.forEach(function (q) { var k = q.x + "," + q.y; (groups[k] = groups[k] || { x: q.x, y: q.y, n: 0, pids: [] }).n++; if (groups[k].pids.length < 8) groups[k].pids.push(q.pid); });
+                        var marks = Object.keys(groups).map(function (k) { var g = groups[k]; g.r = Math.min(20, 3 + 3 * Math.sqrt(g.n - 1)); return g; });
+                        var nmax = marks.reduce(function (m, g) { return Math.max(m, g.n); }, 0), c = color(series.indexOf(s));
+                        info.push((series.length > 1 ? s.name + ": " : "") + sp.length + " pairs · " + marks.length + " distinct" + (nmax > 1 ? " · max multiplicity " + nmax : ""));
+                        dsS.push({ label: seriesLabel(s), data: marks, backgroundColor: c + "88", borderColor: c, borderWidth: 1 });
+                    });
+                    stats.textContent = head + " · " + info.join(" · ") + noteSkipped();
+                    o.plugins.legend.display = series.length > 1;
                     o.plugins.tooltip = { callbacks: {
                         title: function (cs) { var g = cs[0].raw; return fmt(g.x) + ", " + fmt(g.y) + (g.n > 1 ? "  × " + g.n : ""); },
                         label: function (c) { var g = c.raw; return g.pids.join(", ") + (g.n > g.pids.length ? ", …" : ""); } } };
-                    draw({ type: "bubble", data: { datasets: [{ label: "Items", data: marks, backgroundColor: ACCENT + "99", borderColor: ACCENT, borderWidth: 1 }] }, options: o });
+                    draw({ type: "bubble", data: { datasets: dsS }, options: o });
                     controls(false, null);
                 }
             } else if (xNum || yNum) {
@@ -601,62 +752,99 @@
             }
             return;
         }
-        var vals = [];
-        sel.forEach(function (it) { vals = vals.concat(valuesFor(it, xp)); });
+        // One key per series. The active series decides the family (numeric
+        // or categorical); other series join when their values fit it.
+        var valsOf = drawn.map(function (s, i) { var v = []; sels[i].forEach(function (it) { v = v.concat(valuesFor(it, s.x, s)); }); return v; });
+        var ai = drawn.indexOf(a), vals = valsOf[ai];
         if (!vals.length) { clear(head + " · no values for this key on the selected items"); controls(false, null); return; }
-        var nums = vals.map(toNum).filter(function (v) { return v !== null; });
+        var frac = $("norm").value === "frac";
         if (isNumeric(vals)) {
             $("mode1d-l").hidden = false; $("logy-l").hidden = false;
             var m1 = $("mode1d").value, logy = $("logy").checked, ov = overlayXY();
-            var mean = nums.reduce(function (a, c) { return a + c; }, 0) / nums.length;
-            stats.textContent = head + " · N=" + nums.length + "  mean=" + fmt(mean) + "  min=" + fmt(Math.min.apply(null, nums)) + "  max=" + fmt(Math.max.apply(null, nums));
-            var ovDs = ov.length ? [{ label: $("ovn").value || "Overlay", data: ov, type: "line", borderColor: OVER, borderDash: [6, 4], borderWidth: 2, pointRadius: 3, pointBackgroundColor: OVER, tension: 0 }] : [];
+            var numsOf = [], used = [];
+            drawn.forEach(function (s, i) {
+                if (i !== ai && !isNumeric(valsOf[i])) { if (valsOf[i].length) skipped.push(s.name); return; }
+                var nums = valsOf[i].map(toNum).filter(function (v) { return v !== null; });
+                if (!nums.length) { if (i !== ai) skipped.push(s.name); return; }
+                used.push(s); numsOf.push(nums);
+            });
+            var rows = used.map(function (s, i) { var ms = meanSd(numsOf[i]); ms.name = s.name; ms.color = color(series.indexOf(s)); return ms; });
+            stats.textContent = head + " · " + used.map(function (s, i) {
+                var nums = numsOf[i]; return (used.length > 1 ? s.name + " " : "") + "N=" + nums.length + " mean=" + fmt(rows[i].mean) + " min=" + fmt(Math.min.apply(null, nums)) + " max=" + fmt(Math.max.apply(null, nums));
+            }).join(" · ") + noteSkipped();
+            var ovDs = ov.length ? [{ label: $("ovn").value || "Reference", data: ov, type: "line", borderColor: OVER, borderDash: [6, 4], borderWidth: 2, pointRadius: 3, pointBackgroundColor: OVER, tension: 0 }] : [];
             if (m1 === "line") {
                 // Values in item order (PID ascending), then array order within an
                 // item — the Dashboard's "Line": a waveform / curve for one item.
-                var seq = [];
-                sel.slice().sort(function (a, b) { return a.pid < b.pid ? -1 : 1; }).forEach(function (it) {
-                    valuesFor(it, xp).forEach(function (v) { var n = toNum(v); if (n !== null) seq.push({ x: seq.length, y: n, pid: it.pid }); });
+                var dsL = used.map(function (s, i) {
+                    var seq = [], c = color(series.indexOf(s));
+                    sels[drawn.indexOf(s)].slice().sort(function (p, q) { return p.pid < q.pid ? -1 : 1; }).forEach(function (it) {
+                        valuesFor(it, s.x, s).forEach(function (v) { var n = toNum(v); if (n !== null) seq.push({ x: seq.length, y: n, pid: it.pid }); });
+                    });
+                    return { label: seriesLabel(s), data: seq, borderColor: c, backgroundColor: c, borderWidth: 1.5, pointRadius: seq.length > 400 ? 0 : 2, tension: 0 };
                 });
-                var oL = opts("index", showPath(xp)); oL.scales.x.type = "linear"; oL.scales.y.beginAtZero = false; oL.scales.y.ticks = {};
+                var oL = opts("index", used.length > 1 ? "value" : showPath(xp)); oL.scales.x.type = "linear"; oL.scales.y.beginAtZero = false; oL.scales.y.ticks = {};
                 if (logy) oL.scales.y.type = "logarithmic";
+                oL.plugins.legend.display = used.length > 1;
                 oL.plugins.tooltip.callbacks = { title: function (cs) { var q = cs[0].raw; return q.pid ? q.pid + "  [" + q.x + "]" : fmt(q.x); } };
-                draw({ type: "line", data: { datasets: [{ label: "Items", data: seq, borderColor: ACCENT, backgroundColor: ACCENT, borderWidth: 1.5, pointRadius: seq.length > 400 ? 0 : 2, tension: 0 }].concat(ovDs) }, options: oL });
+                draw({ type: "line", data: { datasets: dsL.concat(ovDs) }, options: oL });
                 controls(false, "num");
                 return;
             }
-            var b1 = binSetup(nums), counts1 = histCounts(nums, b1.lo, b1.hi, b1.nb);
-            if (m1 === "cum") { var run = 0; counts1 = counts1.map(function (c) { run += c; return run; }); }
-            // Bars at bin centres on a linear axis so overlay points land at their true x.
-            var bars = counts1.map(function (c, i) { return { x: b1.lo + (i + 0.5) * b1.w, y: c }; });
-            var ds1 = [m1 === "cum"
-                ? { label: "Items (cumulative)", data: bars, type: "line", borderColor: ACCENT, backgroundColor: ACCENT + "33", fill: true, stepped: "middle", pointRadius: 0, borderWidth: 2 }
-                : { label: "Items", data: bars, backgroundColor: ACCENT + "cc", barPercentage: 1, categoryPercentage: 1 }].concat(ovDs);
-            var o1 = opts(showPath(xp) + "  (bin width " + fmt(b1.w) + ")", m1 === "cum" ? "cumulative count" : "count");
+            // Histogram / cumulative: one bin grid over every drawn series so the overlays line up.
+            var all = [].concat.apply([], numsOf), b1 = binSetup(all);
+            var ds1 = used.map(function (s, i) {
+                var counts1 = histCounts(numsOf[i], b1.lo, b1.hi, b1.nb), c = color(series.indexOf(s));
+                if (m1 === "cum") { var run = 0; counts1 = counts1.map(function (k) { run += k; return run; }); }
+                if (frac) counts1 = counts1.map(function (k) { return k / numsOf[i].length; });
+                // Bars at bin centres on a linear axis so reference points land at their true x.
+                var bars = counts1.map(function (k, j) { return { x: b1.lo + (j + 0.5) * b1.w, y: k }; });
+                if (m1 === "cum") return { label: seriesLabel(s) + " (cumulative)", data: bars, type: "line", borderColor: c, backgroundColor: c + "22", fill: used.length === 1, stepped: "middle", pointRadius: 0, borderWidth: 2 };
+                if (used.length > 1) {
+                    // Overlaid histograms: stepped outlines on the bin edges, so a series hiding behind another still shows.
+                    var edges = counts1.map(function (k, j) { return { x: b1.lo + j * b1.w, y: k }; }); edges.push({ x: b1.hi, y: counts1[counts1.length - 1] });
+                    return { label: seriesLabel(s), data: edges, type: "line", borderColor: c, backgroundColor: c + "22", fill: true, stepped: "after", pointRadius: 0, borderWidth: 2 };
+                }
+                return { label: seriesLabel(s), data: bars, backgroundColor: c + "cc", barPercentage: 1, categoryPercentage: 1 };
+            });
+            var yT = (m1 === "cum" ? "cumulative " : "") + (frac ? "fraction of items" : "count");
+            var xKeys = used.map(function (s) { return s.x; }).filter(function (k, i, arr) { return arr.indexOf(k) === i; });
+            var o1 = opts((xKeys.length > 1 ? xKeys.map(lastSeg).join(" · ") : showPath(xp)) + "  (bin width " + fmt(b1.w) + ")", yT);
             var xmin = Math.min.apply(null, [b1.lo].concat(ov.map(function (q) { return q.x; }))), xmax = Math.max.apply(null, [b1.hi].concat(ov.map(function (q) { return q.x; })));
             o1.scales.x = { type: "linear", min: xmin, max: xmax, offset: false, grid: { offset: false }, title: o1.scales.x.title,
                             ticks: { maxRotation: 45, autoSkipPadding: 12, font: { size: 11 }, callback: function (v) { return fmt(v); } } };
+            if (frac) o1.scales.y.ticks = {};
             if (logy) { o1.scales.y.type = "logarithmic"; delete o1.scales.y.beginAtZero; }
-            o1.plugins.tooltip.callbacks = { title: function (cs) { var q = cs[0].raw; return cs[0].dataset.label === ($("ovn").value || "Overlay") ? fmt(q.x) : fmt(q.x - b1.w / 2) + " – " + fmt(q.x + b1.w / 2); } };
-            draw({ type: "bar", data: { datasets: ds1 }, options: o1 });
+            o1.plugins.legend.display = false;          // the chips + stats boxes name the series
+            o1.plugins.statsBox = { rows: rows };
+            o1.plugins.tooltip.callbacks = { title: function (cs) { var q = cs[0].raw, d = cs[0].dataset; return d.label === ($("ovn").value || "Reference") ? fmt(q.x) : d.stepped === "after" ? fmt(q.x) + " – " + fmt(q.x + b1.w) : fmt(q.x - b1.w / 2) + " – " + fmt(q.x + b1.w / 2); },
+                                             label: function (c) { return c.dataset.label + ": " + (frac ? (100 * c.raw.y).toFixed(1) + " %" : c.raw.y); } };
+            draw({ type: "bar", data: { datasets: ds1.concat(ovDs) }, options: o1 });
             controls(true, "num");
             return;
         }
+        // Categorical: bars per label, one dataset per series; the active series' top 40 labels lead.
         var c1 = topCats(vals, 40), oc = overlayCats(), ocKeys = Object.keys(oc);
-        var labels1 = c1.keys.concat(ocKeys.filter(function (k) { return !(k in c1.counts); }));   // overlay-only labels get a slot too
-        stats.textContent = head + " · N=" + vals.length + "  unique=" + c1.unique + (c1.unique > 40 ? " (top 40 shown)" : "");
-        var dsc = [{ label: "Items", data: labels1.map(function (c) { return c1.counts[c] || 0; }), backgroundColor: ACCENT + "cc" }];
-        if (ocKeys.length) dsc.push({ label: $("ovn").value || "Overlay", data: labels1.map(function (c) { return c in oc ? oc[c] : null; }), type: "line", borderColor: OVER, borderDash: [6, 4], borderWidth: 2, pointRadius: 4, pointBackgroundColor: OVER, spanGaps: true });
-        draw({ type: "bar", data: { labels: labels1, datasets: dsc }, options: opts(showPath(xp), "count") });
+        var labels1 = c1.keys.concat(ocKeys.filter(function (k) { return !(k in c1.counts); }));   // reference-only labels get a slot too
+        var dsc = [];
+        drawn.forEach(function (s, i) {
+            if (i !== ai && (isNumeric(valsOf[i]) || !valsOf[i].length)) { if (valsOf[i].length) skipped.push(s.name); return; }
+            var tc = i === ai ? c1 : topCats(valsOf[i], 1e9), n = valsOf[i].length;
+            dsc.push({ label: seriesLabel(s), data: labels1.map(function (k) { var v = tc.counts[k] || 0; return frac ? v / n : v; }), backgroundColor: color(series.indexOf(s)) + "cc" });
+        });
+        stats.textContent = head + " · N=" + vals.length + "  unique=" + c1.unique + (c1.unique > 40 ? " (top 40 shown)" : "") + noteSkipped();
+        if (ocKeys.length) dsc.push({ label: $("ovn").value || "Reference", data: labels1.map(function (c) { return c in oc ? oc[c] : null; }), type: "line", borderColor: OVER, borderDash: [6, 4], borderWidth: 2, pointRadius: 4, pointBackgroundColor: OVER, spanGaps: true });
+        var oc1 = opts(showPath(xp), frac ? "fraction of items" : "count"); oc1.plugins.legend.display = dsc.length > 1; if (frac) oc1.scales.y.ticks = {};
+        draw({ type: "bar", data: { labels: labels1, datasets: dsc }, options: oc1 });
         controls(false, "cat");
     }
 
     // ---- Controls ----------------------------------------------------------
     function fillSelect(sel, values, keep, blank) {
-        var cur = keep ? sel.value : ""; sel.textContent = "";
+        var curv = keep ? sel.value : ""; sel.textContent = "";
         if (blank !== undefined) { var o0 = document.createElement("option"); o0.value = ""; o0.textContent = blank; sel.appendChild(o0); }
         values.forEach(function (v) { var o = document.createElement("option"); o.value = v.value; o.textContent = v.text; sel.appendChild(o); });
-        if (values.some(function (v) { return v.value === cur; })) sel.value = cur;
+        if (values.some(function (v) { return v.value === curv; })) sel.value = curv;
     }
     // Rare = on fewer than 5% of items (and not all of a tiny type); hidden
     // from the key pickers unless the toggle is on or the key is in use.
@@ -672,40 +860,138 @@
                     });
     }
     function fillKeySelects(x, y) {
-        var keep = [x, y].concat(cuts.map(function (c) { return c.p; })).filter(Boolean);
+        var keep = [x, y].concat(S().cuts.map(function (c) { return c.p; })).filter(Boolean);
         fillSelect($("xkey"), keyOptions(keep), false, "key…"); fillSelect($("ykey"), keyOptions(keep), false, "—");
         $("xkey").value = x || ""; $("ykey").value = y || "";
     }
-    function cutRow(c) {
+    function cutRow(c, s) {
         var row = document.createElement("span"); row.className = "pl-cut";
         var ps = document.createElement("select"); fillSelect(ps, keyOptions([c.p]), false, "key…"); ps.value = c.p || "";
         var os = document.createElement("select"); fillSelect(os, OPS.map(function (o) { return { value: o, text: o }; })); os.value = c.o || "=";
-        var vi = document.createElement("input"); vi.type = "text"; vi.style.width = "90px"; vi.placeholder = "value"; vi.value = c.v || "";
+        var vi = document.createElement("input"); vi.type = "text"; vi.placeholder = "value"; vi.value = c.v || "";
         var x = document.createElement("a"); x.href = "#"; x.textContent = "×"; x.title = "Remove";
         ps.addEventListener("change", function () { c.p = ps.value; changed(); });
         os.addEventListener("change", function () { c.o = os.value; changed(); });
         vi.addEventListener("input", function () { c.v = vi.value; changed(); });
-        x.addEventListener("click", function (e) { e.preventDefault(); cuts.splice(cuts.indexOf(c), 1); drawCuts(); changed(); });
+        x.addEventListener("click", function (e) { e.preventDefault(); s.cuts.splice(s.cuts.indexOf(c), 1); drawCuts(); changed(); });
         row.appendChild(ps); row.appendChild(os); row.appendChild(vi); row.appendChild(x);
         return row;
     }
-    function drawCuts() { var el = $("cuts"); el.textContent = ""; cuts.forEach(function (c) { el.appendChild(cutRow(c)); }); }
+    function drawCuts() { var el = $("cuts"), s = S(); el.textContent = ""; s.cuts.forEach(function (c) { el.appendChild(cutRow(c, s)); }); }
+
+    // Facet menus: the values present in the dataset, the active series' pick selected.
+    var facetVals = {};
+    function drawFacets() {
+        var s = S();
+        FACETS.forEach(function (k) {
+            var vals = facetVals[k] || {}, keys = Object.keys(vals).sort(function (a, b) { return vals[b] - vals[a]; });
+            $("f-" + k + "-l").hidden = keys.length < 2;
+            fillSelect($("f-" + k), keys.map(function (v) { return { value: v, text: v + " (" + vals[v] + ")" }; }), false, "all");
+            if (s.f[k] && vals[s.f[k]]) $("f-" + k).value = s.f[k]; else delete s.f[k];
+        });
+    }
+    // The X / Y and Cuts controls show series[cur].
+    function syncPanel() {
+        var s = S();
+        fillKeySelects(s.x, s.y);
+        $("item").value = s.item || ""; $("pidf").value = s.pid || ""; $("logic").value = s.logic || "and";
+        drawFacets(); drawCuts();
+        Array.prototype.forEach.call(document.querySelectorAll(".pl-for"), function (el) {
+            el.textContent = ""; if (series.length > 1) { el.appendChild(document.createTextNode("for ")); var b = document.createElement("b"); b.style.color = color(cur); b.textContent = s.name; el.appendChild(b); }
+        });
+    }
+    function drawChips() {
+        var box = $("chips"); box.textContent = "";
+        var drawn = drawnSeries();
+        series.forEach(function (s, i) {
+            var chip = document.createElement("span"); chip.className = "pl-chip" + (i === cur ? " on" : "") + (drawn.indexOf(s) < 0 ? " dim" : "");
+            chip.title = drawn.indexOf(s) < 0 ? "not drawn in this mode — click to edit" : "click to edit this series";
+            var dot = document.createElement("span"); dot.className = "dot"; dot.style.background = color(i); chip.appendChild(dot);
+            chip.appendChild(document.createTextNode(s.name));
+            if (s.x) { var k = document.createElement("span"); k.className = "k"; k.textContent = lastSeg(s.x) + (s.y ? " × " + lastSeg(s.y) : ""); k.title = showPath(s.x) + (s.y ? " × " + showPath(s.y) : ""); chip.appendChild(k); }
+            if (series.length > 1) {
+                var x = document.createElement("a"); x.className = "x"; x.href = "#"; x.textContent = "×"; x.title = "Remove this series";
+                x.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); removeSeries(i); });
+                chip.appendChild(x);
+            }
+            chip.addEventListener("click", function () { if (i !== cur) { cur = i; syncPanel(); changed(); } });
+            box.appendChild(chip);
+        });
+        $("chip-add").hidden = !items.length;
+        drawSeriesList();
+    }
+    function drawSeriesList() {
+        var el = $("ser-list"); el.textContent = "";
+        series.forEach(function (s, i) {
+            var row = document.createElement("div"); row.className = "pl-ser" + (i === cur ? " on" : "");
+            var dot = document.createElement("span"); dot.className = "dot"; dot.style.background = color(i);
+            var name = document.createElement("input"); name.type = "text"; name.value = s.name; name.title = "Rename";
+            name.addEventListener("input", function () { s.name = name.value.trim() || ("Series " + (i + 1)); drawChipsOnly(); writeHash(); });
+            name.addEventListener("blur", function () { name.value = s.name; syncPanel(); render(); drawItems(); });
+            var x = document.createElement("a"); x.href = "#"; x.textContent = series.length > 1 ? "×" : ""; x.title = "Remove this series";
+            x.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); if (series.length > 1) removeSeries(i); });
+            var k = document.createElement("span"); k.className = "k"; k.textContent = s.x ? showPath(s.x) + (s.y ? " × " + showPath(s.y) : "") : "no key yet";
+            row.appendChild(dot); row.appendChild(name); row.appendChild(x); row.appendChild(k);
+            row.addEventListener("click", function (e) { if (e.target === name) return; if (i !== cur) { cur = i; syncPanel(); changed(); } });
+            el.appendChild(row);
+        });
+    }
+    function drawChipsOnly() {      // a rename in flight: repaint chips without rebuilding the list the user is typing in
+        var chips = $("chips").children;
+        series.forEach(function (s, i) { if (chips[i]) chips[i].childNodes[1].nodeValue = s.name; });
+    }
+    function addSeries() {
+        var s = copySeries(S()); s.name = nextName();       // an exact copy: same keys, pins, selection and cuts
+        series.push(s); cur = series.length - 1;
+        syncPanel(); changed(); showTab("data");
+    }
+    function removeSeries(i) {
+        if (series.length < 2) return;
+        series.splice(i, 1); if (cur >= series.length) cur = series.length - 1; else if (i < cur) cur--;
+        syncPanel(); changed();
+    }
 
     // Plot config lives in the URL hash so a plot is bookmarkable/shareable.
     function readHash() { try { return JSON.parse(decodeURIComponent(location.hash.slice(1)) || "{}"); } catch (e) { return {}; } }
+    // Pre-#156 hashes (and the part page's #{"item": …} link) describe one series at the top level.
+    function hashSeries(cfg) {
+        if (Array.isArray(cfg.series) && cfg.series.length) return cfg.series;
+        var s = { x: cfg.x, y: cfg.y, xi: cfg.xi, yi: cfg.yi, item: cfg.item, pid: cfg.pid, f: cfg.f, cuts: cfg.cuts, logic: cfg.logic };
+        return [s];
+    }
+    function packSeries(s) {
+        var f = {}; FACETS.forEach(function (k) { if (s.f[k]) f[k] = s.f[k]; });
+        return { name: s.name, x: s.x, y: s.y || undefined, item: (s.item || "").trim() || undefined, pid: s.pid || undefined, f: Object.keys(f).length ? f : undefined,
+                 xi: idxOf(s.x, s) || undefined, yi: idxOf(s.y, s) || undefined,
+                 cuts: s.cuts.filter(function (c) { return c.p; }), logic: s.logic === "or" ? "or" : undefined };
+    }
     function writeHash() {
-        var f = {}; FACETS.forEach(function (k) { if ($("f-" + k).value) f[k] = $("f-" + k).value; });
-        var cfg = { src: source, x: $("xkey").value, y: $("ykey").value, bins: +$("bins").value, pid: $("pidf").value, item: $("item").value.trim() || undefined, f: f,
-                    xi: idxOf($("xkey").value) || undefined, yi: idxOf($("ykey").value) || undefined,
-                    cuts: cuts.filter(function (c) { return c.p; }), logic: $("logic").value, ov: $("ov").value, ovn: $("ovn").value,
+        var cfg = { src: source, series: series.map(packSeries), cur: cur || undefined, bins: +$("bins").value,
+                    ov: $("ov").value || undefined, ovn: $("ovn").value || undefined, norm: $("norm").value === "frac" ? "frac" : undefined,
                     rare: $("rare").checked ? undefined : false, m2: $("mode2d").value, m1: $("mode1d").value, logy: $("logy").checked || undefined };
         history.replaceState(null, "", "#" + encodeURIComponent(JSON.stringify(cfg)));
     }
-    function changed() { drawIdx(); writeHash(); render(); drawItems(); }
+    function changed() { drawIdx(); writeHash(); drawChips(); render(); drawItems(); }
 
-    // ---- Items table: pick one item to plot (its arrays), or browse ---------
+    // ---- Tabs ----------------------------------------------------------------
+    var tabs = document.querySelectorAll(".pl-tab"), panes = document.querySelectorAll(".pl-panel [data-pane]");
+    function showTab(name) {
+        Array.prototype.forEach.call(tabs, function (t) { t.classList.toggle("on", t.dataset.tab === name); });
+        Array.prototype.forEach.call(panes, function (p) { p.hidden = p.dataset.pane !== name; });
+    }
+    Array.prototype.forEach.call(tabs, function (t) { t.addEventListener("click", function () { if (!t.disabled) showTab(t.dataset.tab); }); });
+    function enableTabs(on) { Array.prototype.forEach.call(tabs, function (t) { if (t.dataset.tab !== "data") t.disabled = !on; }); }
+
+    // ---- Items grid: pick one item to plot (its arrays), or browse ----------
+    // One value column per series with an X key: what that item contributes.
     var ITEMS_PER = 25, itemsPage = 0;
-    function onePid() { return $("item").value.trim() || null; }
+    function onePid() { var s = S(); return s && (s.item || "").trim() || null; }
+    function cellValue(it, s) {
+        var v = valuesFor(it, s.x, s);
+        if (!v.length) return "";
+        if (v.length === 1) { var n = toNum(v[0]); return n === null ? String(v[0]) : fmt(n); }
+        return v.length.toLocaleString() + " values";
+    }
     function drawItems() {
         var q = $("items-q").value.trim().toLowerCase();
         var list = (q ? items.filter(function (it) {
@@ -717,14 +1003,25 @@
         $("items-prev").disabled = $("items-first").disabled = itemsPage === 0;
         $("items-next").disabled = $("items-last").disabled = itemsPage >= pages - 1;
         var one = onePid(); $("items-all").hidden = !one;
+        var vcols = series.filter(function (s) { return s.x; });
+        var head = $("items-head"); head.textContent = "";
+        ["PID", "Serial", "Status", "Creator", "Institution", "Updated"].forEach(function (h) { var th = document.createElement("th"); th.textContent = h; head.appendChild(th); });
+        vcols.forEach(function (s) {
+            var th = document.createElement("th"); th.className = "v";
+            var sw = document.createElement("span"); sw.className = "sw"; sw.style.background = color(series.indexOf(s)); th.appendChild(sw);
+            th.appendChild(document.createTextNode((series.length > 1 ? s.name + " · " : "") + lastSeg(s.x))); th.title = showPath(s.x);
+            head.appendChild(th);
+        });
         var body = $("items-body"); body.textContent = "";
         list.slice(itemsPage * ITEMS_PER, (itemsPage + 1) * ITEMS_PER).forEach(function (it) {
             var tr = document.createElement("tr"); if (it.pid === one) tr.className = "is-on";
             [["mono", it.pid], ["", it.serial], ["", it.status], ["", it.creator], ["", it.institution], ["mono", it.updated || it.tested || ""]].forEach(function (c) {
                 var td = document.createElement("td"); td.className = c[0]; td.textContent = c[1] || ""; td.title = c[1] || ""; tr.appendChild(td);
             });
+            vcols.forEach(function (s) { var td = document.createElement("td"); td.className = "v"; td.textContent = cellValue(it, s); tr.appendChild(td); });
             tr.addEventListener("click", function () {
-                $("item").value = it.pid === one ? "" : it.pid;     // click again to release
+                S().item = it.pid === one ? "" : it.pid;     // click again to release
+                $("item").value = S().item;
                 changed();
             });
             body.appendChild(tr);
@@ -735,9 +1032,9 @@
     $("items-prev").addEventListener("click", function () { itemsPage--; drawItems(); });
     $("items-next").addEventListener("click", function () { itemsPage++; drawItems(); });
     $("items-last").addEventListener("click", function () { itemsPage = 1e9; drawItems(); });
-    $("items-all").addEventListener("click", function (e) { e.preventDefault(); $("item").value = ""; changed(); });
+    $("items-all").addEventListener("click", function (e) { e.preventDefault(); S().item = ""; $("item").value = ""; changed(); });
 
-    // Both sources land here: the item list + the key inventory → controls → plot.
+    // Both sources land here: the item list + the key inventory → series → controls → plot.
     function setDataset(newItems, counts, statusText) {
         items = newItems; pathCounts = counts; specDims = {};
         paths = Object.keys(counts).sort(function (a, b) { return (counts[b] - counts[a]) || (a < b ? -1 : 1); });
@@ -745,31 +1042,32 @@
         var cfg = readHash(), acc = new Set(paths);
         $("rare").checked = cfg.rare !== false;    // shown by default; the hash remembers an opt-out
         $("rare-l").hidden = !paths.some(isRare);
-        cuts = (cfg.cuts || []).filter(function (c) { return acc.has(c.p); });
-        fillKeySelects(cfg.x && acc.has(cfg.x) ? cfg.x : "", cfg.y && acc.has(cfg.y) ? cfg.y : "");
-        if (!$("xkey").value && $("xkey").options[1]) $("xkey").value = $("xkey").options[1].value;
+        FACETS.forEach(function (k) { var vals = {}; items.forEach(function (it) { if (it[k]) vals[it[k]] = (vals[it[k]] || 0) + 1; }); facetVals[k] = vals; });
+        series = hashSeries(cfg).map(function (h, i) {
+            var s = blankSeries();
+            s.name = (h.name || "").trim() || "Series " + (i + 1);
+            s.x = h.x && acc.has(h.x) ? h.x : ""; s.y = h.y && acc.has(h.y) ? h.y : "";
+            s.item = h.item || ""; s.pid = h.pid || ""; s.f = h.f || {}; s.logic = h.logic === "or" ? "or" : "and";
+            s.cuts = (h.cuts || []).filter(function (c) { return c && acc.has(c.p); });
+            // #154: index pins from the hash belong to the keys it names
+            s.xi = Array.isArray(h.xi) ? h.xi.map(function (j) { return j === null ? null : +j; }) : []; s.xk = s.x;
+            s.yi = Array.isArray(h.yi) ? h.yi.map(function (j) { return j === null ? null : +j; }) : []; s.yk = s.y;
+            return s;
+        });
+        cur = Math.min(+cfg.cur || 0, series.length - 1);
+        if (!series[0].x && paths.length) series[0].x = paths[0];
         if (cfg.bins) $("bins").value = cfg.bins;
-        $("pidf").value = cfg.pid || ""; $("item").value = cfg.item || ""; $("logic").value = cfg.logic || "and"; $("ov").value = cfg.ov || ""; $("ovn").value = cfg.ovn || "";
+        $("ov").value = cfg.ov || ""; $("ovn").value = cfg.ovn || ""; $("norm").value = cfg.norm === "frac" ? "frac" : "count";
         $("mode2d").value = cfg.m2 === "heat" ? "heat" : "scatter";
         $("mode1d").value = ["hist", "cum", "line"].indexOf(cfg.m1) >= 0 ? cfg.m1 : "hist"; $("logy").checked = !!cfg.logy;
-        FACETS.forEach(function (k) {
-            var vals = {}; items.forEach(function (it) { if (it[k]) vals[it[k]] = (vals[it[k]] || 0) + 1; });
-            var keys = Object.keys(vals).sort(function (a, b) { return vals[b] - vals[a]; });
-            $("f-" + k + "-l").hidden = keys.length < 2;
-            fillSelect($("f-" + k), keys.map(function (v) { return { value: v, text: v + " (" + vals[v] + ")" }; }), false, "all");
-            if (cfg.f && cfg.f[k] && vals[cfg.f[k]]) $("f-" + k).value = cfg.f[k];
-        });
-        // #154: index pins from the hash belong to the keys it names
-        xi = Array.isArray(cfg.xi) ? cfg.xi.map(function (i) { return i === null ? null : +i; }) : []; idxKeys.x = $("xkey").value;
-        yi = Array.isArray(cfg.yi) ? cfg.yi.map(function (i) { return i === null ? null : +i; }) : []; idxKeys.y = $("ykey").value;
         $("xidx").removeAttribute("data-key"); $("yidx").removeAttribute("data-key");
-        drawIdx();
-        drawCuts();
-        $("controls").hidden = false; $("plot-card").hidden = !paths.length; $("items-card").hidden = !items.length;
-        itemsPage = 0; drawItems();
+        syncPanel();
+        enableTabs(true);
+        $("items-card").hidden = !items.length;
+        $("axes-grp").hidden = false;
+        itemsPage = 0;
         $("stats").textContent = paths.length ? "" : "No keys on these items.";
-        writeHash();
-        render();
+        changed();
     }
 
     function loadSpecs(rec) {
@@ -801,9 +1099,10 @@
 
     async function switchSource() {
         var v = $("src").value;
-        if (v === "__fetch__") { $("src").value = source; await fetchTestData("incremental"); return; }
+        if (v === "__fetch__") { $("src").value = source; showTab("data"); await fetchTestData("incremental"); return; }
         source = v;
-        $("controls").hidden = true; $("plot-card").hidden = true; $("items-card").hidden = true; $("td-log").hidden = true; $("fetch-error").textContent = "";
+        enableTabs(false); showTab("data"); $("axes-grp").hidden = true; $("items-card").hidden = true; $("td-log").hidden = true; $("fetch-error").textContent = "";
+        $("chips").textContent = ""; $("chip-add").hidden = true; if (chart) { chart.destroy(); chart = null; } $("stats").textContent = "";
         if (isTest()) { await loadTest(source); return; }
         var rec = null;
         try { rec = await idbGet(TYPE_KEY + "/specs"); } catch (e) { rec = null; }
@@ -818,22 +1117,44 @@
         }
     }
 
-    ["xkey", "ykey", "bins", "logic", "mode2d", "mode1d", "logy", "f-status", "f-creator", "f-manufacturer", "f-institution"].forEach(function (id) { $(id).addEventListener("change", changed); });
-    ["pidf", "item", "ov", "ovn"].forEach(function (id) { $(id).addEventListener("input", changed); });
+    // Per-series controls write into series[cur]; shared ones just redraw.
+    $("xkey").addEventListener("change", function () { S().x = $("xkey").value; fillKeySelects(S().x, S().y); changed(); });
+    $("ykey").addEventListener("change", function () { S().y = $("ykey").value; fillKeySelects(S().x, S().y); changed(); });
+    $("pidf").addEventListener("input", function () { S().pid = $("pidf").value; changed(); });
+    $("item").addEventListener("input", function () { S().item = $("item").value; changed(); });
+    $("logic").addEventListener("change", function () { S().logic = $("logic").value; changed(); });
+    FACETS.forEach(function (k) { $("f-" + k).addEventListener("change", function () { if ($("f-" + k).value) S().f[k] = $("f-" + k).value; else delete S().f[k]; changed(); }); });
+    ["bins", "mode2d", "mode1d", "logy", "norm"].forEach(function (id) { $(id).addEventListener("change", changed); });
+    ["ov", "ovn"].forEach(function (id) { $(id).addEventListener("input", changed); });
     $("zoom-reset").addEventListener("click", function () { if (chart && chart.resetZoom) chart.resetZoom(); });
     $("plot").addEventListener("dblclick", function () { if (chart && chart.resetZoom) chart.resetZoom(); });
-    $("cut-add").addEventListener("click", function () { cuts.push({ p: "", o: "=", v: "" }); drawCuts(); });
-    $("rare").addEventListener("change", function () { fillKeySelects($("xkey").value, $("ykey").value); drawCuts(); writeHash(); });
+    $("cut-add").addEventListener("click", function () { S().cuts.push({ p: "", o: "=", v: "" }); drawCuts(); });
+    $("rare").addEventListener("change", function () { fillKeySelects(S().x, S().y); drawCuts(); writeHash(); });
     $("src").addEventListener("change", switchSource);
     $("fetch-btn").addEventListener("click", function () { if (isTest()) fetchTestData("incremental"); else fetchSpecs(); });
     $("fetch-full-btn").addEventListener("click", function () { fetchTestData("full"); });
+    $("ser-add").addEventListener("click", addSeries);
+    $("chip-add").addEventListener("click", addSeries);
     $("png-btn").addEventListener("click", function () {
         if (!chart) return;
         var c = chart.canvas, out = document.createElement("canvas"); out.width = c.width; out.height = c.height;
         var ctx = out.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, out.width, out.height); ctx.drawImage(c, 0, 0);
         var a = document.createElement("a"); a.href = out.toDataURL("image/png");
-        a.download = (cacheKey().replace(/[\/:]/g, "_") + "_" + showPath($("xkey").value)).replace(/[^\w.-]+/g, "_") + ".png"; a.click();
+        a.download = (cacheKey().replace(/[\/:]/g, "_") + "_" + showPath(S().x)).replace(/[^\w.-]+/g, "_") + ".png"; a.click();
     });
+
+    // Plot height: drag the handle; remembered per browser.
+    (function () {
+        var wrap = $("plot-card"), KEY = "cets-plot-h";
+        try { var h = +localStorage.getItem(KEY); if (h >= 240 && h <= 1200) wrap.style.height = h + "px"; } catch (e) {}
+        $("split").addEventListener("mousedown", function (e) {
+            e.preventDefault();
+            var y0 = e.clientY, h0 = wrap.getBoundingClientRect().height;
+            function move(ev) { wrap.style.height = Math.max(240, Math.min(1200, h0 + ev.clientY - y0)) + "px"; }
+            function up() { document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); try { localStorage.setItem(KEY, String(Math.round(wrap.getBoundingClientRect().height))); } catch (er) {} }
+            document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+        });
+    })();
 
     // Boot: sources first (mirror-only), then the hash's source or specs.
     loadSources().then(function (srcs) {
