@@ -4629,6 +4629,40 @@ def _preship_gate(api, part_id) -> dict:
     }
 
 
+def _preship_sheet(api, inst, ptid, part_id, cl) -> tuple[dict, bytes]:
+    """Build the box's DUNE Shipping Sheet from live HWDB data (manifest, QR)
+    and the checklist's POC — ``(part_info, pdf_bytes)``. Step 8's preview
+    download and the final write render the very same sheet."""
+    leaf = HierarchyNode.for_instance(inst).filter(
+        level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
+    manifest = current_manifest(_safe_get_data(api.get_subcomponents, part_id))
+    info = checklists.part_info(leaf, part_id, manifest)
+    qr = None
+    try:
+        qr = api.get_qrcode_response(part_id).content
+    except Exception as e:
+        logger.warning("preship: QR fetch failed: %s", e)
+    poc = cl.state.get("PreShipping3", {})
+    pdf = checklists.build_label_pdf(
+        part_id, info,
+        "Development HWDB" if inst == "dev" else "Production HWDB", qr,
+        poc_name=poc.get("approver_name", ""),
+        poc_email=poc.get("approver_email", ""))
+    return info, pdf
+
+
+def _preship_sheet_url(request, cl) -> str:
+    """Download link for the shipping sheet a completed pre-shipping run
+    uploaded (its HWDB image, named as it was uploaded), or "" when the run
+    predates the recorded image id."""
+    final = cl.state.get(checklists.scene_key(checklists.N_SCENES), {})
+    if not final.get("image_id"):
+        return ""
+    name = final.get("image_name") or f"ShippingSheet_{cl.part_id}.pdf"
+    return (_rev(request, "explore:shipment_image", args=[final["image_id"]])
+            + "?" + urlencode({"name": name}))
+
+
 @login_not_required
 @fnal_login_required
 def explore_preship_view(request, part_id):
@@ -4724,29 +4758,16 @@ def explore_preship_view(request, part_id):
             **cl.state.get(checklists.scene_key(scene), {}), **cleaned}
 
         if scene == checklists.N_SCENES:  # final writes
-            leaf = HierarchyNode.for_instance(inst).filter(
-                level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
-            manifest = current_manifest(_safe_get_data(api.get_subcomponents, part_id))
-            info = checklists.part_info(leaf, part_id, manifest)
-            qr = None
-            try:
-                qr = api.get_qrcode_response(part_id).content
-            except Exception as e:
-                logger.warning("preship: QR fetch failed: %s", e)
-            poc = cl.state.get("PreShipping3", {})
-            label = checklists.build_label_pdf(
-                part_id, info,
-                "Development HWDB" if inst == "dev" else "Production HWDB", qr,
-                poc_name=poc.get("approver_name", ""),
-                poc_email=poc.get("approver_email", ""))
+            info, label = _preship_sheet(api, inst, ptid, part_id, cl)
             try:
                 who = api.whoami().get("data") or {}
             except Exception:
                 who = {}
             username = who.get("username") or request.user.get_username()
+            filename = checklists.sheet_filename(username)
             try:
                 image_id, err = checklists.execute_final_patch(
-                    api, cl, info, label, username=username)
+                    api, cl, info, label, filename)
             except requests.RequestException as e:
                 messages.error(request, f"HWDB rejected the update — {_hwdb_error_detail(e)}")
                 return redirect(page_url)
@@ -4754,7 +4775,7 @@ def explore_preship_view(request, part_id):
                 messages.error(request, f"HWDB rejected the update — {err}")
                 return redirect(page_url)
             cl.state[checklists.scene_key(scene)].update(
-                {"image_id": image_id, "patched": True})
+                {"image_id": image_id, "image_name": filename, "patched": True})
             cl.completed_at = timezone.now()
             cl.save()
             _refresh_box_quietly(api, inst, ptid, part_id)
@@ -4772,6 +4793,13 @@ def explore_preship_view(request, part_id):
         return redirect(page_url)
 
     # ---- GET ----
+    if cl and request.GET.get("sheet"):
+        # Step 8's preview: the sheet as the final write would upload it.
+        _info, pdf = _preship_sheet(api, inst, ptid, part_id, cl)
+        resp = HttpResponse(pdf, content_type="application/pdf")
+        resp["Content-Disposition"] = (
+            f'attachment; filename="{checklists.sheet_filename(request.user.get_username())}"')
+        return resp
     if cl and request.GET.get("csv"):
         leaf = HierarchyNode.for_instance(inst).filter(
             level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
@@ -4791,6 +4819,8 @@ def explore_preship_view(request, part_id):
         "routes": BoxChecklist.ROUTES,
         "n_scenes": checklists.N_SCENES,
     }
+    if cl and cl.completed_at:
+        ctx["sheet_url"] = _preship_sheet_url(request, cl)
     if cl and not cl.completed_at:
         scene = cl.current_scene
         if scene == 0:                      # the route re-pick screen (#76)

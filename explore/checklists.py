@@ -21,7 +21,8 @@ import PIL.Image
 from reportlab.graphics.barcode import code128
 from reportlab.lib import units
 from reportlab.lib.pagesizes import letter
-from reportlab.lib.utils import ImageReader
+from reportlab.lib.utils import ImageReader, simpleSplit
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas as rl_canvas
 
 from .auth import FNAL_USERNAME_PREFIX
@@ -675,6 +676,21 @@ def logistics_mailto(checklist, csv_filename: str,
 
 # ---- Shipping label (scene 8's "shipping sheet" PDF) ------------------------
 
+def _wrap(text, font: str, size: float, max_w: float) -> list[str]:
+    """Word-wrap ``text`` to ``max_w`` points, hard-breaking any single word
+    wider than that (a long unbroken slot name) so nothing overflows."""
+    out = []
+    for line in simpleSplit(str(text or ""), font, size, max_w) or [""]:
+        while len(line) > 1 and stringWidth(line, font, size) > max_w:
+            n = len(line)
+            while n > 1 and stringWidth(line[:n], font, size) > max_w:
+                n -= 1
+            out.append(line[:n])
+            line = line[n:]
+        out.append(line)
+    return out
+
+
 def build_label_pdf(part_id: str, info: dict, instance_label: str,
                     qr_png: bytes | None, poc_name: str = "",
                     poc_email: str = "") -> bytes:
@@ -709,26 +725,29 @@ def build_label_pdf(part_id: str, info: dict, instance_label: str,
     barcode.drawOn(cvs, x_left + qr_size + 0.5 * units.inch,
                    top - qr_size / 2 - 0.45 * units.inch)
 
-    y = top - qr_size - 30
-    cvs.setFont("Helvetica-Bold", 14)
-    for line in (instance_label, info.get("part_type_name"), part_id):
-        if line:
-            cvs.drawCentredString(width / 2, y, str(line))
-            y -= 14
+    # Long strings wrap within the page / their column instead of running
+    # off the edge or being cut short.
+    max_w = width - 2 * x_left
+
+    def centred(lines, font, size, leading, y):
+        cvs.setFont(font, size)
+        for line in lines:
+            for part in _wrap(line, font, size, max_w) if line else ():
+                cvs.drawCentredString(width / 2, y, part)
+                y -= leading
+        return y
+
+    y = centred((instance_label, info.get("part_type_name"), part_id),
+                "Helvetica-Bold", 14, 14, top - qr_size - 30)
 
     # POC + hierarchy block (spec p.10: POC info and the corresponding
     # System and Subsystem names).
-    y -= 12
-    cvs.setFont("Helvetica", 11)
     poc = f"{poc_name} <{poc_email}>" if poc_email else poc_name
-    for line in (
+    y = centred((
         f"POC: {poc}" if poc else None,
         f"System: {info.get('system_name', '')} ({info.get('system_id', '')})",
         f"Subsystem: {info.get('subsystem_name', '')} ({info.get('subsystem_id', '')})",
-    ):
-        if line:
-            cvs.drawCentredString(width / 2, y, line)
-            y -= 14
+    ), "Helvetica", 11, 14, y - 12)
 
     # Sub-component table.
     c1, c2, c3 = x_left, x_left + 2.6 * units.inch, x_left + 5.0 * units.inch
@@ -746,14 +765,22 @@ def build_label_pdf(part_id: str, info: dict, instance_label: str,
     subs = list(info.get("subcomponents", {}).values())
     if not subs:
         cvs.drawString(c1, y, "(no sub-components linked)")
+    gap = 8
+    columns = (("Sub-component PID", c1, c2 - c1 - gap),
+               ("Component Type Name", c2, c3 - c2 - gap),
+               ("Functional Position Name", c3, width - x_left - c3))
+    leading = 11.5
     for sc in subs:
-        if y < 0.8 * units.inch:
+        cells = [(x, _wrap(sc.get(key, ""), "Helvetica", 9.5, w))
+                 for key, x, w in columns]
+        n_lines = max(len(lines) for _x, lines in cells)
+        if y - (n_lines - 1) * leading < 0.8 * units.inch:
             cvs.showPage()
             y = table_header(height - 0.75 * units.inch)
-        cvs.drawString(c1, y, str(sc.get("Sub-component PID", ""))[:44])
-        cvs.drawString(c2, y, str(sc.get("Component Type Name", ""))[:42])
-        cvs.drawString(c3, y, str(sc.get("Functional Position Name", ""))[:30])
-        y -= 13
+        for x, lines in cells:
+            for i, part in enumerate(lines):
+                cvs.drawString(x, y - i * leading, part)
+        y -= 13 + (n_lines - 1) * leading
     cvs.showPage()
     cvs.save()
     return buf.getvalue()
@@ -822,16 +849,19 @@ def sub_pids(info: dict) -> list[dict]:
             for v in info.get("subcomponents", {}).values()]
 
 
+def sheet_filename(username: str = "") -> str:
+    """The spec's file-name convention (procedure p.10):
+    ShippingSheet_<username>_<time stamp>.pdf (#77)."""
+    return (f"ShippingSheet_{_doc_username(username)}_"
+            f"{datetime.now():%Y%m%d_%H%M%S}.pdf")
+
+
 def execute_final_patch(api, checklist, info: dict, label_pdf: bytes,
-                        username: str = "") -> tuple[str | None, str | None]:
+                        filename: str) -> tuple[str | None, str | None]:
     """Scene 8's writes, in the Dashboard's order: upload the shipping sheet
-    (comment "shipping sheet"), then PATCH the item with the checklist +
-    SubPIDs folded into its latest specifications block. Returns
-    ``(image_id, error)``."""
-    # The spec's file-name convention (procedure p.10):
-    # ShippingSheet_<username>_<time stamp>.pdf (#77).
-    filename = (f"ShippingSheet_{_doc_username(username)}_"
-                f"{datetime.now():%Y%m%d_%H%M%S}.pdf")
+    (comment "shipping sheet", named ``filename``), then PATCH the item with
+    the checklist + SubPIDs folded into its latest specifications block.
+    Returns ``(image_id, error)``."""
     body = api.post_component_image(checklist.part_id, io.BytesIO(label_pdf),
                                     filename, comments="shipping sheet")
     if body.get("status") != "OK":

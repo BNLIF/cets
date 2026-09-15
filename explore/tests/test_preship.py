@@ -326,6 +326,22 @@ class PatchBuildTest(TestCase):
             pdf = checklists.build_label_pdf(BOX, info, "Dev", raw.getvalue())
             self.assertTrue(pdf.startswith(b"%PDF"))
 
+    def test_label_wraps_long_strings_instead_of_cutting_them(self):
+        # Long type / slot names wrap within their column (and the header
+        # lines within the page) — nothing is truncated or drawn off-page.
+        long_type = "Cold Electronics Adapter Board With An Unusually Long Descriptive Name"
+        long_pos = "FEB_Slot_Left_Upper_Position_Number_Seventeen_Of_Twenty"
+        info = checklists.part_info(None, BOX, [
+            {"part_id": "P-1", "type_name": long_type, "functional_position": long_pos}])
+        info["part_type_name"] = long_type * 2
+        text = _pdf_text(checklists.build_label_pdf(BOX, info, "Development HWDB", None))
+        self.assertIn("Descriptive Name", text)           # tail of the type name kept…
+        self.assertNotIn(long_type, text)                  # …on a further line
+        drawn = re.findall(r"\((.*?)\) Tj", text)
+        chunks = [p for p in drawn if len(p) > 3 and p in long_pos]
+        self.assertGreater(len(chunks), 1)                 # the unbroken slot name was hard-wrapped
+        self.assertEqual("".join(chunks), long_pos)        # …with every character kept
+
     def test_label_paginates_a_full_box(self):
         # A box with many items must not run the table off the page —
         # the header repeats on the next page instead.
@@ -383,6 +399,15 @@ class ChecklistFlowTest(TestCase):
             self._advance({"confirm_list": "on"})                       # 1 gate
             for scene in (2, 3, 4, 5, 6, 7):
                 self._advance(SCENE_DATA[scene])
+            # Step 8 previews the very sheet the write will upload.
+            html = self.client.get(PAGE).content.decode()
+            self.assertIn('href="?sheet=1"', html)
+            preview = self.client.get(PAGE + "?sheet=1")
+            self.assertEqual(preview["Content-Type"], "application/pdf")
+            self.assertRegex(preview["Content-Disposition"],
+                             r'filename="ShippingSheet_w_\d{8}_\d{6}\.pdf"')
+            self.assertIn("DUNE Shipping Sheet", _pdf_text(preview.content))
+            self.assertIn("D05700300001-00012", _pdf_text(preview.content))
             resp = self._advance({"confirm_patch_hwdb": "on"})          # 8 write
 
         # Shipping sheet uploaded with the Dashboard's comment string, named
@@ -410,6 +435,13 @@ class ChecklistFlowTest(TestCase):
         cl = BoxChecklist.for_instance("dev").get(part_id=BOX)
         self.assertIsNotNone(cl.completed_at)
         self.assertRedirects(resp, PAGE, fetch_redirect_response=False)
+        # The Done card offers the uploaded sheet for download, by its HWDB
+        # image id and the name it was uploaded under.
+        self.assertEqual(cl.state["PreShipping7"]["image_name"], name)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("Download shipping sheet", html)
+        self.assertIn("/hw/dev/shipment-image/sheet9/?name=" + name, html)
 
     def test_gate_blocks_without_summary(self):
         api = _api()

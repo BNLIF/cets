@@ -83,7 +83,7 @@
     <form method="post" onsubmit="return confirm('Discard this completed run and start over?');">
       {% csrf_token %}<input type="hidden" name="action" value="start">
       <input type="hidden" name="route" value="{{ cl.route }}">
-      <div class="ps-actions"><button class="ps-btn quiet">Start a fresh run</button></div>
+      <div class="ps-actions">{% if sheet_url %}<a class="ps-btn" href="{{ sheet_url }}">Download shipping sheet</a>{% endif %}<button class="ps-btn quiet">Start a fresh run</button></div>
     </form>
   </div>
 
@@ -214,6 +214,8 @@
       </table>
       {% endif %}
       {% endfor %}
+      <div class="ps-actions" style="margin-top:6px;"><a class="ps-btn quiet" href="?sheet=1">Download shipping sheet</a>
+        <span class="ps-hint">Preview of the PDF that will be uploaded.</span></div>
       <label class="inline" style="margin-top:8px;"><input type="checkbox" name="confirm_patch_hwdb" required>
         Upload the shipping sheet and patch the checklist into the {{ hwdb_instance }} HWDB.</label>
     {% endif %}
