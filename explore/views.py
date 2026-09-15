@@ -823,6 +823,7 @@ def explore_plots_view(request):
     return render(request, "explore/plots.html", {
         "active_nav": "plots",
         "sidebar": navigation.sidebar_tree(inst, {}),
+        "sidebar_label": "Plot a type",
         "groups": groups,
         "n_types": len(leaves),
     })

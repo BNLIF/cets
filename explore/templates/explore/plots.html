@@ -16,12 +16,20 @@
   .pls-row .mono { font-family: var(--font-mono); font-size: 12px; color: var(--faint); }
   .pls-row .n { margin-left: auto; font-size: 12px; color: var(--faint); white-space: nowrap; }
   .pls-empty { color: var(--faint); font-size: 13.5px; padding: 24px 15px; }
+  .pls-hint { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--faint); }
+  .pls-row .who { font-size: 12px; color: var(--dim); }
+  .pls-row .del { margin-left: 8px; color: var(--faint); text-decoration: none; font-size: 13px; }
+  .pls-row .del:hover { color: var(--bad, #a33); }
   .pls-page [hidden] { display: none !important; }
 </style>
 <div class="pls-page">
   <h1>Plots</h1>
   <p class="pls-sub">Distributions over Item Specifications, per component type · {{ n_types }} types with items</p>
   <input type="search" id="pls-filter" placeholder="filter types" autofocus>
+  <div class="pls-group" id="pls-saved" hidden data-base="{% url 'explore:plot' part_type_id='PTID' %}">
+    <h2>Saved plots <span class="pls-hint">in this browser</span></h2>
+    <div class="pls-list" id="pls-saved-list"></div>
+  </div>
   {% for g in groups %}
   <div class="pls-group">
     <h2>{{ g.system }} <span aria-hidden="true">›</span> {{ g.subsystem }}</h2>
@@ -40,6 +48,33 @@
 </div>
 <script>
 (function () {
+    // Saved plots live in this browser (the plot page's Save as…); each is a URL hash.
+    var wrap = document.getElementById("pls-saved"), list = document.getElementById("pls-saved-list"), KEY = "cets-plot-saved:{{ hwdb_instance }}";
+    function drawSaved() {
+        var all = []; try { all = JSON.parse(localStorage.getItem(KEY) || "[]"); } catch (e) { all = []; }
+        if (!Array.isArray(all) || !all.length) { wrap.hidden = true; return; }
+        all.sort(function (a, b) { return (a.type + a.name).toLowerCase() < (b.type + b.name).toLowerCase() ? -1 : 1; });
+        list.textContent = ""; wrap.hidden = false;
+        all.forEach(function (r) {
+            var a = document.createElement("a"); a.className = "pls-row"; a.href = wrap.dataset.base.replace("PTID", r.ptid) + "#" + r.hash;
+            a.dataset.q = (r.name + " " + r.type + " " + r.ptid).toLowerCase();
+            var nm = document.createElement("span"); nm.textContent = r.name;
+            var ty = document.createElement("span"); ty.className = "who"; ty.textContent = r.type;
+            var id = document.createElement("span"); id.className = "mono"; id.textContent = r.ptid;
+            var n = document.createElement("span"); n.className = "n"; n.textContent = new Date(r.at).toLocaleDateString();
+            var del = document.createElement("a"); del.className = "del"; del.href = "#"; del.textContent = "×"; del.title = "Forget this saved plot";
+            del.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); if (!confirm("Forget “" + r.name + "”?")) return;
+                try { localStorage.setItem(KEY, JSON.stringify(all.filter(function (x) { return x.id !== r.id; }))); } catch (er) {} drawSaved(); });
+            n.appendChild(del);
+            a.appendChild(nm); a.appendChild(ty); a.appendChild(id); a.appendChild(n); list.appendChild(a);
+        });
+    }
+    drawSaved();
+    // The sidebar tree on this page opens a type's Plot page, not its Type View.
+    document.querySelectorAll("#ex-side a.extree-leaf").forEach(function (a) {
+        var m = /\/([A-Za-z]\d{11})\/?(?:[?#].*)?$/.exec(a.getAttribute("href") || "");
+        if (m) a.href = wrap.dataset.base.replace("PTID", m[1]);
+    });
     var box = document.getElementById("pls-filter");
     var groups = Array.prototype.slice.call(document.querySelectorAll(".pls-group"));
     box.addEventListener("input", function () {
