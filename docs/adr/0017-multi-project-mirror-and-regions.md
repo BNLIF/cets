@@ -27,11 +27,16 @@ them), and they may be small or empty on a given instance.
   aggregations key by `(project, system_id, …)` tuples.
 - **Extra projects are curated as a list, not a taxonomy.** `curation.yaml`
   gains `extra_projects: [{id: Z, name: …}, {id: L, name: LBNF}]` per
-  instance. The full refresh records each extra project's systems
-  **names-only** (one `systems/{P}` call each) and each system walks lazily on
-  first visit — the overflow (#49) machinery reused as-is (`sync_system` takes
-  a `project`, the walk URL carries `?project=`). A failed `systems/{P}`
-  listing warns and keeps the project's previous rows.
+  instance. The full refresh lists each extra project's systems (one
+  `systems/{P}` call each) and walks every one fully, per system via
+  `sync_system` (amended 2026-09-15: originally names-only + lazy first-visit
+  walk, which left types created after a system's first visit invisible to
+  Refresh; D's uncurated overflow systems are walked by the refresh the same
+  way since the same date). The overflow (#49) first-visit auto-walk stays as
+  the fallback for a system the refresh hasn't walked yet (`sync_system`
+  takes a `project`, the walk URL carries `?project=`). A failed `systems/{P}` listing warns and keeps
+  the project's previous rows; a failed system walk is recorded on its row and
+  skipped.
 - **Each extra project renders as a synthetic region** (key `Z`) built from
   the mirror at render time, one flattened single-system family per system —
   the same dict shape as `overflow_region`, so cards, crumbs, sidebar and deep

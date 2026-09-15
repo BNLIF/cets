@@ -34,17 +34,26 @@ def _chain(ptid, sid=57, sname="FD-VD TDE", ssid=2, ssname="Digital electronics"
         subsystem_id=ssid, subsystem_name=ssname, name=tname, part_type_id=ptid, **leaf)
 
 
-def _fake_api(systems, subsystems, part_types, counts, projects=None, type_records=None):
+def _fake_api(systems, subsystems, part_types, counts, projects=None, type_records=None,
+              project_trees=None):
     """``projects`` maps extra project letters to their ``systems/{P}`` lists
     (#71); unlisted projects return empty — ``systems`` is project D's.
-    ``type_records`` maps ptid → the ``component-types/{ptid}`` record (#72),
-    fetched by the walk for cable-category types."""
+    ``project_trees`` maps an extra project letter to its own ``(subsystems,
+    part_types)`` dicts (the refresh walks extra projects too); an extra
+    project without one has empty systems. ``type_records`` maps ptid → the
+    ``component-types/{ptid}`` record (#72), fetched by the walk for
+    cable-category types."""
     api = mock.MagicMock()
+    trees = {"D": (subsystems, part_types), **(project_trees or {})}
+
+    def _tree(p1):
+        return trees.get(p1, ({}, {}))
+
     api.get_systems.side_effect = (
         lambda p1="D": {"data": systems if p1 == "D" else (projects or {}).get(p1, [])})
-    api.get_subsystems.side_effect = lambda p1, p2: {"data": subsystems.get(int(p2), [])}
+    api.get_subsystems.side_effect = lambda p1, p2: {"data": _tree(p1)[0].get(int(p2), [])}
     api.get_part_types_for_subsystem.side_effect = (
-        lambda p1, p2, ssid: {"data": part_types.get((int(p2), ssid), [])}
+        lambda p1, p2, ssid: {"data": _tree(p1)[1].get((int(p2), ssid), [])}
     )
     api.get_component_type.side_effect = (
         lambda ptid: {"data": (type_records or {}).get(ptid, {})})
@@ -553,14 +562,14 @@ class ExploreSyncViewTest(TestCase):
 
 
 class OverflowSyncTest(TestCase):
-    """Overflow discovery during the full refresh (#49) — uses the real dev
-    curation block (curated = {5}, overflow on)."""
+    """Overflow discovery + walk during the full refresh (#49) — uses the real
+    dev curation block (curated = {5}, overflow on)."""
 
     def _run(self, api):
         with mock.patch("explore.hierarchy.FnalDbApiClient", return_value=api):
             return list(hierarchy.sync_hierarchy(api, "dev"))
 
-    def _api(self, include_stray=True):
+    def _api(self, include_stray=True, stray_types=("D02100200001",)):
         # System 21 ("DAQ") is a dev-only stray — uncurated since the
         # 2026-07-02 curation of ND/Others.
         systems = [{"id": 5, "name": "FD1-HD HVS"}]
@@ -568,36 +577,34 @@ class OverflowSyncTest(TestCase):
             systems.append({"id": 21, "name": "DAQ"})
         return _fake_api(
             systems=systems,
-            subsystems={5: [{"subsystem_id": 998, "subsystem_name": "HWDBUnitTest"}]},
+            subsystems={5: [{"subsystem_id": 998, "subsystem_name": "HWDBUnitTest"}],
+                        21: [{"subsystem_id": 2, "subsystem_name": "Servers"}]},
             part_types={(5, 998): [{"part_type_id": "D00599800007",
-                                    "full_name": "D.FD1-HD HVS.HWDBUnitTest.Test Type 007"}]},
+                                    "full_name": "D.FD1-HD HVS.HWDBUnitTest.Test Type 007"}],
+                        (21, 2): [{"part_type_id": p, "full_name": f"D.DAQ.Servers.{p}"}
+                                  for p in stray_types]},
             counts={"D00599800007": 147},
         )
 
-    def test_records_uncurated_systems_without_walking(self):
+    def test_walks_uncurated_systems_on_refresh(self):
         api = self._api()
         lines = self._run(api)
         row = H.objects.get(instance="dev", level=H.LEVEL_SYSTEM, system_id=21)
-        self.assertIsNone(row.structure_synced_at)
-        self.assertFalse(H.objects.filter(instance="dev", system_id=21)
-                         .exclude(level=H.LEVEL_SYSTEM).exists())
+        self.assertIsNotNone(row.structure_synced_at)   # walked, not just listed
+        self.assertTrue(H.objects.filter(instance="dev", part_type_id="D02100200001").exists())
         called = {c.args for c in api.get_subsystems.call_args_list}
-        self.assertEqual(called, {("D", "005")})   # 021 listed, never walked
+        self.assertEqual(called, {("D", "005"), ("D", "021")})
         self.assertTrue(any("overflow" in l for l in lines))
 
-    def test_prune_spares_lazily_walked_overflow_subtree(self):
+    def test_refresh_picks_up_new_uncurated_types(self):
+        # A type created after an earlier refresh shows up on the next one —
+        # the same guarantee curated systems always had.
         self._run(self._api())
-        sys21 = H.objects.get(instance="dev", level=H.LEVEL_SYSTEM, system_id=21)
-        sub = H.objects.create(
-            instance="dev", level=H.LEVEL_SUBSYSTEM, parent=sys21, system_id=21,
-            subsystem_id=2, system_name=sys21.system_name, subsystem_name="Servers", name="Servers")
-        H.objects.create(
-            instance="dev", level=H.LEVEL_TYPE, parent=sub, system_id=21,
-            subsystem_id=2, system_name=sys21.system_name, subsystem_name="Servers",
-            name="Event Builder", part_type_id="D02100200001")
-        self._run(self._api())   # a later global refresh
+        self._run(self._api(stray_types=("D02100200001", "D02100200002")))
         self.assertTrue(H.objects.filter(instance="dev",
-                                         part_type_id="D02100200001").exists())
+                                         part_type_id="D02100200002").exists())
+        self.assertTrue(H.objects.filter(instance="dev",
+                                         part_type_id="D00599800007").exists())
 
     def test_vanished_overflow_system_pruned(self):
         self._run(self._api())
@@ -677,7 +684,7 @@ class SyncSystemTest(TestCase):
 
 
 class MultiProjectSyncTest(TestCase):
-    """Extra HWDB projects (Z, L) recorded by the refresh and walked lazily,
+    """Extra HWDB projects (Z, L) recorded and walked by the refresh,
     with per-project system-id scoping (#71)."""
 
     def setUp(self):
@@ -694,32 +701,49 @@ class MultiProjectSyncTest(TestCase):
         with mock.patch("explore.hierarchy.FnalDbApiClient", return_value=api):
             return list(hierarchy.sync_hierarchy(api, "prod"))
 
-    def _api(self, z_systems=None):
+    Z_TREE = ({57: [{"subsystem_id": 1, "subsystem_name": "Z Optics"}]},
+              {(57, 1): [{"part_type_id": "Z05700100001",
+                          "full_name": "Z.Z Machine.Z Optics.Z Widget"}]})
+
+    def _api(self, z_systems=None, z_tree=None):
         # Z's system 57 deliberately collides with D's — ids are per-project.
         return _fake_api(
             systems=[{"id": 57, "name": "FD-VD TDE"}],
             subsystems={57: [{"subsystem_id": 2, "subsystem_name": "Digital electronics"}]},
             part_types={(57, 2): [{"part_type_id": "D05700200001",
                                    "full_name": "D.FD-VD TDE.Digital electronics.AMC"}]},
-            counts={"D05700200001": 5},
+            counts={"D05700200001": 5, "Z05700100001": 4},
             projects={"Z": z_systems if z_systems is not None
                       else [{"id": 57, "name": "Z Machine"}]},
+            project_trees={"Z": z_tree} if z_tree else None,
         )
 
-    def test_records_extra_project_systems_without_walking(self):
+    def test_walks_extra_project_systems_on_refresh(self):
         api = self._api()
         lines = self._run(api)
         zrow = H.objects.get(instance="prod", project="Z",
                              level=H.LEVEL_SYSTEM, system_id=57)
-        self.assertIsNone(zrow.structure_synced_at)
+        self.assertIsNotNone(zrow.structure_synced_at)   # walked, not just listed
         drow = H.objects.get(instance="prod", project="D",
                              level=H.LEVEL_SYSTEM, system_id=57)
         self.assertNotEqual(zrow.pk, drow.pk)        # no cross-project clobber
         self.assertEqual(drow.system_name, "FD-VD TDE")
         self.assertEqual(zrow.system_name, "Z Machine")
         called = {c.args for c in api.get_subsystems.call_args_list}
-        self.assertEqual(called, {("D", "057")})     # Z listed, never walked
+        self.assertEqual(called, {("D", "057"), ("Z", "057")})   # both projects walked
         self.assertTrue(any("project Z" in l for l in lines))
+
+    def test_extra_project_walk_picks_up_new_types(self):
+        # A type created after an earlier refresh shows up on the next one
+        # (Hajime 2026-09-15: Z00100300081–85 were invisible to Refresh).
+        self._run(self._api(z_tree=self.Z_TREE))
+        subs, pts = self.Z_TREE
+        grown = (subs, {(57, 1): pts[(57, 1)] + [{"part_type_id": "Z05700100084",
+                                                  "full_name": "Z.Z Machine.Z Optics.New"}]})
+        self._run(self._api(z_tree=grown))
+        self.assertTrue(H.objects.filter(instance="prod", project="Z",
+                                         part_type_id="Z05700100084").exists())
+        self.assertTrue(H.objects.filter(part_type_id="D05700200001").exists())
 
     def test_listing_failure_keeps_previous_rows(self):
         self._run(self._api())
@@ -738,19 +762,9 @@ class MultiProjectSyncTest(TestCase):
         self.assertTrue(any("WARNING: project Z" in l for l in lines))
 
     def test_vanished_extra_project_system_pruned_with_subtree(self):
-        self._run(self._api())
-        zsys = H.objects.get(instance="prod", project="Z",
-                             level=H.LEVEL_SYSTEM, system_id=57)
-        zsub = H.objects.create(
-            instance="prod", project="Z", level=H.LEVEL_SUBSYSTEM, parent=zsys,
-            system_id=57, subsystem_id=1, system_name="Z Machine",
-            subsystem_name="Z Optics", name="Z Optics")
-        H.objects.create(
-            instance="prod", project="Z", level=H.LEVEL_TYPE, parent=zsub,
-            system_id=57, subsystem_id=1, system_name="Z Machine",
-            subsystem_name="Z Optics", name="Z Widget", part_type_id="Z05700100001")
-        # Still listed → the lazily-walked subtree survives the refresh.
-        self._run(self._api())
+        self._run(self._api(z_tree=self.Z_TREE))
+        # Still listed → the subtree survives the refresh.
+        self._run(self._api(z_tree=self.Z_TREE))
         self.assertTrue(H.objects.filter(part_type_id="Z05700100001").exists())
         # Gone from the listing → system + subtree pruned; D's 57 untouched.
         self._run(self._api(z_systems=[]))
@@ -760,13 +774,8 @@ class MultiProjectSyncTest(TestCase):
 
     def test_sync_system_scopes_by_project(self):
         self._run(self._api())
-        api = _fake_api(
-            systems=[],
-            subsystems={57: [{"subsystem_id": 1, "subsystem_name": "Z Optics"}]},
-            part_types={(57, 1): [{"part_type_id": "Z05700100001",
-                                   "full_name": "Z.Z Machine.Z Optics.Z Widget"}]},
-            counts={"Z05700100001": 4},
-        )
+        api = _fake_api(systems=[], subsystems={}, part_types={},
+                        counts={"Z05700100001": 4}, project_trees={"Z": self.Z_TREE})
         with mock.patch("explore.hierarchy.FnalDbApiClient", return_value=api):
             list(hierarchy.sync_system(api, "prod", 57, project="Z"))
         leaf = H.objects.get(part_type_id="Z05700100001")

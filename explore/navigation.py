@@ -43,15 +43,16 @@ def overflow_region(instance: str) -> dict | None:
     if not families:
         return None
     return {"name": "Uncurated", "key": OVERFLOW_KEY, "overflow": True,
-            "note": "not in curation.yaml · each system loads on first visit",
+            "note": "not in curation.yaml",
             "families": families}
 
 
 def project_regions(instance: str) -> list[dict]:
     """One synthetic region per extra HWDB project (#71), built from the
     mirror at render time like ``overflow_region``: one flattened
-    single-system family per mirrored system, each walked lazily on first
-    visit (``overflow: True`` triggers the same auto-walk). The region's
+    single-system family per mirrored system, walked by the hierarchy refresh
+    (``overflow: True`` keeps the first-visit auto-walk for a system the
+    refresh hasn't walked yet). The region's
     ``project`` scopes every mirror read below it — system/subsystem ids are
     per-project. A project the refresh hasn't recorded yet renders nothing."""
     out = []
@@ -68,7 +69,7 @@ def project_regions(instance: str) -> list[dict]:
                     "key": prj, "project": prj,
                     "overflow": True,
                     "test": curation.project_is_test(instance, prj),
-                    "note": f"HWDB project {prj} · each system loads on first visit",
+                    "note": f"HWDB project {prj}",
                     "families": families})
     return out
 

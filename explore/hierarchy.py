@@ -5,8 +5,10 @@ whitelist (``systems/D`` → ``subsystems/D/{sys}`` → ``component-types/D/{sys
 and mirrors each component type into ``ComponentTypeNode`` with a true
 component count. Read-only against HWDB; additive locally (ADR-0010).
 Extra projects (Z, L, … — ``curation.extra_projects``, #71) get their systems
-recorded names-only on each refresh and walked lazily via ``sync_system``;
-system/subsystem ids are per-project, so ``project`` is part of a row's key.
+walked fully on each refresh, as are D's uncurated (overflow, #49) systems
+(each per system via ``sync_system``); a never-refreshed system still walks
+lazily on first visit. System/subsystem ids are per-project, so ``project``
+is part of a row's key.
 
 Like ``hwdb.sync.sync_family``, the orchestrator yields plain-text progress
 lines so a view can wrap a ``StreamingHttpResponse`` on top without changing
@@ -202,9 +204,10 @@ def sync_hierarchy(api, instance: str = "prod", project: str = "D") -> Iterator[
         systems.sort(key=lambda s: s.get("id") or 0)
         yield f"hierarchy: {len(systems)} curated systems to walk\n"
 
-        # Overflow (#49): record every live-but-uncurated system as a bare
-        # System row — names only, no walk; each is walked lazily on first
-        # visit. Their previously-walked subtrees are spared from the prune.
+        # Overflow (#49): record every live-but-uncurated system as a System
+        # row, then walk each one fully below like any other system (2026-09-15:
+        # refresh walks everything, so a type created after a system's first
+        # visit is never invisible). Their subtrees are spared from the prune.
         overflow_ids: set[int] = set()
         if curation.has_overflow(instance):
             extras = sorted(
@@ -222,14 +225,16 @@ def sync_hierarchy(api, instance: str = "prod", project: str = "D") -> Iterator[
                 seen.add(node.pk)
                 overflow_ids.add(s["id"])
             if overflow_ids:
-                yield f"  overflow: {len(overflow_ids)} uncurated systems recorded (each walks on first visit)\n"
+                yield f"  overflow: {len(overflow_ids)} uncurated systems recorded\n"
 
         # Extra projects (#71): record every system of each curated extra
-        # project (Z, L, …) as a bare System row — names only, no walk; each
-        # is walked lazily on first visit, exactly like overflow. A project
+        # project (Z, L, …) as a System row, then walk each one fully below —
+        # projects refresh equally (Hajime 2026-09-15: a type created after a
+        # Sandbox system's first visit was invisible to Refresh). A project
         # whose listing fails keeps its previous rows (skipped from pruning).
         extra_prj = curation.extra_projects(instance)
         prj_synced: set[str] = set()
+        extra_systems: list[tuple[str, int]] = [(project, i) for i in sorted(overflow_ids)]
         for prj in extra_prj:
             try:
                 prj_systems = _with_retry(
@@ -249,8 +254,9 @@ def sync_hierarchy(api, instance: str = "prod", project: str = "D") -> Iterator[
                               "name": s.get("name") or ""},
                 )
                 seen.add(node.pk)
+                extra_systems.append((prj, s["id"]))
             prj_synced.add(prj)
-            yield f"  project {prj}: {len(prj_systems)} systems recorded (each walks on first visit)\n"
+            yield f"  project {prj}: {len(prj_systems)} systems recorded\n"
 
         # --- Parallel read phases (no ORM here) ---
         # Phase 1: subsystems per system.
@@ -309,6 +315,19 @@ def sync_hierarchy(api, instance: str = "prod", project: str = "D") -> Iterator[
             for line in lines:
                 yield line
             systems_done += 1
+
+        # Uncurated + extra-project systems: the same walk as a first visit
+        # (``sync_system``: own parallel phases + in-system prune). One failing
+        # system is recorded on its row and skipped — the refresh goes on.
+        for prj, sid in extra_systems:
+            try:
+                yield from sync_system(api, instance, sid, project=prj)
+            except Exception as e:  # noqa: BLE001 — one system mustn't kill the walk
+                yield f"  WARNING: walk of {prj}/{sid} failed ({e}); previous rows kept\n"
+                continue
+            systems_done += 1
+            leaves += HierarchyNode.for_instance(instance).filter(
+                project=prj, system_id=sid, level=HierarchyNode.LEVEL_TYPE).count()
 
         # Prune within this instance: stale curated-subtree rows and vanished
         # systems go; the lazily-walked subtrees of live overflow systems stay

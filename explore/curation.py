@@ -41,8 +41,8 @@ def extra_projects(instance: str) -> list[str]:
     """Ids of the extra HWDB projects (PID part1 letters) mirrored besides
     "D" (#71). YAML entries are ``{id: Z, name: Sandbox}`` (or bare letters).
     Each renders as its own synthetic region at the same tree level as DUNE;
-    its systems are recorded by the full refresh (names only) and walked
-    lazily on first visit, like the overflow section."""
+    its systems are recorded and walked by the full refresh, like the
+    overflow section."""
     out = []
     for e in _block(instance).get("extra_projects") or []:
         out.append(str(e["id"]) if isinstance(e, dict) else str(e))

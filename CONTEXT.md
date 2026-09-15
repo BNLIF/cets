@@ -141,8 +141,8 @@ the part-type ID. For LArASIC P5B Prod, `D08100100003` decodes as:
   from `GET systems/D` is the 2nd PID segment. FD-VD spans systems
   51/54/55/56/57/58/59/80 plus the shared `FD CE` (81), DAQ, Slow Control.
   System/subsystem ids are **per-project** — besides `D` the explorer mirrors
-  the extra projects in `curation.yaml` (`Z`, `L`), each as its own lazily
-  walked region. See [[0017-multi-project-mirror-and-regions]].
+  the extra projects in `curation.yaml` (`Z`, `L`), each as its own region
+  walked by the hierarchy refresh. See [[0017-multi-project-mirror-and-regions]].
 - **Subsystem**: second level (e.g. `Digital electronics`, `Chimney`). The
   `subsystem_id` is the 3rd PID segment.
 - **Cable-end ref**: in `/subcomponents` rows a cable link overloads
