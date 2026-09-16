@@ -2786,7 +2786,8 @@ class PendingSubmitTest(TestCase):
             cleared = self.client.get(PAGE + "?clear=1").content.decode()
         # escapejs writes the PID's hyphen as \u002D — the same string once the browser parses it
         self.assertIn(f'var CL_PID = "{PART.replace("-", "\\u002D")}";', html)
-        self.assertIn(f'"cl-auto:dev:" + CL_PID + ":{NAME}:o"', html)   # #157: the blank copy fills CL_PID from the URL
+        self.assertIn(f'var CL_KEY_PRE = "cl-auto:dev:", CL_KEY_SUF = ":{NAME}:o";', html)
+        self.assertIn("var KEY = CL_KEY_PRE + CL_PID + CL_KEY_SUF;", html)   # #157: the blank copy fills CL_PID from the URL
         self.assertIn('id="cl-form">', html)             # no clear flag on a plain visit
         self.assertIn("var STATE_AT = 0,", html)          # nothing on the server yet → any copy restores
         self.assertIn("if (newer) apply(saved.v, saved.n);", html)
@@ -2816,7 +2817,7 @@ class OfflineTest(TestCase):
         js = r.content.decode()
         self.assertIn('addEventListener("fetch"', js)
         # #157: fill pages, each checklist's chooser + blank form, the profile — nothing else
-        self.assertIn("var FILL = /\\/part\\/([A-Za-z]\\d{11})-(?:\\d{5}|blank)\\/checklist\\/([^\\/]+)\\/$/;", js)
+        self.assertIn("var FILL = /\\/part\\/([A-Za-z]\\d{11})-(?:\\d{5}|blank\\d*)\\/checklist\\/([^\\/]+)\\/$/;", js)
         self.assertIn("var PAGES = [FILL, /\\/checklist\\/[A-Za-z]\\d{11}\\/[^\\/]+\\/(?:blank\\/)?$/, /\\/profile\\/$/];", js)
         self.assertIn('req.mode === "navigate"', js)
         self.assertIn("cl-offline-v3", js)
@@ -2861,19 +2862,51 @@ class BlankFillPageTest(TestCase):
         api.get_component.assert_not_called()
         api.get_tests.assert_not_called()
         self.assertIn('var CL_PID = "";', html)                    # filled from the URL the copy is served at
-        self.assertIn("/\\/part\\/([A-Za-z]\\d{11}-(?:\\d{5}|blank))\\/checklist\\//i.exec(location.pathname)", html)
+        self.assertIn("/\\/part\\/([A-Za-z]\\d{11})-(\\d{5}|blank\\d*)\\/checklist\\//i.exec(location.pathname)", html)
         self.assertIn('<span class="mono" data-cl-pid></span>', html)
         self.assertIn(f'href="{self.CHOOSER}">{PTID}</a>', html)   # crumb back to the chooser, not an item
         self.assertIn('id="cl-back" class="es-flash success" hidden', html)
-        self.assertIn('el.textContent = "no item"', html)          # opened by its own URL: nothing to submit
-        self.assertIn(f'CL_PID = "{PTID}-blank";', html)             # ...but typed values are kept on the device
+        self.assertIn('textContent = "Checklist for an item not yet in HWDB.";', html)   # opened by its own URL: nothing to submit
+        self.assertIn(f'CL_PID = "{PTID}-" + (m ? m[2].toLowerCase() : "blank");', html)   # ...but typed values are kept on the device
         self.assertIn("n: names()", html)                          # the copy records which fields it had
         self.assertIn("if (n && n.indexOf(el.name) < 0) return;", html)
 
     def test_placeholder_pid_url_is_the_blank_form(self):
-        # the device saves the blank form under <type>-blank; its fill URL leads back to the form
-        r = self.client.get(f"/hw/dev/part/{PTID}-blank/checklist/{NAME}/")
-        self.assertRedirects(r, self.URL, fetch_redirect_response=False)
+        # #159: the device keeps a checklist filled before its item exists under
+        # <type>-blank, -blank2, …; that PID's fill URL renders the blank form
+        m1, m2 = _mocked(_api())
+        with m1, m2:
+            r = self.client.get(f"/hw/dev/part/{PTID}-blank2/checklist/{NAME}/")
+            html = r.content.decode()
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('var CL_PID = "";', html)                                 # the page reads it from the URL
+        self.assertIn('CL_PID = "{}-" + (m ? m[2].toLowerCase() : "blank");'.format(PTID), html)
+        self.assertIn('id="cl-create" hidden', html)                             # shown by the page on a placeholder
+        self.assertIn(f'?checklist={NAME}" title="Mint the item in HWDB', html)
+        self.assertIn('c.href += "&from=" + encodeURIComponent(CL_PID);', html)
+
+    def test_minted_item_takes_over_the_placeholder_values(self):
+        # #159: the create page carries the placeholder through; the new PID's
+        # page moves the device's values (autosave, photos) to its own key
+        api = _api()
+        api.get_institutions.return_value = {"data": [{"id": 128, "name": "BNL", "country": {"code": "US"}}]}
+        api.get_component_type.return_value = {"data": {"manufacturers": [{"id": 7}],
+            "properties": {"specifications": [{"datasheet": {"Note": ""}}]}}}
+        api.create_component.return_value = {"status": "OK", "part_id": NEW_PID}
+        m1, m2 = _mocked(api)
+        with m1, m2, mock.patch("explore.views.sync_test_events", return_value=iter(())):
+            html = self.client.get(f"{NEW_PAGE}?checklist={NAME}&from={PTID}-blank2").content.decode()
+            self.assertIn(f'<input type="hidden" name="from" value="{PTID}-blank2">', html)
+            self.assertIn("What you filled in without a PID follows onto the new item.", html)
+            junk = self.client.get(f"{NEW_PAGE}?checklist={NAME}&from=evil").content.decode()
+            self.assertNotIn('name="from"', junk)
+            r = self.client.post(NEW_PAGE, {"institution_id": "128", "checklist": NAME, "from": f"{PTID}-blank2"})
+            self.assertRedirects(r, f"/hw/dev/part/{NEW_PID}/checklist/{NAME}/?from={PTID}-blank2",
+                                 fetch_redirect_response=False)
+            page = self.client.get(PAGE).content.decode()
+        self.assertIn('var CL_FROM = (/^[A-Za-z]\\d{11}-blank\\d*$/i.exec(new URLSearchParams(location.search).get("from")', page)
+        self.assertIn("localStorage.setItem(CL_KEY_PRE + CL_PID + CL_KEY_SUF, fv); localStorage.removeItem(fk);", page)
+        self.assertIn("// #159: photos taken under the placeholder become this item's", page)
 
     def test_blank_page_needs_a_write_instance_and_a_known_checklist(self):
         with override_settings(HWDB_WRITE_INSTANCES=["prod"]):
@@ -2896,8 +2929,9 @@ class BlankFillPageTest(TestCase):
         self.assertIn('id="clp-unsent" hidden', html)
         self.assertIn(f'var PRE = "cl-auto:dev:", SUF = ":{NAME}:o";', html)
         self.assertIn(f'FILL = "/hw/dev/part/PID/checklist/{NAME}/"', html)     # a well-formed PID opens in the browser
-        self.assertIn(f'href="{self.URL}"\n           title="The form with no item', html)   # Blank checklist button
-        self.assertIn('var blank = r.pid === TID + "-blank";', html)   # listed among the unsent
+        self.assertIn(f'id="clp-blank"\n           href="/hw/dev/part/{PTID}-blank/checklist/{NAME}/"', html)   # Blank checklist button
+        self.assertIn('for (var k = 2; used.indexOf(free) >= 0; k++) free = TID + "-blank" + k;', html)   # first slot not in use
+        self.assertIn('return n ? "Blank checklist" + (n[1] ? " " + n[1] : "") : pid;', html)   # listed among the unsent
 
     def test_profile_warms_every_bookmark(self):
         from explore.models import ChecklistBookmark

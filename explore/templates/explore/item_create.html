@@ -34,7 +34,7 @@
   <h1>New <span class="mono">{{ part_type_id }}</span> item</h1>
   <p class="es-sub">Mints the item in the HWDB — the PID is assigned there.
     {% if via_checklist %}You'll land straight in the
-    “{{ via_checklist }}” checklist to fill it out.
+    “{{ via_checklist }}” checklist to fill it out.{% if via_from %} What you filled in without a PID follows onto the new item.{% endif %}
     {% elif checklist_names|length == 1 %}You'll land straight in the
     “{{ checklist_names.0 }}” checklist to fill it out.{% elif checklist_names %}The new item's page
     lists this type's checklists ({{ checklist_names|join:", " }}) to fill out next.{% endif %}</p>
@@ -42,6 +42,7 @@
   <form method="post" class="es-card">
     {% csrf_token %}
     {% if via_checklist %}<input type="hidden" name="checklist" value="{{ via_checklist }}">{% endif %}
+    {% if via_from %}<input type="hidden" name="from" value="{{ via_from }}">{% endif %}
     <div class="cl-field">
       <label class="cl-lab">Institution <span class="cl-hint">(where the item belongs — required)</span></label>
       {% include "explore/_inst_pick.html" with pick=inst_pick %}

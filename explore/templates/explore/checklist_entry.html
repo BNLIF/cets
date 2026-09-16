@@ -78,9 +78,9 @@
         <a class="es-btn quiet cl-need-net" style="text-decoration:none;"
            href="{% url 'explore:item_create' part_type_id=part_type_id %}?checklist={{ cl_name|urlencode }}"
            title="Mint a new item of this type in HWDB (a new PID is assigned there), then continue straight into this checklist">+ New item</a>
-        <a class="es-btn quiet" style="text-decoration:none;"
-           href="{% url 'explore:checklist_blank' part_type_id=part_type_id name=cl_name %}"
-           title="The form with no item — to read or print; submitting needs a PID">Blank checklist</a>
+        <a class="es-btn quiet" style="text-decoration:none;" id="clp-blank"
+           href="{% url 'explore:checklist' part_id=part_type_id|add:'-blank' name=cl_name %}"
+           title="The form with no item — fill it now (offline too), create the item in HWDB later and the values follow">Blank checklist</a>
       </form>
     </div>
   </div>
@@ -116,8 +116,11 @@
   window.clWarm([BLANK]);
 
   // #157: items with values saved on this device (the fill page's autosave)
-  // and not submitted yet
+  // and not submitted yet; #159: blank forms filled without a PID among
+  // them (<type>-blank, -blank2, …), and the Blank checklist button opens
+  // the first slot not in use
   var PRE = "cl-auto:{{ hwdb_instance|escapejs }}:", SUF = ":{{ cl_name|escapejs }}:{{ user.get_username|escapejs }}";
+  function slotLabel(pid) { var n = /-blank(\d*)$/.exec(pid); return n ? "Blank checklist" + (n[1] ? " " + n[1] : "") : pid; }
   var card = document.getElementById("clp-unsent"), list = document.getElementById("clp-unsent-list");
   function ls() { try { return window.localStorage; } catch (e) { return null; } }
   function dropPhotos(key) {   // the fill page's photo cache (IndexedDB) for that item
@@ -149,9 +152,11 @@
     }
     rows.sort(function (a, b) { return b.t - a.t; });
     card.hidden = !rows.length;
+    var used = rows.map(function (r) { return r.pid; }), free = TID + "-blank";
+    for (var k = 2; used.indexOf(free) >= 0; k++) free = TID + "-blank" + k;
+    document.getElementById("clp-blank").href = FILL.replace("PID", free);
     list.innerHTML = rows.map(function (r) {
-      var blank = r.pid === TID + "-blank";   // the blank form, filled with no item
-      return '<div class="clp-unsent"><a href="' + (blank ? BLANK : FILL.replace("PID", r.pid)) + '">' + (blank ? "Blank checklist" : r.pid) + '</a>' +
+      return '<div class="clp-unsent"><a href="' + FILL.replace("PID", r.pid) + '">' + slotLabel(r.pid) + '</a>' +
         '<span class="when">' + (r.t ? new Date(r.t).toLocaleString() : "") + '</span>' +
         '<button type="button" data-key="' + r.key + '" title="Forget what was filled for this item on this device">forget</button></div>';
     }).join("");

@@ -6,7 +6,7 @@
 // request passes straight through. Submitting stays online-only — the page
 // itself disables Submit while offline.
 var CACHE = "cl-offline-v3";
-var FILL = /\/part\/([A-Za-z]\d{11})-(?:\d{5}|blank)\/checklist\/([^\/]+)\/$/;   // <type>-blank: the blank form itself
+var FILL = /\/part\/([A-Za-z]\d{11})-(?:\d{5}|blank\d*)\/checklist\/([^\/]+)\/$/;   // <type>-blank, -blank2…: the blank form, no item yet
 var PAGES = [FILL, /\/checklist\/[A-Za-z]\d{11}\/[^\/]+\/(?:blank\/)?$/, /\/profile\/$/];
 
 self.addEventListener("install", function () { self.skipWaiting(); });

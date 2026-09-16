@@ -3126,6 +3126,11 @@ def _checklist_state_at(rec, draft) -> int:
     return int(max(times).timestamp() * 1000) if times else 0
 
 
+# #159: a PID a device made up for a checklist filled before its item
+# exists — <type>-blank, <type>-blank2, … Never sent to HWDB.
+_PLACEHOLDER = re.compile(r"([A-Za-z]\d{11})-blank\d*", re.I)
+
+
 @login_not_required
 @fnal_login_required
 def explore_checklist_view(request, part_id, name):
@@ -3136,8 +3141,9 @@ def explore_checklist_view(request, part_id, name):
     first, then one test record of the schema's test type. HWDB is the only
     store — nothing lands locally."""
     inst = instance_of(request)
-    if part_id.lower().endswith("-blank"):   # #157: the device's placeholder for the blank form
-        return redirect(_rev(request, "explore:checklist_blank", args=[part_id[:-6], name]))
+    ph = _PLACEHOLDER.fullmatch(part_id)
+    if ph:   # #157/#159: a device placeholder (<type>-blank, -blank2, …) — the blank form at this URL
+        return explore_checklist_blank_view(request, ph.group(1).upper(), name)
     page_url = _rev(request, "explore:checklist", args=[part_id, name])
     if inst not in settings.HWDB_WRITE_INSTANCES:
         return HttpResponseForbidden("Checklists are not enabled here.")
@@ -3788,15 +3794,22 @@ def explore_item_create_view(request, part_type_id):
         # checklist; else the #97 rule (single checklist, or the part page).
         via = request.POST.get("checklist") or ""
         if via in checklist_names:
-            return redirect(_rev(request, "explore:checklist",
-                                 args=[part_id, via]))
+            url = _rev(request, "explore:checklist", args=[part_id, via])
+            # #159: filled offline under a placeholder — the new item's page
+            # takes over those values (and cached photos) on the device
+            frm = request.POST.get("from") or ""
+            if _PLACEHOLDER.fullmatch(frm):
+                url += "?" + urlencode({"from": frm})
+            return redirect(url)
         if len(checklist_names) == 1:
             return redirect(_rev(request, "explore:checklist",
                                  args=[part_id, checklist_names[0]]))
         return redirect(_rev(request, "explore:part", args=[part_id]))
 
     via = request.GET.get("checklist") or ""
+    frm = request.GET.get("from") or ""
     return render(request, "explore/item_create.html", {
+        "via_from": frm if _PLACEHOLDER.fullmatch(frm) else "",
         "sidebar": navigation.sidebar_tree(inst, {}),
         "part_type_id": part_type_id,
         "inst_pick": _inst_pick(insts := _institution_options(api), "institution_id",

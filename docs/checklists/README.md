@@ -356,6 +356,16 @@ submitted; typing or scanning a PID there navigates in the browser, so it
 works offline. Back online, the blank copy offers a reload for the item's
 details; the real page then restores the values.
 
+No PID yet (#159): the chooser's **Blank checklist** opens the form under
+a device placeholder, `<type>-blank` (then `-blank2`, … — the button
+takes the first slot not in use), whose fill URL renders the blank form
+online and offline. Nothing can be submitted there, but the autosave and
+photo cache work as for any item, and the chooser lists the slot among
+the unsent. Online, **Create item in HWDB** goes to the New-Item page with
+`?from=<placeholder>`; after minting, the new PID's page moves the
+placeholder's values and cached photos to its own key and restores them,
+ready to submit. Placeholders never reach HWDB.
+
 ## For consortium users (quickstart)
 
 1. On your component type's page, open **Add/Edit checklists** and build a

@@ -34,8 +34,8 @@
   <div id="cl-offline" class="es-flash error" hidden>Offline — blank checklist for <span class="mono" data-cl-pid></span>;
     item details and earlier submissions are not available. Keep filling: everything stays on this device.
     Submit and Save draft need the connection; Pick, link and lookups are paused.</div>
-  <div id="cl-back" class="es-flash success" hidden style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-    <span>Back online.</span><a class="es-btn" href="" style="text-decoration:none;">Reload for the item's details</a></div>
+  <div id="cl-back" class="es-flash success" hidden>
+    <span>Back online.</span> <a class="es-btn" href="" style="text-decoration:none;">Reload for the item's details</a></div>
   {% else %}
   <div id="cl-offline" class="es-flash error" hidden>Offline — this is the page as last seen online. Keep
     filling: everything stays on this device. Submit and Save draft need the connection; Pick, link and
@@ -45,7 +45,7 @@
 
   {# the schema's display title and the checklist's (file)name can differ — show both so the link text that got you here is recognizable #}
   <h1>{{ schema.name }}{% if cl_name != schema.name %} <span class="mono" style="font-size:.7em; font-weight:400; color:var(--dim);">· {{ cl_name }}</span>{% endif %}</h1>
-  <p class="es-sub">Checklist on <span class="mono" data-cl-pid>{{ part_id }}</span> — submissions post straight
+  <p class="es-sub" id="cl-sub">Checklist on <span class="mono" data-cl-pid>{{ part_id }}</span> — submissions post straight
     to HWDB as <span class="mono">{{ schema.test_type_name }}</span> test records; this page keeps no
     local state.{% if prefilled %} Pre-filled from the latest submission — edit and re-submit to
     supersede it.{% endif %}</p>
@@ -81,12 +81,13 @@
 
   <form method="post" enctype="multipart/form-data" id="cl-form"{% if clear_local %} data-cl-clear="1"{% endif %}>
     {% csrf_token %}
-    {% if blank %}<p class="es-sub">Item details load when online.</p>{% else %}{% include "explore/_checklist_item_card.html" %}{% endif %}
+    {% if blank %}<p class="es-sub" id="cl-noitem">Item details load when online.</p>{% else %}{% include "explore/_checklist_item_card.html" %}{% endif %}
     {% include "explore/_checklist_sections.html" %}
     {% if not no_test_type %}
     <div class="es-row" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
       <button class="es-btn cl-need-net">Submit to HWDB</button>
       <button class="es-btn quiet cl-need-net" name="action" value="draft" formnovalidate title="Saves the values on the server for you (any device); nothing goes to HWDB — photos stay on this device until you submit">Save draft</button>
+      {% if blank %}<a class="es-btn cl-need-net" id="cl-create" hidden style="text-decoration:none;" href="{% url 'explore:item_create' part_type_id=part_type_id %}?checklist={{ cl_name|urlencode }}" title="Mint the item in HWDB — a PID is assigned there — and continue with these values on it">Create item in HWDB</a>{% endif %}
       <button type="button" class="es-btn quiet" onclick="window.print()" title="print, or save as PDF from the print dialog — useful for procedure sheets">&#9113; Print</button>
       <button type="button" class="es-btn quiet" id="cl-csv-save" title="The form as it stands, as a CSV file on this device — works offline; photos are not in the file">Save CSV</button>
       <button type="button" class="es-btn quiet" id="cl-csv-load" title="Fill the form from a CSV saved here, or edited in a spreadsheet">Load CSV</button>
@@ -99,16 +100,32 @@
 </div>
 
 <script>
-  // the item this page is for — on the blank offline copy (#157), from the URL it was served at
+  // the item this page is for — on the blank offline copy (#157), from the URL it was served at.
+  // Device storage (autosave, photos) is keyed per instance / item / checklist / user.
   var CL_PID = "{{ part_id|escapejs }}";
+  var CL_KEY_PRE = "cl-auto:{{ hwdb_instance|escapejs }}:", CL_KEY_SUF = ":{{ cl_name|escapejs }}:{{ user.get_username|escapejs }}";
+  // #159: ?from=<type>-blankN — this item was just minted for a checklist
+  // filled without a PID; that placeholder's values and photos move here
+  var CL_FROM = (/^[A-Za-z]\d{11}-blank\d*$/i.exec(new URLSearchParams(location.search).get("from") || "") || [""])[0];
+  if (CL_FROM && CL_PID) {
+    try {
+      var fk = CL_KEY_PRE + CL_FROM + CL_KEY_SUF, fv = localStorage.getItem(fk);
+      if (fv) { localStorage.setItem(CL_KEY_PRE + CL_PID + CL_KEY_SUF, fv); localStorage.removeItem(fk); }
+    } catch (e) {}
+    history.replaceState(null, "", location.pathname);
+  }
   {% if blank %}(function () {
-    var m = /\/part\/([A-Za-z]\d{11}-(?:\d{5}|blank))\/checklist\//i.exec(location.pathname);
-    if (!m || /-blank$/i.test(m[1])) {   // the blank form itself: nothing to submit, but what is typed stays on the device
-      CL_PID = "{{ part_type_id|escapejs }}-blank";
-      document.querySelectorAll("[data-cl-pid]").forEach(function (el) { el.textContent = "no item"; });
+    var m = /\/part\/([A-Za-z]\d{11})-(\d{5}|blank\d*)\/checklist\//i.exec(location.pathname);
+    if (!m || /^blank/i.test(m[2])) {   // no item yet: nothing to submit, but what is typed stays on the device, and Create item carries it over
+      CL_PID = "{{ part_type_id|escapejs }}-" + (m ? m[2].toLowerCase() : "blank");
+      document.getElementById("cl-sub").textContent = "Checklist for an item not yet in HWDB.";
+      document.getElementById("cl-noitem").textContent = "What you fill in stays on this device; Create item in HWDB carries it onto the new item.";
       document.querySelectorAll("#cl-form .cl-need-net").forEach(function (el) { el.hidden = true; });
+      var c = document.getElementById("cl-create");
+      if (c) { c.href += "&from=" + encodeURIComponent(CL_PID); c.hidden = false; }
       return;
     }
+    m[1] = m[1] + "-" + m[2];
     CL_PID = m[1].toUpperCase();
     document.title = "{{ schema.name|escapejs }} · Checklist · " + CL_PID + " · HWDB Explorer";
     document.querySelectorAll("[data-cl-pid]").forEach(function (el) { el.textContent = CL_PID; });
@@ -198,7 +215,7 @@
   (function () {
     var form = document.getElementById("cl-form");
     if (!form || !window.indexedDB || !CL_PID) return;
-    var KEY = "cl-auto:{{ hwdb_instance|escapejs }}:" + CL_PID + ":{{ cl_name|escapejs }}:{{ user.get_username|escapejs }}";
+    var KEY = CL_KEY_PRE + CL_PID + CL_KEY_SUF;
     function db() {
       return new Promise(function (res, rej) {
         var r = indexedDB.open("cl-photos", 1);
@@ -220,11 +237,19 @@
     function drop() { inputs.forEach(function (el) { op("readwrite", function (st) { return st.delete(KEY + ":" + el.name); }); }); }
     window.clDropPhotos = drop;
     if (form.hasAttribute("data-cl-clear")) { drop(); return; }
+    // #159: photos taken under the placeholder become this item's
+    var moved = CL_FROM ? Promise.all(inputs.map(function (el) {
+      var fromKey = CL_KEY_PRE + CL_FROM + CL_KEY_SUF + ":" + el.name;
+      return op("readonly", function (st) { return st.get(fromKey); }).then(function (f) {
+        if (!f) return;
+        return op("readwrite", function (st) { st.put(f, KEY + ":" + el.name); return st.delete(fromKey); });
+      });
+    })) : Promise.resolve();
     function note(el, text) {
       var n = document.createElement("span"); n.className = "cl-hint"; n.textContent = text;
       el.parentNode.appendChild(n);
     }
-    inputs.forEach(function (el) {
+    moved.then(function () { inputs.forEach(function (el) {
       op("readonly", function (st) { return st.get(KEY + ":" + el.name); }).then(function (f) {
         if (!f) return;
         try { var dt = new DataTransfer(); dt.items.add(f); el.files = dt.files; }
@@ -232,7 +257,7 @@
         el.dispatchEvent(new Event("change", { bubbles: true }));   // preview follows
         note(el, "restored from this device");
       });
-    });
+    }); });
     form.addEventListener("change", function (e) {
       var el = e.target;
       if (el.type !== "file" || !el.name) return;
@@ -247,7 +272,7 @@
   // shows is offered back; a successful submit or a discard drops it.
   (function () {
     var form = document.getElementById("cl-form");
-    var KEY = "cl-auto:{{ hwdb_instance|escapejs }}:" + CL_PID + ":{{ cl_name|escapejs }}:{{ user.get_username|escapejs }}";
+    var KEY = CL_KEY_PRE + CL_PID + CL_KEY_SUF;
     function store() { try { return window.localStorage; } catch (e) { return null; } }
     var ls = store();
     if (!form) return;
