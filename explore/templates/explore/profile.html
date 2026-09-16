@@ -177,6 +177,11 @@
     <p class="pf-nowatch">Nothing yet — hit “☆ Bookmark” on a checklist page.</p>
     {% endif %}
   </div>
+  {% if bookmark_groups %}
+  {# #157: the bookmarked checklists' chooser and blank form go into the offline cache #}
+  {% include "explore/_checklist_offline.html" %}
+  <script>window.clWarm([{% for group, marks in bookmark_groups %}{% for b in marks %}"{{ b.url|escapejs }}", "{{ b.blank_url|escapejs }}"{% if not forloop.last or not forloop.parentloop.last %}, {% endif %}{% endfor %}{% endfor %}]);</script>
+  {% endif %}
 
   </div>
 

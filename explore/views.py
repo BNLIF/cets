@@ -3136,6 +3136,8 @@ def explore_checklist_view(request, part_id, name):
     first, then one test record of the schema's test type. HWDB is the only
     store — nothing lands locally."""
     inst = instance_of(request)
+    if part_id.lower().endswith("-blank"):   # #157: the device's placeholder for the blank form
+        return redirect(_rev(request, "explore:checklist_blank", args=[part_id[:-6], name]))
     page_url = _rev(request, "explore:checklist", args=[part_id, name])
     if inst not in settings.HWDB_WRITE_INSTANCES:
         return HttpResponseForbidden("Checklists are not enabled here.")
@@ -3295,6 +3297,49 @@ def explore_sw_view(request):
     resp = render(request, "explore/sw.js", content_type="application/javascript")
     resp["Cache-Control"] = "no-cache"
     return resp
+
+
+@login_not_required
+@fnal_login_required
+def explore_checklist_blank_view(request, part_type_id, name):
+    """#157: the checklist's form with no item — what the service worker
+    serves offline for a PID of this type whose own page was never opened
+    on the device. The page reads its PID from the URL it was served at;
+    the PID chooser and the profile's bookmarks load this URL in a hidden
+    frame so the copy is in the cache before it is needed."""
+    inst = instance_of(request)
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return HttpResponseForbidden("Checklists are not enabled here.")
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        nxt = _rev(request, "explore:type_checklist", args=[part_type_id, name])
+        return redirect(f"{link}?{urlencode({'next': nxt, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        return HttpResponse(FNAL_UNAVAILABLE, status=503, content_type="text/plain")
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    schema, msg = checklistforms.load(api, part_type_id, name)
+    if schema is None:
+        raise Http404(msg)
+    return render(request, "explore/checklist_form.html", {
+        "active_nav": "hardware",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "blank": True,
+        "part_type_id": part_type_id,
+        "part_id": "",
+        "cl_name": name,
+        "schema": checklistforms.bind(schema, None),
+        "item_card": None,
+        "arrived_default": timezone.localtime().strftime("%Y-%m-%dT%H:%M"),
+        "schema_msg": msg,
+        "prefilled": False,
+        "email_href": "",
+        "draft": None,
+        "no_test_type": not schema["test_type_name"],
+        "clear_local": False,
+        "state_at": 0,
+    })
 
 
 @login_not_required
@@ -5476,6 +5521,8 @@ def explore_profile_view(request):
         n = nodes.get(b.part_type_id)
         b.url = _rev(request, "explore:type_checklist",
                      args=[b.part_type_id, b.name])
+        b.blank_url = _rev(request, "explore:checklist_blank",   # #157: cached for offline
+                           args=[b.part_type_id, b.name])
         key = (f"{n.system_name} › {n.subsystem_name}" if n and n.subsystem_name
                else (n.system_name if n else ""))
         bm_groups.setdefault(key, []).append(b)

@@ -51,6 +51,8 @@ urlpatterns = [
          name="item_create"),
     path("checklist/<str:part_type_id>/<str:name>/",
          views.explore_type_checklist_view, name="type_checklist"),
+    path("checklist/<str:part_type_id>/<str:name>/blank/",
+         views.explore_checklist_blank_view, name="checklist_blank"),
     path("checklist-names/<str:part_type_id>/",
          views.explore_checklist_names_view, name="checklist_names"),
     path("checklist-bookmark/", views.explore_checklist_bookmark_view,

@@ -32,6 +32,12 @@
   .ship-table a { color: var(--accent-ink); }
   tr.ship-row { cursor: pointer; }
   tr.ship-row:hover { background: var(--surface); }
+  .clp-unsent { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--rule); font-size: 13.5px; }
+  .clp-unsent:last-child { border-bottom: none; }
+  .clp-unsent a { color: var(--accent-ink); font-family: var(--font-mono); text-decoration: none; }
+  .clp-unsent .when { color: var(--faint); font-size: 12px; }
+  .clp-unsent button { margin-left: auto; background: none; border: 0; color: var(--faint); cursor: pointer; font-size: 12px; }
+  .clp-unsent button:hover { color: var(--bad, #a33); }
 </style>
 {% include "explore/_checklist_style.html" %}
 
@@ -42,6 +48,8 @@
     <span class="sep">›</span>{{ schema.name }}
   </div>
 
+  <div id="cl-offline" class="es-flash error" hidden>Offline — items as last seen online. Scan or type a PID:
+    its checklist opens and what you fill in stays on this device until you submit.</div>
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
 
   {# the schema's display title and the checklist's (file)name can differ — show both so the type page's link text is recognizable #}
@@ -52,7 +60,7 @@
       <input type="hidden" name="part_type_id" value="{{ part_type_id }}">
       <input type="hidden" name="name" value="{{ cl_name }}">
       <input type="hidden" name="next" value="{{ request.get_full_path }}">
-      <button class="es-btn quiet" type="submit"
+      <button class="es-btn quiet cl-need-net" type="submit"
               {% if bookmarked %}style="color:var(--good); border-color:var(--good); background:var(--good-bg);"{% endif %}
               title="{% if bookmarked %}Remove from My checklists on your profile{% else %}Add to My checklists on your profile{% endif %}">
         {% if bookmarked %}&#9733; Bookmarked{% else %}&#9734; Bookmark{% endif %}</button>
@@ -67,11 +75,19 @@
                autocomplete="off" autocapitalize="characters" spellcheck="false">
         <button type="button" class="es-btn cl-scan" data-target="clp-pid">&#9635; Scan</button>
         <button class="es-btn">Open checklist</button>
-        <a class="es-btn quiet" style="text-decoration:none;"
+        <a class="es-btn quiet cl-need-net" style="text-decoration:none;"
            href="{% url 'explore:item_create' part_type_id=part_type_id %}?checklist={{ cl_name|urlencode }}"
            title="Mint a new item of this type in HWDB (a new PID is assigned there), then continue straight into this checklist">+ New item</a>
+        <a class="es-btn quiet" style="text-decoration:none;"
+           href="{% url 'explore:checklist_blank' part_type_id=part_type_id name=cl_name %}"
+           title="The form with no item — to read or print; submitting needs a PID">Blank checklist</a>
       </form>
     </div>
+  </div>
+
+  <div class="es-card cl-sec" id="clp-unsent" hidden>
+    <h2 style="margin-top:0;">Unsent on this device <span class="cl-hint">filled here, not yet submitted — open and submit</span></h2>
+    <div class="cl-sec-body" id="clp-unsent-list"></div>
   </div>
 
   <div class="es-card cl-sec">
@@ -81,4 +97,73 @@
 </div>
 
 {% include "explore/_checklist_scan.html" %}
+{% include "explore/_checklist_offline.html" %}
+<script>
+(function () {
+  var TID = "{{ part_type_id|escapejs }}", FILL = "{% url 'explore:checklist' part_id='PID' name=cl_name %}",
+      BLANK = "{% url 'explore:checklist_blank' part_type_id=part_type_id name=cl_name %}";
+  // a well-formed PID opens its page in the browser (offline too — the
+  // worker serves the last copy or the blank form); anything else asks the server
+  var form = document.querySelector(".clp-form"), pid = document.getElementById("clp-pid");
+  form.addEventListener("submit", function (e) {
+    var v = pid.value.trim().toUpperCase();
+    if (new RegExp("^" + TID + "-\\d{5}$").test(v)) { e.preventDefault(); location.href = FILL.replace("PID", v); return; }
+    if (document.documentElement.classList.contains("cl-offline")) { e.preventDefault(); pid.classList.add("cl-bad"); pid.focus(); }
+  });
+  pid.addEventListener("input", function () { pid.classList.remove("cl-bad"); });
+
+  // #157: the blank form goes into the cache now, for any PID scanned later
+  window.clWarm([BLANK]);
+
+  // #157: items with values saved on this device (the fill page's autosave)
+  // and not submitted yet
+  var PRE = "cl-auto:{{ hwdb_instance|escapejs }}:", SUF = ":{{ cl_name|escapejs }}:{{ user.get_username|escapejs }}";
+  var card = document.getElementById("clp-unsent"), list = document.getElementById("clp-unsent-list");
+  function ls() { try { return window.localStorage; } catch (e) { return null; } }
+  function dropPhotos(key) {   // the fill page's photo cache (IndexedDB) for that item
+    try {
+      var r = indexedDB.open("cl-photos", 1);
+      r.onupgradeneeded = function () { r.result.createObjectStore("files"); };
+      r.onsuccess = function () {
+        var st = r.result.transaction("files", "readwrite").objectStore("files");
+        st.openCursor().onsuccess = function (e) {
+          var c = e.target.result;
+          if (!c) return;
+          if (String(c.key).indexOf(key + ":") === 0) c.delete();
+          c.continue();
+        };
+      };
+    } catch (e) {}
+  }
+  function draw() {
+    var s = ls(), rows = [];
+    if (!s) return;
+    for (var i = 0; i < s.length; i++) {
+      var k = s.key(i);
+      if (k.indexOf(PRE) !== 0 || k.slice(-SUF.length) !== SUF) continue;
+      var p = k.slice(PRE.length, -SUF.length);
+      if (p.indexOf(TID + "-") !== 0) continue;
+      var t = 0;
+      try { t = JSON.parse(s.getItem(k)).t || 0; } catch (e) {}
+      rows.push({ key: k, pid: p, t: t });
+    }
+    rows.sort(function (a, b) { return b.t - a.t; });
+    card.hidden = !rows.length;
+    list.innerHTML = rows.map(function (r) {
+      var blank = r.pid === TID + "-blank";   // the blank form, filled with no item
+      return '<div class="clp-unsent"><a href="' + (blank ? BLANK : FILL.replace("PID", r.pid)) + '">' + (blank ? "Blank checklist" : r.pid) + '</a>' +
+        '<span class="when">' + (r.t ? new Date(r.t).toLocaleString() : "") + '</span>' +
+        '<button type="button" data-key="' + r.key + '" title="Forget what was filled for this item on this device">forget</button></div>';
+    }).join("");
+  }
+  list.addEventListener("click", function (e) {
+    var b = e.target.closest("button[data-key]");
+    if (!b || !confirm("Forget the values filled for " + b.parentNode.querySelector("a").textContent + " on this device?")) return;
+    try { ls().removeItem(b.getAttribute("data-key")); } catch (x) {}
+    dropPhotos(b.getAttribute("data-key"));
+    draw();
+  });
+  draw();
+})();
+</script>
 {% endblock %}

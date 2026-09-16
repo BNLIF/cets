@@ -17,29 +17,35 @@
     border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule)); }
   .es-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
     border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
-  /* #152: offline — what needs the server is paused */
-  .cl-offline .cl-need-net, .cl-offline .cl-pick, .cl-offline .cl-map-lnk, .cl-offline .cl-map-unl {
-    pointer-events: none; opacity: .45; }
 </style>
 {% include "explore/_checklist_style.html" %}
 
 <div class="es-page">
   <div class="es-crumbs">
     <a href="{% url 'explore:home' %}">Explorer</a>
-    <span class="sep">›</span><a href="{% url 'explore:part' part_id=part_id %}">{{ part_id }}</a>
+    {% if blank %}<span class="sep">›</span><a href="{% url 'explore:type_checklist' part_type_id=part_type_id name=cl_name %}">{{ part_type_id }}</a>
+    <span class="sep">›</span><span class="mono" data-cl-pid></span>{% else %}<span class="sep">›</span><a href="{% url 'explore:part' part_id=part_id %}">{{ part_id }}</a>{% endif %}
     <span class="sep">›</span>{{ schema.name }}
     <span class="cl-scale"><button type="button" data-step="-0.1" title="Smaller text">A&minus;</button><button type="button" data-step="0.1" title="Larger text">A+</button><button type="button" data-set="1" title="Default text size">&#8634;</button></span>
   </div>
 
   {# #152: shown while the browser is offline (the page itself came from the service worker's cache) #}
+  {% if blank %}
+  <div id="cl-offline" class="es-flash error" hidden>Offline — blank checklist for <span class="mono" data-cl-pid></span>;
+    item details and earlier submissions are not available. Keep filling: everything stays on this device.
+    Submit and Save draft need the connection; Pick, link and lookups are paused.</div>
+  <div id="cl-back" class="es-flash success" hidden style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+    <span>Back online.</span><a class="es-btn" href="" style="text-decoration:none;">Reload for the item's details</a></div>
+  {% else %}
   <div id="cl-offline" class="es-flash error" hidden>Offline — this is the page as last seen online. Keep
     filling: everything stays on this device. Submit and Save draft need the connection; Pick, link and
     lookups are paused.</div>
+  {% endif %}
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
 
   {# the schema's display title and the checklist's (file)name can differ — show both so the link text that got you here is recognizable #}
   <h1>{{ schema.name }}{% if cl_name != schema.name %} <span class="mono" style="font-size:.7em; font-weight:400; color:var(--dim);">· {{ cl_name }}</span>{% endif %}</h1>
-  <p class="es-sub">Checklist on <span class="mono">{{ part_id }}</span> — submissions post straight
+  <p class="es-sub">Checklist on <span class="mono" data-cl-pid>{{ part_id }}</span> — submissions post straight
     to HWDB as <span class="mono">{{ schema.test_type_name }}</span> test records; this page keeps no
     local state.{% if prefilled %} Pre-filled from the latest submission — edit and re-submit to
     supersede it.{% endif %}</p>
@@ -75,7 +81,7 @@
 
   <form method="post" enctype="multipart/form-data" id="cl-form"{% if clear_local %} data-cl-clear="1"{% endif %}>
     {% csrf_token %}
-    {% include "explore/_checklist_item_card.html" %}
+    {% if blank %}<p class="es-sub">Item details load when online.</p>{% else %}{% include "explore/_checklist_item_card.html" %}{% endif %}
     {% include "explore/_checklist_sections.html" %}
     {% if not no_test_type %}
     <div class="es-row" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
@@ -90,6 +96,24 @@
   </form>
 </div>
 
+<script>
+  // the item this page is for — on the blank offline copy (#157), from the URL it was served at
+  var CL_PID = "{{ part_id|escapejs }}";
+  {% if blank %}(function () {
+    var m = /\/part\/([A-Za-z]\d{11}-(?:\d{5}|blank))\/checklist\//i.exec(location.pathname);
+    if (!m || /-blank$/i.test(m[1])) {   // the blank form itself: nothing to submit, but what is typed stays on the device
+      CL_PID = "{{ part_type_id|escapejs }}-blank";
+      document.querySelectorAll("[data-cl-pid]").forEach(function (el) { el.textContent = "no item"; });
+      document.querySelectorAll("#cl-form .cl-need-net").forEach(function (el) { el.hidden = true; });
+      return;
+    }
+    CL_PID = m[1].toUpperCase();
+    document.title = "{{ schema.name|escapejs }} · Checklist · " + CL_PID + " · HWDB Explorer";
+    document.querySelectorAll("[data-cl-pid]").forEach(function (el) { el.textContent = CL_PID; });
+    document.addEventListener("cl-offline", function (e) { document.getElementById("cl-back").hidden = e.detail; });
+  })();{% endif %}
+</script>
+{% include "explore/_checklist_offline.html" %}
 {% include "explore/_checklist_behavior.html" %}
 {% include "explore/_lightbox.html" %}
 {% include "explore/_checklist_scan.html" %}
@@ -161,40 +185,18 @@
   document.addEventListener("submit", function (e) {
     if (document.documentElement.classList.contains("cl-offline")) { e.preventDefault(); return; }   // #152: submitting is online-only
     var b = e.submitter;
-    if (b && b.classList.contains("es-btn") && !b.name && !confirm("Submit to HWDB for {{ part_id }}?")) e.preventDefault();
+    if (b && b.classList.contains("es-btn") && !b.name && !confirm("Submit to HWDB for " + CL_PID + "?")) e.preventDefault();
   });
 
-  // #152: visited fill pages come back offline through the service worker
-  // (sw.js); here the page says so and pauses what needs the server. "Offline"
-  // is decided by probing the server (a tiny no-store request for the worker
-  // script, which the worker never answers itself), not by navigator.onLine
-  // alone — a dead server on a live network counts too.
-  var SW_URL = "{% url 'explore:sw' %}", offT = null;
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register(SW_URL).catch(function () {});
-  }
-  function setOffline(off) {
-    document.documentElement.classList.toggle("cl-offline", off);
-    document.getElementById("cl-offline").hidden = !off;
-    clearTimeout(offT);
-    offT = setTimeout(probe, 30000);   // re-checked every half minute either way
-  }
-  function probe() {
-    if (!navigator.onLine) { setOffline(true); return; }
-    fetch(SW_URL, { method: "HEAD", cache: "no-store", credentials: "same-origin" })
-      .then(function (r) { setOffline(!r.ok); }, function () { setOffline(true); });
-  }
-  window.addEventListener("online", probe);
-  window.addEventListener("offline", function () { setOffline(true); });
-  probe();
+  // (#152: the service worker, the offline probe and banner live in _checklist_offline.html)
 
   // #151: photos are cached on this device (IndexedDB holds a File across
   // reloads) and put back into their inputs on load — nothing reaches HWDB
   // before Submit. Same key as the autosave below; cleared with it.
   (function () {
     var form = document.getElementById("cl-form");
-    if (!form || !window.indexedDB) return;
-    var KEY = "cl-auto:{{ hwdb_instance|escapejs }}:{{ part_id|escapejs }}:{{ cl_name|escapejs }}:{{ user.get_username|escapejs }}";
+    if (!form || !window.indexedDB || !CL_PID) return;
+    var KEY = "cl-auto:{{ hwdb_instance|escapejs }}:" + CL_PID + ":{{ cl_name|escapejs }}:{{ user.get_username|escapejs }}";
     function db() {
       return new Promise(function (res, rej) {
         var r = indexedDB.open("cl-photos", 1);
@@ -243,10 +245,17 @@
   // shows is offered back; a successful submit or a discard drops it.
   (function () {
     var form = document.getElementById("cl-form");
-    var KEY = "cl-auto:{{ hwdb_instance|escapejs }}:{{ part_id|escapejs }}:{{ cl_name|escapejs }}:{{ user.get_username|escapejs }}";
+    var KEY = "cl-auto:{{ hwdb_instance|escapejs }}:" + CL_PID + ":{{ cl_name|escapejs }}:{{ user.get_username|escapejs }}";
     function store() { try { return window.localStorage; } catch (e) { return null; } }
     var ls = store();
-    if (!form || !ls) return;
+    if (!form || !ls || !CL_PID) return;
+    // the fields this page has — the blank offline copy (#157) lacks the Item
+    // card, so its copy must leave those fields alone when put back here
+    function names() {
+      var n = [];
+      Array.prototype.forEach.call(form.elements, function (el) { if (el.name && n.indexOf(el.name) < 0) n.push(el.name); });
+      return n;
+    }
     function snapshot() {
       var v = {};
       new FormData(form).forEach(function (val, k) {
@@ -264,10 +273,11 @@
       history.replaceState(null, "", location.pathname);
     }
     var muted = false;   // apply() fires input events; they must not re-save
-    function apply(v) {
+    function apply(v, n) {
       muted = true;
       Array.prototype.forEach.call(form.elements, function (el) {
         if (!el.name || el.type === "file" || el.type === "hidden" || el.name === "csrfmiddlewaretoken") return;
+        if (n && n.indexOf(el.name) < 0) return;   // not on the page the copy was made from
         var val = v[el.name];
         if (el.type === "checkbox" || el.type === "radio") el.checked = val !== undefined && val === el.value;
         else el.value = val === undefined ? "" : val;
@@ -294,9 +304,9 @@
           + '<button type="button" class="es-btn" data-restore>Restore</button>'
           + '<button type="button" class="es-btn quiet" data-drop>Discard</button>';
       form.parentNode.insertBefore(bar, form);
-      if (newer) apply(saved.v);
+      if (newer) apply(saved.v, saved.n);
       bar.addEventListener("click", function (e) {
-        if (e.target.hasAttribute("data-restore")) { apply(saved.v); bar.remove(); }
+        if (e.target.hasAttribute("data-restore")) { apply(saved.v, saved.n); bar.remove(); }
         if (e.target.hasAttribute("data-undo")) {   // back to the page's own values; Redo stays offered
           apply(rendered);
           try { ls.removeItem(KEY); } catch (x) {}
@@ -304,7 +314,7 @@
             + '<button type="button" class="es-btn quiet" data-redo>Redo</button>';
         }
         if (e.target.hasAttribute("data-redo")) {
-          apply(saved.v);
+          apply(saved.v, saved.n);
           try { ls.setItem(KEY, JSON.stringify(saved)); } catch (x) {}
           bar.innerHTML = restoredMsg;
         }
@@ -320,7 +330,7 @@
       if (muted) return;
       clearTimeout(t);
       t = setTimeout(function () {
-        try { ls.setItem(KEY, JSON.stringify({ t: Date.now(), v: snapshot() })); } catch (e) {}
+        try { ls.setItem(KEY, JSON.stringify({ t: Date.now(), v: snapshot(), n: names() })); } catch (e) {}
       }, 800);
     }
     form.addEventListener("input", save);

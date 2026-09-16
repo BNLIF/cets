@@ -315,21 +315,34 @@ which HWDB accepts once the type has it.
   `mailto:` can't attach files — so the body is cut at ~1.8 kB with a
   pointer to the CSV, which you attach yourself when the full data matters.
 
-## Offline (#152)
+## Offline (#152, #157)
 
 A checklist page you have opened while online comes back when the network
-is gone: a service worker (registered by the fill page only, scoped to the
-Explorer's mount) keeps the last online copy of every fill page you visit
-and of the assets it loads — styles, scanner library, htmx, fonts,
-reference drawings and thumbnails through the image proxy. Reloading
-offline shows that copy with a red *Offline* banner; filling continues,
-with #151's autosave keeping values and photos on the device. What needs
-the server is paused until the connection returns: Submit and Save draft,
-Pick, live link/unlink, when-rule and serial-number lookups, CSV and
-Email. Submitting is online-only by design — there is no queued submit.
-A page never opened online shows the browser's own offline page; no other
-Explorer page is affected. The cached copy is a snapshot: its Item card
-and draft banner refresh on the next online load.
+is gone: a service worker (scoped to the Explorer's mount, registered by
+the fill page, the PID chooser and the profile) keeps the last online copy
+of every fill page you visit and of the assets it loads — styles, scanner
+library, htmx, fonts, reference drawings and thumbnails through the image
+proxy. Reloading offline shows that copy with a red *Offline* banner;
+filling continues, with #151's autosave keeping values and photos on the
+device. What needs the server is paused until the connection returns:
+Submit and Save draft, Pick, live link/unlink, when-rule and serial-number
+lookups, CSV and Email. Submitting is online-only by design — there is no
+queued submit. The cached copy is a snapshot: its Item card and draft
+banner refresh on the next online load.
+
+Any item of a checklist you use (#157): the PID chooser and the profile's
+*My checklists* load, in a hidden frame, the checklist's chooser and its
+**blank form** (`checklist/<type>/<name>/blank/` — the fill page with no
+item) into the cache. Offline, a PID whose own page was never opened on
+the device gets that blank form: it reads the PID from the URL, so the
+autosave key, the photo cache and the eventual Submit address the right
+item. Its Item card is absent (nothing of the item is known), and the
+autosave copy records which fields it had, so putting it back on the real
+page leaves the Item card's values alone. The chooser's *Unsent on this
+device* card lists the items with values saved on the device and not yet
+submitted; typing or scanning a PID there navigates in the browser, so it
+works offline. Back online, the blank copy offers a reload for the item's
+details; the real page then restores the values.
 
 ## For consortium users (quickstart)
 

@@ -1,0 +1,56 @@
+{# #152/#157: offline support shared by the checklist fill page, the PID chooser and the profile. Registers the service worker (sw.js), decides "offline" by probing the server, and offers clWarm(urls) — loads pages one by one in a hidden frame so the worker caches them and what they show. #}
+<style>
+  .cl-offline .cl-need-net, .cl-offline .cl-pick, .cl-offline .cl-map-lnk, .cl-offline .cl-map-unl {
+    pointer-events: none; opacity: .45; }
+</style>
+<script>
+(function () {
+  var SW_URL = "{% url 'explore:sw' %}", offT = null;
+  var ready = ("serviceWorker" in navigator)
+    ? navigator.serviceWorker.register(SW_URL).then(function () { return navigator.serviceWorker.ready; })
+    : Promise.reject();
+  ready.catch(function () {});
+  // pages to have in the cache before they are needed: one hidden frame at a
+  // time, dropped once loaded (its images and scripts come along)
+  var queue = [], busy = false;
+  function next() {
+    var u = queue.shift();
+    if (!u) { busy = false; return; }
+    busy = true;
+    var f = document.createElement("iframe"), t = setTimeout(done, 30000);
+    function done() { clearTimeout(t); f.remove(); next(); }
+    f.hidden = true; f.src = u;
+    f.addEventListener("load", done); f.addEventListener("error", done);
+    document.body.appendChild(f);
+  }
+  window.clWarm = function (urls) {
+    if (window !== window.top) return;   // a warmed page does not warm further
+    queue.push.apply(queue, urls);
+    ready.then(function () { if (!busy) next(); }, function () {});
+  };
+  // the very first visit loads before the worker is in charge — cache this page too
+  ready.then(function () {
+    return caches.match(location.origin + location.pathname).then(function (hit) { if (!hit) window.clWarm([location.pathname]); });
+  }).catch(function () {});
+  // "Offline" is decided by probing the server (a tiny no-store request for
+  // the worker script, which the worker never answers itself), not by
+  // navigator.onLine alone — a dead server on a live network counts too.
+  var banner = document.getElementById("cl-offline");
+  if (!banner) return;
+  function setOffline(off) {
+    document.documentElement.classList.toggle("cl-offline", off);
+    banner.hidden = !off;
+    document.dispatchEvent(new CustomEvent("cl-offline", { detail: off }));
+    clearTimeout(offT);
+    offT = setTimeout(probe, 30000);   // re-checked every half minute either way
+  }
+  function probe() {
+    if (!navigator.onLine) { setOffline(true); return; }
+    fetch(SW_URL, { method: "HEAD", cache: "no-store", credentials: "same-origin" })
+      .then(function (r) { setOffline(!r.ok); }, function () { setOffline(true); });
+  }
+  window.addEventListener("online", probe);
+  window.addEventListener("offline", function () { setOffline(true); });
+  probe();
+})();
+</script>

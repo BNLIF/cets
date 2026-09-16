@@ -1,9 +1,13 @@
-// HWDB Explorer — checklist offline cache (#152). Serves already-visited
-// checklist fill pages, and the assets they load, when the network is gone;
-// every other request passes straight through. Submitting stays online-only
-// — the page itself disables Submit while offline.
-var CACHE = "cl-offline-v2";
-var PAGE = /\/part\/[A-Za-z]\d{11}-\d{5}\/checklist\/[^\/]+\/$/;
+// HWDB Explorer — checklist offline cache (#152, #157). Keeps the pages a
+// checklist needs when the network is gone: fill pages already visited, each
+// checklist's PID chooser and its blank form (a fill page with no item, which
+// reads the PID from the URL it is served at — so any item of a bookmarked
+// checklist opens offline), and the profile with its bookmarks. Every other
+// request passes straight through. Submitting stays online-only — the page
+// itself disables Submit while offline.
+var CACHE = "cl-offline-v3";
+var FILL = /\/part\/([A-Za-z]\d{11})-(?:\d{5}|blank)\/checklist\/([^\/]+)\/$/;   // <type>-blank: the blank form itself
+var PAGES = [FILL, /\/checklist\/[A-Za-z]\d{11}\/[^\/]+\/(?:blank\/)?$/, /\/profile\/$/];
 
 self.addEventListener("install", function () { self.skipWaiting(); });
 self.addEventListener("activate", function (e) {
@@ -18,10 +22,10 @@ self.addEventListener("fetch", function (e) {
   if (req.method !== "GET") return;
   var url = new URL(req.url);
   if (req.mode === "navigate") {
-    if (!PAGE.test(url.pathname)) return;   // any other page: untouched
-    // a fill page: the network first (fresh item card, draft banner), the
-    // last online copy when the network is gone — never a half-render. The
-    // query (?clear=1) is dropped from the cache key.
+    if (!PAGES.some(function (re) { return re.test(url.pathname); })) return;   // any other page: untouched
+    // the network first (fresh item card, draft banner), the last online
+    // copy when the network is gone — never a half-render. The query
+    // (?clear=1, ?page=2) is dropped from the cache key.
     var key = new Request(url.origin + url.pathname);
     e.respondWith(fetch(req).then(function (res) {
       if (res.ok) {
@@ -30,7 +34,15 @@ self.addEventListener("fetch", function (e) {
       }
       return res;
     }).catch(function (err) {
-      return caches.match(key).then(function (hit) { if (hit) return hit; throw err; });
+      return caches.match(key).then(function (hit) {
+        if (hit) return hit;
+        // #157: a fill page never opened on this device — the checklist's
+        // blank form, cached when the chooser or the profile was visited
+        var m = FILL.exec(url.pathname);
+        if (!m) throw err;
+        var blank = url.origin + url.pathname.slice(0, m.index) + "/checklist/" + m[1] + "/" + m[2] + "/blank/";
+        return caches.match(blank).then(function (b) { if (b) return b; throw err; });
+      });
     }));
     return;
   }
