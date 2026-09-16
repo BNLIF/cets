@@ -302,9 +302,21 @@ which HWDB accepts once the type has it.
   **Retry submit** (submits the form below, edited or not, with this
   device's cached photos) and **Discard**. A plain Save draft turns it
   back into an ordinary draft.
-- **Download CSV** exports the latest submission as section/field/value
-  rows (the iPad's "send via email" payload); photos flatten to their HWDB
-  image name/id.
+- **Save CSV / Load CSV** (#158) keep the form as it stands in a CSV file
+  on the device and fill it back from one — built in the browser, so both
+  work offline. The file follows the form: a `== Section ==` heading row,
+  then `Key`, `Field`, `Value` per field; tables as grids (column headers
+  on the table's row, one row per table row with its label, the row's key
+  in column A); steps and map slots one per row. Values read as a person
+  writes them — `pass`/`fail`, `x` for a done step, an option's text —
+  and every empty cell carries a marker for what goes there (`__`, `[ ]`,
+  `[pass/fail]`, `[G/J/C]`), since a plain spreadsheet has no other way to
+  show which cells to fill. Load reads markers as empty and accepts the
+  written forms back, matching on `Key` (labels may change).
+  Excel/Numbers round trips work (semicolon CSVs load too); unknown keys
+  are counted, not applied, and a file made for another checklist asks
+  before loading. Photos are not in the file. The blank form's Save CSV
+  gives a blank CSV to fill elsewhere.
 - **Print** (#105) opens the browser's print dialog — save as PDF from
   there. Folded sections open, buttons and app chrome drop out; values
   print inside their boxes, so a blank checklist doubles as a printable

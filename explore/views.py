@@ -3247,17 +3247,6 @@ def explore_checklist_view(request, part_id, name):
             return redirect(page_url + "?clear=1")   # drops the browser autosave copy (#151)
         return redirect(page_url)
 
-    if request.GET.get("export") == "csv":
-        # #97: the latest submission as CSV (the iPad's email payload).
-        if not rec:
-            messages.error(request, "Nothing to export — no submission yet.")
-            return redirect(page_url)
-        resp = HttpResponse(checklistforms.export_csv(schema, part_id, prev_td),
-                            content_type="text/csv; charset=utf-8")
-        resp["Content-Disposition"] = \
-            f'attachment; filename="Checklist_{part_id}_{name}.csv"'
-        return resp
-
     email_href = ""
     if rec:
         # #99: Hajime's EMAIL button — a mailto: draft in the user's own

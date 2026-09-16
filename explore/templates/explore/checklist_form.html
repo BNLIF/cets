@@ -88,8 +88,10 @@
       <button class="es-btn cl-need-net">Submit to HWDB</button>
       <button class="es-btn quiet cl-need-net" name="action" value="draft" formnovalidate title="Saves the values on the server for you (any device); nothing goes to HWDB — photos stay on this device until you submit">Save draft</button>
       <button type="button" class="es-btn quiet" onclick="window.print()" title="print, or save as PDF from the print dialog — useful for procedure sheets">&#9113; Print</button>
-      {% if prefilled %}<a class="es-btn quiet cl-need-net" style="text-decoration:none;" href="?export=csv">Download CSV</a>
-      <a class="es-btn quiet cl-need-net" style="text-decoration:none;" href="{{ email_href }}" title="opens your mail client with the latest submission as text — attach the CSV yourself if the full data is needed">&#9993; Email</a>{% endif %}
+      <button type="button" class="es-btn quiet" id="cl-csv-save" title="The form as it stands, as a CSV file on this device — works offline; photos are not in the file">Save CSV</button>
+      <button type="button" class="es-btn quiet" id="cl-csv-load" title="Fill the form from a CSV saved here, or edited in a spreadsheet">Load CSV</button>
+      <input type="file" id="cl-csv-file" accept=".csv,text/csv,text/plain" hidden>
+      {% if prefilled %}<a class="es-btn quiet cl-need-net" style="text-decoration:none;" href="{{ email_href }}" title="opens your mail client with the latest submission as text — attach the CSV yourself if the full data is needed">&#9993; Email</a>{% endif %}
       <span class="es-hint">Every submission is a new version — old ones are preserved.</span>
     </div>
     {% endif %}
@@ -248,7 +250,9 @@
     var KEY = "cl-auto:{{ hwdb_instance|escapejs }}:" + CL_PID + ":{{ cl_name|escapejs }}:{{ user.get_username|escapejs }}";
     function store() { try { return window.localStorage; } catch (e) { return null; } }
     var ls = store();
-    if (!form || !ls || !CL_PID) return;
+    if (!form) return;
+    window.clApply = function (v, n) { apply(v, n); if (ls && CL_PID) save(); };   // #158: Load CSV fills the form the same way
+    if (!ls || !CL_PID) return;
     // the fields this page has — the blank offline copy (#157) lacks the Item
     // card, so its copy must leave those fields alone when put back here
     function names() {
@@ -335,6 +339,165 @@
     }
     form.addEventListener("input", save);
     form.addEventListener("change", save);
+  })();
+
+  // #158: the form as a CSV file on this device, and back — works offline.
+  // The file follows the form: a heading row per section, one row per
+  // field (Key, Field, Value), tables as grids with their column headers
+  // and row labels, steps and map slots as lists. Load matches on Key, so
+  // labels can be changed in a spreadsheet; a table row's key is the row's
+  // prefix and its cells follow in column order. Photos are not in the file.
+  (function () {
+    var form = document.getElementById("cl-form"), file = document.getElementById("cl-csv-file");
+    if (!form || !file) return;
+    var NAME = "{{ cl_name|escapejs }}";
+    function text(el) { return (el ? el.textContent : "").replace(/\s+/g, " ").trim(); }
+    function q(v) { v = String(v == null ? "" : v); return /[",;\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+    function skip(el) {
+      return !el.name || el.type === "file" || el.type === "hidden" || el.type === "button" || el.type === "submit" || el.name === "csrfmiddlewaretoken";
+    }
+    // what a cell holds, as a person would write it: pass/fail, x for a
+    // ticked step, the chosen option's text. An empty cell gets a marker
+    // saying what goes there — the only way a plain spreadsheet shows
+    // which cells are to be filled; Load reads the markers as empty.
+    function shown(el) {
+      if (el.type === "radio") { var on = form.querySelector('input[name="' + el.name + '"]:checked'); return on && on.value ? on.value : "[pass/fail]"; }
+      if (el.type === "checkbox") return el.checked ? "x" : "[ ]";
+      if (el.tagName === "SELECT") {
+        if (el.value) return text(el.options[el.selectedIndex]);
+        var opts = Array.prototype.map.call(el.options, text).filter(function (t) { return t && t !== "\u2014"; });
+        return "[" + (opts.join("/").length > 40 ? "choose" : opts.join("/")) + "]";
+      }
+      if (el.hasAttribute("readonly")) return el.value;   // a formula cell — computed, not typed
+      return el.value || "__";
+    }
+    var MARK = /^(__+|\[.*\])$/;
+    function inputs(root) {
+      var seen = {}, out = [];
+      Array.prototype.forEach.call(root.querySelectorAll("input, select, textarea"), function (el) {
+        if (skip(el) || seen[el.name]) return;
+        seen[el.name] = 1; out.push(el);
+      });
+      return out;
+    }
+    function tableRows(fld, lab) {
+      var out = [], tbl = fld.querySelector("table.cl-table"), rowLab = !!tbl.querySelector("th.cl-rowlab");
+      var cols = Array.prototype.map.call(tbl.querySelectorAll("thead th"), text);
+      if (rowLab) cols.shift();
+      out.push(["", lab].concat(cols));
+      Array.prototype.forEach.call(tbl.querySelectorAll("tbody tr"), function (tr) {
+        var key = "", cells = [];
+        Array.prototype.forEach.call(tr.querySelectorAll("td"), function (td) {
+          var el = inputs(td)[0];
+          if (el) { key = key || el.name.replace(/-c\d+$/, ""); cells.push(shown(el)); }
+          else cells.push(text(td));   // a constant cell — printed, never loaded
+        });
+        out.push([key, text(tr.querySelector("th.cl-rowlab"))].concat(cells));
+      });
+      return out;
+    }
+    function rows() {
+      var out = [];
+      Array.prototype.forEach.call(form.querySelectorAll(".cl-sec"), function (sec) {
+        var title = text(sec.querySelector("h2 .cl-fold")) || text(sec.querySelector("h2"));
+        out.push([], ["", "== " + title + " =="]);
+        Array.prototype.forEach.call(sec.querySelectorAll(".cl-field"), function (fld) {
+          var lab = text(fld.querySelector(".cl-lab")) || text(fld.querySelector("label"));
+          if (fld.querySelector("table.cl-table")) { out.push.apply(out, tableRows(fld, lab)); return; }
+          var els = inputs(fld);
+          if (!els.length) return;
+          if (fld.querySelector(".cl-steps")) {   // one row per step, x = done
+            out.push(["", lab + " [x = done]"]);
+            els.forEach(function (el) { out.push([el.name, text(el.closest("label")), shown(el)]); });
+            return;
+          }
+          if (fld.querySelector(".cl-map")) {   // one row per slot
+            out.push(["", lab]);
+            els.forEach(function (el) { out.push([el.name, text(el.labels && el.labels[0]) || el.name, shown(el)]); });
+            return;
+          }
+          els.forEach(function (el, i) {
+            var l = lab;
+            if (el.type === "radio") l += " [pass/fail]";
+            else if (el.type === "checkbox") l += " [x]";
+            else if (/-note$/.test(el.name)) l += " — comment";
+            else if (i) l = text(el.labels && el.labels[0]) || el.name;
+            out.push([el.name, l, shown(el)]);
+          });
+        });
+      });
+      return out;
+    }
+    document.getElementById("cl-csv-save").addEventListener("click", function () {
+      var lines = [["Checklist", NAME], ["Part ID", /-blank$/.test(CL_PID) ? "" : CL_PID], ["Test type", "{{ schema.test_type_name|escapejs }}"], [],
+                   ["Key", "Field", "Value"]].concat(rows());
+      var csv = "\ufeff" + lines.map(function (r) { return r.map(q).join(","); }).join("\r\n") + "\r\n";
+      var a = document.createElement("a"), url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+      a.href = url; a.download = "Checklist_" + CL_PID + "_" + NAME + ".csv";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    });
+    // RFC 4180-ish: quotes, CRLF; a spreadsheet may have saved with ";"
+    function parse(t, sep) {
+      var rows = [], row = [], cell = "", inq = false;
+      for (var i = 0; i < t.length; i++) {
+        var c = t[i];
+        if (inq) { if (c === '"') { if (t[i + 1] === '"') { cell += '"'; i++; } else inq = false; } else cell += c; }
+        else if (c === '"') inq = true;
+        else if (c === sep) { row.push(cell); cell = ""; }
+        else if (c === "\n" || c === "\r") { if (c === "\r" && t[i + 1] === "\n") i++; row.push(cell); rows.push(row); row = []; cell = ""; }
+        else cell += c;
+      }
+      if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
+      return rows;
+    }
+    // a cell's text → the form value: any mark ticks a step, pass/fail in
+    // any case, an option by its text or value
+    function value(key, raw) {
+      var el = form.elements[key], v = String(raw == null ? "" : raw).trim();
+      if (MARK.test(v)) v = "";   // an untouched marker
+      if (el.type === "checkbox" || (el instanceof RadioNodeList && el[0].type === "checkbox")) return v ? (el.value || el[0].value) : "";
+      if (el instanceof RadioNodeList || el.type === "radio") return v.toLowerCase();
+      if (el.tagName === "SELECT") {
+        var o = Array.prototype.find.call(el.options, function (o) { return o.value === v || text(o) === v; });
+        return o ? o.value : v;
+      }
+      return v;
+    }
+    function flash(msg) {
+      var bar = document.createElement("div");
+      bar.className = "es-flash success"; bar.textContent = msg;
+      form.parentNode.insertBefore(bar, form);
+    }
+    document.getElementById("cl-csv-load").addEventListener("click", function () { file.value = ""; file.click(); });
+    file.addEventListener("change", function () {
+      var f = file.files && file.files[0];
+      if (!f) return;
+      f.text().then(function (t) {
+        t = t.replace(/^\ufeff/, "");
+        var rows = parse(t, ","), hdr = rows.findIndex(function (r) { return r[0] === "Key"; });
+        if (hdr < 0) { rows = parse(t, ";"); hdr = rows.findIndex(function (r) { return r[0] === "Key"; }); }
+        if (hdr < 0) { alert("Not a checklist CSV — no “Key” column."); return; }
+        var forName = rows.slice(0, hdr).filter(function (r) { return r[0] === "Checklist"; }).map(function (r) { return r[1]; })[0];
+        if (forName && forName !== NAME && !confirm("This file is for checklist “" + forName + "”. Load it here anyway?")) return;
+        var v = {}, unknown = 0;
+        function typed(k) {   // a formula cell is computed from its row, never loaded
+          var el = form.elements[k];
+          return el && !(el.hasAttribute && el.hasAttribute("data-formula"));
+        }
+        rows.slice(hdr + 1).forEach(function (r) {
+          var k = r[0];
+          if (!k) return;
+          if (form.elements[k]) { if (typed(k)) v[k] = value(k, r[2]); return; }
+          var hit = false;   // a table row: cells follow the row label, one per column
+          r.slice(2).forEach(function (c, j) { var ck = k + "-c" + j; if (form.elements[ck]) { hit = true; if (typed(ck)) v[ck] = value(ck, c); } });
+          if (!hit) unknown++;
+        });
+        var n = Object.keys(v);
+        window.clApply(v, n);
+        flash("Loaded " + n.length + " field" + (n.length === 1 ? "" : "s") + " from " + f.name + (unknown ? " — " + unknown + " not on this form" : "") + ".");
+      });
+    });
   })();
 
   // (QR/barcode scanning into PID fields lives in _checklist_scan.html)

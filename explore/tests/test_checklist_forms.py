@@ -932,23 +932,6 @@ class DraftAndExportTest(TestCase):
         self.assertEqual(ChecklistDraft.objects.count(), 0)
         api.post_test.assert_not_called()
 
-    def test_csv_export_of_the_latest_submission(self):
-        api = _api(prev={"DATA": {
-            "Identification": {"PCB Batch PID": "PCB0001", "Segment type": "C"},
-            "Measurements": {"Thickness": {"P1": 1.6}},
-            "Visual Inspection": {
-                "Photo 1": {"image_id": "img-1", "image_name": "p.jpg"}}}})
-        m1, m2 = _mocked(api)
-        with m1, m2:
-            resp = self.client.get(f"{PAGE}?export=csv")
-        self.assertEqual(resp["Content-Type"], "text/csv; charset=utf-8")
-        self.assertIn(f"Checklist_{PART}_{NAME}.csv", resp["Content-Disposition"])
-        body = resp.content.decode()
-        self.assertIn("PCB0001", body)
-        self.assertIn('"{""P1"": 1.6}"', body)              # dict → JSON cell
-        self.assertIn("p.jpg (image_id=img-1)", body)       # photo flattened
-        self.assertNotIn("Drawing", body)                   # static skipped
-
     def test_email_button_carries_a_mailto_draft(self):
         api = _api(prev={"DATA": {
             "Identification": {"PCB Batch PID": "PCB0001"},
@@ -960,6 +943,27 @@ class DraftAndExportTest(TestCase):
         self.assertIn("Identification%20/%20PCB%20Batch%20PID%3A%20PCB0001", html)
         self.assertIn(f"http%3A//testserver{PAGE}", html.replace("%2F", "/"))
         self.assertIn("Email</a>", html)
+
+    def test_csv_save_and_load_live_in_the_browser(self):
+        # #158: the form as it stands → CSV on the device, and back; no server round trip, so offline too
+        m1, m2 = _mocked(_api())
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('id="cl-csv-save"', html)
+        self.assertIn('id="cl-csv-load"', html)
+        self.assertIn('<input type="file" id="cl-csv-file" accept=".csv,text/csv,text/plain" hidden>', html)
+        self.assertIn('["Key", "Field", "Value"]', html)
+        self.assertIn('out.push([], ["", "== " + title + " =="]);', html)   # the file follows the form's sections
+        self.assertIn('var ck = k + "-c" + j;', html)                       # table rows load cell by cell
+        self.assertIn('return el.value || "__";', html)                     # empty cells carry a fill-me marker
+        self.assertIn('if (MARK.test(v)) v = "";', html)                    # ...which Load reads as empty
+        self.assertIn('el.hasAttribute("data-formula"))', html)             # formula cells recompute, never load
+        self.assertIn('a.download = "Checklist_" + CL_PID + "_" + NAME + ".csv"', html)
+        self.assertIn("window.clApply = function (v, n)", html)   # Load fills the form like the autosave restore
+        self.assertIn('rows = parse(t, ";")', html)               # a spreadsheet's semicolon CSV loads too
+        self.assertNotIn("?export=csv", html)
+        with m1, m2:
+            self.assertEqual(self.client.get(f"{PAGE}?export=csv").status_code, 200)   # just the page now
 
     def test_email_button_absent_without_a_submission(self):
         api = _api()
@@ -980,13 +984,6 @@ class DraftAndExportTest(TestCase):
             "Visual Inspection": {"Anomaly description": "x" * 5000}}}, "http://x/p")
         self.assertLess(len(long), checklistforms.EMAIL_BODY_MAX + 100)
         self.assertIn("truncated", long)
-
-    def test_csv_export_without_a_submission_redirects(self):
-        api = _api()
-        m1, m2 = _mocked(api)
-        with m1, m2:
-            resp = self.client.get(f"{PAGE}?export=csv")
-        self.assertEqual(resp.status_code, 302)
 
 
 CFG_GATED = {**SCHEMA, "roles": [41]}

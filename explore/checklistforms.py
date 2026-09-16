@@ -1055,24 +1055,6 @@ def raw_load(api, part_type_id: str, name: str):
         return None, row["image_name"]
 
 
-def export_csv(schema: dict, part_id: str, test_data: dict | None) -> str:
-    """A submission as CSV text (#97 — the iPad's "send via email" payload):
-    section, label, value rows in schema order. Photos flatten to their HWDB
-    image name/id; dict/list values to JSON."""
-    import csv
-    import io as _io
-    buf = _io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(["Checklist", schema["name"]])
-    w.writerow(["Part ID", part_id])
-    w.writerow(["Test type", schema["test_type_name"]])
-    w.writerow([])
-    w.writerow(["Section", "Field", "Value"])
-    for title, label, v in export_rows(schema, test_data):
-        w.writerow([title, label, v])
-    return buf.getvalue()
-
-
 def export_rows(schema: dict, test_data: dict | None):
     """Yield ``(section, label, value)`` for every value-bearing leaf in
     schema order — the CSV's and the email's shared row walk. Photos
