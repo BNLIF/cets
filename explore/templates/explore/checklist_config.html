@@ -318,6 +318,7 @@
         title="field labels, e.g. one table out of three in a section; with sections set, within those">
       <input class="ff-plotsn" placeholder="serial-number pattern (regex)" style="flex:0 0 220px;"
         title="e.g. HPK\d{5,6} — only values matching it in full count as serial numbers; blank = any single word">
+      <label title="the page exactly as pasted, with its own PID range — a distribution to compare with; nothing is read from the form"><input type="checkbox" class="ff-plotref"> reference plot</label>
     </div>
     <div class="ec-row g-static g-img" style="display:none;">
       <span class="ec-label" style="flex:0 0 auto;">Reference image</span>
@@ -476,6 +477,7 @@
     $(".ff-plotsecs", r).value = (f.sections || []).join(", ");
     $(".ff-plotflds", r).value = (f.fields || []).join(", ");
     $(".ff-plotsn", r).value = f.type === "plot" ? (f.sn || "") : "";
+    $(".ff-plotref", r).checked = f.type === "plot" && f.reference === true;
     $(".ff-gcol", r).value = f.col ? String(f.col) : "auto";           // #120
     $(".ff-gspan", r).value = f.span ? String(f.span) : "1";
     $(".ff-gnl", r).checked = !!f.newline;
@@ -1084,6 +1086,7 @@
       if (psecs.length) f.sections = psecs;
       if (pflds.length) f.fields = pflds;
       if (psn) f.sn = psn;
+      if ($(".ff-plotref", r).checked) f.reference = true;
       return f;
     }
     if (!label) return null;

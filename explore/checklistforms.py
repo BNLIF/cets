@@ -246,6 +246,8 @@ def _norm_field(f: dict) -> dict | None:
         # form (``sections`` / ``fields`` narrow where from; ``sn`` a regex a
         # value must match in full to count as a serial) and embeds the page.
         # Display only, nothing submitted. A URL without a type is dropped.
+        # ``reference: true`` (Hajime): the page as pasted — its own PID
+        # range, a distribution to compare with — nothing collected.
         url = str(f.get("plot") or "").strip()
         m = _PLOT_URL.search(url)
         if not m:
@@ -260,6 +262,8 @@ def _norm_field(f: dict) -> dict | None:
                # field labels to read from (Anselmo: one of three tables in a
                # section) — within the sections when both are set
                "fields": names(f.get("fields") or [])}
+        if f.get("reference") in (True, "true"):
+            out["reference"] = True
         sn = str(f.get("sn") or "").strip()
         if sn:
             try:

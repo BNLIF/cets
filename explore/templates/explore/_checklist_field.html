@@ -108,11 +108,16 @@
     target="_blank" rel="noopener">&#9745; {{ f.checklist }} <span aria-hidden="true">&#x2197;</span></a></div>{% endif %}
 {% elif f.type == "plot" %}{# #160: a Plots page view of the sub-components entered in this form — the collector script (_checklist_behavior.html) fills the frame #}
   {% if f.label %}<span class="cl-lab">{{ f.label|clmd }}</span>{% endif %}
-  <div class="cl-plot-box cl-need-net" data-plot="{% url 'explore:plot' part_type_id=f.plot_type %}" data-hash="{{ f.plot_hash }}" data-type="{{ f.plot_type }}"{% if f.sn %} data-sn="{{ f.sn }}"{% endif %}>
+  <div class="cl-plot-box cl-need-net" data-plot="{% url 'explore:plot' part_type_id=f.plot_type %}" data-hash="{{ f.plot_hash }}" data-type="{{ f.plot_type }}"{% if f.sn %} data-sn="{{ f.sn }}"{% endif %}{% if f.reference %} data-ref="1"{% endif %}>
     {% with sid=f.key|add:"-secs" %}{{ f.sections|json_script:sid }}{% endwith %}{% with fid=f.key|add:"-flds" %}{{ f.fields|json_script:fid }}{% endwith %}
+    {% if f.reference %}{# a reference plot: the page as pasted, with its own PID range #}
+    <iframe class="cl-plot-frame" src="{% url 'explore:plot' part_type_id=f.plot_type %}?embed=1{% if f.plot_hash %}#{{ f.plot_hash }}{% endif %}" title="{{ f.label|default:'plot' }}"></iframe>
+    <a class="cl-plot-open" href="{{ f.plot }}" target="_blank" rel="noopener">Open in Plots <span aria-hidden="true">&#x2197;</span></a>
+    {% else %}
     <div class="cl-hint cl-plot-empty">Enter PIDs or serial numbers of {{ f.plot_type }}{% if f.fields %} in {{ f.fields|join:", " }}{% elif f.sections %} in {{ f.sections|join:", " }}{% endif %} to see the plot.</div>
     <iframe class="cl-plot-frame" hidden title="{{ f.label|default:'plot' }}"></iframe>
     <a class="cl-plot-open" href="{{ f.plot }}" target="_blank" rel="noopener" hidden>Open in Plots <span aria-hidden="true">&#x2197;</span></a>
+    {% endif %}
   </div>
 {% else %}
   <label class="cl-lab" for="{{ f.key }}">{{ f.label|clmd }}</label>

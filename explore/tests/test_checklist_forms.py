@@ -2201,6 +2201,27 @@ class PlotFieldTest(TestCase):
         self.assertIn('var src = base + "?embed=1" + hash;', html)
         self.assertIn('window.clPlots = function ()', html)
 
+    def test_reference_plot_is_the_page_as_pasted(self):
+        # Hajime: a distribution over a PID range to compare with — nothing collected
+        f = self._norm(plot=self.URL, label="Vbd of all boards", reference=True)[0]
+        self.assertIs(f["reference"], True)
+        self.assertNotIn("reference", self._norm(plot=self.URL, reference=False)[0])
+        self.assertNotIn("reference", self._norm(plot=self.URL)[0])
+        user = get_user_model().objects.create_user("pr", "pr@p.io", "pw")
+        self.client.force_login(user)
+        schema = dict(SCHEMA)
+        schema["sections"] = [{"title": "Plots", "fields": [
+            {"type": "plot", "label": "Vbd", "plot": self.URL, "reference": True}]}]
+        m1, m2 = _mocked(_api(schema=schema))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('data-type="D00400300001" data-ref="1">', html)
+        # the frame loads at once with the pasted state, the hint is absent, the link shows
+        self.assertIn('<iframe class="cl-plot-frame" src="/hw/dev/plot/D00400300001/?embed=1#%7B%22src%22', html)
+        self.assertNotIn("to see the plot.", html)
+        self.assertIn('<a class="cl-plot-open" href="' + self.URL.replace("&", "&amp;") + '" target="_blank" rel="noopener">Open in Plots', html)
+        self.assertIn('if (p.hasAttribute("data-ref")) return;', html)
+
 
 class SectionGridTest(TestCase):
     """#120: a section's column grid — col/span/newline per field, placed

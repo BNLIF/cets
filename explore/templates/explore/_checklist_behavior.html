@@ -335,6 +335,7 @@
     return out;
   }
   function update(p) {
+    if (p.hasAttribute("data-ref")) return;   // a reference plot: as pasted, nothing collected
     var ids = entries(p), frame = p.querySelector("iframe"), empty = p.querySelector(".cl-plot-empty"), open = p.querySelector(".cl-plot-open");
     var cfg = {};
     try { cfg = JSON.parse(decodeURIComponent(p.getAttribute("data-hash") || "") || "{}"); } catch (e) {}
