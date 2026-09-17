@@ -296,3 +296,65 @@
   }, true);
 })();
 </script>
+
+<script>
+// #160: plot fields — a Plots page embedded with the PIDs / serial numbers
+// of its type found in the form (the whole form, or the field's sections).
+// The frame's URL hash carries the entries; a hash-only change is a
+// same-document navigation, so the page re-reads it without reloading.
+(function () {
+  var PID = /^[A-Za-z]\d{11}-\d{5}$/, SKIP = { checkbox: 1, radio: 1, file: 1, hidden: 1, button: 1, submit: 1, "datetime-local": 1 };
+  function secsOf(p) {
+    var el = p.querySelector("script[type='application/json']"), a = [];
+    try { a = JSON.parse(el ? el.textContent : "[]"); } catch (e) {}
+    return Array.isArray(a) ? a : [];
+  }
+  function entries(p) {
+    var type = p.getAttribute("data-type"), secs = secsOf(p), re = null, sn = p.getAttribute("data-sn");
+    if (sn) { try { re = new RegExp("^(?:" + sn + ")$", "i"); } catch (e) {} }
+    // the checklist's own sections only — not the Item card, not the page's controls
+    var roots = Array.prototype.filter.call(document.querySelectorAll(".cl-sec[data-title]"), function (s) {
+      return !secs.length || secs.indexOf(s.getAttribute("data-title")) >= 0; });
+    var out = [], seen = {};
+    roots.forEach(function (r) {
+      Array.prototype.forEach.call(r.querySelectorAll("input, textarea"), function (el) {
+        if (SKIP[(el.type || "").toLowerCase()] || el.closest(".cl-plot-box")) return;
+        var v = (el.value || "").trim();
+        if (!v) return;
+        if (PID.test(v)) { v = v.toUpperCase(); if (v.indexOf(type + "-") !== 0) return; }
+        else if (re ? !re.test(v) : (/\s/.test(v) || v.length > 32)) return;   // no pattern: any single token
+        if (!seen[v]) { seen[v] = 1; out.push(v); }
+      });
+    });
+    return out;
+  }
+  function update(p) {
+    var ids = entries(p), frame = p.querySelector("iframe"), empty = p.querySelector(".cl-plot-empty"), open = p.querySelector(".cl-plot-open");
+    var cfg = {};
+    try { cfg = JSON.parse(decodeURIComponent(p.getAttribute("data-hash") || "") || "{}"); } catch (e) {}
+    if (!cfg || typeof cfg !== "object") cfg = {};
+    cfg.ids = ids; delete cfg.sp;
+    var hash = "#" + encodeURIComponent(JSON.stringify(cfg)), base = p.getAttribute("data-plot");
+    open.href = base + hash; open.hidden = !ids.length;
+    frame.hidden = !ids.length; empty.hidden = !!ids.length;
+    if (!ids.length) return;
+    var src = base + "?embed=1" + hash;
+    if (frame.getAttribute("src") === src) return;
+    // a loaded frame takes the new entries through its hash — same document,
+    // the page re-reads it; before that (or cross-origin), the URL is set
+    try {
+      var w = frame.contentWindow;
+      if (frame.getAttribute("src") && w && w.location.pathname === new URL(base, location.href).pathname) {
+        frame.setAttribute("src", src); w.location.hash = hash; return;
+      }
+    } catch (e) {}
+    frame.src = src;
+  }
+  window.clPlots = function () { Array.prototype.forEach.call(document.querySelectorAll(".cl-plot-box"), update); };
+  var timer = null;
+  function schedule() { clearTimeout(timer); timer = setTimeout(window.clPlots, 800); }
+  document.addEventListener("input", schedule);
+  document.addEventListener("change", schedule);
+  window.clPlots();
+})();
+</script>

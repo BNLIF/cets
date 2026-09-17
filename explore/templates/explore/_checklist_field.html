@@ -106,6 +106,14 @@
   {% if f.checklist %}{# #118: jump to another checklist — this item's, or another type's chooser #}
   <div><a href="{% if f.checklist_type %}{% url 'explore:type_checklist' part_type_id=f.checklist_type name=f.checklist %}{% elif part_id %}{% url 'explore:checklist' part_id=part_id name=f.checklist %}{% else %}{% url 'explore:type_checklist' part_type_id=part_type_id name=f.checklist %}{% endif %}"
     target="_blank" rel="noopener">&#9745; {{ f.checklist }} <span aria-hidden="true">&#x2197;</span></a></div>{% endif %}
+{% elif f.type == "plot" %}{# #160: a Plots page view of the sub-components entered in this form — the collector script (_checklist_behavior.html) fills the frame #}
+  {% if f.label %}<span class="cl-lab">{{ f.label|clmd }}</span>{% endif %}
+  <div class="cl-plot-box cl-need-net" data-plot="{% url 'explore:plot' part_type_id=f.plot_type %}" data-hash="{{ f.plot_hash }}" data-type="{{ f.plot_type }}"{% if f.sn %} data-sn="{{ f.sn }}"{% endif %}>
+    {% with sid=f.key|add:"-secs" %}{{ f.sections|json_script:sid }}{% endwith %}
+    <div class="cl-hint cl-plot-empty">Enter PIDs or serial numbers of {{ f.plot_type }}{% if f.sections %} in {{ f.sections|join:", " }}{% endif %} to see the plot.</div>
+    <iframe class="cl-plot-frame" hidden title="{{ f.label|default:'plot' }}"></iframe>
+    <a class="cl-plot-open" href="{{ f.plot }}" target="_blank" rel="noopener" hidden>Open in Plots <span aria-hidden="true">&#x2197;</span></a>
+  </div>
 {% else %}
   <label class="cl-lab" for="{{ f.key }}">{{ f.label|clmd }}</label>
   <input id="{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}" autocomplete="off">

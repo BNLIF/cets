@@ -831,6 +831,7 @@ def explore_plots_view(request):
 
 @login_not_required
 @fnal_login_required
+@xframe_options_sameorigin   # #160: a checklist's plot field embeds this page
 def explore_plot_view(request, part_type_id):
     """Type-wide Plot view (#144): distributions over Item Specifications
     keys for every item of a type. Mirror-only render; the data arrives
@@ -852,6 +853,8 @@ def explore_plot_view(request, part_type_id):
         # per-test-type endpoints; the page substitutes the id
         "tests_base_url": _rev(request, "explore:plot_test_keys", args=[part_type_id, 0]).rsplit("/0/", 1)[0],
         "hwdb_instance": inst,
+        # #160: inside a checklist's plot field — chart + status line only
+        "embed": request.GET.get("embed") == "1",
     })
 
 

@@ -180,7 +180,20 @@
   }
 </style>
 
-<div class="pl-page" id="pl" data-key="{{ hwdb_instance }}/{{ leaf.part_type_id }}" data-url="{{ data_url }}" data-n="{{ n_items }}"
+{% if embed %}<style>
+  /* #160: embedded in a checklist — the chart and its status line, nothing else */
+  .eh-header, .eh-devbanner, .eh-foot, .ex-side, .pl-head, .pl-tabs, .pl-panel, .pl-vsplit, .pl-bar, .pl-split, .pl-grid { display: none !important; }
+  /* the frame's height, whatever it is, split into chart + status line — no scrolling */
+  html, body { height: 100%; margin: 0; overflow: hidden; }
+  .eh-main, .ex-layout, .ex-content, .pl-page, .pl-wb, .pl-main { height: 100%; min-height: 0; }
+  .pl-page { padding: 0; }
+  .pl-wb { grid-template-columns: 1fr; border-top: 0; }
+  .pl-main { min-width: 0; grid-template-rows: minmax(0, 1fr) auto; }
+  .pl-plotwrap { height: auto; min-height: 0; margin: 4px 6px 0; }
+  .pl-status { padding: 4px 8px; max-height: 40px; overflow: hidden; }
+  .pl-status .hint { display: none; }
+</style>{% endif %}
+<div class="pl-page" id="pl" data-key="{{ hwdb_instance }}/{{ leaf.part_type_id }}" data-url="{{ data_url }}" data-n="{{ n_items }}"{% if embed %} data-embed="1"{% endif %}
      data-sources-url="{{ sources_url }}" data-tests-base-url="{{ tests_base_url }}" data-tests-sync-url="{{ tests_sync_url }}">
   <div class="pl-head">
     <div class="pl-crumbs"><a href="{{ type_url }}">{{ leaf.name }}</a><span class="sep">›</span>Plot</div>
@@ -341,6 +354,9 @@
     // The Axes / Select / Cuts panes edit series[cur].
     var source = "specs", items = [], paths = [], pathCounts = {}, chart = null;
     var series = [], cur = 0;
+    // #160: entries (PIDs or serial numbers) handed over by a checklist's plot
+    // field in the hash — they select the items of every series while set
+    var EMBED = !!document.getElementById("pl").getAttribute("data-embed"), IDS = null;
     var testCache = null;          // the IndexedDB record for the current test source
     var busy = false;              // a key fetch is in flight
     function isTest() { return source !== "specs"; }
@@ -349,7 +365,40 @@
     function copySeries(s) { return JSON.parse(JSON.stringify(s)); }
     function nextName() { var n = series.length + 1; while (series.some(function (s) { return s.name === "Series " + n; })) n++; return "Series " + n; }
     // The effective PID filter of a series: its Item box (exactly one PID) wins over the regex box.
-    function pidFilter(s) { var it = (s.item || "").trim(); return it ? "^" + it.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$" : (s.pid || "").trim(); }
+    function pidFilter(s) { if (IDS) return idsFilter(); var it = (s.item || "").trim(); return it ? "^" + it.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$" : (s.pid || "").trim(); }
+    // #160: an entry matches an item by PID, or by serial number — case-insensitive, leading zeros in a digit run ignored (HPK19843 = HPK019843)
+    function normSn(v) { return String(v).toLowerCase().replace(/\d+/g, function (d) { return d.replace(/^0+(?=\d)/, ""); }); }
+    function resolveIds(list) {
+        var byPid = {}, bySn = {}, pids = [], missing = [];
+        items.forEach(function (it) { byPid[it.pid.toLowerCase()] = it.pid; if (it.serial) bySn[normSn(it.serial)] = it.pid; });
+        (list || []).forEach(function (id) {
+            var p = byPid[String(id).toLowerCase()] || bySn[normSn(id)];
+            if (!p) missing.push(id); else if (pids.indexOf(p) < 0) pids.push(p);
+        });
+        return { pids: pids, missing: missing };
+    }
+    // Tooltips name a value's item as "PID · serial" and its place in the
+    // item's array as [i, j] — the series' pins filled in, the free level
+    // counted (one free level), or the flat index when several are free.
+    function who(pid) { var it = itemByPid[pid]; return pid + (it && it.serial ? " · " + it.serial : ""); }
+    function idxLabel(p, s, j) {
+        var d = keyDims(p) || [], ix = idxOf(p, s) || [];
+        if (!d.length) return "";
+        // values arrive flattened row-major over the free levels (selectAt /
+        // plotting.leaves) — undo that with the key's dims; an unknown size
+        // leaves the flat position
+        var levels = d.map(function (dim, l) { return { pin: l < ix.length && ix[l] !== null && ix[l] !== undefined ? ix[l] : null, n: dim && dim.n }; });
+        var free = levels.filter(function (x) { return x.pin === null; });
+        function show(f) { return levels.map(function (x, l) { return (d[l].seg || "level " + (l + 1)) + "[" + f(x) + "]"; }).join(" › "); }
+        if (free.some(function (x) { return !(x.n > 0); })) return show(function (x) { return x.pin === null ? "·" : x.pin; }) + " #" + j;
+        var rest = j;
+        for (var k = free.length - 1; k >= 0; k--) { free[k].at = rest % free[k].n; rest = Math.floor(rest / free[k].n); }
+        return show(function (x) { return x.pin === null ? x.at : x.pin; });
+    }
+    function tipLines(q) { return q.ix ? [q.t, q.ix] : [q.t]; }   // tooltip title: the item, then its array position
+    var itemByPid = {};
+    function pidAlternation(pids) { return "^(" + (pids.length ? pids.join("|") : "-") + ")$"; }
+    function idsFilter() { return pidAlternation(resolveIds(IDS).pids); }
     // "00120..06000" / "D00400300001-00120..06000" / open ends → [lo, hi] on the numeric suffix, else null
     function pidRange(str) {
         var m = /^\s*(?:[A-Za-z]\d{11}-)?(\d*)\s*\.\.\s*(\d*)\s*$/.exec(str || "");
@@ -799,6 +848,13 @@
         var stats = $("stats");
         var sels = drawn.map(function (s) { return filtered(s); });
         var head = drawn.map(function (s, i) { return (series.length > 1 ? s.name + " " : "") + sels[i].length + " / " + items.length + " items" + idxNote(s); }).join(" · ");
+        stats.title = "";
+        if (IDS) {   // #160: what the checklist handed over, and what found no item
+            var rid = resolveIds(IDS), hit = IDS.length - rid.missing.length;
+            head = hit + " of " + IDS.length + " entr" + (IDS.length === 1 ? "y" : "ies") + " matched an item" + (rid.pids.length < hit ? " (" + rid.pids.length + " distinct)" : "")
+                 + (rid.missing.length ? " · no item: " + rid.missing.slice(0, 6).join(", ") + (rid.missing.length > 6 ? ", …" : "") : "") + " · " + head;
+            stats.title = rid.missing.length ? "No item of this type has PID or serial: " + rid.missing.join(", ") : "";
+        }
         var skipped = [];       // series not drawn in this family
         function noteSkipped() { return skipped.length ? " · not drawn: " + skipped.join(", ") : ""; }
         $("mode2d-l").hidden = true; $("mode1d-l").hidden = true; $("logy-l").hidden = true; $("stats-l").hidden = true;
@@ -809,7 +865,7 @@
                 var pairs = [];
                 sel.forEach(function (it) {
                     var xa = valuesFor(it, s.x, s), yb = valuesFor(it, s.y, s), n = Math.min(xa.length, yb.length);
-                    for (var i = 0; i < n; i++) pairs.push({ x: xa[i], y: yb[i], pid: it.pid });
+                    for (var i = 0; i < n; i++) pairs.push({ x: xa[i], y: yb[i], pid: it.pid, t: who(it.pid), ix: idxLabel(s.x, s, i) });
                 });
                 return pairs;
             };
@@ -818,7 +874,7 @@
             var xNum = isNumeric(pairs.map(function (q) { return q.x; })), yNum = isNumeric(pairs.map(function (q) { return q.y; }));
             if (xNum && yNum) {
                 var numPts = function (ps) {
-                    return ps.map(function (q) { return { x: toNum(q.x), y: toNum(q.y), pid: q.pid }; }).filter(function (q) { return q.x !== null && q.y !== null; });
+                    return ps.map(function (q) { return { x: toNum(q.x), y: toNum(q.y), pid: q.pid, t: q.t, ix: q.ix }; }).filter(function (q) { return q.x !== null && q.y !== null; });
                 };
                 var pts = numPts(pairs);
                 $("mode2d-l").hidden = false;
@@ -856,7 +912,7 @@
                         var seq = [], nItems = 0, c = color(series.indexOf(s));
                         sels[si].slice().sort(function (p1, q1) { return p1.pid < q1.pid ? -1 : 1; }).forEach(function (it) {
                             var xa = valuesFor(it, s.x, s), yb = valuesFor(it, s.y, s), n = Math.min(xa.length, yb.length), got = 0;
-                            for (var i = 0; i < n; i++) { var xv = toNum(xa[i]), yv = toNum(yb[i]); if (xv !== null && yv !== null) { seq.push({ x: xv, y: yv, pid: it.pid, i: i }); got++; } }
+                            for (var i = 0; i < n; i++) { var xv = toNum(xa[i]), yv = toNum(yb[i]); if (xv !== null && yv !== null) { seq.push({ x: xv, y: yv, pid: it.pid, i: i, t: who(it.pid), ix: idxLabel(s.x, s, i) }); got++; } }
                             if (got) { nItems++; seq.push({ x: null, y: null }); }     // gap before the next item
                         });
                         if (seq.length) seq.pop();
@@ -866,7 +922,7 @@
                     });
                     stats.textContent = head + " · " + infoL.join(" · ") + noteSkipped();
                     o.plugins.legend.display = series.length > 1;
-                    o.plugins.tooltip = { callbacks: { title: function (cs) { var q = cs[0].raw; return q.pid + "  [" + q.i + "]"; }, label: function (c1) { return fmt(c1.raw.x) + ", " + fmt(c1.raw.y); } } };
+                    o.plugins.tooltip = { callbacks: { title: function (cs) { return tipLines(cs[0].raw); }, label: function (c1) { return fmt(c1.raw.x) + ", " + fmt(c1.raw.y); } } };
                     draw({ type: "line", data: { datasets: dsLn }, options: o });
                     controls(false, null);
                 } else {
@@ -876,7 +932,7 @@
                         var sp = s === a ? pts : numPts(pairsOf(s, sels[si]));
                         if (s !== a && !sp.length) { skipped.push(s.name); return; }
                         var groups = {};
-                        sp.forEach(function (q) { var k = q.x + "," + q.y; (groups[k] = groups[k] || { x: q.x, y: q.y, n: 0, pids: [] }).n++; if (groups[k].pids.length < 8) groups[k].pids.push(q.pid); });
+                        sp.forEach(function (q) { var k = q.x + "," + q.y; (groups[k] = groups[k] || { x: q.x, y: q.y, n: 0, pids: [] }).n++; if (groups[k].pids.length < 8) groups[k].pids.push(q.t ? q.t + (q.ix ? "  " + q.ix : "") : q.pid); });
                         var marks = Object.keys(groups).map(function (k) { var g = groups[k]; g.r = Math.min(20, 3 + 3 * Math.sqrt(g.n - 1)); return g; });
                         var nmax = marks.reduce(function (m, g) { return Math.max(m, g.n); }, 0), c = color(series.indexOf(s));
                         info.push((series.length > 1 ? s.name + ": " : "") + sp.length + " pairs · " + marks.length + " distinct" + (nmax > 1 ? " · max multiplicity " + nmax : ""));
@@ -886,7 +942,7 @@
                     o.plugins.legend.display = series.length > 1;
                     o.plugins.tooltip = { callbacks: {
                         title: function (cs) { var g = cs[0].raw; return fmt(g.x) + ", " + fmt(g.y) + (g.n > 1 ? "  × " + g.n : ""); },
-                        label: function (c) { var g = c.raw; return g.pids.join(", ") + (g.n > g.pids.length ? ", …" : ""); } } };
+                        label: function (c) { var g = c.raw; return g.pids.concat(g.n > g.pids.length ? ["…"] : []); } } };
                     draw({ type: "bubble", data: { datasets: dsS }, options: o });
                     controls(false, null);
                 }
@@ -921,18 +977,20 @@
         }
         // One key per series. The active series decides the family (numeric
         // or categorical); other series join when their values fit it.
-        var valsOf = drawn.map(function (s, i) { var v = []; sels[i].forEach(function (it) { v = v.concat(valuesFor(it, s.x, s)); }); return v; });
+        var tagsOf = [];      // per series, one "PID · serial [index]" per value, in valsOf order
+        var valsOf = drawn.map(function (s, i) { var v = [], t = []; sels[i].forEach(function (it) { valuesFor(it, s.x, s).forEach(function (x, j) { v.push(x); t.push({ t: who(it.pid), ix: idxLabel(s.x, s, j) }); }); }); tagsOf.push(t); return v; });
         var ai = drawn.indexOf(a), vals = valsOf[ai];
         if (!vals.length) { clear(head + " · no values for this key on the selected items"); controls(false, null); return; }
         if (isNumeric(vals)) {
             $("mode1d-l").hidden = false; $("logy-l").hidden = false;
             var m1 = $("mode1d").value, logy = $("logy").checked, ov = overlayXY();
-            var numsOf = [], used = [];
+            var numsOf = [], used = [], numTags = [];
             drawn.forEach(function (s, i) {
                 if (i !== ai && !isNumeric(valsOf[i])) { if (valsOf[i].length) skipped.push(s.name); return; }
-                var nums = valsOf[i].map(toNum).filter(function (v) { return v !== null; });
+                var nums = [], tags = [];
+                valsOf[i].forEach(function (v, j) { var n = toNum(v); if (n !== null) { nums.push(n); tags.push(tagsOf[i][j]); } });
                 if (!nums.length) { if (i !== ai) skipped.push(s.name); return; }
-                used.push(s); numsOf.push(nums);
+                used.push(s); numsOf.push(nums); numTags.push(tags);
             });
             var rows = used.map(function (s, i) { var ms = meanSd(numsOf[i]); ms.name = s.name; ms.color = color(series.indexOf(s)); return ms; });
             stats.textContent = head + " · " + used.map(function (s, i) {
@@ -945,14 +1003,14 @@
                 var dsL = used.map(function (s, i) {
                     var seq = [], c = color(series.indexOf(s));
                     sels[drawn.indexOf(s)].slice().sort(function (p, q) { return p.pid < q.pid ? -1 : 1; }).forEach(function (it) {
-                        valuesFor(it, s.x, s).forEach(function (v) { var n = toNum(v); if (n !== null) seq.push({ x: seq.length, y: n, pid: it.pid }); });
+                        valuesFor(it, s.x, s).forEach(function (v, j) { var n = toNum(v); if (n !== null) seq.push({ x: seq.length, y: n, pid: it.pid, t: who(it.pid), ix: idxLabel(s.x, s, j) }); });
                     });
                     return { label: seriesLabel(s), data: seq, borderColor: c, backgroundColor: c, borderWidth: 1.5, pointRadius: seq.length > 400 ? 0 : 2, tension: 0 };
                 });
                 var oL = opts("index", used.length > 1 ? "value" : showPath(xp)); oL.scales.x.type = "linear"; oL.scales.y.beginAtZero = false; oL.scales.y.ticks = {};
                 if (logy) oL.scales.y.type = "logarithmic";
                 oL.plugins.legend.display = used.length > 1;
-                oL.plugins.tooltip.callbacks = { title: function (cs) { var q = cs[0].raw; return q.pid ? q.pid + "  [" + q.x + "]" : fmt(q.x); } };
+                oL.plugins.tooltip.callbacks = { title: function (cs) { var q = cs[0].raw; return q.t ? tipLines(q) : fmt(q.x); } };
                 draw({ type: "line", data: { datasets: dsL.concat(ovDs) }, options: oL });
                 controls(false, "num");
                 return;
@@ -983,7 +1041,15 @@
             o1.plugins.legend.display = !showStats && used.length > 1;   // stats boxes name the series; without them, a legend does
             o1.plugins.statsBox = { rows: showStats ? rows : [] };
             o1.plugins.tooltip.callbacks = { title: function (cs) { var q = cs[0].raw, d = cs[0].dataset; return d.label === ($("ovn").value || "Reference") ? fmt(q.x) : d.stepped === "after" ? fmt(q.x) + " – " + fmt(q.x + b1.w) : fmt(q.x - b1.w / 2) + " – " + fmt(q.x + b1.w / 2); },
-                                             label: function (c) { return c.dataset.label + ": " + c.raw.y; } };
+                                             label: function (c) { return c.dataset.label + ": " + c.raw.y; },
+                                             // which values sit in the hovered bin — the item, its serial, the array index
+                                             afterBody: function (cs) {
+                                                 var c = cs[0], si = used.indexOf(used.filter(function (s) { return seriesLabel(s) === c.dataset.label; })[0]);
+                                                 if (si < 0 || m1 === "cum" || c.dataset.stepped) return [];
+                                                 var lines = [], more = 0;
+                                                 numsOf[si].forEach(function (v, j) { if (Math.min(b1.nb - 1, Math.floor((v - b1.lo) / b1.w)) === c.dataIndex) { if (lines.length < 10) lines.push(numTags[si][j].t + (numTags[si][j].ix ? "  " + numTags[si][j].ix : "") + " = " + fmt(v)); else more++; } });
+                                                 return more ? lines.concat(["… " + more + " more"]) : lines;
+                                             } };
             draw({ type: "bar", data: { datasets: ds1.concat(ovDs) }, options: o1 });
             controls(true, "num");
             return;
@@ -1232,9 +1298,17 @@
         var cfg = { src: source, series: series.map(packSeries), cur: cur || undefined, bins: +$("bins").value,
                     ov: $("ov").value || undefined, ovn: $("ovn").value || undefined, xr: rangeOf("x") || undefined, yr: rangeOf("y") || undefined,
                     title: $("ptitle").value.trim() || undefined, xl: $("xlab").value.trim() || undefined, yl: $("ylab").value.trim() || undefined, sp: savedId || undefined,
-                    rare: $("rare").checked ? undefined : false, m2: $("mode2d").value, m1: $("mode1d").value, logy: $("logy").checked || undefined, st: $("showstats").checked ? undefined : false };
+                    rare: $("rare").checked ? undefined : false, m2: $("mode2d").value, m1: $("mode1d").value, logy: $("logy").checked || undefined, st: $("showstats").checked ? undefined : false,
+                    ids: IDS || undefined };
         history.replaceState(null, "", "#" + encodeURIComponent(JSON.stringify(cfg)));
     }
+    // #160: the checklist changes the frame's hash as PIDs are entered — same document, new entries
+    window.addEventListener("hashchange", function () {
+        var h = readHash();
+        if (!Array.isArray(h.ids)) return;
+        IDS = h.ids.map(String);
+        if (items.length) { render(); drawItems(); }
+    });
     function changed() { drawIdx(); writeHash(); drawChips(); render(); drawItems(); drawSaved(); }
 
     // ---- Tabs ----------------------------------------------------------------
@@ -1284,6 +1358,7 @@
             });
             vcols.forEach(function (s) { var td = document.createElement("td"); td.className = "v"; td.textContent = cellValue(it, s); tr.appendChild(td); });
             tr.addEventListener("click", function () {
+                if (String(window.getSelection && window.getSelection()).length) return;   // selecting text to copy, not picking
                 S().item = it.pid === one ? "" : it.pid;     // click again to release
                 $("item").value = S().item;
                 changed();
@@ -1301,6 +1376,7 @@
     // Both sources land here: the item list + the key inventory → series → controls → plot.
     function setDataset(newItems, counts, statusText) {
         items = newItems; pathCounts = counts; specDims = {};
+        itemByPid = {}; items.forEach(function (it) { itemByPid[it.pid] = it; });
         paths = Object.keys(counts).sort(function (a, b) { return (counts[b] - counts[a]) || (a < b ? -1 : 1); });
         $("data-status").textContent = statusText;
         var cfg = readHash(), acc = new Set(paths);
@@ -1320,6 +1396,11 @@
             return s;
         });
         cur = Math.min(+cfg.cur || 0, series.length - 1);
+        // #160: entries from a checklist. Embedded, they stay live (the frame's
+        // hash changes as the form is filled); on the full page they become
+        // each series' PID filter, editable like any other.
+        IDS = Array.isArray(cfg.ids) ? cfg.ids.map(String) : null;
+        if (IDS && !EMBED) { var pf = idsFilter(); series.forEach(function (s) { s.item = ""; s.pid = pf; }); IDS = null; }
         savedId = typeof cfg.sp === "string" ? cfg.sp : null;
         if (!series[0].x && paths.length) series[0].x = paths[0];
         $("bins").value = cfg.bins || 40;

@@ -2131,6 +2131,74 @@ class ChecklistLinkTest(TestCase):
         self.assertIn("/hw/dev/checklist/D00300100002/Frame%20Dim/", html)
 
 
+class PlotFieldTest(TestCase):
+    """#160 (Anselmo): a Plots page view of the sub-components entered in
+    the form — PIDs / serial numbers of the URL's type, collected from the
+    named sections, handed to the embedded page in its hash."""
+
+    URL = ("https://x/hw/dev/plot/D00400300001/#%7B%22src%22%3A%22417%22%2C%22series%22%3A"
+           "%5B%7B%22item%22%3A%22D00400300001-06080%22%7D%5D%2C%22sp%22%3A%22abc%22%7D")
+
+    def _norm(self, **f):
+        secs = checklistforms.normalize(
+            {"name": "t", "test_type_name": "T", "sections": [
+                {"title": "S", "fields": [{"type": "plot", **f}]}]}, "t")["sections"]
+        return secs[0]["fields"] if secs else []      # an emptied section is dropped too
+
+    def test_normalize_takes_type_and_state_off_the_url(self):
+        f = self._norm(plot=self.URL, label="Vbd", sections=["SiPM boards up", " SiPM boards down "],
+                       sn=r"HPK\d{5,6}")[0]
+        self.assertEqual(f["plot_type"], "D00400300001")
+        self.assertTrue(f["plot_hash"].startswith("%7B%22src%22"))
+        self.assertEqual(f["sections"], ["SiPM boards up", "SiPM boards down"])
+        self.assertEqual(f["sn"], r"HPK\d{5,6}")
+        # a comma-separated string works too; a bad regex is dropped; the label is optional
+        f = self._norm(plot="/hw/dev/plot/d00400300001/", sections="A, B", sn="HPK(")[0]
+        self.assertEqual((f["plot_type"], f["plot_hash"], f["sections"], f["label"]),
+                         ("D00400300001", "", ["A", "B"], ""))
+        self.assertNotIn("sn", f)
+
+    def test_normalize_drops_a_field_without_a_plots_url(self):
+        self.assertEqual(self._norm(label="Vbd"), [])
+        self.assertEqual(self._norm(label="Vbd", plot="https://x/hw/dev/part/D00400300001-00001/"), [])
+
+    def test_display_only(self):
+        schema = checklistforms.normalize(
+            {"name": "t", "test_type_name": "T", "sections": [
+                {"title": "S", "fields": [{"type": "plot", "plot": self.URL},
+                                          {"type": "text", "label": "Note"}]}]}, "t")
+        key = schema["sections"][0]["fields"][1]["key"]
+        self.assertEqual(checklistforms.parse(schema, {key: "n"}), {"S": {"Note": "n"}})
+        self.assertEqual([r[1] for r in checklistforms.export_rows(schema, {"DATA": {"S": {"Note": "n"}}})],
+                         ["Note"])
+        checklistforms.bind(schema, None)   # no value slot to fill
+
+    def test_fill_page_embeds_the_frame_with_the_collector(self):
+        user = get_user_model().objects.create_user("pl", "pl@p.io", "pw")
+        self.client.force_login(user)
+        schema = dict(SCHEMA)
+        schema["sections"] = [
+            {"title": "SiPM boards up", "fields": [{"type": "table", "label": "Boards", "columns": ["1", "2"]}]},
+            {"title": "Plots", "fields": [{"type": "plot", "label": "Vbd", "plot": self.URL,
+                                           "sections": ["SiPM boards up"], "sn": r"HPK\d{5,6}"}]}]
+        m1, m2 = _mocked(_api(schema=schema))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('<div class="es-card cl-sec" data-title="SiPM boards up"', html)
+        self.assertIn('<div class="cl-plot-box cl-need-net" data-plot="/hw/dev/plot/D00400300001/" '
+                      'data-hash="%7B%22src%22', html)
+        self.assertIn('data-type="D00400300001" data-sn="HPK\\d{5,6}"', html)
+        self.assertIn('-secs" type="application/json">["SiPM boards up"]</script>', html)
+        self.assertNotIn("</script>-secs", html)
+        self.assertIn("Enter PIDs or serial numbers of D00400300001 in SiPM boards up to see the plot.", html)
+        self.assertIn('<iframe class="cl-plot-frame" hidden title="Vbd"></iframe>', html)
+        self.assertIn('class="cl-plot-open" href="' + self.URL.replace("&", "&amp;") + '"', html)
+        # the collector: the frame's URL hash carries the entries, `sp` (a saved-plot id) is dropped
+        self.assertIn('cfg.ids = ids; delete cfg.sp;', html)
+        self.assertIn('var src = base + "?embed=1" + hash;', html)
+        self.assertIn('window.clPlots = function ()', html)
+
+
 class SectionGridTest(TestCase):
     """#120: a section's column grid — col/span/newline per field, placed
     server-side into explicit coordinates."""

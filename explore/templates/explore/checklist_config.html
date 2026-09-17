@@ -265,6 +265,7 @@
         <option value="steps">steps</option>
         <option value="static">static</option>
         <option value="imagemap">image map</option>
+        <option value="plot">plot</option>
       </select>
       <input class="ff-label" placeholder="label">
       <select class="ff-place" style="flex:0 0 108px;"
@@ -308,6 +309,13 @@
         title="a jump link to another checklist — blank type = the same item&#8217;s">
       <input class="ff-checklisttype" placeholder="its Type ID (blank = this item)" style="flex:0 0 200px;"
         title="set when the target checklist belongs to a different component type — the link opens that type&#8217;s PID chooser">
+    </div>
+    <div class="ec-row g-plot" style="display:none;">
+      <input class="ff-plot" placeholder="Plots page URL" style="flex:1 1 100%;"
+        title="build the plot on the Plots page for one item of the sub-component type, Copy link, paste here — the form&#8217;s PIDs / serial numbers of that type replace the item">
+      <input class="ff-plotsecs" placeholder="sections to read PIDs / serials from, comma-separated (blank = every section)">
+      <input class="ff-plotsn" placeholder="serial-number pattern (regex)" style="flex:0 0 220px;"
+        title="e.g. HPK\d{5,6} — only values matching it in full count as serial numbers; blank = any single word">
     </div>
     <div class="ec-row g-static g-img" style="display:none;">
       <span class="ec-label" style="flex:0 0 auto;">Reference image</span>
@@ -428,10 +436,11 @@
     $$(".g-static", r).forEach(function (g) { g.style.display = t === "static" ? "" : "none"; });
     $(".g-img", r).style.display = (t === "static" || t === "imagemap") ? "" : "none";
     $(".g-link", r).style.display = t === "link" ? "" : "none";
+    $(".g-plot", r).style.display = t === "plot" ? "" : "none";          // #160
     $(".g-pid", r).style.display = (t === "qr" || t === "link" || t === "imagemap") ? "" : "none";
     $(".g-map", r).style.display = t === "imagemap" ? "" : "none";
     $(".ff-tospec-w", r).style.display = SPEC_OK.indexOf(t) !== -1 ? "" : "none";
-    $(".ff-label", r).placeholder = t === "static" ? "label (optional)" : "label";
+    $(".ff-label", r).placeholder = (t === "static" || t === "plot") ? "label (optional)" : "label";
   }
 
   function addField(secNode, f, place) {
@@ -461,6 +470,9 @@
     $(".ff-grid", r).checked = f.grid !== false;                         // #139: on by default
     $(".ff-typeid", r).value = f.type_id || "";
     $(".ff-sn", r).value = f.sn || "";                                 // #149
+    $(".ff-plot", r).value = f.plot || "";                             // #160
+    $(".ff-plotsecs", r).value = (f.sections || []).join(", ");
+    $(".ff-plotsn", r).value = f.type === "plot" ? (f.sn || "") : "";
     $(".ff-gcol", r).value = f.col ? String(f.col) : "auto";           // #120
     $(".ff-gspan", r).value = f.span ? String(f.span) : "1";
     $(".ff-gnl", r).checked = !!f.newline;
@@ -618,7 +630,7 @@
            '" style="grid-area:' + it.r + "/" + it.c + "/auto/span " + it.s + '">' +
            it.rows.map(function (r, j) {
              var t = $(".ff-type", r).value, lab = $(".ff-label", r).value.trim() ||
-                     (t === "static" ? ($(".ff-note", r).value.trim() || $(".ff-checklist", r).value.trim() || "figure") : "");
+                     (t === "static" ? ($(".ff-note", r).value.trim() || $(".ff-checklist", r).value.trim() || "figure") : t === "plot" ? "plot" : "");
              return '<span class="lay-line' + (j ? " n2" : "") + '"><b>' + esc(t) + '</b>' + esc(lab) + '</span>';
            }).join("") + "</div>";
     });
@@ -1061,6 +1073,15 @@
       if (cl && clType) f.part_type_id = clType;
       return (note || url || image || imageId || cl) ? f : null;
     }
+    if (t === "plot") {                                                 // #160
+      var purl = $(".ff-plot", r).value.trim(), psecs = list($(".ff-plotsecs", r).value, /,/),
+          psn = $(".ff-plotsn", r).value.trim();
+      if (!purl) return null;
+      f.plot = purl;
+      if (psecs.length) f.sections = psecs;
+      if (psn) f.sn = psn;
+      return f;
+    }
     if (!label) return null;
     if (t === "number" || t === "table") {
       var units = $(".ff-units", r).value.trim();
@@ -1260,7 +1281,7 @@
     // a label-less field silently vanishes from the preview — show why
     $$(".clc-fld").forEach(function (r) {
       $(".ff-label", r).classList.toggle(
-        "miss", !$(".ff-label", r).value.trim() && $(".ff-type", r).value !== "static");
+        "miss", !$(".ff-label", r).value.trim() && $(".ff-type", r).value !== "static" && $(".ff-type", r).value !== "plot");
       // #122: the thumbnail toggle only means something on a static with a figure
       $(".ff-thumbwrap", r).style.display = ($(".ff-type", r).value === "static" &&
         ($(".ff-image", r).value.trim() || $(".ff-imageid", r).value.trim())) ? "" : "none";
@@ -1350,7 +1371,7 @@
         var pane = $("#clc-preview"), st = previewState(pane);
         pane.innerHTML = html;
         restorePreview(pane, st);
-        window.clApplyWhen(); window.clRecompute();
+        window.clApplyWhen(); window.clRecompute(); window.clPlots();
       })
       .catch(function () {});
   }

@@ -99,6 +99,31 @@ class PlotViewsTest(TestCase):
         self.assertIn(f'data-url="/hw/dev/plot/{PTID}/data/"', html)
         self.assertIn('data-n="3"', html)          # mirror count wins over n_components
 
+    def test_embed_mode_and_checklist_entries(self):
+        # #160: inside a checklist's plot field — chrome hidden, the hash's
+        # `ids` (PIDs or serial numbers) select every series' items
+        resp = self.client.get(f"/hw/dev/plot/{PTID}/?embed=1")
+        self.assertEqual(resp["X-Frame-Options"], "SAMEORIGIN")   # the fill page's iframe may show it
+        html = resp.content.decode()
+        self.assertIn('data-embed="1"', html)
+        self.assertIn(".eh-header, .eh-devbanner, .eh-foot, .ex-side, .pl-head, .pl-tabs, .pl-panel", html)
+        self.assertIn("function pidFilter(s) { if (IDS) return idsFilter();", html)
+        self.assertIn("bySn[normSn(it.serial)] = it.pid;", html)
+        self.assertIn('d.replace(/^0+(?=\\d)/, "")', html)          # HPK19843 finds HPK019843
+        self.assertIn('window.addEventListener("hashchange"', html)
+        self.assertIn('if (IDS && !EMBED) { var pf = idsFilter(); series.forEach(function (s) { s.item = ""; s.pid = pf; }); IDS = null; }', html)
+        # points name the item, its serial and the value's place in the array; a
+        # histogram bin lists what sits in it; drag-selecting a row's text is not a pick
+        self.assertIn('function who(pid) { var it = itemByPid[pid]; return pid + (it && it.serial ? " · " + it.serial : ""); }', html)
+        self.assertIn('t: who(it.pid), ix: idxLabel(s.x, s, j)', html)
+        self.assertIn('(d[l].seg || "level " + (l + 1)) + "[" + f(x) + "]"; }).join(" › ")', html)   # Test Results[7] › SiPM[5]
+        self.assertIn("free[k].at = rest % free[k].n; rest = Math.floor(rest / free[k].n);", html)   # flat → [m, n]
+        self.assertIn("afterBody: function (cs) {", html)
+        self.assertIn("if (String(window.getSelection && window.getSelection()).length) return;", html)
+        plain = self.client.get(f"/hw/dev/plot/{PTID}/").content.decode()
+        self.assertNotIn('data-embed="1"', plain)
+        self.assertNotIn(".pl-panel, .pl-vsplit, .pl-bar, .pl-split, .pl-grid { display: none", plain)
+
     def test_page_falls_back_to_n_components_and_404s_unknown_type(self):
         html = self.client.get(f"/hw/dev/plot/{PTID}/").content.decode()
         self.assertIn('data-n="153"', html)

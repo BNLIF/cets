@@ -9,7 +9,7 @@ checklist scenes as schema-driven web forms (Hajime/Greg, 2026-08-07).
   a CLOSED vocabulary mirroring the iPad widgets: ``check`` (tri-state),
   ``number`` (units + tolerance), ``table`` (point-measurement grid),
   ``text``, ``textarea``, ``datetime``, ``select``, ``photo``, ``qr``,
-  ``steps``, ``static``, ``imagemap`` — plus a ``row`` grouping that renders its child
+  ``steps``, ``static``, ``imagemap``, ``plot`` — plus a ``row`` grouping that renders its child
   fields side by side (stacked on phones). Order IS the layout; there are
   no coordinates.
 - **Data** — submissions land in HWDB only: photos post first (for their
@@ -27,7 +27,8 @@ import re
 logger = logging.getLogger(__name__)
 
 FIELD_TYPES = {"check", "number", "table", "text", "textarea", "datetime",
-               "select", "photo", "qr", "steps", "static", "link", "imagemap"}
+               "select", "photo", "qr", "steps", "static", "link", "imagemap",
+               "plot"}
 
 # Field types whose value may ALSO be folded into the item's latest
 # specifications DATA (the ``to_spec`` flag, #96 — "sometimes they do store
@@ -204,6 +205,11 @@ def _tint(v) -> str:
     return c if re.fullmatch(r"#[0-9a-f]{6}", c) else ""
 
 
+# #160: a Plots page URL — ``…/plot/<TYPE>/[?…]#<state>``; the state stays
+# percent-encoded as the page wrote it
+_PLOT_URL = re.compile(r"/plot/([A-Za-z]\d{11})/[^#\s]*(?:#(\S*))?$")
+
+
 def _norm_field(f: dict) -> dict | None:
     """One field off the schema, or None to drop it (unknown type, blank
     label, or a widget missing what defines it)."""
@@ -233,6 +239,35 @@ def _norm_field(f: dict) -> dict | None:
             out["thumb"] = False
         return out if (out["image"] or out["image_id"] or out["url"]
                        or out["note"] or out["checklist"]) else None
+    if t == "plot":
+        # #160 (Anselmo): a Plots page view of the sub-components entered in
+        # this form — ``plot`` is a Plots page URL (its type + ``#`` state),
+        # the fill page collects PIDs / serial numbers of that type from the
+        # form (``sections`` narrows where from; ``sn`` a regex a value must
+        # match in full to count as a serial) and embeds the page with them.
+        # Display only, nothing submitted. A URL without a type is dropped.
+        url = str(f.get("plot") or "").strip()
+        m = _PLOT_URL.search(url)
+        if not m:
+            return None
+        secs = f.get("sections") or []
+        if isinstance(secs, str):
+            secs = secs.split(",")
+        out = {"type": t, "label": label, "plot": url,
+               "plot_type": m.group(1).upper(), "plot_hash": m.group(2) or "",
+               "sections": [str(x).strip() for x in secs if str(x).strip()]
+               if isinstance(secs, list) else []}
+        sn = str(f.get("sn") or "").strip()
+        if sn:
+            try:
+                re.compile(sn)
+                out["sn"] = sn
+            except re.error:
+                pass
+        for k in ("col", "span", "newline", "align"):
+            if f.get(k) is not None:
+                out[k] = f[k]
+        return out
     if t not in FIELD_TYPES or not label:
         return None
     out = {"type": t, "label": label, "units": str(f.get("units") or "").strip(),
@@ -739,7 +774,7 @@ def _bind_leaf(f: dict, v) -> None:
                       for i, s in enumerate(f["slots"])]
     elif t == "photo":
         f["existing"] = v if isinstance(v, dict) and v.get("image_id") else None
-    elif t != "static":   # number, text, textarea, datetime, select, qr
+    elif t not in ("static", "plot"):   # number, text, textarea, datetime, select, qr
         f["value"] = _fmt(v)
 
 
@@ -807,7 +842,7 @@ def parse(schema: dict, post, resolve=None) -> dict:
     data = {}
     for title, f in leaf_fields(schema):
         t, key = f["type"], f["key"]
-        if t in ("static", "photo"):
+        if t in ("static", "photo", "plot"):
             continue
         if t == "check":
             raw = post.get(key) or ""
@@ -1068,7 +1103,7 @@ def export_rows(schema: dict, test_data: dict | None):
             v = f"{v.get('name', '')} (id={v.get('id', '')})"
         yield "Item", label, _fmt(v)
     for title, f in leaf_fields(schema):
-        if f["type"] == "static":
+        if f["type"] in ("static", "plot"):
             continue
         sec = data.get(title)
         v = sec.get(f["label"]) if isinstance(sec, dict) else None
