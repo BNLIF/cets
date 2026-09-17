@@ -10,6 +10,7 @@
     touch-action: none; background: #fff; }
   #cl-lightbox img:active { cursor: grabbing; }
   #cl-lightbox iframe { width: 94vw; height: 92vh; border: 0; background: #fff; }
+  #cl-lightbox .cl-lb-note { color: #eee; font-size: 15px; margin: 0; }
   .cl-lb-bar { position: fixed; top: 10px; right: 14px; display: flex; gap: 8px; z-index: 1; }
   .cl-lb-bar button, .cl-lb-bar a { font: inherit; font-size: 15px; line-height: 1;
     color: #eee; background: rgba(0, 0, 0, .55); border: 1px solid rgba(255, 255, 255, .35);
@@ -23,7 +24,7 @@
 (function () {
   if (window.clLightbox) return;   // once per page, however many includes
   window.clLightbox = true;
-  var lb, lbImg, lbFrame, lbOpen, scale, tx, ty;
+  var lb, lbImg, lbFrame, lbOpen, lbNote, scale, tx, ty;
   // the image proxy defaults to Content-Disposition: attachment — a new tab
   // or iframe needs ?inline=1 to VIEW rather than download (external
   // reference URLs pass through untouched)
@@ -32,6 +33,11 @@
     if (new URL(u, location.href).origin !== location.origin || u.indexOf("inline=") !== -1) return u;
     return u + (u.indexOf("?") === -1 ? "?" : "&") + "inline=1";
   }
+  // #161: the URL the lightbox opens for an element — the fill page fetches these ahead for offline use
+  window.lbUrlOf = function (el) {
+    var u = el.getAttribute("data-lb-src") || el.getAttribute("href") || el.getAttribute("src");
+    return u ? lbInlineUrl(u) : "";
+  };
   function lbApply() { lbImg.style.transform = "translate(" + tx + "px," + ty + "px) scale(" + scale + ")"; }
   function lbZoom(f) { scale = Math.min(8, Math.max(1, scale * f)); if (scale === 1) { tx = ty = 0; } lbApply(); }
   function ensureLb() {
@@ -43,16 +49,21 @@
       '<button type="button" data-lb="+" title="zoom in">+</button>' +
       '<a target="_blank" rel="noopener" title="open in its own tab (print from there)">open &#x2197;</a>' +
       '<button type="button" data-lb="x" title="close">&#x2715;</button></div>' +
-      '<img alt="" draggable="false"><iframe hidden title="figure"></iframe>';
+      '<img alt="" draggable="false"><iframe hidden title="figure"></iframe>' +
+      '<p class="cl-lb-note" hidden>Not on this device — open it once while online.</p>';
     document.body.appendChild(lb);
     lbImg = lb.querySelector("img");
     lbFrame = lb.querySelector("iframe");
     lbOpen = lb.querySelector("a");
+    lbNote = lb.querySelector(".cl-lb-note");
     lbImg.addEventListener("error", function () {   // not an image → PDF viewer
-      if (lb.open && !lbImg.hidden) {
-        lbImg.hidden = true; lbFrame.hidden = false; lbFrame.src = lbOpen.href;
-        lb.classList.add("lb-pdf");
-      }
+      if (!lb.open || lbImg.hidden) return;
+      function pdf() { lbImg.hidden = true; lbFrame.hidden = false; lbFrame.src = lbOpen.href; lb.classList.add("lb-pdf"); }
+      if (!document.documentElement.classList.contains("cl-offline") || !window.caches) return pdf();
+      // #161: offline, a figure never fetched on this device — a note, not the browser's error page
+      caches.match(lbOpen.href).then(function (hit) {
+        if (hit) pdf(); else { lbImg.hidden = true; lbNote.hidden = false; }
+      }, pdf);
     });
     lb.addEventListener("wheel", function (e) {
       if (lbImg.hidden) return;
@@ -118,8 +129,8 @@
     ensureLb();
     scale = 1; tx = ty = 0; lbApply();
     lb.classList.remove("lb-pdf");
-    lbFrame.hidden = true; lbFrame.removeAttribute("src");
-    lbOpen.href = lbInlineUrl(im.getAttribute("data-lb-src") || im.href || im.src);
+    lbFrame.hidden = true; lbFrame.removeAttribute("src"); lbNote.hidden = true;
+    lbOpen.href = window.lbUrlOf(im);
     lbImg.hidden = false; lbImg.src = lbOpen.href;   // errors → iframe fallback
     lb.showModal();
   });

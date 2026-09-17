@@ -32,6 +32,19 @@
   ready.then(function () {
     return caches.match(location.origin + location.pathname).then(function (hit) { if (!hit) window.clWarm([location.pathname]); });
   }).catch(function () {});
+  // #161: the figures the lightbox would load on tap — full-size drawings,
+  // PDFs, label-only links — go into the cache now, while online; the
+  // worker keeps them for good. Runs in a warmed frame too.
+  ready.then(function () {
+    if (!window.lbUrlOf) return;
+    var seen = {};
+    document.querySelectorAll("[data-lightbox]").forEach(function (el) {
+      var u = window.lbUrlOf(el);
+      if (!u || u.indexOf("blob:") === 0 || seen[u] || new URL(u, location.href).origin !== location.origin) return;
+      seen[u] = 1;
+      fetch(u, { credentials: "same-origin" }).then(function (r) { return r.blob(); }).catch(function () {});
+    });
+  }).catch(function () {});
   // "Offline" is decided by probing the server (a tiny no-store request for
   // the worker script, which the worker never answers itself), not by
   // navigator.onLine alone — a dead server on a live network counts too.

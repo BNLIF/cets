@@ -4,8 +4,10 @@
 // reads the PID from the URL it is served at — so any item of a bookmarked
 // checklist opens offline), and the profile with its bookmarks. Every other
 // request passes straight through. Submitting stays online-only — the page
-// itself disables Submit while offline.
+// itself disables Submit while offline. #161: figures through the image
+// proxy are kept for good once fetched, whatever asked for them.
 var CACHE = "cl-offline-v3";
+var IMG = /\/shipment-image\/[^\/]+\/$/;   // the image proxy: thumbnails, full-size drawings, PDFs
 var FILL = /\/part\/([A-Za-z]\d{11})-(?:\d{5}|blank\d*)\/checklist\/([^\/]+)\/$/;   // <type>-blank, -blank2…: the blank form, no item yet
 var PAGES = [FILL, /\/checklist\/[A-Za-z]\d{11}\/[^\/]+\/(?:blank\/)?$/, /\/profile\/$/];
 
@@ -21,6 +23,20 @@ self.addEventListener("fetch", function (e) {
   var req = e.request;
   if (req.method !== "GET") return;
   var url = new URL(req.url);
+  if (IMG.test(url.pathname)) {
+    // #161: a figure — as an <img>, in the lightbox's PDF frame or fetched
+    // ahead by the fill page. HWDB images never change, so a cached copy is
+    // final: no background refresh through the bearer proxy
+    e.respondWith(caches.open(CACHE).then(function (c) {
+      return c.match(url.href).then(function (hit) {
+        return hit || fetch(req).then(function (res) {
+          if (res.ok) c.put(url.href, res.clone());
+          return res;
+        });
+      });
+    }));
+    return;
+  }
   if (req.mode === "navigate") {
     if (!PAGES.some(function (re) { return re.test(url.pathname); })) return;   // any other page: untouched
     // the network first (fresh item card, draft banner), the last online
@@ -48,8 +64,8 @@ self.addEventListener("fetch", function (e) {
   }
   var d = req.destination;
   if (d !== "script" && d !== "style" && d !== "font" && d !== "image") return;
-  // assets (own static, htmx, fonts, reference drawings and thumbnails via
-  // the image proxy): the cached copy at once, refreshed in the background
+  // assets (own static, htmx, fonts): the cached copy at once, refreshed in
+  // the background
   e.respondWith(caches.open(CACHE).then(function (c) {
     return c.match(req).then(function (hit) {
       var net = fetch(req).then(function (res) {

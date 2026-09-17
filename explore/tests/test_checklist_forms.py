@@ -2894,6 +2894,12 @@ class OfflineTest(TestCase):
         self.assertIn("cl-offline-v3", js)
         self.assertIn('"/checklist/" + m[1] + "/" + m[2] + "/blank/"', js)   # a never-opened PID → the blank form
         self.assertIn("var copy = res.clone();", js)   # cloned before the body is handed to the page
+        # #161: the image proxy is cache-first for good, whatever asked for it, and checked before the navigate branch
+        self.assertIn("var IMG = /\\/shipment-image\\/[^\\/]+\\/$/;", js)
+        img_at, nav_at = js.index("if (IMG.test(url.pathname))"), js.index('if (req.mode === "navigate")')
+        self.assertLess(img_at, nav_at)
+        self.assertIn("return hit || fetch(req).then(function (res) {", js)
+        self.assertIn("if (res.ok) c.put(url.href, res.clone());", js)
 
     def test_fill_page_registers_it_and_carries_the_offline_banner(self):
         m1, m2 = _mocked(_api())
@@ -2905,6 +2911,13 @@ class OfflineTest(TestCase):
         self.assertIn('<button class="es-btn cl-need-net">Submit to HWDB</button>', html)
         self.assertIn('if (document.documentElement.classList.contains("cl-offline")) { e.preventDefault(); return; }', html)
         self.assertIn('fetch(SW_URL, { method: "HEAD", cache: "no-store"', html)   # server probe, not just onLine
+        # #161: figures behind the thumbnails are fetched ahead, through the lightbox's own URL rule
+        self.assertIn('document.querySelectorAll("[data-lightbox]").forEach(function (el) {', html)
+        self.assertIn("var u = window.lbUrlOf(el);", html)
+        self.assertIn('fetch(u, { credentials: "same-origin" }).then(function (r) { return r.blob(); })', html)
+        self.assertIn("window.lbUrlOf = function (el) {", html)
+        self.assertIn("Not on this device — open it once while online.", html)
+        self.assertIn("caches.match(lbOpen.href).then(function (hit) {", html)
         # other pages leave the browser alone
         other = self.client.get("/hw/dev/docs/").content.decode()
         self.assertNotIn("serviceWorker", other)

@@ -328,7 +328,7 @@ which HWDB accepts once the type has it.
   `mailto:` can't attach files — so the body is cut at ~1.8 kB with a
   pointer to the CSV, which you attach yourself when the full data matters.
 
-## Offline (#152, #157)
+## Offline (#152, #157, #161)
 
 A checklist page you have opened while online comes back when the network
 is gone: a service worker (scoped to the Explorer's mount, registered by
@@ -342,6 +342,20 @@ Submit and Save draft, Pick, live link/unlink, when-rule and serial-number
 lookups, CSV and Email. Submitting is online-only by design — there is no
 queued submit. The cached copy is a snapshot: its Item card and draft
 banner refresh on the next online load.
+
+Figures (#161): everything a fill page shows or would open on tap — the
+inline thumbnails, imagemap drawings, and the full-size figures and PDF
+drawings behind them, including `thumb: false` links — is fetched once
+while the page is open online and kept on the device for good (HWDB
+images never change). Offline, a figure that never reached the device says
+so in the viewer instead of failing.
+
+What the device keeps — autosaved values, cached photos, cached pages and
+figures, the worker itself — is browser storage. Safari (iPad, Mac) deletes
+all of it for a site not visited for seven days; Chrome and Firefox do not.
+Opening any Explorer page once a week keeps it; a web app added to the Home
+Screen is exempt by WebKit's policy (not yet tried on an iPad). Submit
+before an iPad is put away for long.
 
 Any item of a checklist you use (#157): the PID chooser and the profile's
 *My checklists* load, in a hidden frame, the checklist's chooser and its
