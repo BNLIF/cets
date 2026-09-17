@@ -108,6 +108,11 @@ class PlotViewsTest(TestCase):
         self.assertIn('data-embed="1"', html)
         self.assertIn(".eh-header, .eh-devbanner, .eh-foot, .ex-side, .pl-head, .pl-tabs, .pl-panel", html)
         self.assertIn(".pl-bar .right > :not(#zoom-reset):not(#png-btn) { display: none !important; }", html)   # Reset zoom stays
+        # no status strip (it collided with the axis title); the stats box is drawn in a narrow embed, below the buttons
+        self.assertIn(".pl-status { display: none; }", html)
+        self.assertIn(".pl-plotwrap > canvas { position: absolute; inset: 0; }", html)
+        self.assertIn("y = a.top + 6 + (EMBED ? 26 : 0)", html)
+        self.assertIn("if (a.right - a.left < (EMBED ? 240 : 480)) return;", html)
         self.assertIn("function pidFilter(s) { if (IDS) return idsFilter();", html)
         self.assertIn("bySn[normSn(it.serial)] = it.pid;", html)
         self.assertIn('d.replace(/^0+(?=\\d)/, "")', html)          # HPK19843 finds HPK019843
@@ -371,6 +376,26 @@ class TestDataEndpointsTest(TestCase):
         html = self.client.get("/hw/dev/plot/T/").content.decode()
         self.assertIn('id="idx-row"', html)
         self.assertIn('id="xidx"', html)
+
+    def test_page_has_a_serial_filter(self):
+        # Chao 2026-09-17: a distribution over a PID range should take HPK.* boards only, not SMB.*
+        html = self.client.get("/hw/dev/plot/T/").content.decode()
+        self.assertIn('<div class="pl-f"><span>Serial</span><input type="text" id="snf" placeholder="contains / regex"', html)
+        self.assertIn('var snf = (s.sn || "").trim(), snre = null;', html)
+        self.assertIn('if (snf && !(snre ? snre.test(it.serial || "") : (it.serial || "").toLowerCase().indexOf(snf.toLowerCase()) >= 0)) return false;', html)
+        self.assertIn("sn: s.sn || undefined,", html)         # rides in the hash …
+        self.assertIn('s.sn = h.sn || "";', html)              # … and comes back from it
+        self.assertIn('$("snf").addEventListener("input", function () { S().sn = $("snf").value; changed(); });', html)
+
+    def test_page_takes_a_pasted_list_of_pids_or_serials(self):
+        # Chao 2026-09-17: PID / Serial filters from a pasted list — resolved to an exact PID filter
+        html = self.client.get("/hw/dev/plot/T/").content.decode()
+        self.assertIn('<div class="pl-f"><span>List</span><button type="button" class="pl-btn sm" id="list-btn"', html)
+        self.assertIn('<dialog id="list-dlg" class="pl-dlg">', html)
+        self.assertIn('function listEntries() { return lta.value.split(/[\\s,;]+/).filter(Boolean); }', html)
+        self.assertIn('s.pid = listEntries().length ? pidAlternation(r.pids) : ""; s.item = "";', html)
+        self.assertIn('" · no item: " + r.missing.join(", ")', html)
+        self.assertIn("var m = /^\\^\\((.*)\\)\\$$/.exec(S().pid || \"\");", html)
 
     def test_page_carries_the_test_endpoints(self):
         html = self.client.get("/hw/dev/plot/T/").content.decode()

@@ -36,6 +36,12 @@
   .pl-row { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
   .pl-row label { display: inline-flex; align-items: center; gap: 4px; }
   .pl-hint { font-size: 11.5px; color: var(--faint); }
+  .pl-dlg { border: 1px solid var(--rule); border-radius: var(--r-lg); padding: 14px 16px; background: var(--surface); color: var(--ink); width: min(520px, 92vw); }
+  .pl-dlg::backdrop { background: rgba(10, 10, 12, .35); }
+  .pl-dlg h3 { margin: 0 0 8px; font-size: 14px; }
+  .pl-dlg textarea { width: 100%; min-height: 200px; font-family: var(--font-mono); resize: vertical; }
+  .pl-dlg .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  .pl-dlg .row .pl-hint { flex: 1; overflow-wrap: anywhere; }
   .pl-page select, .pl-page input[type=text], .pl-page input[type=search], .pl-page input[type=number], .pl-page textarea { font: inherit; font-size: 12.5px; color: var(--ink);
     background: var(--paper, #fff); border: 1px solid var(--border, var(--rule)); border-radius: 6px; padding: 3px 6px; min-width: 0; }
   .pl-panel select, .pl-panel input[type=text], .pl-panel textarea { width: 100%; }
@@ -193,9 +199,11 @@
   .pl-page { padding: 0; }
   .pl-wb { grid-template-columns: 1fr; border-top: 0; }
   .pl-main { min-width: 0; grid-template-rows: minmax(0, 1fr) auto; }
-  .pl-plotwrap { height: auto; min-height: 0; margin: 4px 6px 0; }
-  .pl-status { padding: 4px 8px; max-height: 40px; overflow: hidden; }
-  .pl-status .hint { display: none; }
+  /* the canvas fills its box and never sizes it — the box shrinks with the frame, the status keeps its own row */
+  .pl-plotwrap { height: auto; min-height: 0; margin: 4px 6px 0; overflow: hidden; }
+  .pl-plotwrap > canvas { position: absolute; inset: 0; }
+  /* no status strip: the stats box in the chart has the numbers; unmatched entries show on the full page (Open in Plots) */
+  .pl-status { display: none; }
 </style>{% endif %}
 <div class="pl-page" id="pl" data-key="{{ hwdb_instance }}/{{ leaf.part_type_id }}" data-url="{{ data_url }}" data-n="{{ n_items }}"{% if embed %} data-embed="1"{% endif %}
      data-sources-url="{{ sources_url }}" data-tests-base-url="{{ tests_base_url }}" data-tests-sync-url="{{ tests_sync_url }}">
@@ -251,6 +259,8 @@
         <div class="pl-grp">
           <div class="pl-f"><span>Item</span><input type="text" id="item" placeholder="one PID" title="Exactly one item — click a row in the items grid"></div>
           <div class="pl-f"><span>PID</span><input type="text" id="pidf" placeholder="contains / regex / 00120..06000" title="Any number of items, by substring, regex, or a range of the numeric suffix (00120..06000, 00120.., ..06000)"></div>
+          <div class="pl-f"><span>Serial</span><input type="text" id="snf" placeholder="contains / regex" title="Items by serial number — substring or regex (HPK.*), case-insensitive"></div>
+          <div class="pl-f"><span>List</span><button type="button" class="pl-btn sm" id="list-btn" style="justify-self: start;" title="Paste PIDs or serial numbers — they become an exact PID filter">Paste…</button></div>
           <div class="pl-f" id="f-status-l"><span>Status</span><select id="f-status"></select></div>
           <div class="pl-f" id="f-creator-l"><span>Creator</span><select id="f-creator"></select></div>
           <div class="pl-f" id="f-manufacturer-l"><span>Manuf.</span><select id="f-manufacturer"></select></div>
@@ -336,6 +346,13 @@
     <div class="pl-tree" id="ktree"></div>
     <div class="foot"><span class="shape">6</span> a list of 6 at that level — pick one or all below the fields <span style="margin-left: auto;">esc closes</span></div>
   </div>
+<dialog id="list-dlg" class="pl-dlg">
+  <h3>PIDs or serial numbers</h3>
+  <textarea id="list-ta" placeholder="one per line, or separated by spaces or commas&#10;D00400300001-06080&#10;HPK19901"></textarea>
+  <div class="row"><span class="pl-hint" id="list-note"></span>
+    <button type="button" class="pl-btn sm" id="list-cancel">Cancel</button>
+    <button type="button" class="pl-btn sm" id="list-apply">Apply</button></div>
+</dialog>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -365,7 +382,7 @@
     var busy = false;              // a key fetch is in flight
     function isTest() { return source !== "specs"; }
     function S() { return series[cur]; }
-    function blankSeries() { return { name: "", color: "", x: "", y: "", xi: [], yi: [], item: "", pid: "", f: {}, cuts: [], logic: "and" }; }
+    function blankSeries() { return { name: "", color: "", x: "", y: "", xi: [], yi: [], item: "", pid: "", sn: "", f: {}, cuts: [], logic: "and" }; }
     function copySeries(s) { return JSON.parse(JSON.stringify(s)); }
     function nextName() { var n = series.length + 1; while (series.some(function (s) { return s.name === "Series " + n; })) n++; return "Series " + n; }
     // The effective PID filter of a series: its Item box (exactly one PID) wins over the regex box.
@@ -707,10 +724,13 @@
     function filtered(s) {
         var pidf = pidFilter(s), re = null, rng = pidRange(pidf);
         if (pidf && !rng) { try { re = new RegExp(pidf, "i"); } catch (e) { re = null; } }
+        var snf = (s.sn || "").trim(), snre = null;     // serial number: regex, else substring
+        if (snf) { try { snre = new RegExp(snf, "i"); } catch (e) { snre = null; } }
         var any = s.logic === "or", live = s.cuts.filter(function (c) { return c.p && c.v !== ""; });
         return items.filter(function (it) {
             if (pidf && !(rng ? (function (n) { return n >= rng[0] && n <= rng[1]; })(+it.pid.split("-")[1])
                           : re ? re.test(it.pid) : it.pid.toLowerCase().indexOf(pidf.toLowerCase()) >= 0)) return false;
+            if (snf && !(snre ? snre.test(it.serial || "") : (it.serial || "").toLowerCase().indexOf(snf.toLowerCase()) >= 0)) return false;
             for (var i = 0; i < FACETS.length; i++) { var f = s.f[FACETS[i]]; if (f && it[FACETS[i]] !== f) return false; }
             if (!live.length) return true;
             return any ? live.some(function (c) { return passCut(it, c, s); }) : live.every(function (c) { return passCut(it, c, s); });
@@ -743,8 +763,8 @@
     // ROOT-style stats box, one per drawn numeric series: Entries / Mean / Std Dev.
     var statsBox = { id: "statsBox", afterDatasetsDraw: function (ch) {
         var rows = (ch.options.plugins.statsBox || {}).rows; if (!rows || !rows.length) return;
-        var ctx = ch.ctx, a = ch.chartArea, w = 168, h = 58, x = a.right - w - 6, y = a.top + 6;
-        if (a.right - a.left < 480) return;                 // a narrow plot keeps its area; the status strip has the numbers
+        var ctx = ch.ctx, a = ch.chartArea, w = 168, h = 58, x = a.right - w - 6, y = a.top + 6 + (EMBED ? 26 : 0);   // embed: below the floating buttons
+        if (a.right - a.left < (EMBED ? 240 : 480)) return;   // a narrow plot keeps its area; the status strip has the numbers (an embed is narrow by nature)
         ctx.save();
         rows.forEach(function (r) {
             ctx.fillStyle = "rgba(254,252,247,.92)"; ctx.strokeStyle = r.color; ctx.lineWidth = 1;
@@ -1225,7 +1245,7 @@
     function syncPanel() {
         var s = S();
         drawFields(); if (!$("kpop").hidden) drawTree();
-        $("item").value = s.item || ""; $("pidf").value = s.pid || ""; $("logic").value = s.logic || "and";
+        $("item").value = s.item || ""; $("pidf").value = s.pid || ""; $("snf").value = s.sn || ""; $("logic").value = s.logic || "and";
         drawFacets(); drawCuts();
         Array.prototype.forEach.call(document.querySelectorAll(".pl-for"), function (el) {
             el.textContent = ""; if (series.length > 1) { el.appendChild(document.createTextNode("for ")); var b = document.createElement("b"); b.style.color = color(cur); b.textContent = s.name; el.appendChild(b); }
@@ -1289,12 +1309,12 @@
     // Pre-#156 hashes (and the part page's #{"item": …} link) describe one series at the top level.
     function hashSeries(cfg) {
         if (Array.isArray(cfg.series) && cfg.series.length) return cfg.series;
-        var s = { x: cfg.x, y: cfg.y, xi: cfg.xi, yi: cfg.yi, item: cfg.item, pid: cfg.pid, f: cfg.f, cuts: cfg.cuts, logic: cfg.logic };
+        var s = { x: cfg.x, y: cfg.y, xi: cfg.xi, yi: cfg.yi, item: cfg.item, pid: cfg.pid, sn: cfg.sn, f: cfg.f, cuts: cfg.cuts, logic: cfg.logic };
         return [s];
     }
     function packSeries(s) {
         var f = {}; FACETS.forEach(function (k) { if (s.f[k]) f[k] = s.f[k]; });
-        return { name: s.name, color: s.color || undefined, x: s.x, y: s.y || undefined, item: (s.item || "").trim() || undefined, pid: s.pid || undefined, f: Object.keys(f).length ? f : undefined,
+        return { name: s.name, color: s.color || undefined, x: s.x, y: s.y || undefined, item: (s.item || "").trim() || undefined, pid: s.pid || undefined, sn: s.sn || undefined, f: Object.keys(f).length ? f : undefined,
                  xi: idxOf(s.x, s) || undefined, yi: idxOf(s.y, s) || undefined,
                  cuts: s.cuts.filter(function (c) { return c.p; }), logic: s.logic === "or" ? "or" : undefined };
     }
@@ -1392,7 +1412,7 @@
             s.name = (h.name || "").trim() || "Series " + (i + 1);
             s.color = /^#[0-9a-f]{6}$/i.test(h.color || "") ? h.color : "";
             s.x = h.x && acc.has(h.x) ? h.x : ""; s.y = h.y && acc.has(h.y) ? h.y : "";
-            s.item = h.item || ""; s.pid = h.pid || ""; s.f = h.f || {}; s.logic = h.logic === "or" ? "or" : "and";
+            s.item = h.item || ""; s.pid = h.pid || ""; s.sn = h.sn || ""; s.f = h.f || {}; s.logic = h.logic === "or" ? "or" : "and";
             s.cuts = (h.cuts || []).filter(function (c) { return c && acc.has(c.p); });
             // #154: index pins from the hash belong to the keys it names
             s.xi = Array.isArray(h.xi) ? h.xi.map(function (j) { return j === null ? null : +j; }) : []; s.xk = s.x;
@@ -1473,6 +1493,30 @@
     // Per-series controls write into series[cur]; shared ones just redraw.
     $("kq").addEventListener("input", drawTree);
     $("pidf").addEventListener("input", function () { S().pid = $("pidf").value; changed(); });
+    $("snf").addEventListener("input", function () { S().sn = $("snf").value; changed(); });
+    // a pasted list of PIDs / serial numbers → an exact PID filter (the same
+    // alternation a checklist's plot field hands over); unmatched entries are named
+    var ldlg = $("list-dlg"), lta = $("list-ta"), lnote = $("list-note");
+    function listEntries() { return lta.value.split(/[\s,;]+/).filter(Boolean); }
+    function listNote() {
+        var list = listEntries(), r = resolveIds(list);
+        lnote.textContent = !list.length ? "" : r.pids.length + " item" + (r.pids.length === 1 ? "" : "s") + " of " + list.length + " entr" + (list.length === 1 ? "y" : "ies") +
+                            (r.missing.length ? " · no item: " + r.missing.join(", ") : "");
+        return r;
+    }
+    $("list-btn").addEventListener("click", function () {
+        var m = /^\^\((.*)\)\$$/.exec(S().pid || "");          // the current exact filter, one PID per line
+        lta.value = m && m[1] !== "-" ? m[1].split("|").join("\n") : "";
+        listNote(); ldlg.showModal(); lta.focus();
+    });
+    lta.addEventListener("input", listNote);
+    $("list-cancel").addEventListener("click", function () { ldlg.close(); });
+    $("list-apply").addEventListener("click", function () {
+        var r = listNote(), s = S();
+        s.pid = listEntries().length ? pidAlternation(r.pids) : ""; s.item = "";
+        $("pidf").value = s.pid; $("item").value = "";
+        ldlg.close(); changed();
+    });
     $("item").addEventListener("input", function () { S().item = $("item").value; changed(); });
     $("logic").addEventListener("change", function () { S().logic = $("logic").value; changed(); });
     FACETS.forEach(function (k) { $("f-" + k).addEventListener("change", function () { if ($("f-" + k).value) S().f[k] = $("f-" + k).value; else delete S().f[k]; changed(); }); });
