@@ -2147,15 +2147,16 @@ class PlotFieldTest(TestCase):
 
     def test_normalize_takes_type_and_state_off_the_url(self):
         f = self._norm(plot=self.URL, label="Vbd", sections=["SiPM boards up", " SiPM boards down "],
-                       sn=r"HPK\d{5,6}")[0]
+                       fields="SiPM, ", sn=r"HPK\d{5,6}")[0]
         self.assertEqual(f["plot_type"], "D00400300001")
+        self.assertEqual(f["fields"], ["SiPM"])
         self.assertTrue(f["plot_hash"].startswith("%7B%22src%22"))
         self.assertEqual(f["sections"], ["SiPM boards up", "SiPM boards down"])
         self.assertEqual(f["sn"], r"HPK\d{5,6}")
         # a comma-separated string works too; a bad regex is dropped; the label is optional
         f = self._norm(plot="/hw/dev/plot/d00400300001/", sections="A, B", sn="HPK(")[0]
-        self.assertEqual((f["plot_type"], f["plot_hash"], f["sections"], f["label"]),
-                         ("D00400300001", "", ["A", "B"], ""))
+        self.assertEqual((f["plot_type"], f["plot_hash"], f["sections"], f["fields"], f["label"]),
+                         ("D00400300001", "", ["A", "B"], [], ""))
         self.assertNotIn("sn", f)
 
     def test_normalize_drops_a_field_without_a_plots_url(self):
@@ -2180,7 +2181,7 @@ class PlotFieldTest(TestCase):
         schema["sections"] = [
             {"title": "SiPM boards up", "fields": [{"type": "table", "label": "Boards", "columns": ["1", "2"]}]},
             {"title": "Plots", "fields": [{"type": "plot", "label": "Vbd", "plot": self.URL,
-                                           "sections": ["SiPM boards up"], "sn": r"HPK\d{5,6}"}]}]
+                                           "sections": ["SiPM boards up"], "fields": ["Boards"], "sn": r"HPK\d{5,6}"}]}]
         m1, m2 = _mocked(_api(schema=schema))
         with m1, m2:
             html = self.client.get(PAGE).content.decode()
@@ -2189,8 +2190,10 @@ class PlotFieldTest(TestCase):
                       'data-hash="%7B%22src%22', html)
         self.assertIn('data-type="D00400300001" data-sn="HPK\\d{5,6}"', html)
         self.assertIn('-secs" type="application/json">["SiPM boards up"]</script>', html)
+        self.assertIn('-flds" type="application/json">["Boards"]</script>', html)
+        self.assertIn('<div class="cl-field cl-table" data-key="f0-0" data-label="Boards"', html)
+        self.assertIn("Enter PIDs or serial numbers of D00400300001 in Boards to see the plot.", html)
         self.assertNotIn("</script>-secs", html)
-        self.assertIn("Enter PIDs or serial numbers of D00400300001 in SiPM boards up to see the plot.", html)
         self.assertIn('<iframe class="cl-plot-frame" hidden title="Vbd"></iframe>', html)
         self.assertIn('class="cl-plot-open" href="' + self.URL.replace("&", "&amp;") + '"', html)
         # the collector: the frame's URL hash carries the entries, `sp` (a saved-plot id) is dropped

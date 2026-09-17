@@ -314,6 +314,8 @@
       <input class="ff-plot" placeholder="Plots page URL" style="flex:1 1 100%;"
         title="build the plot on the Plots page for one item of the sub-component type, Copy link, paste here — the form&#8217;s PIDs / serial numbers of that type replace the item">
       <input class="ff-plotsecs" placeholder="sections to read PIDs / serials from, comma-separated (blank = every section)">
+      <input class="ff-plotflds" placeholder="fields to read from, comma-separated (blank = every field)"
+        title="field labels, e.g. one table out of three in a section; with sections set, within those">
       <input class="ff-plotsn" placeholder="serial-number pattern (regex)" style="flex:0 0 220px;"
         title="e.g. HPK\d{5,6} — only values matching it in full count as serial numbers; blank = any single word">
     </div>
@@ -472,6 +474,7 @@
     $(".ff-sn", r).value = f.sn || "";                                 // #149
     $(".ff-plot", r).value = f.plot || "";                             // #160
     $(".ff-plotsecs", r).value = (f.sections || []).join(", ");
+    $(".ff-plotflds", r).value = (f.fields || []).join(", ");
     $(".ff-plotsn", r).value = f.type === "plot" ? (f.sn || "") : "";
     $(".ff-gcol", r).value = f.col ? String(f.col) : "auto";           // #120
     $(".ff-gspan", r).value = f.span ? String(f.span) : "1";
@@ -1075,10 +1078,11 @@
     }
     if (t === "plot") {                                                 // #160
       var purl = $(".ff-plot", r).value.trim(), psecs = list($(".ff-plotsecs", r).value, /,/),
-          psn = $(".ff-plotsn", r).value.trim();
+          pflds = list($(".ff-plotflds", r).value, /,/), psn = $(".ff-plotsn", r).value.trim();
       if (!purl) return null;
       f.plot = purl;
       if (psecs.length) f.sections = psecs;
+      if (pflds.length) f.fields = pflds;
       if (psn) f.sn = psn;
       return f;
     }

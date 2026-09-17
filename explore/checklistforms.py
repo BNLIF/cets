@@ -243,20 +243,23 @@ def _norm_field(f: dict) -> dict | None:
         # #160 (Anselmo): a Plots page view of the sub-components entered in
         # this form — ``plot`` is a Plots page URL (its type + ``#`` state),
         # the fill page collects PIDs / serial numbers of that type from the
-        # form (``sections`` narrows where from; ``sn`` a regex a value must
-        # match in full to count as a serial) and embeds the page with them.
+        # form (``sections`` / ``fields`` narrow where from; ``sn`` a regex a
+        # value must match in full to count as a serial) and embeds the page.
         # Display only, nothing submitted. A URL without a type is dropped.
         url = str(f.get("plot") or "").strip()
         m = _PLOT_URL.search(url)
         if not m:
             return None
-        secs = f.get("sections") or []
-        if isinstance(secs, str):
-            secs = secs.split(",")
+        def names(v):       # a list, or a comma-separated string
+            if isinstance(v, str):
+                v = v.split(",")
+            return [str(x).strip() for x in v if str(x).strip()] if isinstance(v, list) else []
         out = {"type": t, "label": label, "plot": url,
                "plot_type": m.group(1).upper(), "plot_hash": m.group(2) or "",
-               "sections": [str(x).strip() for x in secs if str(x).strip()]
-               if isinstance(secs, list) else []}
+               "sections": names(f.get("sections") or []),
+               # field labels to read from (Anselmo: one of three tables in a
+               # section) — within the sections when both are set
+               "fields": names(f.get("fields") or [])}
         sn = str(f.get("sn") or "").strip()
         if sn:
             try:

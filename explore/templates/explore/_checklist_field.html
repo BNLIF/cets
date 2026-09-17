@@ -1,6 +1,6 @@
 {# One checklist leaf field (#95) — dispatched on f.type, closed vocabulary. #}
 {% load checklist %}
-<div class="cl-field cl-{{ f.type }}" data-key="{{ f.key }}"{% if f.g %} style="grid-area: {{ f.g.r }} / {{ f.g.c }} / auto / span {{ f.g.s }};{% if f.g.a %} align-self: {{ f.g.a }};{% endif %}"{% endif %}>
+<div class="cl-field cl-{{ f.type }}" data-key="{{ f.key }}"{% if f.label %} data-label="{{ f.label }}"{% endif %}{% if f.g %} style="grid-area: {{ f.g.r }} / {{ f.g.c }} / auto / span {{ f.g.s }};{% if f.g.a %} align-self: {{ f.g.a }};{% endif %}"{% endif %}>
 {% if f.type == "check" %}
   <span class="cl-lab">{{ f.label|clmd }}</span>
   <div class="cl-tri" role="radiogroup" aria-label="{{ f.label }}">
@@ -109,8 +109,8 @@
 {% elif f.type == "plot" %}{# #160: a Plots page view of the sub-components entered in this form — the collector script (_checklist_behavior.html) fills the frame #}
   {% if f.label %}<span class="cl-lab">{{ f.label|clmd }}</span>{% endif %}
   <div class="cl-plot-box cl-need-net" data-plot="{% url 'explore:plot' part_type_id=f.plot_type %}" data-hash="{{ f.plot_hash }}" data-type="{{ f.plot_type }}"{% if f.sn %} data-sn="{{ f.sn }}"{% endif %}>
-    {% with sid=f.key|add:"-secs" %}{{ f.sections|json_script:sid }}{% endwith %}
-    <div class="cl-hint cl-plot-empty">Enter PIDs or serial numbers of {{ f.plot_type }}{% if f.sections %} in {{ f.sections|join:", " }}{% endif %} to see the plot.</div>
+    {% with sid=f.key|add:"-secs" %}{{ f.sections|json_script:sid }}{% endwith %}{% with fid=f.key|add:"-flds" %}{{ f.fields|json_script:fid }}{% endwith %}
+    <div class="cl-hint cl-plot-empty">Enter PIDs or serial numbers of {{ f.plot_type }}{% if f.fields %} in {{ f.fields|join:", " }}{% elif f.sections %} in {{ f.sections|join:", " }}{% endif %} to see the plot.</div>
     <iframe class="cl-plot-frame" hidden title="{{ f.label|default:'plot' }}"></iframe>
     <a class="cl-plot-open" href="{{ f.plot }}" target="_blank" rel="noopener" hidden>Open in Plots <span aria-hidden="true">&#x2197;</span></a>
   </div>

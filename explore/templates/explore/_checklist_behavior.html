@@ -304,17 +304,23 @@
 // same-document navigation, so the page re-reads it without reloading.
 (function () {
   var PID = /^[A-Za-z]\d{11}-\d{5}$/, SKIP = { checkbox: 1, radio: 1, file: 1, hidden: 1, button: 1, submit: 1, "datetime-local": 1 };
-  function secsOf(p) {
-    var el = p.querySelector("script[type='application/json']"), a = [];
+  function namesOf(p, suffix) {   // the field's sections / fields lists (json_script)
+    var el = p.querySelector("script[id$='" + suffix + "']"), a = [];
     try { a = JSON.parse(el ? el.textContent : "[]"); } catch (e) {}
     return Array.isArray(a) ? a : [];
   }
   function entries(p) {
-    var type = p.getAttribute("data-type"), secs = secsOf(p), re = null, sn = p.getAttribute("data-sn");
+    var type = p.getAttribute("data-type"), secs = namesOf(p, "-secs"), flds = namesOf(p, "-flds"), re = null, sn = p.getAttribute("data-sn");
     if (sn) { try { re = new RegExp("^(?:" + sn + ")$", "i"); } catch (e) {} }
     // the checklist's own sections only — not the Item card, not the page's controls
     var roots = Array.prototype.filter.call(document.querySelectorAll(".cl-sec[data-title]"), function (s) {
       return !secs.length || secs.indexOf(s.getAttribute("data-title")) >= 0; });
+    // named fields only (a table among three in one section), when the field says so
+    if (flds.length) {
+      var picked = [];
+      roots.forEach(function (r) { Array.prototype.forEach.call(r.querySelectorAll(".cl-field[data-label]"), function (f) { if (flds.indexOf(f.getAttribute("data-label")) >= 0) picked.push(f); }); });
+      roots = picked;
+    }
     var out = [], seen = {};
     roots.forEach(function (r) {
       Array.prototype.forEach.call(r.querySelectorAll("input, textarea"), function (el) {
