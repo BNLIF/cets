@@ -190,6 +190,9 @@ def leaves(v) -> list:
     return out
 
 
+SHAPE_SAMPLES = 5   # items whose rows size an array key's shape (max per level)
+
+
 def dims(v) -> list[int]:
     """Max length per list level of a nested value — ``[6, 6, 1960]`` for a
     per-run, per-SiPM sweep; ``[1]`` for a scalar; ``[]`` for a bare leaf."""
@@ -303,13 +306,23 @@ def test_keys(instance: str, part_type_id: str, test_type_id: int) -> dict:
     keys = [{"path": json.loads(r["path"]), "n": r["n"], "nv": r["nv"],
              "big": r["nv"] > BIG_PER_ITEM * r["n"]} for r in rows]
     # #154: array keys' shapes — [{seg, n}] per list level, labelled by the
-    # path segment the list sits at — read off ONE sample item (the one with
-    # the largest row): two queries, not one per key. Keys the sample lacks
-    # (rare keys) report no shape.
+    # path segment the list sits at — read off a few sample items (those with
+    # the largest rows), each level the max across them: two queries, not
+    # one per key. One item alone misled (#160 follow-up): a record with a
+    # single run but the longest sweep made "Test Results" look like 1 wide
+    # for the whole type. Keys every sample lacks (rare keys) take their own
+    # largest row.
     vals = _values(instance, part_type_id, test_type_id)
-    pid = vals.order_by("-nv").values_list("part_id", flat=True).first()
-    if pid:
-        samples = {pid: dict(vals.filter(part_id=pid).values_list("path", "values"))}
+    pids: list = []
+    for p in vals.order_by("-nv").values_list("part_id", flat=True)[:40]:
+        if p not in pids:
+            pids.append(p)
+        if len(pids) == SHAPE_SAMPLES:
+            break
+    if pids:
+        samples: dict = {p: {} for p in pids}
+        for p, pk, v in vals.filter(part_id__in=pids).values_list("part_id", "path", "values"):
+            samples[p][pk] = v
         records: dict = {}
 
         def record(p):
@@ -319,17 +332,24 @@ def test_keys(instance: str, part_type_id: str, test_type_id: int) -> dict:
             return records[p]
 
         for k in keys:
-            pk, spid = path_key(k["path"]), pid
-            if pk not in samples[pid]:      # a key the sample item lacks: its own largest row
+            pk = path_key(k["path"])
+            have = [p for p in pids if pk in samples[p]]
+            if not have:                    # a key the samples lack: its own largest row
                 row = vals.filter(path=pk).order_by("-nv").values_list("part_id", "values").first()
                 if not row:
                     continue
-                spid = row[0]
-                samples.setdefault(spid, {})[pk] = row[1]
-            d = dims(samples[spid][pk])
+                have = [row[0]]
+                samples.setdefault(row[0], {})[pk] = row[1]
+            d: list = []
+            for p in have:
+                for j, n in enumerate(dims(samples[p][pk])):
+                    if j < len(d):
+                        d[j] = max(d[j], n)
+                    else:
+                        d.append(n)
             if max(d, default=0) <= 1:
                 continue
-            labels = dim_labels(record(spid), k["path"])
+            labels = dim_labels(record(have[0]), k["path"])
             k["dims"] = [{"seg": labels[j] if j < len(labels) else "", "n": n} for j, n in enumerate(d)]
     return {"keys": keys, "n_items": _records(instance, part_type_id, test_type_id).count(),
             "max_values": MAX_VALUES}

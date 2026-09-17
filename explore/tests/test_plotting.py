@@ -264,9 +264,14 @@ class NestedValuesTest(TestCase):
         self.client.force_login(get_user_model().objects.create_user("n", "n@n.io", "pw"))
         _td("dev", "T", "T-00001", 5, "A", self.REC)
         _td("dev", "T", "T-00002", 5, "A", {"TR": [{"Loc": [{"i": 1, "I": [9]}]}], "R": 6})
+        # one run with the longest sweep — the biggest row, yet not the shape of the type (#160 follow-up)
+        _td("dev", "T", "T-00003", 5, "A", {"TR": [{"Loc": [{"i": 1, "I": list(range(40))}]}]})
         by = {tuple(x["path"]): x for x in self.client.get("/hw/dev/plot/T/tests/5/keys/").json()["keys"]}
-        self.assertEqual(by[("TR", "Loc", "I")]["dims"], [{"seg": "TR", "n": 2}, {"seg": "Loc", "n": 2}, {"seg": "I", "n": 2}])
+        self.assertEqual(by[("TR", "Loc", "I")]["dims"], [{"seg": "TR", "n": 2}, {"seg": "Loc", "n": 2}, {"seg": "I", "n": 40}])
         self.assertNotIn("dims", by[("R",)])                                    # a scalar has no shape
+        from explore.models import HwdbTestValue
+        HwdbTestValue.objects.filter(part_id="T-00003").delete()
+        HwdbTestData.objects.filter(part_id="T-00003").delete()
         url, key = "/hw/dev/plot/T/tests/5/values/", json.dumps(["TR", "Loc", "I"])
         self.assertEqual(self.client.get(url, {"key": key}).json()["values"],
                          {"T-00001": [1, 2, 3, 4, 5, 6, 7, 8], "T-00002": [9]})    # flat, as before
