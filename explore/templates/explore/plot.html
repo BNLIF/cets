@@ -182,7 +182,11 @@
 
 {% if embed %}<style>
   /* #160: embedded in a checklist — the chart and its status line, nothing else */
-  .eh-header, .eh-devbanner, .eh-foot, .ex-side, .pl-head, .pl-tabs, .pl-panel, .pl-vsplit, .pl-bar, .pl-split, .pl-grid { display: none !important; }
+  .eh-header, .eh-devbanner, .eh-foot, .ex-side, .pl-head, .pl-tabs, .pl-panel, .pl-vsplit, .pl-split, .pl-grid { display: none !important; }
+  /* of the toolbar, Reset zoom and PNG stay — floating over the chart's top-right corner */
+  .pl-main { position: relative; }
+  .pl-bar { position: absolute; top: 6px; right: 12px; z-index: 2; padding: 0; border: 0; background: none; }
+  .pl-bar > :not(.right), .pl-bar .right > :not(#zoom-reset):not(#png-btn) { display: none !important; }
   /* the frame's height, whatever it is, split into chart + status line — no scrolling */
   html, body { height: 100%; margin: 0; overflow: hidden; }
   .eh-main, .ex-layout, .ex-content, .pl-page, .pl-wb, .pl-main { height: 100%; min-height: 0; }

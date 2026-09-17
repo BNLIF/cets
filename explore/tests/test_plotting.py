@@ -107,6 +107,7 @@ class PlotViewsTest(TestCase):
         html = resp.content.decode()
         self.assertIn('data-embed="1"', html)
         self.assertIn(".eh-header, .eh-devbanner, .eh-foot, .ex-side, .pl-head, .pl-tabs, .pl-panel", html)
+        self.assertIn(".pl-bar .right > :not(#zoom-reset):not(#png-btn) { display: none !important; }", html)   # Reset zoom stays
         self.assertIn("function pidFilter(s) { if (IDS) return idsFilter();", html)
         self.assertIn("bySn[normSn(it.serial)] = it.pid;", html)
         self.assertIn('d.replace(/^0+(?=\\d)/, "")', html)          # HPK19843 finds HPK019843
