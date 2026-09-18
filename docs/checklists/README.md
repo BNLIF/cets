@@ -255,16 +255,16 @@ mirrored immediately (an incremental type sync runs on creation), so it
 lists on the type page without a manual "sync new".
 
 Every item the Explorer mints — New item, New box and the sub-components
-below — is **enabled** right after creation (`PATCH components/{pid}/enable`,
-`_mint_enabled`): HWDB attaches only enabled items and a new one is
-disabled ("not available" at link time, dev 2026-09-18). Enabling resets
-the status and wipes the comments, so the serial and comments from the form
-and the item's status and QA/QC flags are PATCHed back in one call
-afterwards. The New item page has a Status select (default **Waiting on
-QA/QC Tests** — linkable; HWDB links only statuses 100/110/120/140) with
-QA/QC uploaded / certified boxes; a new box gets the same default silently.
-Items minted before 2026-09-18 are still disabled with status Unknown;
-enabling them by hand wipes their comments.
+below — is created **with a status** (`_mint_linkable`): an item created
+without one is born disabled and `PATCH components/{pid}/subcomponents`
+refuses it ("not yet available", dev 2026-09-18); a later status PATCH does
+not cure that, only `PATCH …/enable` does — and enabling wipes the comments.
+A status in the create payload makes the item available from the start, so
+no enable call is needed. The New item page has a Status select (default
+**Waiting on QA/QC Tests** — linkable; HWDB links only statuses
+100/110/120/140) with QA/QC uploaded / certified boxes; a new box gets the
+same default silently. Items minted before 2026-09-18 are disabled with
+status Unknown; enabling them by hand wipes their comments.
 
 **Sub-components minted with the item (#167).** When the type defines
 positions, the page lists the child types they accept ("4 × Supercell
@@ -274,9 +274,8 @@ part" button presets Passed All + both flags (Hajime's rule for bureaucratic
 parts nobody tests — HWDB links only statuses 100/110/120/140). Ticked, one
 child per position is minted right after the parent — same institution,
 serial `<parent PID>-<position>`, the child type's own datasheet and single
-manufacturer — enabled (HWDB attaches only enabled items, and a new one is
-not; enabling resets status and wipes comments, so it comes first), patched
-to the chosen status and flags, then linked with one `subcomponents` PATCH. A failed child leaves its position empty and is
+manufacturer, born with the chosen status and flags — then linked with one
+`subcomponents` PATCH. A failed child leaves its position empty and is
 reported; the parent stands. Architects can tick "remember for this type"
 so the choice (types, status, flags) comes pre-filled for everyone
 (`ChildMintSetting`). Anselmo's case: a PDS module and its four supercells,

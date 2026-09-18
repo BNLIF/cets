@@ -119,6 +119,8 @@ class BoxCreateTest(TestCase):
             "serial_number": "BOX-42",
             "comments": "minted from explorer",
             "specifications": {"Batch": None, "_meta": {}},
+            # born linkable (#167): a status in the create payload is what enables the item
+            "status": {"id": 110}, "qaqc_uploaded": False, "certified_qaqc": False,
         })
         row = ShipmentItem.for_instance("dev").get(part_id=NEW_PID)
         self.assertEqual(row.n_contents, 0)

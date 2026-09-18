@@ -1102,20 +1102,13 @@ class ItemCreateTest(TestCase):
                          ({"part_type_id": self.CHILD}, f"{NEW_PID}-A", {"id": 128}, "US"))
         self.assertEqual(child["manufacturer"], {"id": 7})
         self.assertIn(f"Sub-component of {NEW_PID}, position A", child["comments"])
-        self.assertEqual([c.args[0] for c in api.enable_component.call_args_list],
-                         [NEW_PID] + [f"{self.CHILD}-{n:05d}" for n in range(1, 5)])
-        names = [c[0] for c in api.mock_calls if c[0] in ("create_component", "enable_component",
-                                                          "patch_component", "patch_subcomponents")]
-        # parent and each child: create → enable → status/flags (+ restored serial/comments) patch
-        self.assertEqual(names[:6], ["create_component", "enable_component", "patch_component",
-                                     "create_component", "enable_component", "patch_component"])
-        self.assertEqual(names[-1], "patch_subcomponents")
-        flags = api.patch_component.call_args_list[1:]     # [0] is the parent's own status
-        self.assertEqual(len(flags), 4)
-        self.assertEqual(flags[0].args[1]["status"], {"id": 120})
-        self.assertTrue(flags[0].args[1]["qaqc_uploaded"] and flags[0].args[1]["certified_qaqc"])
-        self.assertEqual(flags[0].args[1]["comments"], child["comments"])          # enable wiped it
-        self.assertEqual(flags[0].args[1]["serial_number"], f"{NEW_PID}-A")
+        # born linkable: the status + flags ride in the create payload (no enable, no patch)
+        self.assertEqual((child["status"], child["qaqc_uploaded"], child["certified_qaqc"]),
+                         ({"id": 120}, True, True))
+        api.enable_component.assert_not_called()
+        api.patch_component.assert_not_called()
+        names = [c[0] for c in api.mock_calls if c[0] in ("create_component", "patch_subcomponents")]
+        self.assertEqual(names, ["create_component"] * 5 + ["patch_subcomponents"])
         api.patch_subcomponents.assert_called_once_with(NEW_PID, {
             "component": {"part_id": NEW_PID},
             "subcomponents": {"A": f"{self.CHILD}-00001", "B": f"{self.CHILD}-00002",
@@ -1133,8 +1126,8 @@ class ItemCreateTest(TestCase):
         with m1, m2:
             self.client.post(NEW_PAGE, {"institution_id": "128", "mint_child": [self.CHILD],
                                         f"status_{self.CHILD}": "999"})   # unknown id → default
-        flags = api.patch_component.call_args_list[1].args[1]     # the first child's
-        self.assertEqual((flags["status"], flags["qaqc_uploaded"], flags["certified_qaqc"]),
+        child = api.create_component.call_args_list[1].args[1]     # the first child's
+        self.assertEqual((child["status"], child["qaqc_uploaded"], child["certified_qaqc"]),
                          ({"id": 110}, False, False))
 
     def test_unticked_mints_nothing_extra(self):
@@ -1145,15 +1138,16 @@ class ItemCreateTest(TestCase):
         self.assertEqual(api.create_component.call_count, 1)
         api.patch_subcomponents.assert_not_called()
 
-    def test_every_new_item_is_enabled_with_its_serial_and_comment_restored(self):
+    def test_every_new_item_is_born_with_a_status_so_it_can_be_linked(self):
         api = self._api_children()
         m1, m2 = _mocked(api)
         with m1, m2:
             self.client.post(NEW_PAGE, {"institution_id": "128", "serial_number": "SN-1", "comments": "hello"})
-        api.enable_component.assert_called_once_with(NEW_PID)
-        api.patch_component.assert_called_once_with(
-            NEW_PID, {"part_id": NEW_PID, "comments": "hello", "serial_number": "SN-1",
-                      "status": {"id": 110}, "qaqc_uploaded": False, "certified_qaqc": False})
+        payload = api.create_component.call_args.args[1]
+        self.assertEqual((payload["status"], payload["qaqc_uploaded"], payload["certified_qaqc"],
+                          payload["serial_number"], payload["comments"]),
+                         ({"id": 110}, False, False, "SN-1", "hello"))
+        api.enable_component.assert_not_called()
 
     def test_the_items_own_status_and_flags_are_chosen_on_the_page(self):
         api = self._api_children()
@@ -1164,8 +1158,9 @@ class ItemCreateTest(TestCase):
         self.assertIn('<option value="110" selected>Waiting on QA/QC Tests</option>', html)
         with m1, m2:
             self.client.post(NEW_PAGE, {"institution_id": "128", "status": "100", "cert": "1"})
-        self.assertEqual(api.patch_component.call_args.args[1],
-                         {"part_id": NEW_PID, "status": {"id": 100}, "qaqc_uploaded": False, "certified_qaqc": True})
+        payload = api.create_component.call_args.args[1]
+        self.assertEqual((payload["status"], payload["qaqc_uploaded"], payload["certified_qaqc"]),
+                         ({"id": 100}, False, True))
 
     def test_a_failed_child_leaves_its_position_empty_and_is_reported(self):
         import requests

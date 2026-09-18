@@ -226,8 +226,12 @@ class HwdbComponentEvent(InstanceScoped):
     # assembly currently holding this item (detail record field; also kept
     # fresh by the shipment sync / the explorer's own pack writes via
     # ``refresh_box``); "" = free or not yet captured. ``enabled`` mirrors
-    # HWDB's approval flag (NOT the link gate — a disabled status-0 item
-    # linked fine in the 2026-07-27 probe); NULL = not yet captured.
+    # HWDB's availability flag: an item created WITHOUT a status is born
+    # disabled and ``PATCH components/{pid}/subcomponents`` refuses it ("not
+    # yet available", 2026-09-18 dev probe); a status in the create payload
+    # makes it available, a later status PATCH does not (only the enable
+    # endpoint does, wiping comments). ``_mint_linkable`` creates everything
+    # the Explorer mints with a status. NULL = not yet captured.
     parent_part_id = models.CharField(max_length=50, blank=True, default="",
                                       db_index=True)
     enabled = models.BooleanField(null=True, blank=True)

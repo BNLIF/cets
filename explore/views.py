@@ -1568,23 +1568,21 @@ def _hwdb_error_detail(e) -> str:
     return _mark(str(detail) if detail else str(e), e)
 
 
-def _mint_enabled(api, part_type_id: str, payload: dict, patch: dict | None = None) -> str:
-    """Create an item and ENABLE it: HWDB attaches only enabled items and a
-    new one is disabled ("not available" at link time — Chao on dev
-    2026-09-18; Karla's FEMB flow knew). Enabling resets the status and
-    wipes the comments, so the create payload's comments and serial, plus
-    any ``patch`` fields (status, QA/QC flags), are PATCHed back in one
-    call afterwards. Returns the PID; ``ValueError`` carries HWDB's message
-    when the create is answered but refused."""
-    body = api.create_component(part_type_id, payload)
+def _mint_linkable(api, part_type_id: str, payload: dict, status_id: int,
+                   uploaded: bool = False, certified: bool = False) -> str:
+    """Create an item that HWDB will LINK: a status in the create payload is
+    what makes a new item "available" (dev probe 2026-09-18 — without one
+    the item is born disabled and ``PATCH …/subcomponents`` answers 404
+    "not yet available"; a later status PATCH does not cure it, only
+    ``PATCH …/enable`` does, and that wipes the comments). The QA/QC flags
+    ride in the same payload. Returns the PID; ``ValueError`` carries HWDB's
+    message when the create is answered but refused."""
+    body = api.create_component(part_type_id, {
+        **payload, "status": {"id": status_id},
+        "qaqc_uploaded": uploaded, "certified_qaqc": certified})
     pid = body.get("part_id") if body.get("status") == "OK" else None
     if not pid:
         raise ValueError(str(body.get("data") or body))
-    api.enable_component(pid)
-    after = {k: payload[k] for k in ("comments", "serial_number") if payload.get(k)}
-    after.update(patch or {})
-    if after:
-        api.patch_component(pid, {"part_id": pid, **after})
     return pid
 
 
@@ -1644,8 +1642,7 @@ def explore_box_create_view(request, part_type_id):
         }
         if len(manufacturers) == 1 and manufacturers[0].get("id") is not None:
             payload["manufacturer"] = {"id": manufacturers[0]["id"]}
-        part_id = _mint_enabled(api, part_type_id, payload,
-                                patch={"status": {"id": NEW_ITEM_STATUS}})
+        part_id = _mint_linkable(api, part_type_id, payload, NEW_ITEM_STATUS)
     except requests.RequestException as e:
         logger.warning("box create for %s failed: %s", part_type_id, e)
         messages.error(request, f"HWDB rejected the new box — {_hwdb_error_detail(e)}")
@@ -3819,10 +3816,10 @@ def explore_item_create_view(request, part_type_id):
             }
             if len(manufacturers) == 1 and manufacturers[0].get("id") is not None:
                 payload["manufacturer"] = {"id": manufacturers[0]["id"]}
-            part_id = _mint_enabled(api, part_type_id, payload, patch={
-                "status": {"id": _status_id(request.POST.get("status"))},
-                "qaqc_uploaded": request.POST.get("up") == "1",
-                "certified_qaqc": request.POST.get("cert") == "1"})
+            part_id = _mint_linkable(api, part_type_id, payload,
+                                     _status_id(request.POST.get("status")),
+                                     uploaded=request.POST.get("up") == "1",
+                                     certified=request.POST.get("cert") == "1")
         except requests.RequestException as e:
             messages.error(request, f"HWDB rejected the new item — {_hwdb_error_detail(e)}")
             return redirect(page_url)
@@ -3937,8 +3934,8 @@ def _child_choice(post, c: dict) -> dict:
 def _mint_children(api, inst, request, parent_pid, connectors, children, institution):
     """#167: mint one item of each chosen child type per position that
     accepts it — same institution as the parent, serial ``<parent>-<position>``,
-    the child type's own datasheet and single manufacturer — enabled and
-    patched to the chosen status + QA/QC flags (``_mint_enabled``) (default Waiting on QA/QC; the form's
+    the child type's own datasheet and single manufacturer, born with the
+    chosen status + QA/QC flags (``_mint_linkable``) (default Waiting on QA/QC; the form's
     "virtual part" preset is Passed All + uploaded + certified, Hajime's
     rule for bureaucratic parts nobody tests; HWDB links only statuses
     100/110/120/140), then ONE subcomponents PATCH linking them all.
@@ -3964,9 +3961,8 @@ def _mint_children(api, inst, request, parent_pid, connectors, children, institu
             if len(mans) == 1 and mans[0].get("id") is not None:
                 payload["manufacturer"] = {"id": mans[0]["id"]}
             try:
-                pid = _mint_enabled(api, c["type_id"], payload, patch={
-                    "status": {"id": c["status_id"]}, "qaqc_uploaded": c["qaqc_uploaded"],
-                    "certified_qaqc": c["certified_qaqc"]})
+                pid = _mint_linkable(api, c["type_id"], payload, c["status_id"],
+                                     uploaded=c["qaqc_uploaded"], certified=c["certified_qaqc"])
             except requests.RequestException as e:
                 errors.append(f"{c['name']} for position “{pos}”: {_hwdb_error_detail(e)}")
                 continue
