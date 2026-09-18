@@ -171,6 +171,10 @@
   .pl-status #stats { color: var(--dim); }
   .pl-status .hint { margin-left: auto; }
   .pl-err { color: var(--bad, #a33); font-size: 12.5px; }
+  #draw { font-family: var(--font-mono); flex: 1; }
+  .pl-help { padding: 10px 12px; display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; font-size: 12px; overflow: auto; }
+  .pl-help b { font-weight: 600; color: var(--ink); white-space: nowrap; }
+  .pl-help code { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink); }
   @media (max-width: 960px) {
     .pl-wb { grid-template-columns: 1fr; min-height: 0; }
     .pl-main { min-width: 0; }
@@ -235,6 +239,12 @@
         </div>
         <div id="axes-grp" hidden style="display: grid; gap: 10px;">
           <h2 style="margin-top: 2px;">Axes <span class="for pl-for"></span></h2>
+        <div class="pl-grp">
+          <div class="pl-f"><span>Draw</span><div class="pl-row" style="flex-wrap: nowrap;">
+            <input type="text" id="draw" placeholder="y : x   e.g. Result[3]  or  R_eff/R_cable : Result" spellcheck="false" autocomplete="off" title="ROOT style — an expression over keys draws its histogram; y : x draws two axes (the first is Y). Enter applies.">
+            <button type="button" class="pl-btn sm" id="draw-help" title="Draw syntax">?</button></div></div>
+          <span class="pl-err" id="draw-err" hidden></span>
+        </div>
         <div class="pl-grp">
           <div class="pl-f"><span>X</span><div class="pl-kfield" id="xfield" data-ax="x" tabindex="0" role="button" title="Choose the X key"></div></div>
           <div class="pl-f"><span>Y</span><div class="pl-kfield" id="yfield" data-ax="y" tabindex="0" role="button" title="Choose the Y key (optional)"></div></div>
@@ -336,6 +346,19 @@
     <div class="foot">A saved plot is its URL. Copy link to share one.</div>
   </div>
 
+  <div class="pl-pop" id="dpop" hidden>
+    <div class="srch"><span class="pl-hint">Draw — ROOT style</span><span style="margin-left: auto;" class="pl-hint">esc closes</span></div>
+    <div class="pl-help">
+      <b>expr</b><span>histogram of the expression</span>
+      <b>y : x</b><span>two axes — the first is Y, as in ROOT</span>
+      <b>keys</b><span><code>Test_Results.SiPM.Result</code>, or just <code>Result</code> when that names one key; spaces as <code>_</code>; <code>"quoted"</code> for other characters; case-insensitive unless two keys differ only by case</span>
+      <b>index</b><span><code>Result[3]</code> pins the first list level, <code>Result[3][2]</code> the second too, <code>Result[][5]</code> skips one; <code>SiPM[5].Result</code> pins the level named SiPM; unpinned levels plot every entry</span>
+      <b>operators</b><span><code>+ - * / % ^</code> · comparisons give 1 or 0: <code>== != &lt; &lt;= &gt; &gt;= &amp;&amp; || !</code></span>
+      <b>functions</b><span><code>sqrt abs log log10 exp pow sin cos tan atan atan2 min max floor ceil round</code> · <code>pi e</code></span>
+      <b>lists</b><span>two lists run together entry by entry, a single value repeats; a missing or non-numeric value drops that entry</span>
+    </div>
+    <div class="foot">A bare key name with pins is the same as picking it below.</div>
+  </div>
   <div class="pl-pop" id="kpop" hidden>
     <div class="srch">
       <span class="ax" id="kpop-ax">X</span>
@@ -403,7 +426,9 @@
     // counted (one free level), or the flat index when several are free.
     function who(pid) { var it = itemByPid[pid]; return pid + (it && it.serial ? " · " + it.serial : ""); }
     function idxLabel(p, s, j) {
-        var d = keyDims(p) || [], ix = idxOf(p, s) || [];
+        var d, ix;
+        if (isExpr(p)) { var m = exprMeta(p); if (m.err || !m.ids.length) return ""; d = keyDims(m.ids[0].p) || []; ix = m.ids[0].ix || []; }
+        else { d = keyDims(p) || []; ix = idxOf(p, s) || []; }
         if (!d.length) return "";
         // values arrive flattened row-major over the free levels (selectAt /
         // plotting.leaves) — undo that with the key's dims; an unknown size
@@ -417,6 +442,7 @@
         return show(function (x) { return x.pin === null ? x.at : x.pin; });
     }
     function tipLines(q) { return q.ix ? [q.t, q.ix] : [q.t]; }   // tooltip title: the item, then its array position
+    function srcIdx(arr, j) { return arr.src ? arr.src[j] : j; }   // an expression's result → the entry it came from
     var itemByPid = {};
     function pidAlternation(pids) { return "^(" + (pids.length ? pids.join("|") : "-") + ")$"; }
     function idsFilter() { return pidAlternation(resolveIds(IDS).pids); }
@@ -539,7 +565,7 @@
     // and a series' per-axis index pins — one entry per level, null = every
     // element. Pinned values live in their own cache slot (key@[…]).
     function keyDims(p) {
-        if (!p) return [];
+        if (!p || isExpr(p)) return [];
         if (!isTest()) return specKeyDims(p);
         var k = testCache ? testCache.keys.find(function (x) { return JSON.stringify(x.path) === p; }) : null;
         return k && k.dims ? k.dims : [];
@@ -548,8 +574,9 @@
         var a = p && p === s.x ? s.xi : p && p === s.y ? s.yi : null;
         return a && a.some(function (i) { return i !== null && i !== undefined; }) ? a.map(function (i) { return i === undefined ? null : i; }) : null;
     }
-    function slotBase(p, s) { var ix = idxOf(p, s); return ix ? p + "@" + JSON.stringify(ix) : p; }
-    function idxScale(p, s) { var ix = idxOf(p, s), d = keyDims(p), sc = 1; if (ix) ix.forEach(function (i, j) { if (i !== null && d[j] && d[j].n > 1) sc *= d[j].n; }); return sc; }
+    function slotOf(p, ix) { return ix ? p + "@" + JSON.stringify(ix) : p; }
+    function slotBase(p, s) { return slotOf(p, idxOf(p, s)); }
+    function idxScaleOf(p, ix) { var d = keyDims(p), sc = 1; if (ix) ix.forEach(function (i, j) { if (i !== null && d[j] && d[j].n > 1) sc *= d[j].n; }); return sc; }
     function idxNote(s) {
         return ["x", "y"].map(function (ax) { var p = s[ax], ix = idxOf(p, s); return ix ? " · " + showPath(p) + " [" + ix.map(function (i) { return i === null ? "·" : i; }).join(", ") + "]" : ""; }).join("");
     }
@@ -635,6 +662,195 @@
         return (i >= 0 && i < v.length) ? selectAt(v[i], idx, d + 1) : [];
     }
     // [/154-pure]
+    // [162-pure] ROOT-style Draw expressions (TTree::Draw): tokenizer, parser
+    // (precedence climbing), compiler to a closure over an identifier
+    // environment, the key-name resolver and the position-wise evaluator.
+    // No DOM in this block — test_plotting runs it in node.
+    var EXPR_FUNCS = { sqrt: Math.sqrt, abs: Math.abs, log: Math.log, log10: Math.log10, exp: Math.exp, pow: Math.pow, sin: Math.sin, cos: Math.cos, tan: Math.tan,
+                       atan: Math.atan, atan2: Math.atan2, min: Math.min, max: Math.max, floor: Math.floor, ceil: Math.ceil, round: Math.round };
+    var EXPR_CONSTS = { pi: Math.PI, e: Math.E };
+    var EXPR_PREC = { "||": 1, "&&": 2, "==": 3, "!=": 3, "<": 4, "<=": 4, ">": 4, ">=": 4, "+": 5, "-": 5, "*": 6, "/": 6, "%": 6 };
+    function isExpr(p) { return typeof p === "string" && p.charAt(0) === "="; }     // a series' x / y: "=expr", else a JSON key path
+    function exprText(p) { return isExpr(p) ? p.slice(1) : p; }
+    function exprNum(v) {
+        if (typeof v === "number") return isFinite(v) ? v : null;
+        if (typeof v === "string" && v.trim() !== "") { var n = Number(v); return isFinite(n) ? n : null; }
+        return null;
+    }
+    // "y : x" at the top level (outside brackets and quotes) → [y, x]; no colon → [x]
+    function exprSplit(text) {
+        var parts = [], depth = 0, q = false, cur = "";
+        for (var i = 0; i < text.length; i++) {
+            var ch = text[i];
+            if (ch === '"') q = !q;
+            if (!q) {
+                if (ch === "(" || ch === "[") depth++; else if (ch === ")" || ch === "]") depth--;
+                else if (ch === ":" && !depth) { parts.push(cur); cur = ""; continue; }
+            }
+            cur += ch;
+        }
+        parts.push(cur);
+        return parts.map(function (s) { return s.trim(); });
+    }
+    // Tokens: numbers; identifiers = segments (bare, or "quoted" for other
+    // characters) joined by ".", each with optional [i] / [] pins; a bare name
+    // before "(" is a function; operators. Positions are 1-based in messages.
+    function exprTokens(text) {
+        var out = [], i = 0, n = text.length, OPS2 = ["&&", "||", "==", "!=", "<=", ">=", ">>"], OPS1 = "+-*/%^(),<>!";
+        while (i < n) {
+            var ch = text[i];
+            if (/\s/.test(ch)) { i++; continue; }
+            if (/[0-9.]/.test(ch)) {
+                var m = /^(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/.exec(text.slice(i));
+                if (!m) throw new Error("bad number at " + (i + 1));
+                out.push({ t: "num", v: +m[0], at: i }); i += m[0].length; continue;
+            }
+            if (/[A-Za-z_"]/.test(ch)) {
+                var start = i, segs = [];
+                for (;;) {
+                    var seg;
+                    if (text[i] === '"') {
+                        var e = text.indexOf('"', i + 1); if (e < 0) throw new Error("unclosed quote at " + (i + 1));
+                        seg = { name: text.slice(i + 1, e), pins: [] }; i = e + 1;
+                    } else {
+                        var mm = /^[A-Za-z_][A-Za-z0-9_]*/.exec(text.slice(i)); if (!mm) throw new Error("bad name at " + (i + 1));
+                        seg = { name: mm[0], pins: [] }; i += mm[0].length;
+                    }
+                    while (text[i] === "[") {
+                        var mb = /^\[\s*(\d*|\*)\s*\]/.exec(text.slice(i)); if (!mb) throw new Error("bad index at " + (i + 1));
+                        seg.pins.push(mb[1] === "" || mb[1] === "*" ? null : +mb[1]); i += mb[0].length;
+                    }
+                    segs.push(seg);
+                    if (text[i] === ".") { i++; continue; }
+                    break;
+                }
+                var ws = i; while (ws < n && /\s/.test(text[ws])) ws++;
+                if (segs.length === 1 && !segs[0].pins.length && text[ws] === "(") { out.push({ t: "fn", v: segs[0].name, at: start }); i = ws; continue; }
+                out.push({ t: "id", v: segs, text: text.slice(start, i), at: start }); continue;
+            }
+            var op = OPS2.find(function (o) { return text.substr(i, 2) === o; }) || (OPS1.indexOf(ch) >= 0 ? ch : null);
+            if (!op) throw new Error("unexpected “" + ch + "” at " + (i + 1));
+            if (op === ">>") throw new Error("binning (>>) is not supported yet");
+            out.push({ t: "op", v: op, at: i }); i += op.length;
+        }
+        return out;
+    }
+    // Compile: resolve(idToken) returns the identifier's slot in the value
+    // environment (or throws). Result: { fn(env) → number, ids: [idToken] }.
+    // ^ binds tighter than unary minus (-x^2 = -(x^2)) and is right-associative.
+    function exprCompile(text, resolve) {
+        var toks = exprTokens(text), pos = 0, ids = [];
+        if (!toks.length) throw new Error("empty expression");
+        function peek() { return toks[pos]; }
+        function take() { return toks[pos++]; }
+        function isOp(t, v) { return t && t.t === "op" && t.v === v; }
+        function expectOp(v) { var t = take(); if (!isOp(t, v)) throw new Error("expected “" + v + "”" + (t ? " at " + (t.at + 1) : " at the end")); }
+        function primary() {
+            var t = take();
+            if (!t) throw new Error("unexpected end");
+            if (t.t === "num") { var v = t.v; return function () { return v; }; }
+            if (t.t === "id") {
+                var k;
+                try { k = resolve(t); }
+                catch (err) {
+                    var nm = t.v[0].name.toLowerCase();
+                    if (t.v.length === 1 && !t.v[0].pins.length && Object.prototype.hasOwnProperty.call(EXPR_CONSTS, nm)) { var c = EXPR_CONSTS[nm]; return function () { return c; }; }
+                    throw err;
+                }
+                ids.push(t);
+                return function (env) { return env[k]; };
+            }
+            if (t.t === "fn") {
+                var f = EXPR_FUNCS[t.v.toLowerCase()]; if (!f) throw new Error("unknown function " + t.v);
+                expectOp("("); var args = [];
+                if (!isOp(peek(), ")")) { args.push(expr(0)); while (isOp(peek(), ",")) { take(); args.push(expr(0)); } }
+                expectOp(")");
+                return function (env) { return f.apply(null, args.map(function (a) { return a(env); })); };
+            }
+            if (isOp(t, "(")) { var e = expr(0); expectOp(")"); return e; }
+            if (isOp(t, "-")) { var u = unary(); return function (env) { return -u(env); }; }
+            if (isOp(t, "!")) { var u2 = unary(); return function (env) { return u2(env) ? 0 : 1; }; }
+            throw new Error("unexpected “" + t.v + "” at " + (t.at + 1));
+        }
+        function unary() {
+            var base = primary();
+            if (isOp(peek(), "^")) { take(); var ex = unary(), b0 = base; base = function (env) { return Math.pow(b0(env), ex(env)); }; }
+            return base;
+        }
+        function expr(minPrec) {
+            var left = unary();
+            for (;;) {
+                var t = peek(); if (!t || t.t !== "op" || !Object.prototype.hasOwnProperty.call(EXPR_PREC, t.v) || EXPR_PREC[t.v] < minPrec) break;
+                take();
+                left = (function (op, l, r) { return function (env) {
+                    var a = l(env), b = r(env);
+                    switch (op) {
+                        case "+": return a + b; case "-": return a - b; case "*": return a * b; case "/": return a / b; case "%": return a % b;
+                        case "<": return a < b ? 1 : 0; case "<=": return a <= b ? 1 : 0; case ">": return a > b ? 1 : 0; case ">=": return a >= b ? 1 : 0;
+                        case "==": return a === b ? 1 : 0; case "!=": return a !== b ? 1 : 0; case "&&": return a && b ? 1 : 0; default: return a || b ? 1 : 0;
+                    }
+                }; })(t.v, left, expr(EXPR_PREC[t.v] + 1));
+            }
+            return left;
+        }
+        var fn = expr(0);
+        if (pos < toks.length) throw new Error("unexpected “" + toks[pos].v + "” at " + (toks[pos].at + 1));
+        return { fn: fn, ids: ids };
+    }
+    // A name → one key. keys: [{ p, segs, dims() }]. The name's segments match
+    // the key's trailing segments; case and space/underscore are ignored unless
+    // that leaves several keys — then the exact spelling decides. Pins: [i] on
+    // a segment that names a list level pins that level; on the leaf, the
+    // levels in order from the first (ROOT: a[i][j]); [] skips one.
+    function exprNorm(s) { return String(s).toLowerCase().replace(/[\s_]+/g, "_"); }
+    function exprResolve(idTok, keys) {
+        var segs = idTok.v, n = segs.length;
+        function tail(k, i) { return k.segs[k.segs.length - n + i]; }
+        var loose = keys.filter(function (k) { return k.segs.length >= n && segs.every(function (sg, i) { return exprNorm(tail(k, i)) === exprNorm(sg.name); }); });
+        var hits = loose;
+        if (loose.length > 1) {
+            var exact = loose.filter(function (k) { return segs.every(function (sg, i) { return tail(k, i) === sg.name || tail(k, i) === sg.name.replace(/_/g, " "); }); });
+            if (exact.length === 1) hits = exact;
+            else throw new Error("“" + idTok.text + "” matches " + loose.length + " keys: " + loose.slice(0, 5).map(function (k) { return k.segs.join("."); }).join(", ") + (loose.length > 5 ? ", …" : ""));
+        }
+        if (!hits.length) throw new Error("no key named “" + idTok.text + "”");
+        var k = hits[0], dims = k.dims() || [], ix = null;
+        segs.forEach(function (sg, i) {
+            if (!sg.pins.length) return;
+            var name = tail(k, i), named = dims.map(function (d, j) { return d.seg === name ? j : -1; }).filter(function (j) { return j >= 0; });
+            var levels = named.length ? named : (i === n - 1 ? dims.map(function (d, j) { return j; }) : []);
+            if (!levels.length) throw new Error("“" + name + "” is not a list");
+            if (sg.pins.length > levels.length) throw new Error("“" + name + "” has " + levels.length + " index" + (levels.length > 1 ? "es" : "") + ", not " + sg.pins.length);
+            ix = ix || dims.map(function () { return null; });
+            sg.pins.forEach(function (pin, q) {
+                var lv = levels[q]; if (pin === null) return;
+                if (pin >= dims[lv].n) throw new Error("index " + pin + " is past the end of " + (dims[lv].seg || "level " + (lv + 1)) + " (" + dims[lv].n + " entries)");
+                ix[lv] = pin;
+            });
+        });
+        if (ix && !ix.some(function (v) { return v !== null; })) ix = null;
+        return { p: k.p, ix: ix };
+    }
+    // Evaluate over one item: arrays run together position by position up to the
+    // shortest, a single value repeats, an identifier with no values gives
+    // nothing; a non-numeric or non-finite entry drops out. out.src keeps each
+    // result's source position (tooltips, and X–Y pairing by entry).
+    function exprEval(fn, arrays) {
+        var n = Infinity;
+        arrays.forEach(function (a) { if (!a.length) n = 0; else if (a.length > 1) n = Math.min(n, a.length); });
+        if (n === Infinity) n = 1;
+        var out = [], src = [], env = new Array(arrays.length);
+        for (var j = 0; j < n; j++) {
+            var ok = true;
+            for (var k = 0; k < arrays.length; k++) { var v = exprNum(arrays[k].length > 1 ? arrays[k][j] : arrays[k][0]); if (v === null) { ok = false; break; } env[k] = v; }
+            if (!ok) continue;
+            var r = fn(env);
+            if (typeof r === "number" && isFinite(r)) { out.push(r); src.push(j); }
+        }
+        out.src = src;
+        return out;
+    }
+    // [/162-pure]
     // Specs: a key's shape from up to 200 items holding it (reset with the dataset).
     var specDims = {};
     function specKeyDims(p) {
@@ -650,49 +866,80 @@
         specDims[p] = Math.max.apply(null, d.concat([0])) > 1 ? d.map(function (n, j) { return { seg: (labels && labels[j]) || "", n: n }; }) : [];
         return specDims[p];
     }
-    // The one accessor both sources share.
-    function valuesFor(item, pathJSON, s) {
-        if (!pathJSON) return [];
-        if (isTest()) { var b = slotBase(pathJSON, s); return item.vals[b] || item.vals[b + "|" + pidFilter(s)] || []; }
-        var v = nestedAt(item.data, JSON.parse(pathJSON), 0);
-        return v === null ? [] : selectAt(v, idxOf(pathJSON, s) || []);
+    // The one accessor both sources share: a key (with the series' pins), or
+    // a Draw expression over keys (#162).
+    function slotValues(item, p, ix, s) {
+        if (isTest()) { var b = slotOf(p, ix); return item.vals[b] || item.vals[b + "|" + pidFilter(s)] || []; }
+        var v = nestedAt(item.data, JSON.parse(p), 0);
+        return v === null ? [] : selectAt(v, ix || []);
     }
-    // Test source: is this key loaded for the series' PID filter? (a whole-type
+    function valuesFor(item, p, s) {
+        if (!p) return [];
+        if (isExpr(p)) { var m = exprMeta(p); return m.err ? [] : exprEval(m.fn, m.ids.map(function (id) { return slotValues(item, id.p, id.ix, s); })); }
+        return slotValues(item, p, idxOf(p, s), s);
+    }
+    // Compiled expressions for this dataset: text → { fn, ids: [{ p, ix, text }] } or { err }
+    var exprCache = {};
+    function exprMeta(p) {
+        var text = exprText(p);
+        if (exprCache[text]) return exprCache[text];
+        var keys = paths.map(function (k) { return { p: k, segs: JSON.parse(k), dims: function () { return keyDims(k); } }; }), meta;
+        try {
+            var res = [], c = exprCompile(text, function (tok) {
+                var r = exprResolve(tok, keys), slot = slotOf(r.p, r.ix);
+                for (var i = 0; i < res.length; i++) if (slotOf(res[i].p, res[i].ix) === slot) return i;     // the same key twice: one slot
+                r.text = tok.text; res.push(r); return res.length - 1;
+            });
+            meta = { fn: c.fn, ids: res };
+        } catch (e) { meta = { err: e.message }; }
+        return (exprCache[text] = meta);
+    }
+    function exprErr(s) { return ["x", "y"].map(function (ax) { return isExpr(s[ax]) ? exprMeta(s[ax]).err : null; }).filter(Boolean)[0] || null; }
+    // X and Y of one item paired by entry: by position for keys, by source
+    // position when an expression dropped entries (an entry fails as a whole)
+    function pairValues(it, s) {
+        var xa = valuesFor(it, s.x, s), yb = valuesFor(it, s.y, s), out = [];
+        if (!xa.src && !yb.src) { var n = Math.min(xa.length, yb.length); for (var i = 0; i < n; i++) out.push({ x: xa[i], y: yb[i], i: i }); return out; }
+        var ym = {}; yb.forEach(function (v, j) { ym[srcIdx(yb, j)] = v; });
+        xa.forEach(function (v, j) { var k = srcIdx(xa, j); if (k in ym) out.push({ x: v, y: ym[k], i: k }); });
+        return out;
+    }
+    // Test source: is this slot loaded for the series' PID filter? (a whole-type
     // fetch, stored under the bare key, serves any filter)
-    function haveKey(p, s) { var b = slotBase(p, s); return (b in testCache.values) || ((b + "|" + pidFilter(s)) in testCache.values); }
+    function haveSlot(p, ix, s) { var b = slotOf(p, ix); return (b in testCache.values) || ((b + "|" + pidFilter(s)) in testCache.values); }
     function keyNV(p) { var k = testCache.keys.find(function (x) { return JSON.stringify(x.path) === p; }); return k ? (k.nv || k.n) : 0; }
     function toNum(v) {
         if (typeof v === "number") return isFinite(v) ? v : null;
         if (typeof v === "string" && v.trim() !== "") { var n = Number(v); return isFinite(n) ? n : null; }
         return null;
     }
-    function showPath(p) { return JSON.parse(p).join(" › "); }
-    function lastSeg(p) { try { var a = JSON.parse(p); return a[a.length - 1]; } catch (e) { return ""; } }
+    function showPath(p) { return isExpr(p) ? exprText(p) : JSON.parse(p).join(" › "); }
+    function lastSeg(p) { if (isExpr(p)) return exprText(p); try { var a = JSON.parse(p); return a[a.length - 1]; } catch (e) { return ""; } }
 
     // Test source: make sure every key a series' plot needs is in item.vals.
     // With a PID filter set, only the matching items' values are fetched —
     // that is how a 2000-point-per-item array key stays plottable for one item.
-    async function ensureKeys(pathJSONs, s) {
-        var pidf = pidFilter(s), need = pathJSONs.filter(function (p) { return p && !haveKey(p, s); });
+    async function ensureKeys(specs, s) {         // specs: [{ p, ix }] — a key and the pins to fetch it with
+        var pidf = pidFilter(s), need = specs.filter(function (sp) { return sp.p && !haveSlot(sp.p, sp.ix, s); });
         if (!need.length) return true;
         var max = testCache.max_values || 2000000;
-        var big = need.filter(function (p) { return !pidf && keyNV(p) / idxScale(p, s) > max; });
+        var big = need.filter(function (sp) { return !pidf && keyNV(sp.p) / idxScaleOf(sp.p, sp.ix) > max; });
         if (big.length) {
-            var levels = keyDims(big[0]).filter(function (d) { return d.n > 1; }).map(function (d) { return d.seg || "array"; });
-            clear((series.length > 1 ? s.name + ": " : "") + showPath(big[0]) + " holds " + keyNV(big[0]).toLocaleString() + " values across the type, over the "
+            var levels = keyDims(big[0].p).filter(function (d) { return d.n > 1; }).map(function (d) { return d.seg || "array"; });
+            clear((series.length > 1 ? s.name + ": " : "") + showPath(big[0].p) + " holds " + keyNV(big[0].p).toLocaleString() + " values across the type, over the "
                   + max.toLocaleString() + " limit. Pick one item in the grid below or set a PID filter"
                   + (levels.length ? ", or pin the " + levels.join(" and ") + " index to plot every item" : "") + ".");
             return false;
         }
-        busy = true; $("stats").textContent = "loading " + need.map(showPath).join(", ") + (series.length > 1 ? " for " + s.name : "") + "…";
+        busy = true; $("stats").textContent = "loading " + need.map(function (sp) { return showPath(sp.p); }).join(", ") + (series.length > 1 ? " for " + s.name : "") + "…";
         try {
             for (var i = 0; i < need.length; i++) {
-                var ix = idxOf(need[i], s);
-                var url = TESTS_BASE + "/" + source + "/values/?key=" + encodeURIComponent(need[i]) + (pidf ? "&pid=" + encodeURIComponent(pidf) : "")
+                var ix = need[i].ix;
+                var url = TESTS_BASE + "/" + source + "/values/?key=" + encodeURIComponent(need[i].p) + (pidf ? "&pid=" + encodeURIComponent(pidf) : "")
                         + (ix ? "&idx=" + encodeURIComponent(JSON.stringify(ix)) : "");
                 var resp = await fetch(url), j = await resp.json();
                 if (!resp.ok) { clear(j.error || ("HTTP " + resp.status)); return false; }
-                var slot = pidf ? slotBase(need[i], s) + "|" + pidf : slotBase(need[i], s);
+                var slot = pidf ? slotOf(need[i].p, ix) + "|" + pidf : slotOf(need[i].p, ix);
                 testCache.values[slot] = j.values || {};
                 items.forEach(function (it) { if (j.values && j.values[it.pid]) it.vals[slot] = j.values[it.pid]; });
             }
@@ -700,9 +947,20 @@
         await idbPut(cacheKey(), testCache);
         return true;
     }
-    function seriesKeys(s) { return [s.x, s.y].concat(s.cuts.map(function (c) { return c.p; })).filter(Boolean); }
-    async function ensureAll(list) {           // [series, …] → every series' keys, one series at a time
-        for (var i = 0; i < list.length; i++) { if (!(await ensureKeys(seriesKeys(list[i]), list[i]))) return false; }
+    // Every slot a series reads: its X / Y keys with their pins, an expression's
+    // identifiers with theirs, the cut keys (a cut on the X key shares X's pins)
+    function seriesSpecs(s) {
+        var out = [];
+        ["x", "y"].forEach(function (ax) {
+            var p = s[ax]; if (!p) return;
+            if (isExpr(p)) { var m = exprMeta(p); if (!m.err) m.ids.forEach(function (id) { out.push({ p: id.p, ix: id.ix }); }); }
+            else out.push({ p: p, ix: idxOf(p, s) });
+        });
+        s.cuts.forEach(function (c) { if (c.p) out.push({ p: c.p, ix: idxOf(c.p, s) }); });
+        return out;
+    }
+    async function ensureAll(list) {           // [series, …] → every series' slots, one series at a time
+        for (var i = 0; i < list.length; i++) { if (!(await ensureKeys(seriesSpecs(list[i]), list[i]))) return false; }
         return true;
     }
 
@@ -857,16 +1115,17 @@
     function drawnSeries() {
         var a = S();
         if (a.y && $("mode2d").value === "heat") return [a];
-        return series.filter(function (s) { return s.x; });
+        return series.filter(function (s) { return s.x && !exprErr(s); });
     }
     function seriesLabel(s) { return series.length > 1 ? s.name : "Items"; }
 
     function render() {
         var a = S(), xp = a.x, yp = a.y;
-        if (!xp) { clear("Pick an X key."); return; }
+        if (!xp) { clear("Pick an X key, or type a Draw expression."); return; }
+        if (exprErr(a)) { clear("Draw: " + exprErr(a)); return; }
         var drawn = drawnSeries();
         if (isTest()) {
-            var need = drawn.filter(function (s) { return seriesKeys(s).some(function (p) { return !haveKey(p, s); }); });
+            var need = drawn.filter(function (s) { return seriesSpecs(s).some(function (sp) { return !haveSlot(sp.p, sp.ix, s); }); });
             if (need.length) { if (!busy) ensureAll(need).then(function (ok) { if (ok) { render(); drawItems(); } }); return; }
         }
         var stats = $("stats");
@@ -888,8 +1147,7 @@
             var pairsOf = function (s, sel) {
                 var pairs = [];
                 sel.forEach(function (it) {
-                    var xa = valuesFor(it, s.x, s), yb = valuesFor(it, s.y, s), n = Math.min(xa.length, yb.length);
-                    for (var i = 0; i < n; i++) pairs.push({ x: xa[i], y: yb[i], pid: it.pid, t: who(it.pid), ix: idxLabel(s.x, s, i) });
+                    pairValues(it, s).forEach(function (q) { pairs.push({ x: q.x, y: q.y, pid: it.pid, t: who(it.pid), ix: idxLabel(s.x, s, q.i) }); });
                 });
                 return pairs;
             };
@@ -935,8 +1193,8 @@
                     drawn.forEach(function (s, si) {
                         var seq = [], nItems = 0, c = color(series.indexOf(s));
                         sels[si].slice().sort(function (p1, q1) { return p1.pid < q1.pid ? -1 : 1; }).forEach(function (it) {
-                            var xa = valuesFor(it, s.x, s), yb = valuesFor(it, s.y, s), n = Math.min(xa.length, yb.length), got = 0;
-                            for (var i = 0; i < n; i++) { var xv = toNum(xa[i]), yv = toNum(yb[i]); if (xv !== null && yv !== null) { seq.push({ x: xv, y: yv, pid: it.pid, i: i, t: who(it.pid), ix: idxLabel(s.x, s, i) }); got++; } }
+                            var got = 0;
+                            pairValues(it, s).forEach(function (q) { var xv = toNum(q.x), yv = toNum(q.y); if (xv !== null && yv !== null) { seq.push({ x: xv, y: yv, pid: it.pid, i: q.i, t: who(it.pid), ix: idxLabel(s.x, s, q.i) }); got++; } });
                             if (got) { nItems++; seq.push({ x: null, y: null }); }     // gap before the next item
                         });
                         if (seq.length) seq.pop();
@@ -1002,7 +1260,7 @@
         // One key per series. The active series decides the family (numeric
         // or categorical); other series join when their values fit it.
         var tagsOf = [];      // per series, one "PID · serial [index]" per value, in valsOf order
-        var valsOf = drawn.map(function (s, i) { var v = [], t = []; sels[i].forEach(function (it) { valuesFor(it, s.x, s).forEach(function (x, j) { v.push(x); t.push({ t: who(it.pid), ix: idxLabel(s.x, s, j) }); }); }); tagsOf.push(t); return v; });
+        var valsOf = drawn.map(function (s, i) { var v = [], t = []; sels[i].forEach(function (it) { var arr = valuesFor(it, s.x, s); arr.forEach(function (x, j) { v.push(x); t.push({ t: who(it.pid), ix: idxLabel(s.x, s, srcIdx(arr, j)) }); }); }); tagsOf.push(t); return v; });
         var ai = drawn.indexOf(a), vals = valsOf[ai];
         if (!vals.length) { clear(head + " · no values for this key on the selected items"); controls(false, null); return; }
         if (isNumeric(vals)) {
@@ -1027,7 +1285,7 @@
                 var dsL = used.map(function (s, i) {
                     var seq = [], c = color(series.indexOf(s));
                     sels[drawn.indexOf(s)].slice().sort(function (p, q) { return p.pid < q.pid ? -1 : 1; }).forEach(function (it) {
-                        valuesFor(it, s.x, s).forEach(function (v, j) { var n = toNum(v); if (n !== null) seq.push({ x: seq.length, y: n, pid: it.pid, t: who(it.pid), ix: idxLabel(s.x, s, j) }); });
+                        var arr = valuesFor(it, s.x, s); arr.forEach(function (v, j) { var n = toNum(v); if (n !== null) seq.push({ x: seq.length, y: n, pid: it.pid, t: who(it.pid), ix: idxLabel(s.x, s, srcIdx(arr, j)) }); });
                     });
                     return { label: seriesLabel(s), data: seq, borderColor: c, backgroundColor: c, borderWidth: 1.5, pointRadius: seq.length > 400 ? 0 : 2, tension: 0 };
                 });
@@ -1132,7 +1390,10 @@
         ["x", "y"].forEach(function (ax) {
             var f = $(ax + "field"), p = s[ax]; f.textContent = ""; f.classList.toggle("empty", !p);
             var crumb = document.createElement("span"); crumb.className = "crumb";
-            if (p) {
+            if (isExpr(p)) {
+                var ex = document.createElement("span"); ex.textContent = exprText(p); ex.className = "leaf"; ex.style.fontFamily = "var(--font-mono)"; ex.style.fontWeight = "400"; ex.style.overflow = "hidden"; ex.style.textOverflow = "ellipsis"; ex.style.flex = "0 1 auto"; crumb.appendChild(ex);
+                f.title = exprText(p) + " · Draw expression";
+            } else if (p) {
                 var segs = JSON.parse(p), sd = segDims(p);
                 segs.forEach(function (seg, i) {
                     if (i) { var sp = document.createElement("span"); sp.className = "sep"; sp.textContent = "›"; crumb.appendChild(sp); }
@@ -1166,7 +1427,7 @@
     window.addEventListener("resize", function () { if (!$("kpop").hidden) openPop(popAx); });
     function drawTree() {
         var s = S(), box = $("ktree"), q = $("kq").value.trim().toLowerCase(), show = $("rare").checked, other = popAx === "x" ? "y" : "x";
-        var keep = [s.x, s.y].concat(s.cuts.map(function (c) { return c.p; })).filter(Boolean);
+        var keep = seriesSpecs(s).map(function (sp) { return sp.p; });
         var root = { kids: {}, leaf: null, dim: 0 };
         paths.forEach(function (p) {
             if (!show && isRare(p) && keep.indexOf(p) < 0) return;
@@ -1244,7 +1505,7 @@
     // The X / Y and Cuts controls show series[cur].
     function syncPanel() {
         var s = S();
-        drawFields(); if (!$("kpop").hidden) drawTree();
+        drawFields(); if (!$("kpop").hidden) drawTree(); syncDraw();
         $("item").value = s.item || ""; $("pidf").value = s.pid || ""; $("snf").value = s.sn || ""; $("logic").value = s.logic || "and";
         drawFacets(); drawCuts();
         Array.prototype.forEach.call(document.querySelectorAll(".pl-for"), function (el) {
@@ -1333,7 +1594,7 @@
         IDS = h.ids.map(String);
         if (items.length) { render(); drawItems(); }
     });
-    function changed() { drawIdx(); writeHash(); drawChips(); render(); drawItems(); drawSaved(); }
+    function changed() { drawIdx(); syncDraw(); writeHash(); drawChips(); render(); drawItems(); drawSaved(); }
 
     // ---- Tabs ----------------------------------------------------------------
     var tabs = document.querySelectorAll(".pl-tab"), panes = document.querySelectorAll(".pl-panel [data-pane]");
@@ -1399,7 +1660,7 @@
 
     // Both sources land here: the item list + the key inventory → series → controls → plot.
     function setDataset(newItems, counts, statusText) {
-        items = newItems; pathCounts = counts; specDims = {};
+        items = newItems; pathCounts = counts; specDims = {}; exprCache = {};
         itemByPid = {}; items.forEach(function (it) { itemByPid[it.pid] = it; });
         paths = Object.keys(counts).sort(function (a, b) { return (counts[b] - counts[a]) || (a < b ? -1 : 1); });
         $("data-status").textContent = statusText;
@@ -1411,7 +1672,7 @@
             var s = blankSeries();
             s.name = (h.name || "").trim() || "Series " + (i + 1);
             s.color = /^#[0-9a-f]{6}$/i.test(h.color || "") ? h.color : "";
-            s.x = h.x && acc.has(h.x) ? h.x : ""; s.y = h.y && acc.has(h.y) ? h.y : "";
+            s.x = h.x && (isExpr(h.x) || acc.has(h.x)) ? h.x : ""; s.y = h.y && (isExpr(h.y) || acc.has(h.y)) ? h.y : "";
             s.item = h.item || ""; s.pid = h.pid || ""; s.sn = h.sn || ""; s.f = h.f || {}; s.logic = h.logic === "or" ? "or" : "and";
             s.cuts = (h.cuts || []).filter(function (c) { return c && acc.has(c.p); });
             // #154: index pins from the hash belong to the keys it names
@@ -1489,6 +1750,63 @@
             else $("fetch-progress").textContent = "~" + pages + " pages from HWDB — may take a while";
         }
     }
+
+    // ---- Draw box (#162): the active series as a ROOT-style line, and back --
+    // A key is written as the fewest trailing segments that name it alone,
+    // its pins as [i] on the leaf (ROOT order, [] for a free level).
+    function keyAsName(p, ix) {
+        var segs = JSON.parse(p), n = 1;
+        for (; n < segs.length; n++) {
+            var tl = segs.slice(segs.length - n);
+            if (paths.filter(function (q) { var qs = JSON.parse(q); return qs.length >= n && qs.slice(qs.length - n).every(function (t, i) { return exprNorm(t) === exprNorm(tl[i]); }); }).length === 1) break;
+        }
+        var name = segs.slice(segs.length - n).map(function (t) { return /^[A-Za-z_][A-Za-z0-9_ ]*$/.test(t) ? t.replace(/ /g, "_") : JSON.stringify(t); }).join(".");
+        if (ix && ix.some(function (i) { return i !== null; })) {
+            var last = ix.length - 1; while (last >= 0 && ix[last] === null) last--;
+            for (var l = 0; l <= last; l++) name += "[" + (ix[l] === null ? "" : ix[l]) + "]";
+        }
+        return name;
+    }
+    function drawText(s) {
+        var parts = ["y", "x"].map(function (ax) { return s[ax] ? (isExpr(s[ax]) ? exprText(s[ax]) : keyAsName(s[ax], idxOf(s[ax], s))) : ""; });
+        return parts[0] ? parts[0] + " : " + parts[1] : parts[1];
+    }
+    function syncDraw() {
+        var s = S(); if (!s) return;
+        if (document.activeElement !== $("draw")) $("draw").value = drawText(s);
+        var err = exprErr(s); $("draw-err").textContent = err ? err : ""; $("draw-err").hidden = !err;
+    }
+    function applyDraw() {
+        var s = S(), text = $("draw").value.trim(), err = $("draw-err");
+        function fail(msg) { err.textContent = msg; err.hidden = false; }
+        if (!s) return;
+        var parts = exprSplit(text);
+        if (parts.length > 2) return fail("one “:” at most — y : x");
+        var side = { x: parts[parts.length - 1], y: parts.length === 2 ? parts[0] : "" }, got = {};
+        if (!side.x) return fail("write an expression for X" + (side.y ? " after the colon" : ""));
+        for (var ax in side) {
+            if (!side[ax]) { got[ax] = { p: "", ix: null }; continue; }
+            var m = exprMeta("=" + side[ax]); if (m.err) return fail(m.err);
+            var toks; try { toks = exprTokens(side[ax]); } catch (e) { return fail(e.message); }
+            // a bare key name (pins included) is the key itself, so the index row and the picker stay in step
+            got[ax] = toks.length === 1 && toks[0].t === "id" && m.ids.length === 1 ? { p: m.ids[0].p, ix: m.ids[0].ix } : { p: "=" + side[ax], ix: null };
+        }
+        s.x = got.x.p; s.xk = s.x; s.xi = got.x.ix ? got.x.ix.slice() : [];
+        s.y = got.y.p; s.yk = s.y; s.yi = got.y.ix ? got.y.ix.slice() : [];
+        err.hidden = true; $("xidx").removeAttribute("data-key"); $("yidx").removeAttribute("data-key");
+        drawFields(); changed(); $("draw").blur();
+    }
+    $("draw").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); applyDraw(); } if (e.key === "Escape") { $("draw").blur(); syncDraw(); } });
+    $("draw").addEventListener("blur", function () { if ($("draw").value.trim() !== drawText(S() || blankSeries())) applyDraw(); });
+    $("draw-help").addEventListener("click", function () {
+        var pop = $("dpop"), r = $("draw-help").getBoundingClientRect(), vw = window.innerWidth;
+        if (!pop.hidden) { pop.hidden = true; return; }
+        pop.hidden = false; var w = Math.min(520, vw - 24), left = r.right + 10;
+        if (left + w > vw - 12) left = Math.max(12, vw - w - 12);
+        pop.style.left = left + "px"; pop.style.top = Math.max(8, r.top - 8) + "px"; pop.style.width = w + "px"; pop.style.maxHeight = (window.innerHeight - Math.max(8, r.top - 8) - 12) + "px";
+    });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape") $("dpop").hidden = true; });
+    document.addEventListener("mousedown", function (e) { if (!$("dpop").hidden && !$("dpop").contains(e.target) && e.target !== $("draw-help")) $("dpop").hidden = true; });
 
     // Per-series controls write into series[cur]; shared ones just redraw.
     $("kq").addEventListener("input", drawTree);

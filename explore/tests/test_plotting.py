@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -121,7 +123,7 @@ class PlotViewsTest(TestCase):
         # points name the item, its serial and the value's place in the array; a
         # histogram bin lists what sits in it; drag-selecting a row's text is not a pick
         self.assertIn('function who(pid) { var it = itemByPid[pid]; return pid + (it && it.serial ? " · " + it.serial : ""); }', html)
-        self.assertIn('t: who(it.pid), ix: idxLabel(s.x, s, j)', html)
+        self.assertIn('t: who(it.pid), ix: idxLabel(s.x, s, srcIdx(arr, j))', html)
         self.assertIn('(d[l].seg || "level " + (l + 1)) + "[" + f(x) + "]"; }).join(" › ")', html)   # Test Results[7] › SiPM[5]
         self.assertIn("free[k].at = rest % free[k].n; rest = Math.floor(rest / free[k].n);", html)   # flat → [m, n]
         self.assertIn("afterBody: function (cs) {", html)
@@ -346,6 +348,31 @@ class TestDataMirrorTest(TestCase):
         self.assertEqual(HwdbTestData.objects.filter(instance="dev", part_type_id="T").count(), 4)
 
 
+
+# #162: the Draw-expression block of plot.html, run in node against a small key inventory.
+DRAW_HARNESS = r"""
+var keys = [
+  { path: ["Test Results", "SiPM", "Result"], dims: [{ seg: "Test Results", n: 8 }, { seg: "SiPM", n: 6 }] },
+  { path: ["Test Results", "SiPM Location", "Result"], dims: [{ seg: "Test Results", n: 8 }, { seg: "SiPM Location", n: 6 }] },
+  { path: ["Test Results", "R_eff"], dims: [] }, { path: ["Test Results", "R_cable"], dims: [] },
+  { path: ["x"], dims: [] }, { path: ["X"], dims: [] }, { path: ["Only Lower"], dims: [] },
+].map(function (k) { return { p: JSON.stringify(k.path), segs: k.path, dims: function () { return k.dims; } }; });
+function comp(t) { var res = []; var c = exprCompile(t, function (tok) { var r = exprResolve(tok, keys), k = r.p + JSON.stringify(r.ix); for (var i = 0; i < res.length; i++) if (res[i].p + JSON.stringify(res[i].ix) === k) return i; res.push(r); return res.length - 1; }); return { fn: c.fn, ids: res }; }   // one slot per key+pins, as exprMeta does
+function ids(t) { try { return comp(t).ids.map(function (i) { return [JSON.parse(i.p).join("."), i.ix]; }); } catch (e) { return "ERR " + e.message; } }
+function ev(t, arrays) { var c = comp(t), r = exprEval(c.fn, arrays); return [r, r.src]; }
+console.log(JSON.stringify({
+  pin_leaf: ids("SiPM.Result[3]"), pin_seg: ids("SiPM[5].Result"), pin_skip: ids("SiPM.Result[][5]"), pin_two: ids('"Test Results".SiPM.Result[2][1]'),
+  loose_case: ids("test_results.sipm.result"), exact_x: ids("x"), exact_X: ids("X"), loose_only: ids("only_lower"),
+  ambiguous: ids("Result"), unknown: ids("nope"), past_end: ids("SiPM.Result[9]"), binning: ids("x>>(1,2,3)"), not_list: ids("R_eff[1]"),
+  two_ids: ids("R_eff/R_cable"),
+  broadcast: ev("R_eff/R_cable", [[10], [2, 4]]), neg_pow: ev("-x^2", [[3]]), pow_neg: ev("2^-1", []), cmp: ev("x>2", [[1, 3]]),
+  drops: ev("x*1", [["q", 2, null, 4]]), funcs: ev("sqrt(x)+min(x,X)", [[9], [1, 2]]), consts: ev("pi*2", []), div0: ev("x/0", [[1]]),
+  logic: ev("!x && 1 || 0", [[0, 1]]), empty_id: ev("x+X", [[], [1]]),
+  split: [exprSplit("f(a):b"), exprSplit('"a:b"'), exprSplit("SiPM.Result[3]"), exprSplit("a : b")],
+}));
+"""
+
+
 class TestDataEndpointsTest(TestCase):
     def setUp(self):
         self.client.force_login(get_user_model().objects.create_user("t", "t@t.io", "pw"))
@@ -376,6 +403,59 @@ class TestDataEndpointsTest(TestCase):
         html = self.client.get("/hw/dev/plot/T/").content.decode()
         self.assertIn('id="idx-row"', html)
         self.assertIn('id="xidx"', html)
+
+    def test_draw_expression_block_runs_in_node(self):
+        # #162: ROOT-style Draw — the pure block (tokenizer, parser, resolver, evaluator) exercised in node
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is not installed")
+        html = self.client.get("/hw/dev/plot/T/").content.decode()
+        block = html[html.index("// [162-pure]"):html.index("// [/162-pure]")]
+        run = subprocess.run([node, "-e", block + DRAW_HARNESS], capture_output=True, text=True, timeout=60)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        r = json.loads(run.stdout)
+        K = "Test Results.SiPM.Result"
+        self.assertEqual(r["pin_leaf"], [[K, [3, None]]])          # leaf [i] pins the first level (ROOT order)
+        self.assertEqual(r["pin_seg"], [[K, [None, 5]]])           # [i] on the segment naming a level pins that level
+        self.assertEqual(r["pin_skip"], [[K, [None, 5]]])          # [] skips a level
+        self.assertEqual(r["pin_two"], [[K, [2, 1]]])
+        self.assertEqual(r["loose_case"], [[K, None]])             # case and space/underscore ignored …
+        self.assertEqual((r["exact_x"], r["exact_X"]), ([["x", None]], [["X", None]]))   # … unless keys differ only by case
+        self.assertEqual(r["loose_only"], [["Only Lower", None]])
+        self.assertIn("matches 2 keys: Test Results.SiPM.Result, Test Results.SiPM Location.Result", r["ambiguous"])
+        self.assertIn("no key named “nope”", r["unknown"])
+        self.assertIn("index 9 is past the end of Test Results (8 entries)", r["past_end"])
+        self.assertIn("binning (>>) is not supported yet", r["binning"])
+        self.assertIn("“R_eff” is not a list", r["not_list"])
+        self.assertEqual(r["two_ids"], [["Test Results.R_eff", None], ["Test Results.R_cable", None]])
+        self.assertEqual(r["broadcast"], [[5, 2.5], [0, 1]])       # a single value repeats along the list
+        self.assertEqual(r["neg_pow"], [[-9], [0]])                # -x^2 = -(x^2)
+        self.assertEqual(r["pow_neg"], [[0.5], [0]])
+        self.assertEqual(r["cmp"], [[0, 1], [0, 1]])
+        self.assertEqual(r["drops"], [[2, 4], [1, 3]])             # non-numeric entries drop; src keeps the entry index
+        self.assertEqual(r["funcs"], [[4, 5], [0, 1]])
+        self.assertAlmostEqual(r["consts"][0][0], 6.283185307179586)
+        self.assertEqual(r["div0"], [[], []])                      # non-finite results drop
+        self.assertEqual(r["logic"], [[1, 0], [0, 1]])
+        self.assertEqual(r["empty_id"], [[], []])                  # an identifier with no values gives nothing
+        self.assertEqual(r["split"], [["f(a)", "b"], ['"a:b"'], ["SiPM.Result[3]"], ["a", "b"]])
+
+    def test_page_has_the_draw_box(self):
+        html = self.client.get("/hw/dev/plot/T/").content.decode()
+        self.assertIn('<input type="text" id="draw" placeholder="y : x   e.g. Result[3]  or  R_eff/R_cable : Result"', html)
+        self.assertIn('<button type="button" class="pl-btn sm" id="draw-help" title="Draw syntax">?</button>', html)
+        self.assertIn('<div class="pl-pop" id="dpop" hidden>', html)
+        self.assertIn("<b>y : x</b><span>two axes — the first is Y, as in ROOT</span>", html)
+        # an expression is a virtual key: "=expr" in the series' x / y, restored from the hash, evaluated per item, fetched by its identifiers
+        self.assertIn('function isExpr(p) { return typeof p === "string" && p.charAt(0) === "="; }', html)
+        self.assertIn('s.x = h.x && (isExpr(h.x) || acc.has(h.x)) ? h.x : ""; s.y = h.y && (isExpr(h.y) || acc.has(h.y)) ? h.y : "";', html)
+        self.assertIn("if (isExpr(p)) { var m = exprMeta(p); return m.err ? [] : exprEval(m.fn, m.ids.map(function (id) { return slotValues(item, id.p, id.ix, s); })); }", html)
+        self.assertIn("function seriesSpecs(s) {", html)
+        self.assertIn("function pairValues(it, s) {", html)        # X–Y pairing by entry when an expression dropped some
+        self.assertIn("items = newItems; pathCounts = counts; specDims = {}; exprCache = {};", html)
+        self.assertIn('if (exprErr(a)) { clear("Draw: " + exprErr(a)); return; }', html)
+        self.assertIn("function keyAsName(p, ix) {", html)         # the box shows a picked key as a name with its pins
+        self.assertIn('got[ax] = toks.length === 1 && toks[0].t === "id" && m.ids.length === 1 ? { p: m.ids[0].p, ix: m.ids[0].ix } : { p: "=" + side[ax], ix: null };', html)
 
     def test_page_has_a_serial_filter(self):
         # Chao 2026-09-17: a distribution over a PID range should take HPK.* boards only, not SMB.*
