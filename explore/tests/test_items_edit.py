@@ -13,7 +13,7 @@ from unittest import mock
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
-from explore import itemsedit
+from explore import events, itemsedit
 from explore.models import ActivityEvent, HwdbComponentEvent
 
 T = "D00400300001"
@@ -175,14 +175,14 @@ class RowsTest(TestCase):
                                "serial_number": "HPK-1b", "parent_part_id": "D00400300009-00001",
                                "creator": {"id": 3, "name": "Karla"}},
                 f"{T}-00002": {"part_id": f"{T}-00002", "status": None, "serial_number": "HPK-2"}}
-        self.assertEqual(itemsedit.refresh_mirror("dev", T, live), 1)
+        self.assertEqual(events.refresh_from_listing("dev", T, live), 1)
         r = _row(1)
         self.assertEqual((r.status, r.status_id, r.qaqc_uploaded, r.certified_qaqc, r.is_installed,
                           r.serial_number, r.parent_part_id, r.created_by),
                          ("Waiting on QA/QC Tests", 110, True, False, None, "HPK-1b", "D00400300009-00001", "Karla"))
         self.assertEqual(_row(2).created_by, "Maritza")   # no creator in the row → kept
         self.assertEqual((_row(2).status, _row(2).status_id), ("Unknown", 0))   # blank status never wipes
-        self.assertEqual(itemsedit.refresh_mirror("dev", T, live), 0)
+        self.assertEqual(events.refresh_from_listing("dev", T, live), 0)
 
 
 class ViewTest(TestCase):

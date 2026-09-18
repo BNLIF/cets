@@ -596,6 +596,26 @@ class TypeLocationsViewTest(TestCase):
         self.assertEqual(values["(no location)"], 1)   # never had a location
         self.assertEqual(values["SURF"], 1)
 
+    def test_sweep_refreshes_the_mirror_and_counts_unmirrored_items(self):
+        for pid, st in (("D05700200001-00001", "Unknown"), ("D05700200001-00002", "Unknown")):
+            HwdbComponentEvent.objects.create(instance="dev", part_type_id="D05700200001", part_id=pid,
+                                              status=st, status_id=0, qaqc_uploaded=False)
+        resp = self._get(self._api([[
+            {"part_id": "D05700200001-00001", "location": None,
+             "status": {"id": 110, "name": "Waiting on QA/QC Tests"}, "qaqc_uploaded": True,
+             "serial_number": "S1", "creator": {"id": 1, "name": "Karla"}},
+            {"part_id": "D05700200001-00002", "location": None, "status": {"id": 0, "name": "Unknown"}},
+            {"part_id": "D05700200001-00003", "location": None, "status": {"id": 0, "name": "Unknown"}},
+        ]]))
+        d = resp.json()
+        self.assertEqual((d["total"], d["refreshed"], d["new_items"]), (3, 1, 1))
+        self.assertEqual(sorted((r["value"], r["n"]) for r in d["status_rows"]),
+                         [("Unknown", 1), ("Waiting on QA/QC Tests", 1)])
+        r = HwdbComponentEvent.objects.get(part_id="D05700200001-00001")
+        self.assertEqual((r.status, r.status_id, r.qaqc_uploaded, r.serial_number, r.created_by),
+                         ("Waiting on QA/QC Tests", 110, True, "S1", "Karla"))
+        self.assertFalse(HwdbComponentEvent.objects.filter(part_id="D05700200001-00003").exists())
+
     def test_unlinked_gets_409_json(self):
         with mock.patch("explore.views.mint_for", side_effect=FnalLinkRequired()):
             resp = self.client.get(self.PAGE)

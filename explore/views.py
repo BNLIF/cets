@@ -425,7 +425,8 @@ def explore_type_locations_view(request, part_type_id):
     ``location`` beyond the OpenAPI schema (2026-07-30 probe) — counted per
     location name. One list call per 500 items, no per-PID fan-out. The
     leaf page's Item-breakdown panel fetches this async so the page itself
-    renders without waiting; works for every type, not just shipping."""
+    renders without waiting; works for every type, not just shipping.
+    #169: the rows also refresh the mirror and count unmirrored items."""
     try:
         bearer = mint_for(request)
     except FnalLinkRequired:
@@ -433,20 +434,33 @@ def explore_type_locations_view(request, part_type_id):
                             status=409)
     except FnalUnavailable:
         return JsonResponse({"error": "unavailable"}, status=502)
-    api = FnalDbApiClient(settings.HWDB_PROFILES[instance_of(request)]["api"], bearer)
+    inst = instance_of(request)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
     counts: dict[str, int] = {}
     total = 0
+    live: dict[str, dict] = {}
     try:
         for row in events._list_rows(api, part_type_id):
             total += 1
             key = _location_label(row.get("location"))
             counts[key] = counts.get(key, 0) + 1
+            if row.get("part_id"):
+                live[row["part_id"]] = row
     except Exception:
         logger.exception("explore_type_locations_view(%s) crashed", part_type_id)
         return JsonResponse({"error": "fetch_failed"}, status=502)
     rows = [{"value": v, "n": n}
             for v, n in sorted(counts.items(), key=lambda kv: -kv[1])]
-    return JsonResponse({"total": total, "rows": rows})
+    # #169: the same sweep refreshes the mirror (status, flags, serial, parent,
+    # creator) and counts the items HWDB has that the mirror doesn't — the
+    # page redraws the Status chart and points at "Sync new" for those.
+    refreshed = events.refresh_from_listing(inst, part_type_id, live)
+    known = set(HwdbComponentEvent.for_instance(inst).filter(part_type_id=part_type_id)
+                .values_list("part_id", flat=True))
+    status_rows = next((b["rows"] for b in component_breakdowns(inst, part_type_id)
+                        if b["field"] == "status"), [])
+    return JsonResponse({"total": total, "rows": rows, "refreshed": refreshed,
+                         "new_items": len(set(live) - known), "status_rows": status_rows})
 
 
 # Shipments dashboard status tabs (#87). In Transit is HWDB location id 0;
@@ -4051,7 +4065,7 @@ def explore_items_edit_view(request, part_type_id):
             live = itemsedit.live_rows(
                 api, part_type_id,
                 make_api=lambda: FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer))
-            itemsedit.refresh_mirror(inst, part_type_id, live)
+            events.refresh_from_listing(inst, part_type_id, live)
         except requests.RequestException as e:
             messages.error(request, f"Couldn’t read the items from HWDB — {_hwdb_error_detail(e)}")
     ctx = {"part_type_id": part_type_id, "type_name": node.name if node else "",

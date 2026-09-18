@@ -168,8 +168,9 @@ def live_rows(api, ptid: str, make_api=None) -> dict[str, dict]:
     serial, comments and parent — not manufacturer. Every bulk-update row
     must echo the item's comments and serial (dev probe 2026-09-18: a row
     applies ONLY with a non-empty ``comments``; one without ``serial_number``
-    NULLs the serial), and the same sweep refreshes the mirror (Chao
-    2026-09-18: always the listing, and re-stamp the mirror to avoid staleness)."""
+    NULLs the serial), and the same sweep refreshes the mirror through
+    ``events.refresh_from_listing`` (Chao 2026-09-18: always the listing,
+    and re-stamp the mirror to avoid staleness)."""
     tls = local()
 
     def _init():
@@ -182,41 +183,6 @@ def live_rows(api, ptid: str, make_api=None) -> dict[str, dict]:
         with ThreadPoolExecutor(max_workers=6, initializer=_init) as pool:
             pages += list(pool.map(lambda i: _page(tls.client, ptid, i), range(2, n + 1)))
     return {r["part_id"]: r for body in pages for r in body.get("data") or [] if r.get("part_id")}
-
-
-_LIVE_FIELDS = ("status", "status_id", "parent_part_id", "serial_number", "created_by",
-                "qaqc_uploaded", "certified_qaqc", "is_installed")
-
-
-def refresh_mirror(inst: str, ptid: str, live: dict[str, dict]) -> int:
-    """Re-stamp the type's mirror rows from the listing just fetched —
-    status, parent, serial, creator and the three flags (``events.sweep_parents``
-    does status + parent from its own sweep). Returns how many rows changed.
-    Items HWDB lists but the mirror lacks are left to the incremental sync
-    (it needs the detail record)."""
-    changed = []
-    for row in HwdbComponentEvent.for_instance(inst).filter(part_type_id=ptid):
-        r = live.get(row.part_id)
-        if r is None:
-            continue
-        raw = r.get("status")
-        new = {
-            "status": parts.normalize_status(raw) or row.status or "",
-            "status_id": raw.get("id") if isinstance(raw, dict) else row.status_id,
-            "parent_part_id": r.get("parent_part_id") or "",
-            "serial_number": r.get("serial_number") or "",
-            "created_by": events._ref_name(r.get("creator")) or row.created_by,
-            "qaqc_uploaded": bool(r["qaqc_uploaded"]) if r.get("qaqc_uploaded") is not None else row.qaqc_uploaded,
-            "certified_qaqc": bool(r["certified_qaqc"]) if r.get("certified_qaqc") is not None else row.certified_qaqc,
-            "is_installed": bool(r["is_installed"]) if r.get("is_installed") is not None else row.is_installed,
-        }
-        if any(getattr(row, k) != v for k, v in new.items()):
-            for k, v in new.items():
-                setattr(row, k, v)
-            changed.append(row)
-    if changed:
-        HwdbComponentEvent.objects.bulk_update(changed, list(_LIVE_FIELDS), batch_size=500)
-    return len(changed)
 
 
 def rows_for(items, patch: dict, mirror_rows, manufacturers: list[dict]) -> list[dict]:

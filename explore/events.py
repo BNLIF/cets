@@ -289,6 +289,44 @@ def sweep_enabled(api, instance: str, part_type_id: str) -> int | None:
     return len(disabled)
 
 
+_LISTING_FIELDS = ("status", "status_id", "parent_part_id", "serial_number", "created_by",
+                   "qaqc_uploaded", "certified_qaqc", "is_installed")
+
+
+def refresh_from_listing(instance: str, part_type_id: str, live: dict[str, dict]) -> int:
+    """#169: re-stamp the type's mirror rows from a component listing already
+    fetched (pid → row) — status, parent, serial, creator and the three QC
+    flags, everything the listing carries that the mirror keeps. The Type
+    View's Location panel and the Edit items page both sweep the listing
+    anyway, so the mirror stops going stale for free. A blank status in a
+    row never wipes a known one (as ``sweep_parents``). Returns how many
+    rows changed. Items the listing has but the mirror lacks are NOT added:
+    a mirror row needs the detail record (Sync new does that)."""
+    changed = []
+    for row in HwdbComponentEvent.for_instance(instance).filter(part_type_id=part_type_id):
+        r = live.get(row.part_id)
+        if r is None:
+            continue
+        raw = r.get("status")
+        new = {
+            "status": parts.normalize_status(raw) or row.status or "",
+            "status_id": raw.get("id") if isinstance(raw, dict) else row.status_id,
+            "parent_part_id": r.get("parent_part_id") or "",
+            "serial_number": r.get("serial_number") or "",
+            "created_by": _ref_name(r.get("creator")) or row.created_by,
+            "qaqc_uploaded": _flag(r.get("qaqc_uploaded")) if r.get("qaqc_uploaded") is not None else row.qaqc_uploaded,
+            "certified_qaqc": _flag(r.get("certified_qaqc")) if r.get("certified_qaqc") is not None else row.certified_qaqc,
+            "is_installed": _flag(r.get("is_installed")) if r.get("is_installed") is not None else row.is_installed,
+        }
+        if any(getattr(row, k) != v for k, v in new.items()):
+            for k, v in new.items():
+                setattr(row, k, v)
+            changed.append(row)
+    if changed:
+        HwdbComponentEvent.objects.bulk_update(changed, list(_LISTING_FIELDS), batch_size=500)
+    return len(changed)
+
+
 def refresh_component_row(api, instance: str, part_id: str) -> None:
     """One ``components/{pid}`` fetch → the item's mirror row updated in
     place (#110 review: a checklist's Item card and the part page's ✎ Edit
