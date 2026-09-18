@@ -33,7 +33,7 @@ from hwdb.fnal import session as fnal_session
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for, verify_link
 
 from . import (activity, charts, checklistforms, checklists, curation, events,
-               execsummary, navigation, parts, plotting, scanning, watches)
+               execsummary, itemsedit, navigation, parts, plotting, scanning, watches)
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, refresh_component_row, sync_test_events
 from .hierarchy import sync_hierarchy, sync_system
@@ -4003,6 +4003,125 @@ def explore_part_edit_view(request, part_id):
     refresh_component_row(api, inst, part_id)   # keep the mirror row current (#110 review)
     messages.success(request, f"Updated {changed}.")
     return redirect(part_url)
+
+
+@login_not_required
+@fnal_login_required
+def explore_items_edit_view(request, part_type_id):
+    """#166: set status, QA/QC flags, manufacturer or comments on many items
+    at once (Hajime/Anselmo 2026-09-18: 13k SiPM boards uploaded as
+    "Unknown" cannot be linked). A pasted list — PIDs, serials, PID ranges —
+    is resolved against the mirror and previewed — after one sweep of the
+    type's HWDB listing, which refreshes the mirror rows (status, flags,
+    serial, parent) and gives the current comments and serial every
+    bulk-update row must echo (or HWDB skips the row / nulls the serial); Apply is
+    driven by the page in slices of ``itemsedit.CHUNK``, one HWDB
+    ``bulk-update`` call per request, and the mirror rows follow at once.
+    Any FNAL-linked user on a write instance; HWDB enforces its own roles."""
+    inst = instance_of(request)
+    page_url = _rev(request, "explore:items_edit", args=[part_type_id])
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return HttpResponseForbidden("Item edits are not enabled here.")
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        if request.POST.get("step") == "apply":
+            return JsonResponse({"error": "FNAL link expired — reload the page."}, status=401)
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        if request.POST.get("step") == "apply":
+            return JsonResponse({"error": FNAL_UNAVAILABLE}, status=503)
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(_rev(request, "explore:home"))
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    manufacturers = _checklist_item_opts(
+        api, part_type_id, {"item_fields": ["manufacturer"]}).get("manufacturers") or []
+    node = (HierarchyNode.for_instance(inst)
+            .filter(level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first())
+    post = request.POST if request.method == "POST" else {}
+    rules = {k: (post.get(k) or "").strip() for k in ("f_status", "f_sn", "f_man", "f_creator")}
+    step = post.get("step") or ""
+    live = None
+    if step != "apply":
+        # the whole type's listing: refreshes the mirror (status, flags, serial,
+        # parent, creator) so the rules and their counts see HWDB's current
+        # values, and gives the comments + serial every bulk-update row echoes
+        try:
+            live = itemsedit.live_rows(
+                api, part_type_id,
+                make_api=lambda: FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer))
+            itemsedit.refresh_mirror(inst, part_type_id, live)
+        except requests.RequestException as e:
+            messages.error(request, f"Couldn’t read the items from HWDB — {_hwdb_error_detail(e)}")
+    ctx = {"part_type_id": part_type_id, "type_name": node.name if node else "",
+           "status_options": checklistforms.STATUS_OPTIONS, "manufacturers": manufacturers,
+           "flags": [(f, checklistforms.ITEM_FIELD_LABELS[f], post.get(f) or "")
+                     for f in itemsedit.FLAGS],
+           "post": post, "items_text": post.get("items") or "", "rules": rules,
+           "rule_text": " · ".join(t for t in (
+               rules["f_status"] and f"status {rules['f_status']}",
+               rules["f_sn"] and f"serial {rules['f_sn']}",
+               rules["f_man"] and f"manufacturer {rules['f_man']}",
+               rules["f_creator"] and f"created by {rules['f_creator']}") if t),
+           "statuses": itemsedit.facet(inst, part_type_id, "status"),
+           "makers": itemsedit.facet(inst, part_type_id, "manufacturer"),
+           "creators": itemsedit.facet(inst, part_type_id, "created_by"),
+           "chunk": itemsedit.CHUNK}
+    if step in ("preview", "apply"):
+        patch, mirror, shown = itemsedit.changes(post, manufacturers)
+        if not patch:
+            if step == "apply":
+                return JsonResponse({"error": "Pick at least one field to change."}, status=400)
+            messages.error(request, "Pick at least one field to change.")
+            return render(request, "explore/items_edit.html", ctx)
+        ctx["shown"] = shown
+    if step == "preview":
+        if not itemsedit.entries(post.get("items")) and not any(rules.values()):
+            messages.error(request, "Paste items or pick a match rule.")
+            return render(request, "explore/items_edit.html", ctx)
+        if live is None:   # the sweep failed — nothing safe to echo
+            return render(request, "explore/items_edit.html", ctx)
+        res = itemsedit.resolve(inst, part_type_id, post.get("items"), status=rules["f_status"],
+                                sn=rules["f_sn"], manufacturer=rules["f_man"],
+                                created_by=rules["f_creator"])
+        missing = [r.part_id for r in res["rows"] if r.part_id not in live]
+        res["rows"] = [r for r in res["rows"] if r.part_id in live]
+        items = [(r.part_id, live[r.part_id].get("comments") or "",
+                  live[r.part_id].get("serial_number") or "") for r in res["rows"]]
+        ctx.update(preview=res, missing=missing, counts=itemsedit.status_counts(res["rows"]),
+                   rows_json=json.dumps(items), pickable=len(items) <= itemsedit.PICK_MAX,
+                   show_max=itemsedit.SHOW_MAX)
+        return render(request, "explore/items_edit.html", ctx)
+    if step == "apply":
+        try:
+            items = [(str(p), str(c), str(sn)) for p, c, sn in json.loads(post.get("rows") or "[]")]
+        except (ValueError, TypeError):
+            return HttpResponseBadRequest("rows")
+        mirror_rows = list(HwdbComponentEvent.for_instance(inst)
+                           .filter(part_type_id=part_type_id, part_id__in=[i[0] for i in items]))
+        known = {r.part_id for r in mirror_rows}
+        items = [i for i in items if i[0] in known][:itemsedit.CHUNK]
+        if not items:
+            return JsonResponse({"done": 0, "error": "No items to update."})
+        rows = itemsedit.rows_for(items, patch, mirror_rows, manufacturers)
+        try:
+            body = api.bulk_update_components(part_type_id, {"data": rows})
+            if body.get("status", "OK") != "OK":
+                return JsonResponse({"done": 0, "error": str(body.get("data") or body)})
+        except requests.RequestException as e:
+            return JsonResponse({"done": 0, "error": _hwdb_error_detail(e)})
+        done = [i[0] for i in items]
+        if mirror:
+            (HwdbComponentEvent.for_instance(inst)
+             .filter(part_type_id=part_type_id, part_id__in=done)
+             .update(updated=timezone.now(), **mirror))
+        if post.get("first") == "1":
+            activity.log(inst, ActivityEvent.KIND_ITEM,
+                         f"{post.get('total') or len(done)} {part_type_id} items: {'; '.join(shown)}",
+                         part_type_id=part_type_id, actor=activity.actor_of(request))
+        return JsonResponse({"done": len(done)})
+    return render(request, "explore/items_edit.html", ctx)
 
 
 @login_not_required

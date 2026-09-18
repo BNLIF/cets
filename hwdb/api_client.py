@@ -252,6 +252,15 @@ class FnalDbApiClient:
     def patch_component(self, part_id, payload):
         return self._make_request("PATCH", f"components/{part_id}", data=payload)
 
+    def bulk_update_components(self, part_type_id, payload):
+        """#166: PATCH many items of one type in one call — ``{"data":
+        [{"part_id": …, "status": {"id": …}, "certified_qaqc": …,
+        "qaqc_uploaded": …, "comments": …}, …]}`` (Hajime's curl,
+        2026-09-18). Each row names its own PID."""
+        return self._make_request(
+            "PATCH", f"component-types/{part_type_id}/bulk-update", data=payload
+        )
+
     def patch_subcomponents(self, part_id, payload):
         """Set a component's functional positions (issue #63). The payload is
         ``{"component": {"part_id": …}, "subcomponents": {pos: pid|None, …}}``;

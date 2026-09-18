@@ -1,0 +1,187 @@
+{% extends 'explore/base.html' %}
+{% block title %}Edit items · {{ part_type_id }} · HWDB Explorer{% endblock %}
+
+{% block content %}
+{% include "explore/_checklist_style.html" %}
+<style>
+  .es-page { padding: 22px 30px 56px; max-width: 760px; }
+  .es-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .es-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .es-crumbs a:hover { text-decoration: underline; }
+  .es-crumbs .sep { color: var(--faint); margin: 0 7px; }
+  .es-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 2px; }
+  .es-page h1 .mono, .ie-mono { font-family: var(--font-mono); }
+  .es-sub { color: var(--dim); font-size: 13px; margin: 0 0 12px; }
+  .es-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
+  .es-flash.success { color: var(--good); background: var(--good-bg);
+    border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule)); }
+  .es-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
+    border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+  .ie-grid { display: grid; grid-template-columns: 140px 1fr; gap: 8px 14px; align-items: center; font-size: 13px; max-width: 520px; }
+  .ie-grid label { color: var(--dim); }
+  .ie-grid select, .ie-grid input[type=text] { font: inherit; }
+  #items { font-family: var(--font-mono); width: 100%; box-sizing: border-box; min-height: 7em; }
+  .ie-summ { font-size: 13px; margin: 0 0 8px; }
+  .ie-summ li { margin: 2px 0; }
+  .ie-warn { color: var(--bad, #a33); }
+  .ie-table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 8px 0; }
+  .ie-table th, .ie-table td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+  .ie-scroll { max-height: 420px; overflow: auto; border: 1px solid var(--rule); border-radius: var(--r-sm); }
+  .ie-table tr.off td { color: var(--faint); text-decoration: line-through; }
+  .ie-table tr.off td:first-child { text-decoration: none; }
+  .ie-table th { color: var(--faint); font-weight: 500; }
+  .ie-more { color: var(--faint); font-size: 12px; }
+  .ie-actions { margin-top: 12px; display: flex; gap: 10px; align-items: center; }
+</style>
+
+<div class="es-page">
+  <div class="es-crumbs">
+    <a href="{% url 'explore:home' %}">Explorer</a>
+    <span class="sep">›</span>Edit items
+  </div>
+
+  {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+
+  <h1>Edit <span class="mono">{{ part_type_id }}</span> items</h1>
+  <p class="es-sub">{% if type_name %}{{ type_name }} · {% endif %}Writes the chosen fields to every listed item in the HWDB. Nothing is written before Apply.</p>
+
+  {% if preview %}
+  <form method="post" class="es-card" id="ie-form" data-chunk="{{ chunk }}">
+    {% csrf_token %}
+    <input type="hidden" name="step" value="apply">
+    {% for f, _, v in flags %}<input type="hidden" name="{{ f }}" value="{{ v }}">{% endfor %}
+    <input type="hidden" name="status" value="{{ post.status }}">
+    <input type="hidden" name="manufacturer" value="{{ post.manufacturer }}">
+    {% if post.comments_set %}<input type="hidden" name="comments_set" value="on"><input type="hidden" name="comments" value="{{ post.comments }}">{% endif %}
+    <script type="application/json" id="ie-rows">{{ rows_json|safe }}</script>
+    <h2>Preview</h2>
+    <ul class="ie-summ">
+      <li><b>{{ preview.rows|length }}</b> item{{ preview.rows|length|pluralize }} — now {% for st, n in counts %}{{ st }} {{ n }}{% if not forloop.last %}, {% endif %}{% endfor %}</li>
+      {% if rule_text %}<li>Match: {{ rule_text }}</li>{% endif %}
+      {% for line in shown %}<li>{{ line }}</li>{% endfor %}
+      {% if preview.unmatched %}<li class="ie-warn">Not in the mirror: <span class="ie-mono">{{ preview.unmatched|join:", " }}</span></li>{% endif %}
+      {% if missing %}<li class="ie-warn">In the mirror but no longer in HWDB (re-sync the type): <span class="ie-mono">{{ missing|join:", " }}</span></li>{% endif %}
+      {% for sn, pids in preview.shared %}<li class="ie-warn">Serial <span class="ie-mono">{{ sn }}</span> is on {{ pids|length }} items — skipped, paste the PID instead: <span class="ie-mono">{{ pids|join:", " }}</span></li>{% endfor %}
+    </ul>
+    {% if preview.rows %}
+    <div class="ie-scroll">
+    <table class="ie-table">
+      <thead><tr>{% if pickable %}<th><input type="checkbox" id="ie-all" checked title="all / none"></th>{% endif %}<th>PID</th><th>Serial</th><th>Status</th><th>Uploaded</th><th>Certified</th><th>Installed</th><th>Manufacturer</th></tr></thead>
+      <tbody>
+      {% for r in preview.rows %}{% if pickable or forloop.counter <= show_max %}
+        <tr>{% if pickable %}<td><input type="checkbox" class="ie-pick" data-i="{{ forloop.counter0 }}" checked></td>{% endif %}
+          <td class="ie-mono"><a href="{% url 'explore:part' part_id=r.part_id %}" target="_blank" rel="noopener">{{ r.part_id }}</a></td>
+          <td class="ie-mono">{{ r.serial_number }}</td><td>{{ r.status|default:"—" }}</td>
+          <td>{{ r.qaqc_uploaded|yesno:"yes,no,—" }}</td><td>{{ r.certified_qaqc|yesno:"yes,no,—" }}</td>
+          <td>{{ r.is_installed|yesno:"yes,no,—" }}</td><td>{{ r.manufacturer|default:"—" }}</td></tr>
+      {% endif %}{% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% if not pickable %}<p class="ie-more">First {{ show_max }} of {{ preview.rows|length }} shown; Apply covers all of them. Narrow the list or the match rules to pick single items.</p>{% endif %}
+    {% endif %}
+    <div class="ie-actions">
+      <button type="submit" class="es-btn" id="ie-apply"{% if not preview.rows %} disabled{% endif %}>Apply to <span id="ie-n">{{ preview.rows|length }}</span> item{{ preview.rows|length|pluralize }}</button>
+      <a href="{% url 'explore:items_edit' part_type_id=part_type_id %}" id="ie-back">Back</a>
+      <span id="ie-prog" class="ie-more"></span>
+    </div>
+    <ul id="ie-errs" class="ie-summ ie-warn"></ul>
+  </form>
+  <script>
+  (function () {
+    var form = document.getElementById("ie-form"), btn = document.getElementById("ie-apply");
+    var prog = document.getElementById("ie-prog"), errs = document.getElementById("ie-errs");
+    var all = JSON.parse(document.getElementById("ie-rows").textContent || "[]");
+    var chunk = +form.dataset.chunk || 500, rows = all;
+    var picks = form.querySelectorAll(".ie-pick"), allBox = document.getElementById("ie-all");
+    function recount() {
+      if (!picks.length) return;
+      rows = [];
+      picks.forEach(function (c) { c.closest("tr").classList.toggle("off", !c.checked); if (c.checked) rows.push(all[+c.dataset.i]); });
+      document.getElementById("ie-n").textContent = rows.length;
+      btn.disabled = !rows.length;
+    }
+    form.addEventListener("change", function (ev) {
+      if (ev.target === allBox) picks.forEach(function (c) { c.checked = allBox.checked; });
+      if (ev.target.classList.contains("ie-pick") || ev.target === allBox) recount();
+    });
+    form.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      if (btn.disabled) return;
+      btn.disabled = true; if (allBox) allBox.disabled = true; picks.forEach(function (c) { c.disabled = true; });
+      var done = 0, i = 0;
+      function fail(msg) { var li = document.createElement("li"); li.textContent = msg; errs.appendChild(li); }
+      function finish() {
+        prog.textContent = "Updated " + done + " of " + rows.length + " item" + (rows.length === 1 ? "" : "s") + ".";
+        document.getElementById("ie-back").textContent = "Done — back";
+      }
+      function next() {
+        if (i >= rows.length) return finish();
+        var slice = rows.slice(i, i + chunk);
+        prog.textContent = "Updating " + (i + slice.length) + " of " + rows.length + "…";
+        var fd = new FormData(form);
+        fd.set("rows", JSON.stringify(slice));
+        fd.set("first", i === 0 ? "1" : "0");
+        fd.set("total", String(rows.length));
+        fetch(form.action || location.href, { method: "POST", body: fd, credentials: "same-origin",
+                                              headers: { "X-CSRFToken": fd.get("csrfmiddlewaretoken") } })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          .then(function (res) {
+            if (!res.ok || res.j.error) fail(slice[0][0] + (slice.length > 1 ? " … " + slice[slice.length - 1][0] : "") + ": " + (res.j.error || "request failed"));
+            done += res.j.done || 0;
+            i += slice.length;
+            next();
+          })
+          .catch(function (e) { fail("Request failed: " + e); finish(); });
+      }
+      next();
+    });
+  })();
+  </script>
+  {% else %}
+  <form method="post" class="es-card">
+    {% csrf_token %}
+    <input type="hidden" name="step" value="preview">
+    <div class="cl-field">
+      <label class="cl-lab" for="items">Items <span class="cl-hint">(PIDs, serial numbers or a range like 00120..06000 — one per line, or comma / space separated)</span></label>
+      <textarea id="items" name="items">{{ items_text }}</textarea>
+    </div>
+    <div class="cl-field">
+      <span class="cl-lab">Match <span class="cl-hint">(narrows the list above — or, with no list, selects every item that matches)</span></span>
+      <div class="ie-grid">
+        <label for="ie-fstatus">Status</label>
+        <select id="ie-fstatus" name="f_status"><option value="">any</option>{% for st, n in statuses %}{% if st %}<option value="{{ st }}"{% if rules.f_status == st %} selected{% endif %}>{{ st }} ({{ n }})</option>{% endif %}{% endfor %}</select>
+        {% if creators|length > 1 or creators.0.0 %}
+        <label for="ie-fcreator">Created by</label>
+        <select id="ie-fcreator" name="f_creator"><option value="">anyone</option>{% for c, n in creators %}{% if c %}<option value="{{ c }}"{% if rules.f_creator == c %} selected{% endif %}>{{ c }} ({{ n }})</option>{% endif %}{% endfor %}</select>
+        {% endif %}
+        <label for="ie-fsn">Serial matches</label>
+        <input type="text" id="ie-fsn" name="f_sn" value="{{ rules.f_sn }}" placeholder="^HPK   or   ^(?!SMB)" autocomplete="off" spellcheck="false">
+        {% if makers|length > 1 or makers.0.0 %}
+        <label for="ie-fman">Manufacturer</label>
+        <select id="ie-fman" name="f_man"><option value="">any</option>{% for m, n in makers %}{% if m %}<option value="{{ m }}"{% if rules.f_man == m %} selected{% endif %}>{{ m }} ({{ n }})</option>{% endif %}{% endfor %}</select>
+        {% endif %}
+      </div>
+    </div>
+    <div class="cl-field">
+      <span class="cl-lab">Set <span class="cl-hint">(blank = leave as is)</span></span>
+      <div class="ie-grid">
+        <label for="ie-status">Component status</label>
+        <select id="ie-status" name="status"><option value="">—</option>{% for o in status_options %}<option value="{{ o.value }}"{% if post.status == o.value|stringformat:"s" %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>
+        {% for f, label, v in flags %}
+        <label for="ie-{{ f }}">{{ label }}</label>
+        <select id="ie-{{ f }}" name="{{ f }}"><option value="">—</option><option value="1"{% if v == "1" %} selected{% endif %}>yes</option><option value="0"{% if v == "0" %} selected{% endif %}>no</option></select>
+        {% endfor %}
+        {% if manufacturers %}
+        <label for="ie-manufacturer">Manufacturer</label>
+        <select id="ie-manufacturer" name="manufacturer"><option value="">—</option>{% for m in manufacturers %}<option value="{{ m.value }}"{% if post.manufacturer == m.value|stringformat:"s" %} selected{% endif %}>{{ m.label }}</option>{% endfor %}</select>
+        {% endif %}
+        <label><input type="checkbox" name="comments_set"{% if post.comments_set %} checked{% endif %}> Item comments</label>
+        <input type="text" name="comments" value="{{ post.comments }}" autocomplete="off">
+      </div>
+    </div>
+    <div class="ie-actions"><button type="submit" class="es-btn">Preview</button></div>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}
