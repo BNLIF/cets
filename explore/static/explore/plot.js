@@ -7,7 +7,7 @@
     var FACETS = ["status", "creator", "manufacturer", "institution"];
     var OPS = ["=", "≠", "<", "≤", ">", "≥", "contains"];
     // pure helpers from plot-core.js (expressions, nested arrays, ranges, binning)
-    var PC = window.PlotCore, nestedAt = PC.nestedAt, dimsOf = PC.dimsOf, dimLabels = PC.dimLabels, selectAt = PC.selectAt, isExpr = PC.isExpr, exprText = PC.exprText, exprSplit = PC.exprSplit, exprTokens = PC.exprTokens, exprCompile = PC.exprCompile, exprNorm = PC.exprNorm, exprResolve = PC.exprResolve, exprEval = PC.exprEval, normSn = PC.normSn, pidAlternation = PC.pidAlternation, pidRange = PC.pidRange, toNum = PC.toNum, fmt = PC.fmt, histCounts = PC.histCounts, isNumeric = PC.isNumeric, catKey = PC.catKey, topCats = PC.topCats, meanSd = PC.meanSd;
+    var PC = window.PlotCore, exprSelect = PC.exprSelect, nestedAt = PC.nestedAt, dimsOf = PC.dimsOf, dimLabels = PC.dimLabels, selectAt = PC.selectAt, isExpr = PC.isExpr, exprText = PC.exprText, exprSplit = PC.exprSplit, exprTokens = PC.exprTokens, exprCompile = PC.exprCompile, exprNorm = PC.exprNorm, exprResolve = PC.exprResolve, exprEval = PC.exprEval, normSn = PC.normSn, pidAlternation = PC.pidAlternation, pidRange = PC.pidRange, toNum = PC.toNum, fmt = PC.fmt, histCounts = PC.histCounts, isNumeric = PC.isNumeric, catKey = PC.catKey, topCats = PC.topCats, meanSd = PC.meanSd;
 
     // ---- State -------------------------------------------------------------
     // source: "specs" (whole dataset, values walked from item.data) or a test
@@ -24,7 +24,7 @@
     var busy = false;              // a key fetch is in flight
     function isTest() { return source !== "specs"; }
     function S() { return series[cur]; }
-    function blankSeries() { return { name: "", color: "", x: "", y: "", xi: [], yi: [], item: "", pid: "", sn: "", f: {}, cuts: [], logic: "and" }; }
+    function blankSeries() { return { name: "", color: "", x: "", y: "", xi: [], yi: [], item: "", pid: "", sn: "", sel: "", f: {}, cuts: [], logic: "and" }; }
     function copySeries(s) { return JSON.parse(JSON.stringify(s)); }
     function nextName() { var n = series.length + 1; while (series.some(function (s) { return s.name === "Series " + n; })) n++; return "Series " + n; }
     // The effective PID filter of a series: its Item box (exactly one PID) wins over the regex box.
@@ -45,7 +45,7 @@
     function who(pid) { var it = itemByPid[pid]; return pid + (it && it.serial ? " · " + it.serial : ""); }
     function idxLabel(p, s, j) {
         var d, ix;
-        if (isExpr(p)) { var m = exprMeta(p); if (m.err || !m.ids.length) return ""; d = keyDims(m.ids[0].p) || []; ix = m.ids[0].ix || []; }
+        if (isExpr(p)) { var m = exprMeta(p), id0 = m.err ? null : m.ids.filter(function (id) { return !id.attr; })[0]; if (!id0) return ""; d = keyDims(id0.p) || []; ix = id0.ix || []; }
         else { d = keyDims(p) || []; ix = idxOf(p, s) || []; }
         if (!d.length) return "";
         // values arrive flattened row-major over the free levels (selectAt /
@@ -189,7 +189,8 @@
     function slotBase(p, s) { return slotOf(p, idxOf(p, s)); }
     function idxScaleOf(p, ix) { var d = keyDims(p), sc = 1; if (ix) ix.forEach(function (i, j) { if (i !== null && d[j] && d[j].n > 1) sc *= d[j].n; }); return sc; }
     function idxNote(s) {
-        return ["x", "y"].map(function (ax) { var p = s[ax], ix = idxOf(p, s); return ix ? " · " + showPath(p) + " [" + ix.map(function (i) { return i === null ? "·" : i; }).join(", ") + "]" : ""; }).join("");
+        return ["x", "y"].map(function (ax) { var p = s[ax], ix = idxOf(p, s); return ix ? " · " + showPath(p) + " [" + ix.map(function (i) { return i === null ? "·" : i; }).join(", ") + "]" : ""; }).join("")
+               + (s.sel ? " · select: " + s.sel : "");
     }
     // The index-pin inputs, for series[cur].
     function drawIdx() {
@@ -254,12 +255,17 @@
         var v = nestedAt(item.data, JSON.parse(p), 0);
         return v === null ? [] : selectAt(v, ix || []);
     }
+    // an identifier's values on one item: a key slot, or an item field ($serial …) as one value
+    function idValues(item, id, s) { return id.attr ? [item[id.attr] === null || item[id.attr] === undefined ? "" : item[id.attr]] : slotValues(item, id.p, id.ix, s); }
+    function exprValues(item, text, s) { var m = exprMeta(text); return m.err ? [] : exprEval(m.fn, m.ids.map(function (id) { return idValues(item, id, s); })); }
     function valuesFor(item, p, s) {
         if (!p) return [];
-        if (isExpr(p)) { var m = exprMeta(p); return m.err ? [] : exprEval(m.fn, m.ids.map(function (id) { return slotValues(item, id.p, id.ix, s); })); }
-        return slotValues(item, p, idxOf(p, s), s);
+        var arr = isExpr(p) ? exprValues(item, p, s) : slotValues(item, p, idxOf(p, s), s);
+        // #163: the series' selection keeps entries one by one (ROOT's second argument)
+        if (s.sel && !exprMeta(s.sel).err) arr = exprSelect(arr, exprValues(item, s.sel, s));
+        return arr;
     }
-    // Compiled expressions for this dataset: text → { fn, ids: [{ p, ix, text }] } or { err }
+    // Compiled expressions for this dataset: text → { fn, ids: [{ p, ix, text } | { attr, text }] } or { err }
     var exprCache = {};
     function exprMeta(p) {
         var text = exprText(p);
@@ -267,15 +273,17 @@
         var keys = paths.map(function (k) { return { p: k, segs: JSON.parse(k), dims: function () { return keyDims(k); } }; }), meta;
         try {
             var res = [], c = exprCompile(text, function (tok) {
-                var r = exprResolve(tok, keys), slot = slotOf(r.p, r.ix);
-                for (var i = 0; i < res.length; i++) if (slotOf(res[i].p, res[i].ix) === slot) return i;     // the same key twice: one slot
+                var r = tok.t === "attr" ? { attr: tok.v } : exprResolve(tok, keys), slot = r.attr ? "$" + r.attr : slotOf(r.p, r.ix);
+                for (var i = 0; i < res.length; i++) if ((res[i].attr ? "$" + res[i].attr : slotOf(res[i].p, res[i].ix)) === slot) return i;     // the same name twice: one slot
                 r.text = tok.text; res.push(r); return res.length - 1;
             });
             meta = { fn: c.fn, ids: res };
         } catch (e) { meta = { err: e.message }; }
         return (exprCache[text] = meta);
     }
-    function exprErr(s) { return ["x", "y"].map(function (ax) { return isExpr(s[ax]) ? exprMeta(s[ax]).err : null; }).filter(Boolean)[0] || null; }
+    function drawErr(s) { return ["x", "y"].map(function (ax) { return isExpr(s[ax]) ? exprMeta(s[ax]).err : null; }).filter(Boolean)[0] || null; }
+    function selErr(s) { return s.sel && exprMeta(s.sel).err ? "selection: " + exprMeta(s.sel).err : null; }
+    function exprErr(s) { return drawErr(s) || selErr(s); }
     // X and Y of one item paired by entry: by position for keys, by source
     // position when an expression dropped entries (an entry fails as a whole)
     function pairValues(it, s) {
@@ -329,9 +337,10 @@
         var out = [];
         ["x", "y"].forEach(function (ax) {
             var p = s[ax]; if (!p) return;
-            if (isExpr(p)) { var m = exprMeta(p); if (!m.err) m.ids.forEach(function (id) { out.push({ p: id.p, ix: id.ix }); }); }
+            if (isExpr(p)) { var m = exprMeta(p); if (!m.err) m.ids.forEach(function (id) { if (!id.attr) out.push({ p: id.p, ix: id.ix }); }); }
             else out.push({ p: p, ix: idxOf(p, s) });
         });
+        if (s.sel) { var ms = exprMeta(s.sel); if (!ms.err) ms.ids.forEach(function (id) { if (!id.attr) out.push({ p: id.p, ix: id.ix }); }); }
         s.cuts.forEach(function (c) { if (c.p) out.push({ p: c.p, ix: idxOf(c.p, s) }); });
         return out;
     }
@@ -876,7 +885,7 @@
             chip.title = drawn.indexOf(s) < 0 ? "not drawn in this mode — click to edit" : "click to edit this series";
             var dot = document.createElement("span"); dot.className = "dot"; dot.style.background = color(i); chip.appendChild(dot);
             chip.appendChild(document.createTextNode(s.name));
-            if (s.x) { var k = document.createElement("span"); k.className = "k"; k.textContent = lastSeg(s.x) + (s.y ? " × " + lastSeg(s.y) : ""); k.title = showPath(s.x) + (s.y ? " × " + showPath(s.y) : ""); chip.appendChild(k); }
+            if (s.x) { var k = document.createElement("span"); k.className = "k"; k.textContent = lastSeg(s.x) + (s.y ? " × " + lastSeg(s.y) : ""); k.title = showPath(s.x) + (s.y ? " × " + showPath(s.y) : "") + (s.sel ? "\nselect: " + s.sel : ""); chip.appendChild(k); }
             if (series.length > 1) {
                 var x = document.createElement("a"); x.className = "x"; x.href = "#"; x.textContent = "×"; x.title = "Remove this series";
                 x.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); removeSeries(i); });
@@ -926,12 +935,12 @@
     // Pre-#156 hashes (and the part page's #{"item": …} link) describe one series at the top level.
     function hashSeries(cfg) {
         if (Array.isArray(cfg.series) && cfg.series.length) return cfg.series;
-        var s = { x: cfg.x, y: cfg.y, xi: cfg.xi, yi: cfg.yi, item: cfg.item, pid: cfg.pid, sn: cfg.sn, f: cfg.f, cuts: cfg.cuts, logic: cfg.logic };
+        var s = { x: cfg.x, y: cfg.y, xi: cfg.xi, yi: cfg.yi, item: cfg.item, pid: cfg.pid, sn: cfg.sn, sel: cfg.sel, f: cfg.f, cuts: cfg.cuts, logic: cfg.logic };
         return [s];
     }
     function packSeries(s) {
         var f = {}; FACETS.forEach(function (k) { if (s.f[k]) f[k] = s.f[k]; });
-        return { name: s.name, color: s.color || undefined, x: s.x, y: s.y || undefined, item: (s.item || "").trim() || undefined, pid: s.pid || undefined, sn: s.sn || undefined, f: Object.keys(f).length ? f : undefined,
+        return { name: s.name, color: s.color || undefined, x: s.x, y: s.y || undefined, item: (s.item || "").trim() || undefined, pid: s.pid || undefined, sn: s.sn || undefined, sel: s.sel || undefined, f: Object.keys(f).length ? f : undefined,
                  xi: idxOf(s.x, s) || undefined, yi: idxOf(s.y, s) || undefined,
                  cuts: s.cuts.filter(function (c) { return c.p; }), logic: s.logic === "or" ? "or" : undefined };
     }
@@ -1029,7 +1038,7 @@
             s.name = (h.name || "").trim() || "Series " + (i + 1);
             s.color = /^#[0-9a-f]{6}$/i.test(h.color || "") ? h.color : "";
             s.x = h.x && (isExpr(h.x) || acc.has(h.x)) ? h.x : ""; s.y = h.y && (isExpr(h.y) || acc.has(h.y)) ? h.y : "";
-            s.item = h.item || ""; s.pid = h.pid || ""; s.sn = h.sn || ""; s.f = h.f || {}; s.logic = h.logic === "or" ? "or" : "and";
+            s.item = h.item || ""; s.pid = h.pid || ""; s.sn = h.sn || ""; s.sel = typeof h.sel === "string" ? h.sel : ""; s.f = h.f || {}; s.logic = h.logic === "or" ? "or" : "and";
             s.cuts = (h.cuts || []).filter(function (c) { return c && acc.has(c.p); });
             // #154: index pins from the hash belong to the keys it names
             s.xi = Array.isArray(h.xi) ? h.xi.map(function (j) { return j === null ? null : +j; }) : []; s.xk = s.x;
@@ -1130,8 +1139,18 @@
     function syncDraw() {
         var s = S(); if (!s) return;
         if (document.activeElement !== $("draw")) $("draw").value = drawText(s);
-        var err = exprErr(s); $("draw-err").textContent = err ? err : ""; $("draw-err").hidden = !err;
+        if (document.activeElement !== $("dsel")) $("dsel").value = s.sel || "";
+        var err = drawErr(s); $("draw-err").textContent = err ? err : ""; $("draw-err").hidden = !err;
+        var se = s.sel ? exprMeta(s.sel).err : null; $("sel-err").textContent = se ? se : ""; $("sel-err").hidden = !se;
     }
+    function applySel() {           // #163: the selection is kept as typed; it compiles against the dataset like a Draw expression
+        var s = S(); if (!s) return;
+        var text = $("dsel").value.trim();
+        if (text === (s.sel || "")) return;
+        s.sel = text; changed(); $("dsel").blur();
+    }
+    $("dsel").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); applySel(); } if (e.key === "Escape") { $("dsel").blur(); syncDraw(); } });
+    $("dsel").addEventListener("blur", applySel);
     function applyDraw() {
         var s = S(), text = $("draw").value.trim(), err = $("draw-err");
         function fail(msg) { err.textContent = msg; err.hidden = false; }

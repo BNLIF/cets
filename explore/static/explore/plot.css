@@ -167,7 +167,8 @@
 .pl-status #stats { color: var(--dim); }
 .pl-status .hint { margin-left: auto; }
 .pl-err { color: var(--bad, #a33); font-size: 12.5px; }
-#draw { font-family: var(--font-mono); flex: 1; }
+#draw, #dsel { font-family: var(--font-mono); flex: 1; }
+#dsel { width: 100%; }
 .pl-help { padding: 10px 12px; display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; font-size: 12px; overflow: auto; }
 .pl-help b { font-weight: 600; color: var(--ink); white-space: nowrap; }
 .pl-help code { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink); }

@@ -359,10 +359,11 @@ var keys = [
   { path: ["Test Results", "SiPM", "Result"], dims: [{ seg: "Test Results", n: 8 }, { seg: "SiPM", n: 6 }] },
   { path: ["Test Results", "SiPM Location", "Result"], dims: [{ seg: "Test Results", n: 8 }, { seg: "SiPM Location", n: 6 }] },
   { path: ["Test Results", "R_eff"], dims: [] }, { path: ["Test Results", "R_cable"], dims: [] },
-  { path: ["x"], dims: [] }, { path: ["X"], dims: [] }, { path: ["Only Lower"], dims: [] },
+  { path: ["x"], dims: [] }, { path: ["X"], dims: [] }, { path: ["Only Lower"], dims: [] }, { path: ["Loc"], dims: [] },
 ].map(function (k) { return { p: JSON.stringify(k.path), segs: k.path, dims: function () { return k.dims; } }; });
-function comp(t) { var res = []; var c = exprCompile(t, function (tok) { var r = exprResolve(tok, keys), k = r.p + JSON.stringify(r.ix); for (var i = 0; i < res.length; i++) if (res[i].p + JSON.stringify(res[i].ix) === k) return i; res.push(r); return res.length - 1; }); return { fn: c.fn, ids: res }; }   // one slot per key+pins, as exprMeta does
-function ids(t) { try { return comp(t).ids.map(function (i) { return [JSON.parse(i.p).join("."), i.ix]; }); } catch (e) { return "ERR " + e.message; } }
+function comp(t) { var res = []; var c = exprCompile(t, function (tok) { var r = tok.t === "attr" ? { attr: tok.v } : exprResolve(tok, keys), k = r.attr ? "$" + r.attr : r.p + JSON.stringify(r.ix); for (var i = 0; i < res.length; i++) if ((res[i].attr ? "$" + res[i].attr : res[i].p + JSON.stringify(res[i].ix)) === k) return i; res.push(r); return res.length - 1; }); return { fn: c.fn, ids: res }; }   // one slot per key+pins / field, as exprMeta does
+function ids(t) { try { return comp(t).ids.map(function (i) { return i.attr ? ["$" + i.attr] : [JSON.parse(i.p).join("."), i.ix]; }); } catch (e) { return "ERR " + e.message; } }
+function sel(t, arr, arrays) { var m = exprEval(comp(t).fn, arrays), r = exprSelect(arr, m); return [r, r.src]; }
 function ev(t, arrays) { var c = comp(t), r = exprEval(c.fn, arrays); return [r, r.src]; }
 console.log(JSON.stringify({
   pin_leaf: ids("SiPM.Result[3]"), pin_seg: ids("SiPM[5].Result"), pin_skip: ids("SiPM.Result[][5]"), pin_two: ids('"Test Results".SiPM.Result[2][1]'),
@@ -373,6 +374,12 @@ console.log(JSON.stringify({
   drops: ev("x*1", [["q", 2, null, 4]]), funcs: ev("sqrt(x)+min(x,X)", [[9], [1, 2]]), consts: ev("pi*2", []), div0: ev("x/0", [[1]]),
   logic: ev("!x && 1 || 0", [[0, 1]]), empty_id: ev("x+X", [[], [1]]),
   split: [exprSplit("f(a):b"), exprSplit('"a:b"'), exprSplit("SiPM.Result[3]"), exprSplit("a : b")],
+  // #163: text, regex, item fields, the selection mask
+  attr_ids: ids("$serial =~ 'a' && SiPM.Result[3] > 1"), bad_field: ids("$foo"), bad_pattern: ids("x =~ '('"),
+  re_hit: ev("$serial =~ '^hpk'", [["HPK19901"]]), re_miss: ev("$serial =~ '^hpk'", [["SMB1"]]), text_eq: ev("Loc == 'BNL'", [["BNL", "CERN"]]),
+  text_lt: ev("Loc < 'C'", [["BNL", "CERN"]]), num_text: ev("x + 1", [["3"]]), not_text: ev("!Loc", [["", "x"]]),
+  mixed: ev("x > 50 && $status == 'Unknown'", [[49, 51, 52], ["Unknown"]]),
+  sel_entries: sel("x > 50", [10, 20, 30], [[49, 51, 52]]), sel_item_out: sel("$status == 'Ready'", [10, 20, 30], [["Unknown"]]), sel_item_in: sel("$status == 'Unknown'", [10, 20, 30], [["Unknown"]]),
 }));
 """
 
@@ -413,7 +420,7 @@ class TestDataEndpointsTest(TestCase):
         node = shutil.which("node")
         if not node:
             self.skipTest("node is not installed")
-        pre = "var C = require(" + json.dumps(str(PLOT_CORE)) + "); var exprCompile = C.exprCompile, exprResolve = C.exprResolve, exprEval = C.exprEval, exprSplit = C.exprSplit;\n"
+        pre = "var C = require(" + json.dumps(str(PLOT_CORE)) + "); var exprCompile = C.exprCompile, exprResolve = C.exprResolve, exprEval = C.exprEval, exprSplit = C.exprSplit, exprSelect = C.exprSelect;\n"
         run = subprocess.run([node, "-e", pre + DRAW_HARNESS], capture_output=True, text=True, timeout=60)
         self.assertEqual(run.returncode, 0, run.stderr)
         r = json.loads(run.stdout)
@@ -442,6 +449,19 @@ class TestDataEndpointsTest(TestCase):
         self.assertEqual(r["logic"], [[1, 0], [0, 1]])
         self.assertEqual(r["empty_id"], [[], []])                  # an identifier with no values gives nothing
         self.assertEqual(r["split"], [["f(a)", "b"], ['"a:b"'], ["SiPM.Result[3]"], ["a", "b"]])
+        # #163: text in 'single quotes', =~ regex, $fields, and the per-entry selection mask
+        self.assertEqual(r["attr_ids"], [["$serial"], [K, [3, None]]])
+        self.assertIn("no item field “$foo” — one of $pid $serial $status $creator $institution $manufacturer", r["bad_field"])
+        self.assertIn("bad pattern “(”", r["bad_pattern"])
+        self.assertEqual((r["re_hit"], r["re_miss"]), ([[1], [0]], [[0], [0]]))
+        self.assertEqual(r["text_eq"], [[1, 0], [0, 1]])
+        self.assertEqual(r["text_lt"], [[1, 0], [0, 1]])
+        self.assertEqual(r["num_text"], [[4], [0]])                # a numeric string is a number
+        self.assertEqual(r["not_text"], [[1, 0], [0, 1]])          # empty text is false
+        self.assertEqual(r["mixed"], [[0, 1, 1], [0, 1, 2]])       # the item field repeats along the entries
+        self.assertEqual(r["sel_entries"], [[20, 30], [1, 2]])     # kept entries keep their source positions
+        self.assertEqual(r["sel_item_out"], [[], []])              # an all-scalar false mask drops the item …
+        self.assertEqual(r["sel_item_in"], [[10, 20, 30], None])   # … a true one keeps it whole (a plain array, no src)
 
     def test_page_has_the_draw_box(self):
         html = self.client.get("/hw/dev/plot/T/").content.decode()
@@ -452,13 +472,23 @@ class TestDataEndpointsTest(TestCase):
         # an expression is a virtual key: "=expr" in the series' x / y, restored from the hash, evaluated per item, fetched by its identifiers
         self.assertIn('function isExpr(p) { return typeof p === "string" && p.charAt(0) === "="; }', PLOT_JS)
         self.assertIn('s.x = h.x && (isExpr(h.x) || acc.has(h.x)) ? h.x : ""; s.y = h.y && (isExpr(h.y) || acc.has(h.y)) ? h.y : "";', PLOT_JS)
-        self.assertIn("if (isExpr(p)) { var m = exprMeta(p); return m.err ? [] : exprEval(m.fn, m.ids.map(function (id) { return slotValues(item, id.p, id.ix, s); })); }", PLOT_JS)
+        self.assertIn("var arr = isExpr(p) ? exprValues(item, p, s) : slotValues(item, p, idxOf(p, s), s);", PLOT_JS)
         self.assertIn("function seriesSpecs(s) {", PLOT_JS)
         self.assertIn("function pairValues(it, s) {", PLOT_JS)        # X–Y pairing by entry when an expression dropped some
         self.assertIn("items = newItems; pathCounts = counts; specDims = {}; exprCache = {};", PLOT_JS)
         self.assertIn('if (exprErr(a)) { clear("Draw: " + exprErr(a)); return; }', PLOT_JS)
         self.assertIn("function keyAsName(p, ix) {", PLOT_JS)         # the box shows a picked key as a name with its pins
         self.assertIn('got[ax] = toks.length === 1 && toks[0].t === "id" && m.ids.length === 1 ? { p: m.ids[0].p, ix: m.ids[0].ix } : { p: "=" + side[ax], ix: null };', PLOT_JS)
+        # #163: the Select box — per-entry selection stored as `sel` on the series, applied to every value the series reads
+        self.assertIn('<input type="text" id="dsel" placeholder="entries to keep, e.g. Result_Err[3] &lt; 0.1 &amp;&amp; $serial =~ \'HPK\'"', html)
+        self.assertIn('<span class="pl-err" id="sel-err" hidden></span>', html)
+        self.assertIn("<b>select</b><span>a second expression, true (non-zero) keeps the entry", html)
+        self.assertIn("if (s.sel && !exprMeta(s.sel).err) arr = exprSelect(arr, exprValues(item, s.sel, s));", PLOT_JS)
+        self.assertIn('function idValues(item, id, s) { return id.attr ? [item[id.attr] === null || item[id.attr] === undefined ? "" : item[id.attr]] : slotValues(item, id.p, id.ix, s); }', PLOT_JS)
+        self.assertIn("sel: s.sel || undefined,", PLOT_JS)
+        self.assertIn('s.sel = typeof h.sel === "string" ? h.sel : "";', PLOT_JS)
+        self.assertIn('if (s.sel) { var ms = exprMeta(s.sel); if (!ms.err) ms.ids.forEach(function (id) { if (!id.attr) out.push({ p: id.p, ix: id.ix }); }); }', PLOT_JS)
+        self.assertIn('function selErr(s) { return s.sel && exprMeta(s.sel).err ? "selection: " + exprMeta(s.sel).err : null; }', PLOT_JS)
 
     def test_page_has_a_serial_filter(self):
         # Chao 2026-09-17: a distribution over a PID range should take HPK.* boards only, not SMB.*

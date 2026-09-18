@@ -50,7 +50,8 @@
     var EXPR_FUNCS = { sqrt: Math.sqrt, abs: Math.abs, log: Math.log, log10: Math.log10, exp: Math.exp, pow: Math.pow, sin: Math.sin, cos: Math.cos, tan: Math.tan,
                        atan: Math.atan, atan2: Math.atan2, min: Math.min, max: Math.max, floor: Math.floor, ceil: Math.ceil, round: Math.round };
     var EXPR_CONSTS = { pi: Math.PI, e: Math.E };
-    var EXPR_PREC = { "||": 1, "&&": 2, "==": 3, "!=": 3, "<": 4, "<=": 4, ">": 4, ">=": 4, "+": 5, "-": 5, "*": 6, "/": 6, "%": 6 };
+    var EXPR_PREC = { "||": 1, "&&": 2, "==": 3, "!=": 3, "=~": 3, "<": 4, "<=": 4, ">": 4, ">=": 4, "+": 5, "-": 5, "*": 6, "/": 6, "%": 6 };
+    var EXPR_ATTRS = ["pid", "serial", "status", "creator", "institution", "manufacturer"];   // $pid … : the item's own fields (#163)
     function isExpr(p) { return typeof p === "string" && p.charAt(0) === "="; }     // a series' x / y: "=expr", else a JSON key path
     function exprText(p) { return isExpr(p) ? p.slice(1) : p; }
     function exprNum(v) {
@@ -73,14 +74,24 @@
         parts.push(cur);
         return parts.map(function (s) { return s.trim(); });
     }
-    // Tokens: numbers; identifiers = segments (bare, or "quoted" for other
-    // characters) joined by ".", each with optional [i] / [] pins; a bare name
-    // before "(" is a function; operators. Positions are 1-based in messages.
+    // Tokens: numbers; 'strings' (single quotes — double quotes name keys);
+    // $attr = an item field; identifiers = segments (bare, or "quoted" for
+    // other characters) joined by ".", each with optional [i] / [] pins; a bare
+    // name before "(" is a function; operators. Positions are 1-based in messages.
     function exprTokens(text) {
-        var out = [], i = 0, n = text.length, OPS2 = ["&&", "||", "==", "!=", "<=", ">=", ">>"], OPS1 = "+-*/%^(),<>!";
+        var out = [], i = 0, n = text.length, OPS2 = ["&&", "||", "==", "!=", "=~", "<=", ">=", ">>"], OPS1 = "+-*/%^(),<>!";
         while (i < n) {
             var ch = text[i];
             if (/\s/.test(ch)) { i++; continue; }
+            if (ch === "'") {
+                var qe = text.indexOf("'", i + 1); if (qe < 0) throw new Error("unclosed quote at " + (i + 1));
+                out.push({ t: "str", v: text.slice(i + 1, qe), at: i }); i = qe + 1; continue;
+            }
+            if (ch === "$") {
+                var ma = /^\$([A-Za-z_]+)/.exec(text.slice(i)); if (!ma) throw new Error("bad name at " + (i + 1));
+                if (EXPR_ATTRS.indexOf(ma[1].toLowerCase()) < 0) throw new Error("no item field “" + ma[0] + "” — one of $" + EXPR_ATTRS.join(" $"));
+                out.push({ t: "attr", v: ma[1].toLowerCase(), text: ma[0], at: i }); i += ma[0].length; continue;
+            }
             if (/[0-9.]/.test(ch)) {
                 var m = /^(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/.exec(text.slice(i));
                 if (!m) throw new Error("bad number at " + (i + 1));
@@ -116,6 +127,18 @@
         }
         return out;
     }
+    // Values are raw in the environment: arithmetic coerces to a number (NaN
+    // when it cannot, so the entry drops); comparisons are numeric when both
+    // sides read as numbers, else on the text; truth = a non-zero number or a
+    // non-empty string.
+    function exprNv(x) { var n = exprNum(x); return n === null ? NaN : n; }
+    function exprTruthy(x) { return typeof x === "string" ? x !== "" : !!exprNum(x); }
+    function exprCmp(a, b) {
+        var na = exprNum(a), nb = exprNum(b);
+        if (na !== null && nb !== null) return na < nb ? -1 : na > nb ? 1 : 0;
+        var sa = a === null || a === undefined ? "" : String(a), sb = b === null || b === undefined ? "" : String(b);
+        return sa < sb ? -1 : sa > sb ? 1 : 0;
+    }
     // Compile: resolve(idToken) returns the identifier's slot in the value
     // environment (or throws). Result: { fn(env) → number, ids: [idToken] }.
     // ^ binds tighter than unary minus (-x^2 = -(x^2)) and is right-associative.
@@ -129,7 +152,8 @@
         function primary() {
             var t = take();
             if (!t) throw new Error("unexpected end");
-            if (t.t === "num") { var v = t.v; return function () { return v; }; }
+            if (t.t === "num" || t.t === "str") { var v = t.v; return function () { return v; }; }
+            if (t.t === "attr") { var ka = resolve(t); ids.push(t); return function (env) { return env[ka]; }; }
             if (t.t === "id") {
                 var k;
                 try { k = resolve(t); }
@@ -146,16 +170,16 @@
                 expectOp("("); var args = [];
                 if (!isOp(peek(), ")")) { args.push(expr(0)); while (isOp(peek(), ",")) { take(); args.push(expr(0)); } }
                 expectOp(")");
-                return function (env) { return f.apply(null, args.map(function (a) { return a(env); })); };
+                return function (env) { return f.apply(null, args.map(function (a) { return exprNv(a(env)); })); };
             }
             if (isOp(t, "(")) { var e = expr(0); expectOp(")"); return e; }
-            if (isOp(t, "-")) { var u = unary(); return function (env) { return -u(env); }; }
-            if (isOp(t, "!")) { var u2 = unary(); return function (env) { return u2(env) ? 0 : 1; }; }
+            if (isOp(t, "-")) { var u = unary(); return function (env) { return -exprNv(u(env)); }; }
+            if (isOp(t, "!")) { var u2 = unary(); return function (env) { return exprTruthy(u2(env)) ? 0 : 1; }; }
             throw new Error("unexpected “" + t.v + "” at " + (t.at + 1));
         }
         function unary() {
             var base = primary();
-            if (isOp(peek(), "^")) { take(); var ex = unary(), b0 = base; base = function (env) { return Math.pow(b0(env), ex(env)); }; }
+            if (isOp(peek(), "^")) { take(); var ex = unary(), b0 = base; base = function (env) { return Math.pow(exprNv(b0(env)), exprNv(ex(env))); }; }
             return base;
         }
         function expr(minPrec) {
@@ -163,14 +187,27 @@
             for (;;) {
                 var t = peek(); if (!t || t.t !== "op" || !Object.prototype.hasOwnProperty.call(EXPR_PREC, t.v) || EXPR_PREC[t.v] < minPrec) break;
                 take();
+                var rt = peek(), right = expr(EXPR_PREC[t.v] + 1);
+                if (t.v === "=~") {          // regex, case-insensitive; a literal pattern compiles once
+                    var lit = rt && rt.t === "str" && toks[pos - 1] === rt ? rt.v : null, re0 = null;
+                    if (lit !== null) { try { re0 = new RegExp(lit, "i"); } catch (e) { throw new Error("bad pattern “" + lit + "”"); } }
+                    left = (function (l, r, re0) { return function (env) {
+                        var a = l(env); if (a === null || a === undefined) return 0;
+                        var re = re0; if (!re) { try { re = new RegExp(String(r(env)), "i"); } catch (e) { return 0; } }
+                        return re.test(String(a)) ? 1 : 0;
+                    }; })(left, right, re0);
+                    continue;
+                }
                 left = (function (op, l, r) { return function (env) {
                     var a = l(env), b = r(env);
                     switch (op) {
-                        case "+": return a + b; case "-": return a - b; case "*": return a * b; case "/": return a / b; case "%": return a % b;
-                        case "<": return a < b ? 1 : 0; case "<=": return a <= b ? 1 : 0; case ">": return a > b ? 1 : 0; case ">=": return a >= b ? 1 : 0;
-                        case "==": return a === b ? 1 : 0; case "!=": return a !== b ? 1 : 0; case "&&": return a && b ? 1 : 0; default: return a || b ? 1 : 0;
+                        case "&&": return exprTruthy(a) && exprTruthy(b) ? 1 : 0; case "||": return exprTruthy(a) || exprTruthy(b) ? 1 : 0;
+                        case "==": return exprCmp(a, b) === 0 ? 1 : 0; case "!=": return exprCmp(a, b) !== 0 ? 1 : 0;
+                        case "<": return exprCmp(a, b) < 0 ? 1 : 0; case "<=": return exprCmp(a, b) <= 0 ? 1 : 0; case ">": return exprCmp(a, b) > 0 ? 1 : 0; case ">=": return exprCmp(a, b) >= 0 ? 1 : 0;
                     }
-                }; })(t.v, left, expr(EXPR_PREC[t.v] + 1));
+                    a = exprNv(a); b = exprNv(b);
+                    switch (op) { case "+": return a + b; case "-": return a - b; case "*": return a * b; case "/": return a / b; default: return a % b; }
+                }; })(t.v, left, right);
             }
             return left;
         }
@@ -214,20 +251,29 @@
     }
     // Evaluate over one item: arrays run together position by position up to the
     // shortest, a single value repeats, an identifier with no values gives
-    // nothing; a non-numeric or non-finite entry drops out. out.src keeps each
-    // result's source position (tooltips, and X–Y pairing by entry).
+    // nothing; an entry whose result is not a finite number drops out. out.src
+    // keeps each result's source position (tooltips, X–Y pairing, selection);
+    // out.n is the entry count the arrays ran over (1 = only single values).
     function exprEval(fn, arrays) {
         var n = Infinity;
         arrays.forEach(function (a) { if (!a.length) n = 0; else if (a.length > 1) n = Math.min(n, a.length); });
         if (n === Infinity) n = 1;
         var out = [], src = [], env = new Array(arrays.length);
         for (var j = 0; j < n; j++) {
-            var ok = true;
-            for (var k = 0; k < arrays.length; k++) { var v = exprNum(arrays[k].length > 1 ? arrays[k][j] : arrays[k][0]); if (v === null) { ok = false; break; } env[k] = v; }
-            if (!ok) continue;
+            for (var k = 0; k < arrays.length; k++) env[k] = arrays[k].length > 1 ? arrays[k][j] : arrays[k][0];
             var r = fn(env);
             if (typeof r === "number" && isFinite(r)) { out.push(r); src.push(j); }
         }
+        out.src = src; out.n = n;
+        return out;
+    }
+    // A selection (#163) over an item's entries: the mask's kept positions
+    // filter arr by source position; all-scalar masks keep or drop the whole item.
+    function exprSelect(arr, mask) {
+        var out = [], src = [];
+        if (mask.n === 1) { if (mask.length && mask[0]) return arr; out.src = []; return out; }
+        var keep = {}; mask.forEach(function (v, j) { if (v) keep[mask.src[j]] = true; });
+        arr.forEach(function (v, j) { var q = arr.src ? arr.src[j] : j; if (keep[q]) { out.push(v); src.push(q); } });
         out.src = src;
         return out;
     }
@@ -267,6 +313,6 @@
         return { n: n, mean: mean, sd: sd };
     }
 
-    var PlotCore = { nestedAt: nestedAt, dimsOf: dimsOf, dimLabels: dimLabels, selectAt: selectAt, isExpr: isExpr, exprText: exprText, exprSplit: exprSplit, exprTokens: exprTokens, exprCompile: exprCompile, exprNorm: exprNorm, exprResolve: exprResolve, exprEval: exprEval, normSn: normSn, pidAlternation: pidAlternation, pidRange: pidRange, toNum: toNum, fmt: fmt, histCounts: histCounts, isNumeric: isNumeric, catKey: catKey, topCats: topCats, meanSd: meanSd };
+    var PlotCore = { exprSelect: exprSelect, EXPR_ATTRS: EXPR_ATTRS, nestedAt: nestedAt, dimsOf: dimsOf, dimLabels: dimLabels, selectAt: selectAt, isExpr: isExpr, exprText: exprText, exprSplit: exprSplit, exprTokens: exprTokens, exprCompile: exprCompile, exprNorm: exprNorm, exprResolve: exprResolve, exprEval: exprEval, normSn: normSn, pidAlternation: pidAlternation, pidRange: pidRange, toNum: toNum, fmt: fmt, histCounts: histCounts, isNumeric: isNumeric, catKey: catKey, topCats: topCats, meanSd: meanSd };
     if (typeof module !== "undefined" && module.exports) module.exports = PlotCore; else root.PlotCore = PlotCore;
 })(typeof window !== "undefined" ? window : this);
