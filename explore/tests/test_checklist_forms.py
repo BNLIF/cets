@@ -533,6 +533,7 @@ class SpecAndLinkTest(TestCase):
         api.get_subcomponents.return_value = {"data": [
             {"functional_position": "CBL1", "part_id": None}]}
         api.patch_component.return_value = {"status": "OK"}
+        api.enable_component.return_value = {"status": "OK"}
         api.patch_subcomponents.return_value = {"status": "OK"}
         return api
 
@@ -1052,6 +1053,141 @@ class ItemCreateTest(TestCase):
             "properties": {"specifications": [{"datasheet": {"Note": ""}}]}}}
         api.create_component.return_value = {"status": "OK", "part_id": NEW_PID}
         return api
+
+    # ---- #167: sub-components minted and linked along with the item ----
+    CHILD = "D00900100002"
+    CONNECTORS = {"A": CHILD, "B": CHILD, "C": CHILD, "D": CHILD, "X": ""}
+
+    def _api_children(self):
+        api = self._api_create()
+        api.get_component_type.return_value["data"]["connectors"] = dict(self.CONNECTORS)
+        n = iter(range(1, 10))
+        api.create_component.side_effect = lambda tid, payload: {
+            "status": "OK", "part_id": NEW_PID if tid == PTID else f"{tid}-{next(n):05d}"}
+        api.patch_component.return_value = {"status": "OK"}
+        api.enable_component.return_value = {"status": "OK"}
+        api.patch_subcomponents.return_value = {"status": "OK"}
+        return api
+
+    def test_form_offers_the_positions_child_types_and_preticks_the_remembered(self):
+        from explore.models import ChildMintSetting
+        api = self._api_children()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(NEW_PAGE).content.decode()
+        self.assertIn(f'name="mint_child" value="{self.CHILD}">', html)   # offered, not ticked
+        self.assertIn(f"4 × {self.CHILD}", html)
+        self.assertIn("A, B, C, D", html)
+        self.assertIn(f'<option value="110" selected>', html)   # default: Waiting on QA/QC
+        ChildMintSetting.objects.create(instance="dev", part_type_id=PTID, children=[
+            {"type_id": self.CHILD, "status_id": 120, "qaqc_uploaded": True, "certified_qaqc": True}])
+        with m1, m2:
+            html = self.client.get(NEW_PAGE).content.decode()
+        self.assertIn(f'name="mint_child" value="{self.CHILD}" checked>', html)
+        self.assertIn(f'<option value="120" selected>', html)
+        self.assertIn(f'name="up_{self.CHILD}" value="1" checked>', html)
+
+    def test_post_mints_children_patches_flags_and_links_once(self):
+        from explore.models import ActivityEvent, ChildMintSetting
+        api = self._api_children()
+        m1, m2 = _mocked(api)
+        with m1, m2, mock.patch("explore.views._is_architect", return_value=True):
+            resp = self.client.post(NEW_PAGE, {"institution_id": "128", "mint_child": [self.CHILD],
+                                               f"status_{self.CHILD}": "120", f"up_{self.CHILD}": "1",
+                                               f"cert_{self.CHILD}": "1", "remember_children": "1"}, follow=True)
+        creates = api.create_component.call_args_list
+        self.assertEqual([c.args[0] for c in creates], [PTID] + [self.CHILD] * 4)
+        child = creates[1].args[1]
+        self.assertEqual((child["component_type"], child["serial_number"], child["institution"], child["country_code"]),
+                         ({"part_type_id": self.CHILD}, f"{NEW_PID}-A", {"id": 128}, "US"))
+        self.assertEqual(child["manufacturer"], {"id": 7})
+        self.assertIn(f"Sub-component of {NEW_PID}, position A", child["comments"])
+        self.assertEqual([c.args[0] for c in api.enable_component.call_args_list],
+                         [NEW_PID] + [f"{self.CHILD}-{n:05d}" for n in range(1, 5)])
+        names = [c[0] for c in api.mock_calls if c[0] in ("create_component", "enable_component",
+                                                          "patch_component", "patch_subcomponents")]
+        # parent and each child: create → enable → status/flags (+ restored serial/comments) patch
+        self.assertEqual(names[:6], ["create_component", "enable_component", "patch_component",
+                                     "create_component", "enable_component", "patch_component"])
+        self.assertEqual(names[-1], "patch_subcomponents")
+        flags = api.patch_component.call_args_list[1:]     # [0] is the parent's own status
+        self.assertEqual(len(flags), 4)
+        self.assertEqual(flags[0].args[1]["status"], {"id": 120})
+        self.assertTrue(flags[0].args[1]["qaqc_uploaded"] and flags[0].args[1]["certified_qaqc"])
+        self.assertEqual(flags[0].args[1]["comments"], child["comments"])          # enable wiped it
+        self.assertEqual(flags[0].args[1]["serial_number"], f"{NEW_PID}-A")
+        api.patch_subcomponents.assert_called_once_with(NEW_PID, {
+            "component": {"part_id": NEW_PID},
+            "subcomponents": {"A": f"{self.CHILD}-00001", "B": f"{self.CHILD}-00002",
+                              "C": f"{self.CHILD}-00003", "D": f"{self.CHILD}-00004", "X": None}})
+        html = resp.content.decode()
+        self.assertIn("with 4 sub-components minted and linked", html)
+        self.assertIn(f"A: {self.CHILD}-00001", html)
+        self.assertEqual(ActivityEvent.objects.filter(kind=ActivityEvent.KIND_MINTED).count(), 5)
+        self.assertEqual(ChildMintSetting.objects.get(part_type_id=PTID).children,
+                         [{"type_id": self.CHILD, "status_id": 120, "qaqc_uploaded": True, "certified_qaqc": True}])
+
+    def test_default_birth_is_waiting_on_qaqc_with_flags_off(self):
+        api = self._api_children()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(NEW_PAGE, {"institution_id": "128", "mint_child": [self.CHILD],
+                                        f"status_{self.CHILD}": "999"})   # unknown id → default
+        flags = api.patch_component.call_args_list[1].args[1]     # the first child's
+        self.assertEqual((flags["status"], flags["qaqc_uploaded"], flags["certified_qaqc"]),
+                         ({"id": 110}, False, False))
+
+    def test_unticked_mints_nothing_extra(self):
+        api = self._api_children()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(NEW_PAGE, {"institution_id": "128"})
+        self.assertEqual(api.create_component.call_count, 1)
+        api.patch_subcomponents.assert_not_called()
+
+    def test_every_new_item_is_enabled_with_its_serial_and_comment_restored(self):
+        api = self._api_children()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(NEW_PAGE, {"institution_id": "128", "serial_number": "SN-1", "comments": "hello"})
+        api.enable_component.assert_called_once_with(NEW_PID)
+        api.patch_component.assert_called_once_with(
+            NEW_PID, {"part_id": NEW_PID, "comments": "hello", "serial_number": "SN-1",
+                      "status": {"id": 110}, "qaqc_uploaded": False, "certified_qaqc": False})
+
+    def test_the_items_own_status_and_flags_are_chosen_on_the_page(self):
+        api = self._api_children()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(NEW_PAGE).content.decode()
+        self.assertIn('<select id="ic-status" name="status">', html)
+        self.assertIn('<option value="110" selected>Waiting on QA/QC Tests</option>', html)
+        with m1, m2:
+            self.client.post(NEW_PAGE, {"institution_id": "128", "status": "100", "cert": "1"})
+        self.assertEqual(api.patch_component.call_args.args[1],
+                         {"part_id": NEW_PID, "status": {"id": 100}, "qaqc_uploaded": False, "certified_qaqc": True})
+
+    def test_a_failed_child_leaves_its_position_empty_and_is_reported(self):
+        import requests
+        api = self._api_children()
+        n = iter(range(1, 10))
+
+        def create(tid, payload):
+            if tid == PTID:
+                return {"status": "OK", "part_id": NEW_PID}
+            if payload["serial_number"].endswith("-B"):
+                raise requests.exceptions.HTTPError("500 boom")
+            return {"status": "OK", "part_id": f"{tid}-{next(n):05d}"}
+        api.create_component.side_effect = create
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.post(NEW_PAGE, {"institution_id": "128", "mint_child": [self.CHILD]},
+                                    follow=True).content.decode()
+        self.assertEqual(api.patch_subcomponents.call_args.args[1]["subcomponents"]["B"], None)
+        self.assertEqual(api.patch_subcomponents.call_args.args[1]["subcomponents"]["A"], f"{self.CHILD}-00001")
+        self.assertIn("with 3 sub-components minted and linked", html)
+        self.assertIn("Sub-component — ", html)
+        self.assertIn("position “B”: 500 boom", html)
 
     def test_form_renders_with_institutions_and_checklist_hint(self):
         api = self._api_create()

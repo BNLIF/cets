@@ -38,7 +38,7 @@ from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, refresh_component_row, sync_test_events
 from .hierarchy import sync_hierarchy, sync_system
 from .instances import instance_of, namespace_of
-from .models import (
+from .models import (ChildMintSetting, 
     ActivityEvent, BoxChecklist, ChecklistBookmark, ChecklistDraft, HierarchyNode,
     InstitutionPref, ShippingTypeOverride,
     HierarchySyncState, HwdbComponentEvent, HwdbTestEvent, PackScan, ShipmentItem, TestDateSetting,
@@ -1568,6 +1568,26 @@ def _hwdb_error_detail(e) -> str:
     return _mark(str(detail) if detail else str(e), e)
 
 
+def _mint_enabled(api, part_type_id: str, payload: dict, patch: dict | None = None) -> str:
+    """Create an item and ENABLE it: HWDB attaches only enabled items and a
+    new one is disabled ("not available" at link time — Chao on dev
+    2026-09-18; Karla's FEMB flow knew). Enabling resets the status and
+    wipes the comments, so the create payload's comments and serial, plus
+    any ``patch`` fields (status, QA/QC flags), are PATCHed back in one
+    call afterwards. Returns the PID; ``ValueError`` carries HWDB's message
+    when the create is answered but refused."""
+    body = api.create_component(part_type_id, payload)
+    pid = body.get("part_id") if body.get("status") == "OK" else None
+    if not pid:
+        raise ValueError(str(body.get("data") or body))
+    api.enable_component(pid)
+    after = {k: payload[k] for k in ("comments", "serial_number") if payload.get(k)}
+    after.update(patch or {})
+    if after:
+        api.patch_component(pid, {"part_id": pid, **after})
+    return pid
+
+
 def _spec_template(type_record: dict) -> dict:
     """The type's spec datasheet — the template a create payload must echo
     (the official flow posts ``ct.properties.specifications[-1].datasheet``)."""
@@ -1624,14 +1644,14 @@ def explore_box_create_view(request, part_type_id):
         }
         if len(manufacturers) == 1 and manufacturers[0].get("id") is not None:
             payload["manufacturer"] = {"id": manufacturers[0]["id"]}
-        body = api.create_component(part_type_id, payload)
+        part_id = _mint_enabled(api, part_type_id, payload,
+                                patch={"status": {"id": NEW_ITEM_STATUS}})
     except requests.RequestException as e:
         logger.warning("box create for %s failed: %s", part_type_id, e)
         messages.error(request, f"HWDB rejected the new box — {_hwdb_error_detail(e)}")
         return redirect(back)
-    part_id = body.get("part_id")
-    if body.get("status") != "OK" or not part_id:
-        messages.error(request, f"HWDB rejected the new box — {body.get('data') or body}")
+    except ValueError as e:
+        messages.error(request, f"HWDB rejected the new box — {e}")
         return redirect(back)
 
     try:  # the box exists now; give it a mirror row so it lists immediately
@@ -3749,6 +3769,15 @@ def explore_item_create_view(request, part_type_id):
     template = _spec_template(type_record)
     has_data = isinstance(template.get("DATA"), dict)
     is_arch = _is_architect(request, inst, api)
+    # #167: the type's positions grouped by the child type they accept — the
+    # form offers to mint those along with the item, each with the status and
+    # QA/QC flags it is born with; the remembered choice (architects,
+    # "remember for this type") comes pre-filled
+    connectors = (type_record.get("data") or {}).get("connectors") or {}
+    remembered = {d["type_id"]: d for d in (
+        ChildMintSetting.for_instance(inst).filter(part_type_id=part_type_id)
+        .values_list("children", flat=True).first() or []) if isinstance(d, dict)}
+    child_types = _child_types(inst, connectors, remembered)
 
     if request.method == "POST":
         institution = next(
@@ -3759,6 +3788,14 @@ def explore_item_create_view(request, part_type_id):
             messages.error(request, "Pick the institution the new item "
                                     "belongs to.")
             return redirect(page_url)
+        mint = [_child_choice(request.POST, c) for c in child_types
+                if c["type_id"] in request.POST.getlist("mint_child")]
+        if is_arch and request.POST.get("remember_children"):
+            ChildMintSetting.objects.update_or_create(
+                instance=inst, part_type_id=part_type_id,
+                defaults={"children": [{k: c[k] for k in ("type_id", "status_id", "qaqc_uploaded", "certified_qaqc")}
+                                       for c in mint],
+                          "updated_by": activity.actor_of(request)})
         if not has_data and is_arch and request.POST.get("define_type_data"):
             derr = _define_type_spec_data(api, part_type_id, type_record)
             if derr:
@@ -3782,31 +3819,40 @@ def explore_item_create_view(request, part_type_id):
             }
             if len(manufacturers) == 1 and manufacturers[0].get("id") is not None:
                 payload["manufacturer"] = {"id": manufacturers[0]["id"]}
-            body = api.create_component(part_type_id, payload)
+            part_id = _mint_enabled(api, part_type_id, payload, patch={
+                "status": {"id": _status_id(request.POST.get("status"))},
+                "qaqc_uploaded": request.POST.get("up") == "1",
+                "certified_qaqc": request.POST.get("cert") == "1"})
         except requests.RequestException as e:
             messages.error(request, f"HWDB rejected the new item — {_hwdb_error_detail(e)}")
             return redirect(page_url)
-        part_id = body.get("part_id")
-        if body.get("status") != "OK" or not part_id:
-            messages.error(request, f"HWDB rejected the new item — {body.get('data') or body}")
+        except ValueError as e:
+            messages.error(request, f"HWDB rejected the new item — {e}")
             return redirect(page_url)
         activity.log(inst, ActivityEvent.KIND_MINTED,
                      f"Item {part_id} minted",
                      part_id=part_id, part_type_id=part_type_id,
                      actor=activity.actor_of(request))
-        try:
-            # Mirror the new item right away (incremental = detail + tests
-            # for unknown PIDs only, i.e. just this one) so the type page
-            # lists it without a manual "sync new" (#97 review).
-            for _ in sync_test_events(settings.HWDB_PROFILES[inst]["api"],
-                                      bearer, part_type_id, instance=inst,
-                                      mode="incremental"):
-                pass
-        except Exception as e:
-            logger.warning("post-create sync for %s failed: %s",
-                           part_type_id, e)
+        linked, child_errors = _mint_children(api, inst, request, part_id, connectors,
+                                              mint, institution) if mint else ({}, [])
+        for ptid in [part_type_id] + [c["type_id"] for c in mint]:
+            try:
+                # Mirror the new item(s) right away (incremental = detail + tests
+                # for unknown PIDs only) so the type page lists them without a
+                # manual "sync new" (#97 review).
+                for _ in sync_test_events(settings.HWDB_PROFILES[inst]["api"],
+                                          bearer, ptid, instance=inst,
+                                          mode="incremental"):
+                    pass
+            except Exception as e:
+                logger.warning("post-create sync for %s failed: %s", ptid, e)
         _remember_institution(request, inst, institution["id"])
-        messages.success(request, f"Item {part_id} minted in the {inst} HWDB.")
+        with_children = (f", with {len(linked)} sub-component{'s' if len(linked) != 1 else ''} "
+                         f"minted and linked ({', '.join(f'{p}: {linked[p]}' for p in linked)})"
+                         if linked else "")
+        messages.success(request, f"Item {part_id} minted in the {inst} HWDB{with_children}.")
+        for err in child_errors:
+            messages.error(request, f"Sub-component — {err}")
         # #110: arrived via a checklist's PID chooser — continue into THAT
         # checklist; else the #97 rule (single checklist, or the part page).
         via = request.POST.get("checklist") or ""
@@ -3836,7 +3882,111 @@ def explore_item_create_view(request, part_type_id):
         "spec_template": json.dumps(template, indent=2, ensure_ascii=False),
         "spec_has_data": has_data,
         "can_define_type_data": (not has_data) and is_arch,
+        "child_types": child_types,
+        "status_options": checklistforms.STATUS_OPTIONS,
+        "item_status": NEW_ITEM_STATUS,
+        "is_arch": is_arch,
     })
+
+
+NEW_ITEM_STATUS = 110   # Waiting on QA/QC Tests — linkable (HWDB links 100/110/120/140 only), awaiting its tests
+
+
+def _status_id(raw) -> int:
+    """A posted status id when it is one HWDB knows, else the new-item default."""
+    try:
+        sid = int(raw or NEW_ITEM_STATUS)
+    except (TypeError, ValueError):
+        return NEW_ITEM_STATUS
+    return sid if sid in {o["value"] for o in checklistforms.STATUS_OPTIONS} else NEW_ITEM_STATUS
+
+
+def _child_types(inst, connectors: dict, remembered: dict) -> list[dict]:
+    """#167: a type's positions grouped by the child type they accept —
+    ``[{type_id, name, positions, checked, status_id, qaqc_uploaded,
+    certified_qaqc}]`` in position order, pre-filled from the remembered
+    choice (else unticked, Waiting on QA/QC, flags off); untyped positions
+    are skipped (nothing to mint for them)."""
+    names = dict(HierarchyNode.for_instance(inst)
+                 .filter(level=HierarchyNode.LEVEL_TYPE, part_type_id__in={t for t in connectors.values() if t})
+                 .values_list("part_type_id", "name"))
+    out: dict[str, dict] = {}
+    for pos, tid in sorted(connectors.items(), key=lambda kv: str(kv[0])):
+        if not tid:
+            continue
+        if tid not in out:
+            r = remembered.get(tid) or {}
+            out[tid] = {"type_id": tid, "name": names.get(tid) or tid, "positions": [],
+                        "checked": tid in remembered,
+                        "status_id": r.get("status_id", NEW_ITEM_STATUS),
+                        "qaqc_uploaded": bool(r.get("qaqc_uploaded")),
+                        "certified_qaqc": bool(r.get("certified_qaqc"))}
+        out[tid]["positions"].append(pos)
+    return list(out.values())
+
+
+def _child_choice(post, c: dict) -> dict:
+    """The form's choice for one child type: status (a known id, else the
+    default) and the two QA/QC flags."""
+    tid = c["type_id"]
+    return {**c, "status_id": _status_id(post.get(f"status_{tid}")),
+            "qaqc_uploaded": post.get(f"up_{tid}") == "1",
+            "certified_qaqc": post.get(f"cert_{tid}") == "1"}
+
+
+def _mint_children(api, inst, request, parent_pid, connectors, children, institution):
+    """#167: mint one item of each chosen child type per position that
+    accepts it — same institution as the parent, serial ``<parent>-<position>``,
+    the child type's own datasheet and single manufacturer — enabled and
+    patched to the chosen status + QA/QC flags (``_mint_enabled``) (default Waiting on QA/QC; the form's
+    "virtual part" preset is Passed All + uploaded + certified, Hajime's
+    rule for bureaucratic parts nobody tests; HWDB links only statuses
+    100/110/120/140), then ONE subcomponents PATCH linking them all.
+    Returns ``({position: pid}, [error, …])``; a failed child leaves its
+    position empty, the parent stands."""
+    minted: dict[str, str] = {}
+    errors: list[str] = []
+    for c in children:
+        try:
+            rec = api.get_component_type(c["type_id"])
+        except requests.RequestException as e:
+            errors.append(f"{c['name']}: couldn’t read the type — {_hwdb_error_detail(e)}")
+            continue
+        template = _spec_template(rec)
+        mans = (rec.get("data") or {}).get("manufacturers") or []
+        for pos in c["positions"]:
+            comment = f"Sub-component of {parent_pid}, position {pos}"
+            payload = {"component_type": {"part_type_id": c["type_id"]},
+                       "country_code": institution["country_code"],
+                       "institution": {"id": institution["id"]},
+                       "serial_number": f"{parent_pid}-{pos}", "comments": comment,
+                       "specifications": template}
+            if len(mans) == 1 and mans[0].get("id") is not None:
+                payload["manufacturer"] = {"id": mans[0]["id"]}
+            try:
+                pid = _mint_enabled(api, c["type_id"], payload, patch={
+                    "status": {"id": c["status_id"]}, "qaqc_uploaded": c["qaqc_uploaded"],
+                    "certified_qaqc": c["certified_qaqc"]})
+            except requests.RequestException as e:
+                errors.append(f"{c['name']} for position “{pos}”: {_hwdb_error_detail(e)}")
+                continue
+            except ValueError as e:
+                errors.append(f"{c['name']} for position “{pos}”: {e}")
+                continue
+            minted[pos] = pid
+            activity.log(inst, ActivityEvent.KIND_MINTED,
+                         f"Item {pid} minted as {parent_pid}'s “{pos}”",
+                         part_id=pid, part_type_id=c["type_id"], actor=activity.actor_of(request))
+    if minted:
+        try:
+            body = api.patch_subcomponents(parent_pid, {
+                "component": {"part_id": parent_pid},
+                "subcomponents": {pos: minted.get(pos) for pos in connectors}})
+            if body.get("status") != "OK":
+                errors.append(f"linking failed — {body.get('data') or body}")
+        except requests.RequestException as e:
+            errors.append(f"linking failed — {_hwdb_error_detail(e)}")
+    return minted, errors
 
 
 def _define_type_spec_data(api, part_type_id, type_record) -> str | None:

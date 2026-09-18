@@ -496,6 +496,28 @@ class TestDateSetting(InstanceScoped):
         return f"{self.instance}:{self.part_type_id} → {self.label}"
 
 
+class ChildMintSetting(InstanceScoped):
+    """#167: the sub-components New item mints and links along with a new
+    item of this type (Anselmo: a PDS module's four supercells are
+    bureaucratic objects that should exist the moment the module does).
+    ``children`` = ``[{type_id, status_id, qaqc_uploaded, certified_qaqc}]``
+    — which child types, and the status + QA/QC flags they are born with.
+    Architects set it from the New item page ("remember for this type");
+    the page then pre-fills it for everyone."""
+
+    part_type_id = models.CharField(max_length=20, db_index=True)
+    children = models.JSONField(default=list)
+    updated_by = models.CharField(max_length=150, blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=["instance", "part_type_id"], name="uniq_child_mint_setting")]
+
+    def __str__(self):
+        return f"{self.instance}:{self.part_type_id} → {self.children}"
+
+
 class ChecklistDraft(InstanceScoped):
     """A partially-filled consortium checklist (#97).
 
