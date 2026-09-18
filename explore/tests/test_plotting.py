@@ -360,6 +360,7 @@ var keys = [
   { path: ["Test Results", "SiPM Location", "Result"], dims: [{ seg: "Test Results", n: 8 }, { seg: "SiPM Location", n: 6 }] },
   { path: ["Test Results", "R_eff"], dims: [] }, { path: ["Test Results", "R_cable"], dims: [] },
   { path: ["x"], dims: [] }, { path: ["X"], dims: [] }, { path: ["Only Lower"], dims: [] }, { path: ["Loc"], dims: [] },
+  { path: ["Test Results", "SiPM", "V"], dims: [{ seg: "Test Results", n: 6 }, { seg: "SiPM", n: 6 }, { seg: "V", n: 300 }] },
 ].map(function (k) { return { p: JSON.stringify(k.path), segs: k.path, dims: function () { return k.dims; } }; });
 function comp(t) { var res = []; var c = exprCompile(t, function (tok) { var r = tok.t === "attr" ? { attr: tok.v } : exprResolve(tok, keys), k = r.attr ? "$" + r.attr : r.p + JSON.stringify(r.ix); for (var i = 0; i < res.length; i++) if ((res[i].attr ? "$" + res[i].attr : res[i].p + JSON.stringify(res[i].ix)) === k) return i; res.push(r); return res.length - 1; }); return { fn: c.fn, ids: res }; }   // one slot per key+pins / field, as exprMeta does
 function ids(t) { try { return comp(t).ids.map(function (i) { return i.attr ? ["$" + i.attr] : [JSON.parse(i.p).join("."), i.ix]; }); } catch (e) { return "ERR " + e.message; } }
@@ -367,6 +368,7 @@ function sel(t, arr, arrays) { var m = exprEval(comp(t).fn, arrays), r = exprSel
 function ev(t, arrays) { var c = comp(t), r = exprEval(c.fn, arrays); return [r, r.src]; }
 console.log(JSON.stringify({
   pin_leaf: ids("SiPM.Result[3]"), pin_seg: ids("SiPM[5].Result"), pin_skip: ids("SiPM.Result[][5]"), pin_two: ids('"Test Results".SiPM.Result[2][1]'),
+  leaf_names_level: ids("SiPM.V[0][1]"), leaf_three: ids("V[0][1][7]"), inner_and_leaf: ids("SiPM[2].V[0]"), leaf_too_many: ids("V[0][1][2][3]"),
   loose_case: ids("test_results.sipm.result"), exact_x: ids("x"), exact_X: ids("X"), loose_only: ids("only_lower"),
   ambiguous: ids("Result"), unknown: ids("nope"), past_end: ids("SiPM.Result[9]"), binning: ids("x>>(1,2,3)"), not_list: ids("R_eff[1]"),
   two_ids: ids("R_eff/R_cable"),
@@ -379,6 +381,10 @@ console.log(JSON.stringify({
   re_hit: ev("$serial =~ '^hpk'", [["HPK19901"]]), re_miss: ev("$serial =~ '^hpk'", [["SMB1"]]), text_eq: ev("Loc == 'BNL'", [["BNL", "CERN"]]),
   text_lt: ev("Loc < 'C'", [["BNL", "CERN"]]), num_text: ev("x + 1", [["3"]]), not_text: ev("!Loc", [["", "x"]]),
   mixed: ev("x > 50 && $status == 'Unknown'", [[49, 51, 52], ["Unknown"]]),
+  // #164: the trailing ">> name(nx,lo,hi,…)"
+  bin_1d: exprBinning("SiPM.Result[3] >> (20,49,53)"), bin_2d: exprBinning("y:x >> h(30,49,53,10,0,0.1)"), bin_n: exprBinning("a>>(20)"), bin_name: exprBinning("a >> h"),
+  bin_blank: exprBinning("a >> (20,,53)"), bin_none: exprBinning("a + b"), bin_bad: [(function () { try { exprBinning("a >> (20,49)"); } catch (e) { return e.message; } })(), (function () { try { exprBinning("a >> (1)"); } catch (e) { return e.message; } })(), (function () { try { exprBinning("a >> (20,5,1)"); } catch (e) { return e.message; } })()],
+  opt: [exprOption("colz"), exprOption("cum logy nostats"), exprOption(""), (function () { try { exprOption("foo"); } catch (e) { return e.message; } })()],
   sel_entries: sel("x > 50", [10, 20, 30], [[49, 51, 52]]), sel_item_out: sel("$status == 'Ready'", [10, 20, 30], [["Unknown"]]), sel_item_in: sel("$status == 'Unknown'", [10, 20, 30], [["Unknown"]]),
 }));
 """
@@ -420,7 +426,7 @@ class TestDataEndpointsTest(TestCase):
         node = shutil.which("node")
         if not node:
             self.skipTest("node is not installed")
-        pre = "var C = require(" + json.dumps(str(PLOT_CORE)) + "); var exprCompile = C.exprCompile, exprResolve = C.exprResolve, exprEval = C.exprEval, exprSplit = C.exprSplit, exprSelect = C.exprSelect;\n"
+        pre = "var C = require(" + json.dumps(str(PLOT_CORE)) + "); var exprCompile = C.exprCompile, exprResolve = C.exprResolve, exprEval = C.exprEval, exprSplit = C.exprSplit, exprSelect = C.exprSelect, exprBinning = C.exprBinning, exprOption = C.exprOption;\n"
         run = subprocess.run([node, "-e", pre + DRAW_HARNESS], capture_output=True, text=True, timeout=60)
         self.assertEqual(run.returncode, 0, run.stderr)
         r = json.loads(run.stdout)
@@ -429,13 +435,18 @@ class TestDataEndpointsTest(TestCase):
         self.assertEqual(r["pin_seg"], [[K, [None, 5]]])           # [i] on the segment naming a level pins that level
         self.assertEqual(r["pin_skip"], [[K, [None, 5]]])          # [] skips a level
         self.assertEqual(r["pin_two"], [[K, [2, 1]]])
+        V = "Test Results.SiPM.V"
+        self.assertEqual(r["leaf_names_level"], [[V, [0, 1, None]]])   # the leaf names the innermost list, its brackets still count from the first
+        self.assertEqual(r["leaf_three"], [[V, [0, 1, 7]]])
+        self.assertEqual(r["inner_and_leaf"], [[V, [0, 2, None]]])     # SiPM[2] pins the SiPM level, V[0] the first
+        self.assertIn("“V” has 3 indexes, not 4", r["leaf_too_many"])
         self.assertEqual(r["loose_case"], [[K, None]])             # case and space/underscore ignored …
         self.assertEqual((r["exact_x"], r["exact_X"]), ([["x", None]], [["X", None]]))   # … unless keys differ only by case
         self.assertEqual(r["loose_only"], [["Only Lower", None]])
         self.assertIn("matches 2 keys: Test Results.SiPM.Result, Test Results.SiPM Location.Result", r["ambiguous"])
         self.assertIn("no key named “nope”", r["unknown"])
         self.assertIn("index 9 is past the end of Test Results (8 entries)", r["past_end"])
-        self.assertIn("binning (>>) is not supported yet", r["binning"])
+        self.assertIn("binning goes at the end: expr >> (nx,lo,hi)", r["binning"])   # ">>" inside an expression
         self.assertIn("“R_eff” is not a list", r["not_list"])
         self.assertEqual(r["two_ids"], [["Test Results.R_eff", None], ["Test Results.R_cable", None]])
         self.assertEqual(r["broadcast"], [[5, 2.5], [0, 1]])       # a single value repeats along the list
@@ -462,11 +473,29 @@ class TestDataEndpointsTest(TestCase):
         self.assertEqual(r["sel_entries"], [[20, 30], [1, 2]])     # kept entries keep their source positions
         self.assertEqual(r["sel_item_out"], [[], []])              # an all-scalar false mask drops the item …
         self.assertEqual(r["sel_item_in"], [[10, 20, 30], None])   # … a true one keeps it whole (a plain array, no src)
+        # #164: ">>" binning forms
+        self.assertEqual(r["bin_1d"], {"expr": "SiPM.Result[3]", "name": "", "bins": {"nx": 20, "lo": 49, "hi": 53, "ny": None, "lo2": None, "hi2": None}})
+        self.assertEqual(r["bin_2d"], {"expr": "y:x", "name": "h", "bins": {"nx": 30, "lo": 49, "hi": 53, "ny": 10, "lo2": 0, "hi2": 0.1}})
+        self.assertEqual(r["bin_n"]["bins"]["nx"], 20)
+        self.assertEqual((r["bin_name"]["name"], r["bin_name"]["bins"]), ("h", None))
+        self.assertEqual((r["bin_blank"]["bins"]["lo"], r["bin_blank"]["bins"]["hi"]), (None, 53))
+        self.assertEqual(r["bin_none"], {"expr": "a + b", "name": "", "bins": None})
+        self.assertEqual(r["opt"], [{"m2": "heat"}, {"m1": "cum", "logy": True, "stats": False}, {}, "unknown option “foo” — hist cum line · scat line colz · logy liny nostats stats"])
+        self.assertEqual(r["bin_bad"], ["binning: (nx), (nx,lo,hi), (nx,lo,hi,ny) or (nx,lo,hi,ny,lo2,hi2)", "binning: at least 2 bins", "binning: lo must be below hi"])
 
     def test_page_has_the_draw_box(self):
         html = self.client.get("/hw/dev/plot/T/").content.decode()
-        self.assertIn('<input type="text" id="draw" placeholder="y : x   e.g. Result[3]  or  R_eff/R_cable : Result"', html)
-        self.assertIn('<button type="button" class="pl-btn sm" id="draw-help" title="Draw syntax">?</button>', html)
+        # ROOT's Draw(expression, selection, option) on the Data pane, above the key pickers: two text areas and an option line
+        self.assertNotIn('data-tab="expr"', html)
+        self.assertIn("ROOT's <code>TTree::Draw(expression, selection, option)</code> over the keys below.", html)
+        self.assertLess(html.index('<textarea id="draw"'), html.index('id="xfield"'))
+        self.assertIn('<textarea id="draw" rows="2" placeholder="y : x >> (nx,lo,hi)   e.g. SiPM.Result[3]  or  Result_Err[3] : Result[3]"', html)
+        self.assertIn('<input type="text" id="dopt" placeholder="hist · cum · line · scat · colz · logy · nostats"', html)
+        self.assertIn('<button type="button" class="pl-btn primary sm" id="draw-apply">Draw</button><button type="button" class="pl-btn sm" id="draw-help" title="Draw syntax">? syntax</button>', html)
+        self.assertIn('if (o.m1) $("mode1d").value = o.m1;', PLOT_JS)
+        self.assertIn('$("logy").checked = !!o.logy; $("showstats").checked = o.stats !== false;', PLOT_JS)   # switches left out are off
+        self.assertIn('return { scatter: "scat", line: "line", heat: "colz" }[$("mode2d").value] || "scat";', PLOT_JS)
+        self.assertIn('if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); applyDraw(); }', PLOT_JS)
         self.assertIn('<div class="pl-pop" id="dpop" hidden>', html)
         self.assertIn("<b>y : x</b><span>two axes — the first is Y, as in ROOT</span>", html)
         # an expression is a virtual key: "=expr" in the series' x / y, restored from the hash, evaluated per item, fetched by its identifiers
@@ -480,7 +509,7 @@ class TestDataEndpointsTest(TestCase):
         self.assertIn("function keyAsName(p, ix) {", PLOT_JS)         # the box shows a picked key as a name with its pins
         self.assertIn('got[ax] = toks.length === 1 && toks[0].t === "id" && m.ids.length === 1 ? { p: m.ids[0].p, ix: m.ids[0].ix } : { p: "=" + side[ax], ix: null };', PLOT_JS)
         # #163: the Select box — per-entry selection stored as `sel` on the series, applied to every value the series reads
-        self.assertIn('<input type="text" id="dsel" placeholder="entries to keep, e.g. Result_Err[3] &lt; 0.1 &amp;&amp; $serial =~ \'HPK\'"', html)
+        self.assertIn('<textarea id="dsel" rows="2" placeholder="entries to keep, e.g. Result_Err[3] &lt; 0.1 &amp;&amp; $serial =~ \'HPK\'"', html)
         self.assertIn('<span class="pl-err" id="sel-err" hidden></span>', html)
         self.assertIn("<b>select</b><span>a second expression, true (non-zero) keeps the entry", html)
         self.assertIn("if (s.sel && !exprMeta(s.sel).err) arr = exprSelect(arr, exprValues(item, s.sel, s));", PLOT_JS)
@@ -489,6 +518,17 @@ class TestDataEndpointsTest(TestCase):
         self.assertIn('s.sel = typeof h.sel === "string" ? h.sel : "";', PLOT_JS)
         self.assertIn('if (s.sel) { var ms = exprMeta(s.sel); if (!ms.err) ms.ids.forEach(function (id) { if (!id.attr) out.push({ p: id.p, ix: id.ix }); }); }', PLOT_JS)
         self.assertIn('function selErr(s) { return s.sel && exprMeta(s.sel).err ? "selection: " + exprMeta(s.sel).err : null; }', PLOT_JS)
+        # #164: ">>" sets Bins, the range boxes and the 2D Y bins; the box shows it back; the hash carries the Y bins as `by`
+        self.assertIn("var bn; try { bn = exprBinning(text); } catch (e) { return fail(e.message); }", PLOT_JS)
+        self.assertIn('$("bins").value = b.nx; set("xmin", b.lo); set("xmax", b.hi);', PLOT_JS)
+        self.assertIn("binsY = b.ny && b.ny !== b.nx ? b.ny : null;", PLOT_JS)
+        self.assertIn("function binSuffix(s) {", PLOT_JS)
+        self.assertIn('by = binSetup(pts.map(function (q) { return q.y; }), binsY, "y")', PLOT_JS)
+        # an explicit range is the binning range: edges follow it, entries outside fall in no bin
+        self.assertIn('var lo = r[0] !== null ? r[0] : Math.min.apply(null, nums), hi = r[1] !== null ? r[1] : Math.max.apply(null, nums)', PLOT_JS)
+        self.assertIn("nums.forEach(function (v) { if (v < lo || v > hi) return;", PLOT_JS)
+        self.assertIn("by: binsY || undefined,", PLOT_JS)
+        self.assertIn("<b>binning</b><span><code>expr &gt;&gt; (nx)</code>", html)
 
     def test_page_has_a_serial_filter(self):
         # Chao 2026-09-17: a distribution over a PID range should take HPK.* boards only, not SMB.*

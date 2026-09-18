@@ -53,14 +53,16 @@
           <span class="pl-err" id="fetch-error"></span>
         </div>
         <div id="axes-grp" hidden style="display: grid; gap: 10px;">
-          <h2 style="margin-top: 2px;">Axes <span class="for pl-for"></span></h2>
+          <h2 style="margin-top: 2px;">Draw <span class="for pl-for"></span></h2>
         <div class="pl-grp">
-          <div class="pl-f"><span>Draw</span><div class="pl-row" style="flex-wrap: nowrap;">
-            <input type="text" id="draw" placeholder="y : x   e.g. Result[3]  or  R_eff/R_cable : Result" spellcheck="false" autocomplete="off" title="ROOT style — an expression over keys draws its histogram; y : x draws two axes (the first is Y). Enter applies.">
-            <button type="button" class="pl-btn sm" id="draw-help" title="Draw syntax">?</button></div></div>
+          <span class="pl-hint">ROOT's <code>TTree::Draw(expression, selection, option)</code> over the keys below. Enter applies; Shift+Enter breaks a line.</span>
+          <div class="pl-f"><span>Draw</span><textarea id="draw" rows="2" placeholder="y : x >> (nx,lo,hi)   e.g. SiPM.Result[3]  or  Result_Err[3] : Result[3]" spellcheck="false" title="An expression over keys draws its histogram; y : x draws two axes (the first is Y); >> (nx,lo,hi) sets the binning."></textarea></div>
           <span class="pl-err" id="draw-err" hidden></span>
-          <div class="pl-f"><span>Select</span><input type="text" id="dsel" placeholder="entries to keep, e.g. Result_Err[3] &lt; 0.1 &amp;&amp; $serial =~ 'HPK'" spellcheck="false" autocomplete="off" title="ROOT's selection: an expression per entry — kept when it is true (non-zero). Enter applies."></div>
+          <div class="pl-f"><span>Select</span><textarea id="dsel" rows="2" placeholder="entries to keep, e.g. Result_Err[3] &lt; 0.1 &amp;&amp; $serial =~ 'HPK'" spellcheck="false" title="An expression per entry — kept when it is true (non-zero)."></textarea></div>
           <span class="pl-err" id="sel-err" hidden></span>
+          <div class="pl-f"><span>Option</span><input type="text" id="dopt" placeholder="hist · cum · line · scat · colz · logy · nostats" spellcheck="false" autocomplete="off" title="The plot type and switches, as ROOT's third argument"></div>
+          <span class="pl-err" id="opt-err" hidden></span>
+          <div class="pl-row"><button type="button" class="pl-btn primary sm" id="draw-apply">Draw</button><button type="button" class="pl-btn sm" id="draw-help" title="Draw syntax">? syntax</button></div>
         </div>
         <div class="pl-grp">
           <div class="pl-f"><span>X</span><div class="pl-kfield" id="xfield" data-ax="x" tabindex="0" role="button" title="Choose the X key"></div></div>
@@ -175,6 +177,8 @@
       <b>lists</b><span>two lists run together entry by entry, a single value repeats; a missing or non-numeric value drops that entry</span>
       <b>select</b><span>a second expression, true (non-zero) keeps the entry — <code>Result_Err[3] &lt; 0.1</code>, <code>$serial =~ 'HPK' &amp;&amp; Result[3] &gt; 51</code>; the Cuts pane keeps whole items, this keeps entries</span>
       <b>text</b><span><code>'single quotes'</code> for text (double quotes name keys); <code>==</code> and <code>!=</code> compare text when a side is not a number; <code>=~</code> matches a regex, case-insensitive</span>
+      <b>binning</b><span><code>expr &gt;&gt; (nx)</code>, <code>&gt;&gt; (nx,lo,hi)</code>, or for two axes <code>&gt;&gt; (nx,lo,hi,ny,lo2,hi2)</code> — sets Bins and the range boxes (a blank bound stays automatic); <code>&gt;&gt; name(…)</code> also names the series</span>
+      <b>option</b><span>the plot type and switches: <code>hist</code> <code>cum</code> <code>line</code> for one axis, <code>scat</code> <code>line</code> <code>colz</code> for two; <code>logy</code> / <code>liny</code>, <code>nostats</code> / <code>stats</code></span>
       <b>item fields</b><span><code>$pid $serial $status $creator $institution $manufacturer</code> — one value per item, repeated along its entries</span>
     </div>
     <div class="foot">A bare key name with pins is the same as picking it below.</div>

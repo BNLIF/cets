@@ -122,7 +122,7 @@
             }
             var op = OPS2.find(function (o) { return text.substr(i, 2) === o; }) || (OPS1.indexOf(ch) >= 0 ? ch : null);
             if (!op) throw new Error("unexpected “" + ch + "” at " + (i + 1));
-            if (op === ">>") throw new Error("binning (>>) is not supported yet");
+            if (op === ">>") throw new Error("binning goes at the end: expr >> (nx,lo,hi)");
             out.push({ t: "op", v: op, at: i }); i += op.length;
         }
         return out;
@@ -215,11 +215,44 @@
         if (pos < toks.length) throw new Error("unexpected “" + toks[pos].v + "” at " + (toks[pos].at + 1));
         return { fn: fn, ids: ids };
     }
+    // ROOT's "expr >> name(nx,lo,hi)" (#164): the trailing binning off a Draw
+    // line → { expr, name, bins }. bins: null, or { nx, lo, hi, ny, lo2, hi2 }
+    // from (nx) · (nx,lo,hi) · (nx,lo,hi,ny) · (nx,lo,hi,ny,lo2,hi2); a blank
+    // bound stays automatic.
+    function exprBinning(text) {
+        var m = /^([\s\S]*?)\s*>>\s*([A-Za-z_][A-Za-z0-9_]*)?\s*(?:\(([^()]*)\))?\s*$/.exec(text);
+        if (!m) return { expr: text.trim(), name: "", bins: null };
+        var out = { expr: m[1].trim(), name: m[2] || "", bins: null };
+        if (m[3] === undefined) return out;
+        var a = m[3].split(",").map(function (v) { return v.trim(); }), num = function (v) { return v === "" ? null : (isFinite(+v) ? +v : NaN); };
+        if ([1, 3, 4, 6].indexOf(a.length) < 0) throw new Error("binning: (nx), (nx,lo,hi), (nx,lo,hi,ny) or (nx,lo,hi,ny,lo2,hi2)");
+        var v = a.map(num);
+        if (v.some(function (x) { return x !== null && isNaN(x); })) throw new Error("binning: numbers only — " + m[3]);
+        if (!(v[0] >= 2) || (a.length >= 4 && !(v[3] >= 2))) throw new Error("binning: at least 2 bins");
+        out.bins = { nx: Math.floor(v[0]), lo: v[1] === undefined ? null : v[1], hi: v[2] === undefined ? null : v[2],
+                     ny: a.length >= 4 ? Math.floor(v[3]) : null, lo2: v[4] === undefined ? null : v[4], hi2: v[5] === undefined ? null : v[5] };
+        if (out.bins.lo !== null && out.bins.hi !== null && out.bins.lo >= out.bins.hi) throw new Error("binning: lo must be below hi");
+        if (out.bins.lo2 !== null && out.bins.hi2 !== null && out.bins.lo2 >= out.bins.hi2) throw new Error("binning: lo2 must be below hi2");
+        return out;
+    }
+    // ROOT's third argument: the plot type and switches → { m1, m2, logy, stats }
+    // (only what the text names); an unknown word throws.
+    var EXPR_OPTS = { hist: { m1: "hist" }, cum: { m1: "cum" }, cumulative: { m1: "cum" }, line: { m1: "line", m2: "line" }, l: { m1: "line", m2: "line" },
+                      scat: { m2: "scatter" }, scatter: { m2: "scatter" }, p: { m2: "scatter" }, colz: { m2: "heat" }, col: { m2: "heat" }, box: { m2: "heat" },
+                      logy: { logy: true }, liny: { logy: false }, nostats: { stats: false }, nostat: { stats: false }, stats: { stats: true } };
+    function exprOption(text) {
+        var out = {};
+        String(text || "").toLowerCase().split(/[\s,;]+/).filter(Boolean).forEach(function (w) {
+            if (!Object.prototype.hasOwnProperty.call(EXPR_OPTS, w)) throw new Error("unknown option “" + w + "” — hist cum line · scat line colz · logy liny nostats stats");
+            var o = EXPR_OPTS[w]; Object.keys(o).forEach(function (f) { out[f] = o[f]; });
+        });
+        return out;
+    }
     // A name → one key. keys: [{ p, segs, dims() }]. The name's segments match
     // the key's trailing segments; case and space/underscore are ignored unless
     // that leaves several keys — then the exact spelling decides. Pins: [i] on
-    // a segment that names a list level pins that level; on the leaf, the
-    // levels in order from the first (ROOT: a[i][j]); [] skips one.
+    // an inner segment that names a list level pins that level; on the leaf,
+    // the levels in order from the first (ROOT: a[i][j]); [] skips one.
     function exprNorm(s) { return String(s).toLowerCase().replace(/[\s_]+/g, "_"); }
     function exprResolve(idTok, keys) {
         var segs = idTok.v, n = segs.length;
@@ -235,8 +268,10 @@
         var k = hits[0], dims = k.dims() || [], ix = null;
         segs.forEach(function (sg, i) {
             if (!sg.pins.length) return;
+            // the leaf's brackets count dimensions from the first (ROOT: a[i][j]) even when the leaf itself names the innermost
+            // list (V[0][1] on Test Results › SiPM › V pins Test Results and SiPM); brackets on an inner segment pin the level it names
             var name = tail(k, i), named = dims.map(function (d, j) { return d.seg === name ? j : -1; }).filter(function (j) { return j >= 0; });
-            var levels = named.length ? named : (i === n - 1 ? dims.map(function (d, j) { return j; }) : []);
+            var levels = i === n - 1 ? dims.map(function (d, j) { return j; }) : named;
             if (!levels.length) throw new Error("“" + name + "” is not a list");
             if (sg.pins.length > levels.length) throw new Error("“" + name + "” has " + levels.length + " index" + (levels.length > 1 ? "es" : "") + ", not " + sg.pins.length);
             ix = ix || dims.map(function () { return null; });
@@ -295,7 +330,7 @@
     function fmt(n) { return Math.abs(n) >= 1000 || Number.isInteger(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 2 }) : n.toPrecision(4); }
     function histCounts(nums, lo, hi, nb) {
         var w = (hi - lo) / nb || 1, counts = new Array(nb).fill(0);
-        nums.forEach(function (v) { var b = Math.min(nb - 1, Math.floor((v - lo) / w)); counts[b]++; });
+        nums.forEach(function (v) { if (v < lo || v > hi) return; var b = Math.min(nb - 1, Math.floor((v - lo) / w)); counts[b]++; });   // outside the edges: no bin
         return counts;
     }
     function isNumeric(vals) {
@@ -313,6 +348,6 @@
         return { n: n, mean: mean, sd: sd };
     }
 
-    var PlotCore = { exprSelect: exprSelect, EXPR_ATTRS: EXPR_ATTRS, nestedAt: nestedAt, dimsOf: dimsOf, dimLabels: dimLabels, selectAt: selectAt, isExpr: isExpr, exprText: exprText, exprSplit: exprSplit, exprTokens: exprTokens, exprCompile: exprCompile, exprNorm: exprNorm, exprResolve: exprResolve, exprEval: exprEval, normSn: normSn, pidAlternation: pidAlternation, pidRange: pidRange, toNum: toNum, fmt: fmt, histCounts: histCounts, isNumeric: isNumeric, catKey: catKey, topCats: topCats, meanSd: meanSd };
+    var PlotCore = { exprOption: exprOption, exprBinning: exprBinning, exprSelect: exprSelect, EXPR_ATTRS: EXPR_ATTRS, nestedAt: nestedAt, dimsOf: dimsOf, dimLabels: dimLabels, selectAt: selectAt, isExpr: isExpr, exprText: exprText, exprSplit: exprSplit, exprTokens: exprTokens, exprCompile: exprCompile, exprNorm: exprNorm, exprResolve: exprResolve, exprEval: exprEval, normSn: normSn, pidAlternation: pidAlternation, pidRange: pidRange, toNum: toNum, fmt: fmt, histCounts: histCounts, isNumeric: isNumeric, catKey: catKey, topCats: topCats, meanSd: meanSd };
     if (typeof module !== "undefined" && module.exports) module.exports = PlotCore; else root.PlotCore = PlotCore;
 })(typeof window !== "undefined" ? window : this);

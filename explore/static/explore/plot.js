@@ -7,7 +7,7 @@
     var FACETS = ["status", "creator", "manufacturer", "institution"];
     var OPS = ["=", "≠", "<", "≤", ">", "≥", "contains"];
     // pure helpers from plot-core.js (expressions, nested arrays, ranges, binning)
-    var PC = window.PlotCore, exprSelect = PC.exprSelect, nestedAt = PC.nestedAt, dimsOf = PC.dimsOf, dimLabels = PC.dimLabels, selectAt = PC.selectAt, isExpr = PC.isExpr, exprText = PC.exprText, exprSplit = PC.exprSplit, exprTokens = PC.exprTokens, exprCompile = PC.exprCompile, exprNorm = PC.exprNorm, exprResolve = PC.exprResolve, exprEval = PC.exprEval, normSn = PC.normSn, pidAlternation = PC.pidAlternation, pidRange = PC.pidRange, toNum = PC.toNum, fmt = PC.fmt, histCounts = PC.histCounts, isNumeric = PC.isNumeric, catKey = PC.catKey, topCats = PC.topCats, meanSd = PC.meanSd;
+    var PC = window.PlotCore, exprOption = PC.exprOption, exprBinning = PC.exprBinning, exprSelect = PC.exprSelect, nestedAt = PC.nestedAt, dimsOf = PC.dimsOf, dimLabels = PC.dimLabels, selectAt = PC.selectAt, isExpr = PC.isExpr, exprText = PC.exprText, exprSplit = PC.exprSplit, exprTokens = PC.exprTokens, exprCompile = PC.exprCompile, exprNorm = PC.exprNorm, exprResolve = PC.exprResolve, exprEval = PC.exprEval, normSn = PC.normSn, pidAlternation = PC.pidAlternation, pidRange = PC.pidRange, toNum = PC.toNum, fmt = PC.fmt, histCounts = PC.histCounts, isNumeric = PC.isNumeric, catKey = PC.catKey, topCats = PC.topCats, meanSd = PC.meanSd;
 
     // ---- State -------------------------------------------------------------
     // source: "specs" (whole dataset, values walked from item.data) or a test
@@ -17,6 +17,7 @@
     // The Axes / Select / Cuts panes edit series[cur].
     var source = "specs", items = [], paths = [], pathCounts = {}, chart = null;
     var series = [], cur = 0;
+    var binsY = null;              // #164: the 2D histogram's Y bin count from ">> (nx,lo,hi,ny,…)"; null = same as Bins
     // #160: entries (PIDs or serial numbers) handed over by a checklist's plot
     // field in the hash — they select the items of every series while set
     var EMBED = !!document.getElementById("pl").getAttribute("data-embed"), IDS = null;
@@ -438,8 +439,11 @@
         });
     }
     function draw(cfg) { if (chart) chart.destroy(); cfg.plugins = [statsBox]; applyRanges(cfg.options.scales); chart = new Chart($("plot"), cfg); $("plot-msg").hidden = true; }
-    function binSetup(nums) {
-        var lo = Math.min.apply(null, nums), hi = Math.max.apply(null, nums), nb = Math.max(2, Math.min(500, +$("bins").value || 40));
+    // Bin edges: an explicit range (the Series pane's boxes, or ">> (nx,lo,hi)") sets
+    // them, as in ROOT — entries outside fall in no bin; otherwise the data's span.
+    function binSetup(nums, nbins, ax) {
+        var r = rangeOf(ax || "x") || [null, null];
+        var lo = r[0] !== null ? r[0] : Math.min.apply(null, nums), hi = r[1] !== null ? r[1] : Math.max.apply(null, nums), nb = Math.max(2, Math.min(500, nbins || +$("bins").value || 40));
         if (lo === hi) { lo -= 0.5; hi += 0.5; }
         var w = (hi - lo) / nb, labels = [];
         for (var i = 0; i < nb; i++) labels.push(fmt(lo + i * w));
@@ -529,8 +533,9 @@
                 if ($("mode2d").value === "heat") {
                     // 2D histogram: Bins × Bins cells, colour depth = count. Active series only.
                     var ACCENT = color(cur);
-                    var bx = binSetup(pts.map(function (q) { return q.x; })), by = binSetup(pts.map(function (q) { return q.y; })), cells = {}, vmax = 0;
+                    var bx = binSetup(pts.map(function (q) { return q.x; }), null, "x"), by = binSetup(pts.map(function (q) { return q.y; }), binsY, "y"), cells = {}, vmax = 0;
                     pts.forEach(function (q) {
+                        if (q.x < bx.lo || q.x > bx.hi || q.y < by.lo || q.y > by.hi) return;     // outside an explicit range: no cell
                         var i = Math.min(bx.nb - 1, Math.floor((q.x - bx.lo) / bx.w)), j = Math.min(by.nb - 1, Math.floor((q.y - by.lo) / by.w)), k = i + "," + j;
                         cells[k] = (cells[k] || 0) + 1; if (cells[k] > vmax) vmax = cells[k];
                     });
@@ -631,11 +636,11 @@
         if (isNumeric(vals)) {
             $("mode1d-l").hidden = false; $("logy-l").hidden = false;
             var m1 = $("mode1d").value, logy = $("logy").checked, ov = overlayXY();
-            var numsOf = [], used = [], numTags = [];
+            var numsOf = [], used = [], numTags = [], xr = m1 === "line" ? null : rangeOf("x");   // histograms: an explicit X range is the binning range, entries outside drop (ROOT's under/overflow)
             drawn.forEach(function (s, i) {
                 if (i !== ai && !isNumeric(valsOf[i])) { if (valsOf[i].length) skipped.push(s.name); return; }
                 var nums = [], tags = [];
-                valsOf[i].forEach(function (v, j) { var n = toNum(v); if (n !== null) { nums.push(n); tags.push(tagsOf[i][j]); } });
+                valsOf[i].forEach(function (v, j) { var n = toNum(v); if (n !== null && !(xr && ((xr[0] !== null && n < xr[0]) || (xr[1] !== null && n > xr[1])))) { nums.push(n); tags.push(tagsOf[i][j]); } });
                 if (!nums.length) { if (i !== ai) skipped.push(s.name); return; }
                 used.push(s); numsOf.push(nums); numTags.push(tags);
             });
@@ -945,7 +950,7 @@
                  cuts: s.cuts.filter(function (c) { return c.p; }), logic: s.logic === "or" ? "or" : undefined };
     }
     function writeHash() {
-        var cfg = { src: source, series: series.map(packSeries), cur: cur || undefined, bins: +$("bins").value,
+        var cfg = { src: source, series: series.map(packSeries), cur: cur || undefined, bins: +$("bins").value, by: binsY || undefined,
                     ov: $("ov").value || undefined, ovn: $("ovn").value || undefined, xr: rangeOf("x") || undefined, yr: rangeOf("y") || undefined,
                     title: $("ptitle").value.trim() || undefined, xl: $("xlab").value.trim() || undefined, yl: $("ylab").value.trim() || undefined, sp: savedId || undefined,
                     rare: $("rare").checked ? undefined : false, m2: $("mode2d").value, m1: $("mode1d").value, logy: $("logy").checked || undefined, st: $("showstats").checked ? undefined : false,
@@ -1053,7 +1058,7 @@
         if (IDS && !EMBED) { var pf = idsFilter(); series.forEach(function (s) { s.item = ""; s.pid = pf; }); IDS = null; }
         savedId = typeof cfg.sp === "string" ? cfg.sp : null;
         if (!series[0].x && paths.length) series[0].x = paths[0];
-        $("bins").value = cfg.bins || 40;
+        $("bins").value = cfg.bins || 40; binsY = cfg.by >= 2 ? Math.floor(+cfg.by) : null;
         $("ov").value = cfg.ov || ""; $("ovn").value = cfg.ovn || "";
         ["x", "y"].forEach(function (ax) { var r = Array.isArray(cfg[ax + "r"]) ? cfg[ax + "r"] : [null, null]; $(ax + "min").value = r[0] === null || r[0] === undefined ? "" : r[0]; $(ax + "max").value = r[1] === null || r[1] === undefined ? "" : r[1]; });
         $("ptitle").value = cfg.title || ""; $("xlab").value = cfg.xl || ""; $("ylab").value = cfg.yl || "";
@@ -1132,29 +1137,57 @@
         }
         return name;
     }
+    // #164: the binning as ">> (nx,lo,hi[,ny,lo2,hi2])" — shown when a range is set, Y bins differ, or Bins left its default
+    function binSuffix(s) {
+        var nx = +$("bins").value || 40, xr = rangeOf("x"), yr = rangeOf("y"), f = function (v) { return v === null || v === undefined ? "" : String(v); };
+        if (s.y && (binsY || yr)) return " >> (" + [nx, f(xr && xr[0]), f(xr && xr[1]), binsY || nx, f(yr && yr[0]), f(yr && yr[1])].join(",") + ")";
+        if (xr) return " >> (" + [nx, f(xr[0]), f(xr[1])].join(",") + ")";
+        return nx !== 40 ? " >> (" + nx + ")" : "";
+    }
     function drawText(s) {
         var parts = ["y", "x"].map(function (ax) { return s[ax] ? (isExpr(s[ax]) ? exprText(s[ax]) : keyAsName(s[ax], idxOf(s[ax], s))) : ""; });
-        return parts[0] ? parts[0] + " : " + parts[1] : parts[1];
+        return (parts[0] ? parts[0] + " : " + parts[1] : parts[1]) + (parts[1] ? binSuffix(s) : "");
     }
     function syncDraw() {
         var s = S(); if (!s) return;
         if (document.activeElement !== $("draw")) $("draw").value = drawText(s);
         if (document.activeElement !== $("dsel")) $("dsel").value = s.sel || "";
+        if (document.activeElement !== $("dopt")) $("dopt").value = optText(s);
         var err = drawErr(s); $("draw-err").textContent = err ? err : ""; $("draw-err").hidden = !err;
         var se = s.sel ? exprMeta(s.sel).err : null; $("sel-err").textContent = se ? se : ""; $("sel-err").hidden = !se;
     }
+    // the Option line: the mode selects and switches as ROOT's third argument, and back
+    function optText(s) {
+        if (s.y) return { scatter: "scat", line: "line", heat: "colz" }[$("mode2d").value] || "scat";
+        return $("mode1d").value + ($("logy").checked ? " logy" : "") + ($("showstats").checked ? "" : " nostats");
+    }
+    function applyOpt() {
+        var s = S(), err = $("opt-err"); if (!s) return;
+        var text = $("dopt").value.trim(), o;
+        if (text === optText(s)) { err.hidden = true; return; }
+        try { o = exprOption(text); } catch (e) { err.textContent = e.message; err.hidden = false; return; }
+        // the line is the whole description, as in ROOT: a mode it names is taken, switches it leaves out are off
+        if (o.m1) $("mode1d").value = o.m1;
+        if (o.m2) $("mode2d").value = o.m2;
+        $("logy").checked = !!o.logy; $("showstats").checked = o.stats !== false;
+        err.hidden = true; changed(); $("dopt").blur();
+    }
+    $("dopt").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); applyOpt(); } if (e.key === "Escape") { $("dopt").blur(); syncDraw(); } });
+    $("dopt").addEventListener("blur", applyOpt);
     function applySel() {           // #163: the selection is kept as typed; it compiles against the dataset like a Draw expression
         var s = S(); if (!s) return;
         var text = $("dsel").value.trim();
         if (text === (s.sel || "")) return;
         s.sel = text; changed(); $("dsel").blur();
     }
-    $("dsel").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); applySel(); } if (e.key === "Escape") { $("dsel").blur(); syncDraw(); } });
+    $("dsel").addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); applySel(); } if (e.key === "Escape") { $("dsel").blur(); syncDraw(); } });
     $("dsel").addEventListener("blur", applySel);
     function applyDraw() {
         var s = S(), text = $("draw").value.trim(), err = $("draw-err");
         function fail(msg) { err.textContent = msg; err.hidden = false; }
         if (!s) return;
+        var bn; try { bn = exprBinning(text); } catch (e) { return fail(e.message); }     // #164: a trailing ">> name(nx,lo,hi,…)"
+        text = bn.expr;
         var parts = exprSplit(text);
         if (parts.length > 2) return fail("one “:” at most — y : x");
         var side = { x: parts[parts.length - 1], y: parts.length === 2 ? parts[0] : "" }, got = {};
@@ -1168,11 +1201,19 @@
         }
         s.x = got.x.p; s.xk = s.x; s.xi = got.x.ix ? got.x.ix.slice() : [];
         s.y = got.y.p; s.yk = s.y; s.yi = got.y.ix ? got.y.ix.slice() : [];
+        if (bn.name) s.name = bn.name;
+        if (bn.bins) {            // Bins, the range boxes and the 2D Y bins follow the ">>" part; (nx) and (nx,lo,hi) reset the Y bins
+            var b = bn.bins, set = function (id, v) { $(id).value = v === null ? "" : v; };
+            $("bins").value = b.nx; set("xmin", b.lo); set("xmax", b.hi);
+            binsY = b.ny && b.ny !== b.nx ? b.ny : null;
+            if (b.ny !== null) { set("ymin", b.lo2); set("ymax", b.hi2); }
+        }
         err.hidden = true; $("xidx").removeAttribute("data-key"); $("yidx").removeAttribute("data-key");
         drawFields(); changed(); $("draw").blur();
     }
-    $("draw").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); applyDraw(); } if (e.key === "Escape") { $("draw").blur(); syncDraw(); } });
+    $("draw").addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); applyDraw(); } if (e.key === "Escape") { $("draw").blur(); syncDraw(); } });
     $("draw").addEventListener("blur", function () { if ($("draw").value.trim() !== drawText(S() || blankSeries())) applyDraw(); });
+    $("draw-apply").addEventListener("click", function () { if ($("draw").value.trim() !== drawText(S() || blankSeries())) applyDraw(); applySel(); applyOpt(); });
     $("draw-help").addEventListener("click", function () {
         var pop = $("dpop"), r = $("draw-help").getBoundingClientRect(), vw = window.innerWidth;
         if (!pop.hidden) { pop.hidden = true; return; }
