@@ -212,6 +212,11 @@
     .cl-static-img { max-height: none; border: none; }
     .cl-plot { display: none; }
   }
+  .cl-tbl-link { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }   /* #153; clear of the table's scrollbar */
+  .cl-table input.cl-pidcell { font-family: var(--font-mono); font-size: calc(12px * var(--cl-scale, 1)); min-width: 19ch; }
+  .cl-table td .cl-serial { display: block; font-size: calc(10.5px * var(--cl-scale, 1)); white-space: nowrap; }
+  .cl-table input.cl-linked { border-color: var(--good); background: var(--good-bg); }
+  .cl-bad-text { color: var(--bad, #a33); }
 </style>
 <script>
 (function () {

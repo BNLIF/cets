@@ -2921,6 +2921,113 @@ def _checklist_link_map(api, inst, part_id, slots: dict) -> str | None:
     return None
 
 
+def _link_target(api, part_id: str, into: str) -> tuple[str | None, str | None]:
+    """#153: where a linking table's items go — this item, or with ``into``
+    the sub-assembly sitting in that position of it (a PDS module's
+    supercell). ``(target pid, error)``."""
+    if not into:
+        return part_id, None
+    try:
+        occupants = {(m.get("functional_position") or ""): m.get("part_id")
+                     for m in (api.get_subcomponents(part_id).get("data") or [])
+                     if isinstance(m, dict)}
+    except requests.RequestException as e:
+        return None, _hwdb_error_detail(e)
+    target = occupants.get(into)
+    if not target:
+        return None, f"position “{into}” of {part_id} is empty — link the sub-assembly there first."
+    return target, None
+
+
+def _default_table_types(api, ptid: str, schema: dict) -> None:
+    """#153: a linking table with no ``type_id`` takes the one type the
+    target's positions accept (Chao 2026-09-18: default to the type at
+    hand) — the item's own positions, or those of the sub-assembly type
+    sitting in ``into``. Several types, or none, leave it blank (PIDs
+    only). Stamped on the loaded schema, so rendering, serial lookup and
+    submit all see it."""
+    tables = [f for _t, f in checklistforms.leaf_fields(schema)
+              if f.get("link") and not f.get("type_id")]
+    if not tables:
+        return
+    try:
+        connectors = _box_connectors(api, ptid)
+        for f in tables:
+            into = f.get("into") or ""
+            if into:
+                child = connectors.get(into)
+                accepted = set(_box_connectors(api, child).values()) if child else set()
+            else:
+                accepted = set(connectors.values())
+            accepted.discard(None)
+            accepted.discard("")
+            if len(accepted) == 1:
+                f["type_id"] = accepted.pop()
+    except Exception as e:
+        logger.info("linking-table default type for %s failed: %s", ptid, e)
+
+
+def _link_block(api, inst, pid: str) -> str:
+    """#153: why HWDB would refuse to link ``pid`` — unknown to HWDB, or a
+    status outside the four linkable ones — or "" when nothing stands in
+    the way. The mirror's status when it has the item, else one HWDB read."""
+    row = HwdbComponentEvent.for_instance(inst).filter(part_id=pid).values("status_id", "status").first()
+    if row is None:
+        try:
+            status = (api.get_component(pid).get("data") or {}).get("status")
+        except requests.HTTPError as e:
+            if getattr(e.response, "status_code", None) == 404:
+                return "unknown to HWDB"
+            raise
+        sid = status.get("id") if isinstance(status, dict) else None
+        label = parts.normalize_status(status)
+    else:
+        sid, label = row["status_id"], row["status"] or f"id {row['status_id']}"
+    if sid is not None and sid not in parts.PROCEDURE_LINKABLE_STATUS_IDS:
+        return f"status “{label}” — HWDB won’t link it"
+    return ""
+
+
+def _table_link_check(api, inst, target: str, values: list[str], type_id: str = "") -> list[dict]:
+    """#153: what "link now" would do with each filled cell of a linking
+    table, nothing written — ``[{value, ok, note}]`` in cell order: the
+    position the item would take, "already linked", or why not (not a PID
+    — a serial number the page couldn't resolve, or one it never tried
+    because the table has no ``type_id`` — a duplicate, no free position,
+    unknown to HWDB, an unlinkable status). Chao 2026-09-18: a way to see
+    the mis-filled cells before linking."""
+    connectors = _box_connectors(api, target.rsplit("-", 1)[0])
+    occupants = {(m.get("functional_position") or ""): m.get("part_id")
+                 for m in (api.get_subcomponents(target).get("data") or [])
+                 if isinstance(m, dict)}
+    current = {pos: occupants.get(pos) for pos in connectors}
+    out, seen = [], set()
+    for v in values:
+        pid = v.strip().upper()
+        ok, note = False, ""
+        if not checklistforms._PID_SHAPE.fullmatch(pid):
+            note = (f"no item of type {type_id} has this serial number" if type_id
+                    else "not a PID — the positions take several types, so without a Type ID on the table serial numbers aren’t looked up")
+        elif pid in seen:
+            note = "duplicate"
+        elif pid in current.values():
+            ok, note = True, "already linked"
+        else:
+            ctid = pid.rsplit("-", 1)[0]
+            free = [p for p in sorted(current, key=str)
+                    if current[p] is None and connectors.get(p) == ctid]
+            if not free:
+                note = f"no free position for {ctid} items"
+            else:
+                note = _link_block(api, inst, pid)
+                if not note:
+                    current[free[0]] = pid
+                    ok, note = True, f"→ {free[0]}"
+        seen.add(pid)
+        out.append({"value": v, "ok": ok, "note": note})
+    return out
+
+
 def _map_positions(api, inst, part_id) -> list[dict]:
     """The item's positions with their occupants, ``[{position,
     child_type_id, child_type_name, part_id}]`` name-sorted — the imagemap's
@@ -2946,7 +3053,9 @@ def explore_checklist_map_view(request, part_id):
     ``action=link&slot=<label>&pid=<PID>`` places one scanned item now
     (slot named like a position → there, else first free for its type —
     the submit rule) and ``action=unlink&pid=<PID>`` frees it. Both answer
-    with the new state, plus ``error`` when HWDB refused."""
+    with the new state, plus ``error`` when HWDB refused. #153:
+    ``action=link_table&pid=…&pid=…[&into=<position>]`` links a table's
+    PIDs at once and answers ``{target, linked, error}``."""
     try:
         bearer = mint_for(request)
     except (FnalLinkRequired, FnalUnavailable):
@@ -2958,6 +3067,38 @@ def explore_checklist_map_view(request, part_id):
         action = request.POST.get("action") or ""
         pid = (request.POST.get("pid") or "").strip().upper()
         slot = (request.POST.get("slot") or "").strip()
+        if action == "check_table":
+            # #153: a linking table's "check" — link now as a dry run, one verdict per filled cell
+            values = [v for v in request.POST.getlist("cell") if v.strip()]
+            target, err = _link_target(api, part_id, (request.POST.get("into") or "").strip())
+            results = []
+            if target:
+                try:
+                    results = _table_link_check(api, inst, target, values,
+                                                (request.POST.get("type_id") or "").strip().upper())
+                except requests.RequestException as e:
+                    err = _hwdb_error_detail(e)
+                except Exception as e:
+                    err = f"couldn’t read the item’s positions — {e}"
+            return JsonResponse({"target": target, "results": results, "error": err})
+        if action == "link_table":
+            # #153: a linking table's "link now" — every PID at once into the
+            # item or the sub-assembly in ``into``; answers with what is
+            # linked there now so the cells can paint
+            pids = [p.strip().upper() for p in request.POST.getlist("pid") if p.strip()]
+            target, err = _link_target(api, part_id, (request.POST.get("into") or "").strip())
+            if not err and pids:
+                err = _checklist_link_map(api, inst, target,
+                                          {f"#{i + 1}": p for i, p in enumerate(pids)})
+            linked = []
+            if target:
+                try:
+                    have = {m.get("part_id") for m in (api.get_subcomponents(target).get("data") or [])
+                            if isinstance(m, dict)}
+                    linked = [p for p in pids if p in have]
+                except requests.RequestException as e:
+                    err = err or _hwdb_error_detail(e)
+            return JsonResponse({"target": target, "linked": linked, "error": err})
         if not pid:
             err = "nothing scanned in that slot."
         elif action == "link":
@@ -3098,6 +3239,13 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
         lerr = _checklist_link_map(api, instance_of(request), part_id, req["slots"])
         if lerr:
             return _mark(f"“{req['label']}”: not linked — {lerr}", lerr)
+    for req in checklistforms.table_link_requests(schema, data):      # #153
+        target, lerr = _link_target(api, part_id, req["into"])
+        if not lerr:
+            lerr = _checklist_link_map(api, instance_of(request), target,
+                                       {f"{req['label']} #{i + 1}": pid for i, pid in enumerate(req["pids"])})
+        if lerr:
+            return _mark(f"“{req['label']}”: not linked — {lerr}", lerr)
     # to_spec values (#96) also fold into the item's specifications. A
     # checklist OWNS the DATA sections named after its sections — this
     # submission replaces them, and sections its previous submission wrote
@@ -3198,6 +3346,7 @@ def explore_checklist_view(request, part_id, name):
         if request.method == "POST" and (request.POST.get("action") or "submit") == "submit":
             return _checklist_pending(request, inst, part_id, name, page_url, msg)   # #151
         raise Http404(msg)
+    _default_table_types(api, ptid, schema)   # #153
     # This checklist's latest submission on the item pre-fills the form and
     # keeps photo references alive across re-submissions.
     rec, _err = (execsummary._test_record_at(

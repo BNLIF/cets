@@ -155,14 +155,17 @@
   });
   document.querySelectorAll("input[data-min], input[data-max]").forEach(paint);
 
-  // #112: type-guarded PID boxes — red when the value isn't of the required
-  // type. #149: a value matching the field's serial-number pattern (typed,
-  // barcoded, Scan Text) is resolved within the type (mirror, then HWDB)
-  // and swapped for the PID, the serial noted beside the box; unknown = red.
+  // #112: type-guarded PID boxes — red when the value is a PID of another
+  // type. #149: any other value (typed, barcoded, Scan Text) is a serial
+  // number — every one without a pattern, a full match with one — resolved
+  // within the type (mirror, then HWDB) and swapped for the PID, the
+  // serial noted beside the box; unknown = red.
   var serialT = {};
   function snMatch(el, v) {
     var sn = el.getAttribute("data-sn");
-    try { return !!sn && new RegExp("^(?:" + sn + ")$").test(v); } catch (e) { return false; }
+    if (/^[A-Z]\d{11}-\d{5}$/i.test(v)) return false;
+    if (!sn) return true;
+    try { return new RegExp("^(?:" + sn + ")$").test(v); } catch (e) { return false; }
   }
   function serialNote(el) { return el.parentNode.querySelector('.cl-serial[data-for="' + el.id + '"]'); }
   function paintPid(el) {

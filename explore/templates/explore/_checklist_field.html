@@ -24,6 +24,10 @@
     {% for row in f.trows %}<tr{% if row.color %} class="cl-tint" style="--cl-tint: {{ row.color }};"{% endif %}><th scope="row" class="cl-rowlab">{{ row.label }}</th>{% for c in row.cells %}{% include "explore/_checklist_cell.html" %}{% endfor %}</tr>
     {% endfor %}{% else %}<tr>{% for c in f.cells %}{% include "explore/_checklist_cell.html" %}{% endfor %}</tr>{% endif %}</tbody>
   </table></div>
+  {% if f.link %}<div class="cl-tbl-link"{% if part_id %} data-link-url="{% url 'explore:checklist_map' part_id=part_id %}" data-into="{{ f.into }}" data-type-id="{{ f.type_id }}"{% endif %}>
+    <span class="cl-hint">{% if f.type_id %}type {{ f.type_id }}{% if f.sn %} &middot; SN {{ f.sn }}{% endif %} &middot; {% endif %}linked as sub-components{% if f.into %} of the item in “{{ f.into }}”{% endif %}</span>
+    {% if part_id %}<button type="button" class="es-btn quiet cl-tbl-chk" title="Nothing is written — each cell gets the position it would take, or what stops it">check</button> <button type="button" class="es-btn quiet cl-tbl-lnk" title="Link every listed item now — the submit links them too">link now</button> <span class="cl-tbl-status cl-hint"></span>{% endif %}
+  </div>{% endif %}
 {% elif f.type == "textarea" %}
   <label class="cl-lab" for="{{ f.key }}">{{ f.label|clmd }}</label>
   <textarea id="{{ f.key }}" name="{{ f.key }}" rows="3">{{ f.value }}</textarea>
@@ -41,7 +45,7 @@
   {# a link field on an item's page links live like an imagemap slot: the container carries the state URL, its position is the slot #}
   <span class="{% if f.type == "link" and part_id %}cl-lnk{% endif %}"{% if f.type == "link" and part_id %} data-link-url="{% url 'explore:checklist_map' part_id=part_id %}"{% endif %} style="display:inline-flex; gap:8px; align-items:center; max-width:100%; flex-wrap:wrap;">
     <input id="{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}" autocomplete="off"
-      autocapitalize="characters" spellcheck="false"{% if f.type_id %} data-type-id="{{ f.type_id }}"{% if f.sn %} data-sn="{{ f.sn }}" data-serial-url="{% url 'explore:serial' part_type_id=f.type_id %}"{% endif %}{% endif %}>
+      autocapitalize="characters" spellcheck="false"{% if f.type_id %} data-type-id="{{ f.type_id }}"{% if f.sn %} data-sn="{{ f.sn }}"{% endif %} data-serial-url="{% url 'explore:serial' part_type_id=f.type_id %}"{% endif %}>
     <button type="button" class="es-btn cl-scan" data-target="{{ f.key }}">&#9635; Scan</button>{% if f.type_id %}
     <button type="button" class="es-btn cl-pick" data-target="{{ f.key }}"{% if f.type == "link" %} data-free="1"{% endif %} title="Pick from the type’s items">&#9776; Pick</button>{% elif f.type == "link" and part_id %}
     <button type="button" class="es-btn cl-pick" data-target="{{ f.key }}" data-free="1" data-slot="{{ f.position }}" hidden title="Pick from the type’s items">&#9776; Pick</button>{% endif %}{% if f.type == "link" and part_id %}
@@ -81,7 +85,7 @@
     <span class="cl-map-slot"><span class="cl-map-n">{{ forloop.counter }}</span>
       <label for="{{ s.name }}">{{ s.label }}</label>
       <input id="{{ s.name }}" name="{{ s.name }}" value="{{ s.value }}" autocomplete="off"
-        autocapitalize="characters" spellcheck="false"{% if f.type_id %} data-type-id="{{ f.type_id }}"{% if f.sn %} data-sn="{{ f.sn }}" data-serial-url="{% url 'explore:serial' part_type_id=f.type_id %}"{% endif %}{% endif %}>
+        autocapitalize="characters" spellcheck="false"{% if f.type_id %} data-type-id="{{ f.type_id }}"{% if f.sn %} data-sn="{{ f.sn }}"{% endif %} data-serial-url="{% url 'explore:serial' part_type_id=f.type_id %}"{% endif %}>
       <button type="button" class="es-btn cl-scan" data-target="{{ s.name }}" title="Scan">&#9635;</button>{% if f.type_id or f.link and part_id %}
       {# no type on the map: the live state supplies it per slot (cl-pick[data-slot]) — a slot named like a position takes that position's type, any other every type the free positions accept #}
       <button type="button" class="es-btn cl-pick" data-target="{{ s.name }}"{% if f.link %} data-free="1"{% endif %}{% if not f.type_id %} data-slot="{{ s.label }}" hidden{% endif %} title="Pick from the type’s items">&#9776;</button>{% endif %}{% if f.link and part_id %}

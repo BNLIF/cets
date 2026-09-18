@@ -289,11 +289,20 @@ def _norm_field(f: dict) -> dict | None:
         # named functional position — or the first free one matching the
         # child's type when no position is pinned (the scan page's rule).
         out["position"] = str(f.get("position") or "").strip()
-    if t in ("qr", "link", "imagemap"):
+    if t == "table" and f.get("link"):
+        # #153 (Anselmo): a linking table — every plain cell is a PID (or a
+        # serial resolved to one, #149) and the button below the table, or
+        # the submit, links them as sub-components: into this item, or with
+        # ``into`` = one of the item's positions, into the sub-assembly
+        # sitting there (the PDS module's supercell holding 8 SiPM boards)
+        out["link"] = True
+        out["into"] = str(f.get("into") or "").strip()
+    if t in ("qr", "link", "imagemap") or (t == "table" and f.get("link")):
         # #112 (Hajime): the box may require a Type ID — a scan of any other
         # type won't fill it (checked in the scan modal, painted on typed
         # input, and dropped here at parse). Malformed ids are ignored.
-        # On an imagemap (#113) the guard applies to every slot.
+        # On an imagemap (#113) the guard applies to every slot; on a
+        # linking table (#153) to every plain cell.
         tid = str(f.get("type_id") or "").strip().upper()
         if re.fullmatch(r"[A-Z]\d{11}", tid):
             out["type_id"] = tid
@@ -790,12 +799,15 @@ def _num_or_str(raw: str):
     return n if n is not None else raw
 
 
-def _parse_table_row(f: dict, post, prefix: str, texts: dict):
+def _parse_table_row(f: dict, post, prefix: str, texts: dict, resolve=None):
     """One table row's posted cells as ``{column: value}``, or None when
     nothing was typed (constants alone, and what they'd compute, aren't a
-    submission)."""
+    submission). On a linking table (#153) a plain cell keeps only a PID of
+    the required type — a serial number is resolved to one (#149), anything
+    else is dropped like a type-guarded box's mismatch."""
     formulas = f.get("formulas") or {}
     checks = f.get("checks") or []
+    link = bool(f.get("link"))
     # #114: constant cells first, so formulas can reference a numeric one;
     # posted overrides for them are ignored like formulas'.
     cells = {c: _num_or_str(tx) for c, tx in texts.items()}
@@ -809,7 +821,12 @@ def _parse_table_row(f: dict, post, prefix: str, texts: dict):
                 cells[c] = raw == "pass"
                 typed = True
             continue
-        if raw:
+        if raw and link:
+            pid = _guarded(f.get("type_id"), raw, resolve, f.get("sn"))
+            if pid:
+                cells[c] = pid.upper()
+                typed = True
+        elif raw:
             cells[c] = _num_or_str(raw)
             typed = True
     if not typed:
@@ -825,16 +842,20 @@ def _parse_table_row(f: dict, post, prefix: str, texts: dict):
     return cells
 
 
+_PID_SHAPE = re.compile(r"[A-Za-z]\d{11}-\d{5}")
+
+
 def _guarded(tid: str | None, raw: str, resolve, sn: str | None = None):
     """#112/#149: the value a type-guarded box keeps. A PID of the required
-    type (or any value with no guard) stands; a value matching the field's
-    ``sn`` pattern in full is a serial number the view's
+    type (or any value with no guard) stands; a PID of another type is
+    dropped (None); anything else is a serial number the view's
     ``resolve(type_id, serial)`` turns into the PID of the item of that
-    type carrying it; anything else — a PID of another type, a string the
-    pattern doesn't cover, an unknown serial — is dropped (None)."""
+    type carrying it — every non-PID value with no ``sn`` pattern, only a
+    full match with one (Chao 2026-09-18: blank = PID or serial). A serial
+    no item has is dropped too."""
     if not tid or raw.upper().startswith(tid + "-"):
         return raw
-    if resolve is None or not sn or not re.fullmatch(sn, raw):
+    if resolve is None or _PID_SHAPE.fullmatch(raw) or (sn and not re.fullmatch(sn, raw)):
         return None
     return resolve(tid, raw)
 
@@ -870,13 +891,13 @@ def parse(schema: dict, post, resolve=None) -> dict:
                 value = {}
                 for i, rw in enumerate(f["rows"]):
                     cells = _parse_table_row(f, post, f"{key}-r{i}",
-                                             {**texts, **rw.get("texts", {})})
+                                             {**texts, **rw.get("texts", {})}, resolve)
                     if cells is not None:
                         value[rw["label"]] = cells
                 if not value:
                     continue
             else:
-                value = _parse_table_row(f, post, key, texts)
+                value = _parse_table_row(f, post, key, texts, resolve)
                 if value is None:
                     continue
         elif t == "steps":
@@ -1064,6 +1085,32 @@ def link_requests(schema: dict, data: dict) -> list[dict]:
         if isinstance(pid, str) and pid.strip():
             out.append({"label": f["label"], "pid": pid.strip(),
                         "position": f["position"]})
+    return out
+
+
+def table_link_requests(schema: dict, data: dict) -> list[dict]:
+    """#153: the submitted linking tables, each with its PIDs in cell order
+    ``[{label, into, pids}]`` — the view links every one into the item's
+    sub-components (``into`` = the position whose occupant is the real
+    parent, e.g. the supercell) in one PATCH per table."""
+    out = []
+    for title, f in leaf_fields(schema):
+        if f["type"] != "table" or not f.get("link"):
+            continue
+        sec = data.get(title)
+        vals = sec.get(f["label"]) if isinstance(sec, dict) else None
+        if not isinstance(vals, dict):
+            continue
+        rows = list(vals.values()) if f.get("rows") else [vals]
+        skip = set(f.get("checks") or []) | set(f.get("texts") or {}) | set(f.get("formulas") or {})
+        pids = []
+        for row in rows:
+            for c in f["columns"]:
+                v = row.get(c) if isinstance(row, dict) else None
+                if c not in skip and isinstance(v, str) and v and v not in pids:
+                    pids.append(v)
+        if pids:
+            out.append({"label": f["label"], "into": f.get("into") or "", "pids": pids})
     return out
 
 

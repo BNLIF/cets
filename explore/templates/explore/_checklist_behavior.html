@@ -205,6 +205,66 @@
     });
     map._state = d;
   }
+  // #153: a linking table's "link now" — every PID in its cells goes to the
+  // item's sub-components (or the sub-assembly in data-into) in one PATCH
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest(".cl-tbl-lnk");
+    if (!b) return;
+    var bar = b.closest(".cl-tbl-link"), tbl = bar.previousElementSibling, st = bar.querySelector(".cl-tbl-status");
+    var cells = Array.prototype.slice.call(tbl.querySelectorAll("input.cl-pidcell"));
+    var pids = cells.map(function (i) { return i.value.trim().toUpperCase(); })
+                    .filter(function (v, i, a) { return v && /^[A-Z]\d{11}-\d{5}$/.test(v) && a.indexOf(v) === i; });
+    if (!pids.length) { st.textContent = "nothing to link — cells need PIDs"; return; }
+    var fd = new FormData();
+    fd.append("action", "link_table"); fd.append("into", bar.dataset.into || "");
+    pids.forEach(function (p) { fd.append("pid", p); });
+    b.disabled = true; st.textContent = "linking " + pids.length + "…";
+    fetch(bar.dataset.linkUrl, { method: "POST", body: fd, credentials: "same-origin", headers: { "X-CSRFToken": csrf() } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var linked = d.linked || [];
+        cells.forEach(function (i) { i.classList.toggle("cl-linked", linked.indexOf(i.value.trim().toUpperCase()) >= 0); });
+        st.textContent = (linked.length ? linked.length + " of " + pids.length + " linked" + (d.target ? " in " + d.target : "") : "")
+                       + (d.error ? (linked.length ? " · " : "") + d.error : "");
+        st.classList.toggle("cl-bad-text", !!d.error);
+      })
+      .catch(function () { st.textContent = "couldn’t reach the server"; })
+      .then(function () { b.disabled = false; });
+  });
+
+  // #153: "check" — link now as a dry run; each filled cell is told the
+  // position it would take (or what stops it, as its tooltip, painted red)
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest(".cl-tbl-chk");
+    if (!b) return;
+    var bar = b.closest(".cl-tbl-link"), tbl = bar.previousElementSibling, st = bar.querySelector(".cl-tbl-status");
+    var cells = Array.prototype.slice.call(tbl.querySelectorAll("input.cl-pidcell")).filter(function (i) { return i.value.trim(); });
+    if (!cells.length) { st.textContent = "nothing to check — the cells are empty"; return; }
+    var fd = new FormData();
+    fd.append("action", "check_table"); fd.append("into", bar.dataset.into || ""); fd.append("type_id", bar.dataset.typeId || "");
+    cells.forEach(function (i) { fd.append("cell", i.value.trim()); });
+    b.disabled = true; st.textContent = "checking " + cells.length + "…";
+    fetch(bar.dataset.linkUrl, { method: "POST", body: fd, credentials: "same-origin", headers: { "X-CSRFToken": csrf() } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var res = d.results || [], bad = [], ok = 0;
+        cells.forEach(function (i, k) {
+          var r = res[k];
+          if (!r) return;
+          i.classList.toggle("cl-bad", !r.ok);
+          if (!r.ok) i.classList.remove("cl-ok");
+          i.classList.toggle("cl-linked", r.note === "already linked");
+          i.title = r.note || "";
+          if (r.ok) ok++; else bad.push(i.value.trim() + " — " + r.note);
+        });
+        st.textContent = d.error ? d.error
+          : ok + " of " + cells.length + " can be linked" + (d.target ? " in " + d.target : "") + (bad.length ? " · " + bad.join(" · ") : "");
+        st.classList.toggle("cl-bad-text", !!(d.error || bad.length));
+      })
+      .catch(function () { st.textContent = "couldn’t reach the server"; })
+      .then(function () { b.disabled = false; });
+  });
+
   var LINKERS = ".cl-map[data-link-url], .cl-lnk[data-link-url]";
   function mapCall(map, body) {
     var opts = { credentials: "same-origin" };

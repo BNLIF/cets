@@ -331,11 +331,16 @@
     <div class="ec-row g-link" style="display:none;">
       <input class="ff-position" placeholder="functional position (blank = first free slot for the child&#8217;s type)" title="on an item&#8217;s page the field links live (link/unlink button) and a named position pre-fills its current occupant">
     </div>
+    <div class="ec-row g-tbllink" style="display:none;">
+      <label class="ec-check" title="every plain cell takes a PID (or a serial number resolved to one) and the items are linked as sub-components — by the button under the table, or at submit"><input type="checkbox" class="ff-tbllink"> link the cells as sub-components</label>
+      <input class="ff-into" placeholder="into the item in position… (blank = this item)" style="flex:0 0 280px;"
+        title="the position of THIS item whose occupant is the real parent — e.g. the supercell holding the SiPM boards">
+    </div>
     <div class="ec-row g-pid" style="display:none;">
       <input class="ff-typeid" placeholder="required Type ID (blank = any)" style="flex:0 0 220px;"
         title="e.g. D00300100002 — a scan of any other type won&#8217;t fill this box">
-      <input class="ff-sn" placeholder="serial-number pattern (regex, blank = PIDs only)"
-        title="e.g. HPK\d{5} — a scanned or typed value matching it in full is looked up as the serial number of an item of the Type ID and swapped for its PID">
+      <input class="ff-sn" placeholder="serial-number pattern (regex, blank = any value that isn’t a PID)"
+        title="e.g. HPK\d{5} — a scanned or typed value that isn’t a PID is looked up as the serial number of an item of the Type ID and swapped for its PID; a pattern narrows that to full matches">
     </div>
     <div class="ec-row g-grid" style="display:none;">
       <label class="ec-inline" title="start column (auto = next free slot)">col
@@ -440,7 +445,8 @@
     $(".g-img", r).style.display = (t === "static" || t === "imagemap") ? "" : "none";
     $(".g-link", r).style.display = t === "link" ? "" : "none";
     $(".g-plot", r).style.display = t === "plot" ? "" : "none";          // #160
-    $(".g-pid", r).style.display = (t === "qr" || t === "link" || t === "imagemap") ? "" : "none";
+    $(".g-tbllink", r).style.display = t === "table" ? "" : "none";
+    $(".g-pid", r).style.display = (t === "qr" || t === "link" || t === "imagemap" || (t === "table" && $(".ff-tbllink", r).checked)) ? "" : "none";
     $(".g-map", r).style.display = t === "imagemap" ? "" : "none";
     $(".ff-tospec-w", r).style.display = SPEC_OK.indexOf(t) !== -1 ? "" : "none";
     $(".ff-label", r).placeholder = (t === "static" || t === "plot") ? "label (optional)" : "label";
@@ -490,6 +496,8 @@
       return s.label + " @ " + s.x + ", " + s.y;
     }).join("\n");
     $(".ff-maplink", r).checked = !!f.link;                            // #133
+    $(".ff-tbllink", r).checked = f.type === "table" && !!f.link;      // #153
+    $(".ff-into", r).value = f.into || "";
     syncMapPos(r);
     syncImgStatus(r);
     syncType(r);
@@ -1115,7 +1123,7 @@
       var pos = $(".ff-position", r).value.trim();
       if (pos) f.position = pos;
     }
-    if (t === "qr" || t === "link" || t === "imagemap") {
+    if (t === "qr" || t === "link" || t === "imagemap" || (t === "table" && $(".ff-tbllink", r).checked)) {
       var tid = $(".ff-typeid", r).value.trim().toUpperCase(), sn = $(".ff-sn", r).value.trim();
       if (tid) f.type_id = tid;
       if (tid && sn) f.sn = sn;   // #149
@@ -1125,6 +1133,10 @@
       if (mid) f.image_id = mid;
       f.slots = readSlots(r);
       if ($(".ff-maplink", r).checked) f.link = true;                  // #133
+    }
+    if (t === "table" && $(".ff-tbllink", r).checked) {                // #153
+      f.link = true;
+      if ($(".ff-into", r).value.trim()) f.into = $(".ff-into", r).value.trim();
     }
     if ($(".ff-tospec", r).checked && SPEC_OK.indexOf(t) !== -1) f.to_spec = true;
     return f;
@@ -1411,6 +1423,7 @@
       syncMap(e.target.closest(".clc-fld"));
       syncMapPos(e.target.closest(".clc-fld"));
     }
+    if (e.target.classList && e.target.classList.contains("ff-tbllink")) syncType(e.target.closest(".clc-fld"));
     if (e.target.classList && e.target.classList.contains("ff-maplink"))
       syncMapPos(e.target.closest(".clc-fld"));
     if (e.target.id !== "clc-json") refresh();

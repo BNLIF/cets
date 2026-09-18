@@ -1726,10 +1726,12 @@ class SerialResolveTest(TestCase):
         self.assertEqual(checklistforms.parse(schema, {key: "ABC19877"}, resolve), {})
         self.assertEqual(checklistforms.parse(schema, {key: "xHPK19877"}, resolve), {})   # full match only
         self.assertEqual(calls, [(self.TID, "HPK19877"), (self.TID, "HPK00000")])
-        # without ``sn`` nothing is looked up
+        # without ``sn`` every value that isn't a PID is a serial (Chao 2026-09-18)
         nosn = self._schema(type="link", label="Strip", type_id=self.TID)
-        self.assertEqual(checklistforms.parse(nosn, {key: "HPK19877"}, resolve), {})
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(checklistforms.parse(nosn, {key: "HPK19877"}, resolve), {"S": {"Strip": "Z00100300029-05316"}})
+        self.assertEqual(checklistforms.parse(nosn, {key: "D00300100002-00001"}, resolve), {})   # a PID of another type still isn't
+        self.assertEqual(checklistforms.parse(nosn, {key: "ABC19877"}, resolve), {})
+        self.assertEqual(calls[2:], [(self.TID, "HPK19877"), (self.TID, "ABC19877")])
         # without a resolver (or a type) parse behaves as before
         self.assertEqual(checklistforms.parse(schema, {key: "HPK19877"}), {})
         plain = self._schema(type="qr", label="Any")
@@ -1782,12 +1784,13 @@ class SerialResolveTest(TestCase):
         with m1, m2:
             html = self.client.get(PAGE).content.decode()
             self.assertIn(f'data-type-id="{self.TID}" data-sn="HPK\\d{{5}}" data-serial-url="/hw/dev/serial/{self.TID}/"', html)
-            self.assertIn(f'id="f0-2" name="f0-2" value="" autocomplete="off"\n      autocapitalize="characters" spellcheck="false" data-type-id="{self.TID}">', html)
+            # a box without a pattern still resolves serials — every non-PID value is one (Chao 2026-09-18)
+            self.assertIn(f'id="f0-2" name="f0-2" value="" autocomplete="off"\n      autocapitalize="characters" spellcheck="false" data-type-id="{self.TID}" data-serial-url="/hw/dev/serial/{self.TID}/">', html)
             self.assertIn("SN HPK\\d{5}", html)         # the label's hint
             self.assertIn("no item of type", html)   # the fill page's refusal text
             self.client.post(PAGE, {"f0-0": "HPK19877", "f0-1": "HPK00000", "f0-2": "HPK19877"})
         data = api.post_test.call_args.args[1]["test_data"]["DATA"]
-        self.assertEqual(data["S"], {"Strip": "Z00100300029-05316"})   # the unknown serial is dropped
+        self.assertEqual(data["S"], {"Strip": "Z00100300029-05316", "Plain": "Z00100300029-05316"})   # the unknown serial is dropped
         api.find_component_by_serial.assert_called_once_with(self.TID, "HPK00000")
 
 
@@ -2204,6 +2207,179 @@ class StackedCellTest(TestCase):
             html = self.client.get(PAGE).content.decode()
         self.assertIn('class="cl-col"', html)
         self.assertIn("20-G202", html)
+
+
+class TableLinkTest(TestCase):
+    """#153 (Anselmo): a table flagged ``link`` takes PIDs / serials in its
+    cells and links them as sub-components — of the item, or of the
+    sub-assembly sitting in one of its positions (``into``)."""
+    SIPM, SC = "D00400300001", "D00800100003"
+    SCHEMA = {"name": "SC", "test_type_name": "SC", "sections": [{"title": "S", "fields": [
+        {"type": "table", "label": "Boards", "link": True, "type_id": SIPM, "sn": r"HPK\d{5}",
+         "into": "SC1", "columns": ["B1", "B2", "B3", {"label": "OK", "check": True}]}]}]}
+
+    def _api(self, into=True):
+        api = _api(schema=self.SCHEMA, test_types=("ES", "SC"))
+        # the item (PTID) holds a supercell in SC1; the supercell has 3 SiPM positions, one taken
+        api.get_component_type.side_effect = lambda t: {"data": {
+            "connectors": ({"P1": self.SIPM, "P2": self.SIPM, "P3": self.SIPM} if t == self.SC
+                           else {"SC1": self.SC, "SC2": self.SC}),
+            "properties": {"specifications": [{"datasheet": {"DATA": {}}}]}}}
+        api.get_subcomponents.side_effect = lambda pid: {"data": (
+            [{"functional_position": "SC1", "part_id": f"{self.SC}-00001"}] if pid == PART
+            else [{"functional_position": "P3", "part_id": f"{self.SIPM}-00099"}])}
+        api.patch_subcomponents.return_value = {"status": "OK"}
+        return api
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("t", "t@t.io", "pw"))
+
+    def test_normalize_keeps_link_into_type_and_sn(self):
+        f = checklistforms.normalize(self.SCHEMA, "SC")["sections"][0]["fields"][0]
+        self.assertEqual((f["link"], f["into"], f["type_id"], f["sn"]), (True, "SC1", self.SIPM, r"HPK\d{5}"))
+        plain = {k: v for k, v in self.SCHEMA["sections"][0]["fields"][0].items() if k not in ("link", "into")}
+        n = checklistforms.normalize({**self.SCHEMA, "sections": [{"title": "S", "fields": [plain]}]}, "SC")
+        f = n["sections"][0]["fields"][0]
+        self.assertNotIn("link", f)
+        self.assertNotIn("type_id", f)   # the guard only exists on a linking table
+
+    def test_parse_keeps_pids_resolves_serials_drops_the_rest(self):
+        schema = checklistforms.normalize(self.SCHEMA, "SC")
+        resolve = lambda tid, sn: f"{tid}-05316" if sn == "HPK19877" else None
+        data = checklistforms.parse(schema, {"f0-0-c0": f"{self.SIPM}-00011", "f0-0-c1": "HPK19877",
+                                             "f0-0-c2": "D00900000001-00001", "f0-0-c3": "pass"}, resolve)
+        self.assertEqual(data["S"]["Boards"], {"B1": f"{self.SIPM}-00011", "B2": f"{self.SIPM}-05316", "OK": True})
+        self.assertEqual(checklistforms.table_link_requests(schema, data),
+                         [{"label": "Boards", "into": "SC1", "pids": [f"{self.SIPM}-00011", f"{self.SIPM}-05316"]}])
+        self.assertEqual(checklistforms.parse(schema, {"f0-0-c0": "HPK00000"}, resolve), {})   # unknown serial = nothing typed
+
+    def test_a_table_without_a_type_takes_the_one_the_positions_accept(self):
+        # Chao 2026-09-18: no Type ID on the table = the type at hand — the
+        # supercell's positions all take SiPM boards, so serials resolve
+        plain = {k: v for k, v in self.SCHEMA["sections"][0]["fields"][0].items() if k not in ("type_id", "sn")}
+        api = self._api()
+        api.get_image_response.return_value = mock.Mock(content=json.dumps(
+            {**self.SCHEMA, "sections": [{"title": "S", "fields": [plain]}]}).encode())
+        api.find_component_by_serial.return_value = {"part_id": f"{self.SIPM}-05316"}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+            self.assertIn(f'class="cl-pidcell" data-type-id="{self.SIPM}" data-serial-url="/hw/dev/serial/{self.SIPM}/"', html)
+            self.assertIn(f'data-into="SC1" data-type-id="{self.SIPM}"', html)
+            self.client.post(PAGE, {"f0-0-c0": "HPK19877"})
+        api.find_component_by_serial.assert_called_once_with(self.SIPM, "HPK19877")
+        self.assertEqual(api.patch_subcomponents.call_args.args[1]["subcomponents"]["P1"], f"{self.SIPM}-05316")
+        # without ``into`` the item's own positions decide — all supercells here
+        api.get_image_response.return_value = mock.Mock(content=json.dumps(
+            {**self.SCHEMA, "sections": [{"title": "S", "fields": [{k: v for k, v in plain.items() if k != "into"}]}]}).encode())
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn(f'class="cl-pidcell" data-type-id="{self.SC}"', html)
+        # positions of several types = no default (PIDs only)
+        api.get_component_type.side_effect = lambda t: {"data": {"connectors": {"SC1": self.SC, "X": self.SIPM},
+                                                                 "properties": {"specifications": [{"datasheet": {"DATA": {}}}]}}}
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('class="cl-pidcell">', html)
+
+    def test_submit_links_the_boards_into_the_supercell(self):
+        api = self._api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"f0-0-c0": f"{self.SIPM}-00011", "f0-0-c1": f"{self.SIPM}-00012"})
+        api.patch_subcomponents.assert_called_once_with(f"{self.SC}-00001", {
+            "component": {"part_id": f"{self.SC}-00001"},
+            "subcomponents": {"P1": f"{self.SIPM}-00011", "P2": f"{self.SIPM}-00012", "P3": f"{self.SIPM}-00099"}})
+        calls = [c[0] for c in api.mock_calls]
+        self.assertLess(calls.index("patch_subcomponents"), calls.index("post_test"))
+
+    def test_submit_refuses_when_the_position_is_empty(self):
+        api = self._api()
+        api.get_subcomponents.side_effect = lambda pid: {"data": []}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.post(PAGE, {"f0-0-c0": f"{self.SIPM}-00011"}, follow=True).content.decode()
+        api.patch_subcomponents.assert_not_called()
+        api.post_test.assert_not_called()
+        self.assertIn("position “SC1” of", html)
+        self.assertIn("is empty", html)
+
+    def test_no_into_links_into_the_item_itself(self):
+        schema = {**self.SCHEMA, "sections": [{"title": "S", "fields": [
+            {**self.SCHEMA["sections"][0]["fields"][0], "into": "", "type_id": self.SC}]}]}
+        api = _api(schema=schema, test_types=("ES", "SC"))
+        api.get_component_type.return_value = {"data": {"connectors": {"SC1": self.SC, "SC2": self.SC},
+                                                        "properties": {"specifications": [{"datasheet": {"DATA": {}}}]}}}
+        api.get_subcomponents.return_value = {"data": []}
+        api.patch_subcomponents.return_value = {"status": "OK"}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"f0-0-c0": f"{self.SC}-00007"})
+        api.patch_subcomponents.assert_called_once_with(PART, {
+            "component": {"part_id": PART}, "subcomponents": {"SC1": f"{self.SC}-00007", "SC2": None}})
+
+    def test_live_link_now_answers_with_what_is_linked(self):
+        api = self._api()
+        linked_after = {"data": [{"functional_position": "P1", "part_id": f"{self.SIPM}-00011"},
+                                 {"functional_position": "P3", "part_id": f"{self.SIPM}-00099"}]}
+        state = {"n": 0}
+        def subs(pid):
+            if pid == PART:
+                return {"data": [{"functional_position": "SC1", "part_id": f"{self.SC}-00001"}]}
+            state["n"] += 1
+            return linked_after if state["n"] > 1 else {"data": [{"functional_position": "P3", "part_id": f"{self.SIPM}-00099"}]}
+        api.get_subcomponents.side_effect = subs
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.post(f"/hw/dev/checklist-map/{PART}/", {"action": "link_table", "into": "SC1",
+                                                                       "pid": [f"{self.SIPM}-00011"]})
+        self.assertEqual(resp.json(), {"target": f"{self.SC}-00001", "linked": [f"{self.SIPM}-00011"], "error": None})
+        self.assertEqual(api.patch_subcomponents.call_args.args[1]["subcomponents"]["P1"], f"{self.SIPM}-00011")
+
+    def test_check_table_is_link_now_as_a_dry_run(self):
+        api = self._api()
+        status = {"data": {"status": {"id": 130, "name": "QA/QC Tests - Failed"}}}
+        def detail(pid):
+            if pid.endswith("-00404"):
+                raise requests.HTTPError("404", response=mock.Mock(status_code=404))
+            return status if pid.endswith("-00130") else {"data": {"status": {"id": 110, "name": "Waiting"}}}
+        api.get_component.side_effect = detail
+        HwdbComponentEvent.objects.create(instance="dev", part_id=f"{self.SIPM}-00012", part_type_id=self.SIPM,
+                                          status="Unknown", status_id=3)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.post(f"/hw/dev/checklist-map/{PART}/", {"action": "check_table", "into": "SC1", "type_id": self.SIPM, "cell": [
+                f"{self.SIPM}-00011", "HPK1", f"{self.SIPM}-00011", f"{self.SIPM}-00099", f"{self.SIPM}-00404",
+                f"{self.SIPM}-00012", f"{self.SIPM}-00130", f"{self.SIPM}-00013", f"{self.SIPM}-00014"]})
+        d = resp.json()
+        self.assertEqual((d["target"], d["error"]), (f"{self.SC}-00001", None))
+        self.assertEqual([(r["ok"], r["note"]) for r in d["results"]], [
+            (True, "→ P1"), (False, f"no item of type {self.SIPM} has this serial number"), (False, "duplicate"), (True, "already linked"),
+            (False, "unknown to HWDB"), (False, "status “Unknown” — HWDB won’t link it"),
+            (False, "status “QA/QC Tests - Failed” — HWDB won’t link it"), (True, "→ P2"),
+            (False, f"no free position for {self.SIPM} items")])
+        api.patch_subcomponents.assert_not_called()   # nothing written
+        api.get_subcomponents.side_effect = lambda pid: {"data": []}
+        with m1, m2:
+            d = self.client.post(f"/hw/dev/checklist-map/{PART}/", {"action": "check_table", "into": "SC1",
+                                                                    "cell": [f"{self.SIPM}-00011"]}).json()
+        self.assertEqual(d["results"], [])
+        self.assertIn("position “SC1” of", d["error"])
+        with m1, m2:   # a table without a Type ID never looks a serial up — say so
+            d = self.client.post(f"/hw/dev/checklist-map/{PART}/", {"action": "check_table", "cell": ["HPK19901"]}).json()
+        self.assertIn("not a PID — the positions take several types", d["results"][0]["note"])
+
+    def test_fill_page_renders_pid_cells_and_the_link_bar(self):
+        api = self._api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn(f'class="cl-pidcell" data-type-id="{self.SIPM}" data-sn="HPK\d{{5}}" data-serial-url="/hw/dev/serial/{self.SIPM}/"', html)
+        self.assertIn('class="cl-tbl-link" data-link-url="/hw/dev/checklist-map/', html)
+        self.assertIn(f'data-into="SC1" data-type-id="{self.SIPM}"', html)
+        self.assertIn("of the item in “SC1”", html)
+        self.assertIn('class="es-btn quiet cl-tbl-lnk"', html)
+        self.assertIn('class="es-btn quiet cl-tbl-chk"', html)
 
 
 class ChecklistLinkTest(TestCase):
