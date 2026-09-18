@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from pathlib import Path
 import subprocess
 from unittest import mock
 
@@ -18,6 +19,9 @@ from explore import plotting
 from explore.models import HierarchyNode as H, HwdbComponentEvent
 from hwdb.fnal.bearer import FnalLinkRequired
 
+STATIC = Path(__file__).resolve().parents[1] / "static" / "explore"
+PLOT_CORE = STATIC / "plot-core.js"
+PLOT_JS = PLOT_CORE.read_text() + (STATIC / "plot.js").read_text()   # #165: the page's script lives in static files
 PTID = "D00599800007"
 
 
@@ -113,21 +117,21 @@ class PlotViewsTest(TestCase):
         # no status strip (it collided with the axis title); the stats box is drawn in a narrow embed, below the buttons
         self.assertIn(".pl-status { display: none; }", html)
         self.assertIn(".pl-plotwrap > canvas { position: absolute; inset: 0; }", html)
-        self.assertIn("y = a.top + 6 + (EMBED ? 26 : 0)", html)
-        self.assertIn("if (a.right - a.left < (EMBED ? 240 : 480)) return;", html)
-        self.assertIn("function pidFilter(s) { if (IDS) return idsFilter();", html)
-        self.assertIn("bySn[normSn(it.serial)] = it.pid;", html)
-        self.assertIn('d.replace(/^0+(?=\\d)/, "")', html)          # HPK19843 finds HPK019843
-        self.assertIn('window.addEventListener("hashchange"', html)
-        self.assertIn('if (IDS && !EMBED) { var pf = idsFilter(); series.forEach(function (s) { s.item = ""; s.pid = pf; }); IDS = null; }', html)
+        self.assertIn("y = a.top + 6 + (EMBED ? 26 : 0)", PLOT_JS)
+        self.assertIn("if (a.right - a.left < (EMBED ? 240 : 480)) return;", PLOT_JS)
+        self.assertIn("function pidFilter(s) { if (IDS) return idsFilter();", PLOT_JS)
+        self.assertIn("bySn[normSn(it.serial)] = it.pid;", PLOT_JS)
+        self.assertIn('d.replace(/^0+(?=\\d)/, "")', PLOT_JS)          # HPK19843 finds HPK019843
+        self.assertIn('window.addEventListener("hashchange"', PLOT_JS)
+        self.assertIn('if (IDS && !EMBED) { var pf = idsFilter(); series.forEach(function (s) { s.item = ""; s.pid = pf; }); IDS = null; }', PLOT_JS)
         # points name the item, its serial and the value's place in the array; a
         # histogram bin lists what sits in it; drag-selecting a row's text is not a pick
-        self.assertIn('function who(pid) { var it = itemByPid[pid]; return pid + (it && it.serial ? " · " + it.serial : ""); }', html)
-        self.assertIn('t: who(it.pid), ix: idxLabel(s.x, s, srcIdx(arr, j))', html)
-        self.assertIn('(d[l].seg || "level " + (l + 1)) + "[" + f(x) + "]"; }).join(" › ")', html)   # Test Results[7] › SiPM[5]
-        self.assertIn("free[k].at = rest % free[k].n; rest = Math.floor(rest / free[k].n);", html)   # flat → [m, n]
-        self.assertIn("afterBody: function (cs) {", html)
-        self.assertIn("if (String(window.getSelection && window.getSelection()).length) return;", html)
+        self.assertIn('function who(pid) { var it = itemByPid[pid]; return pid + (it && it.serial ? " · " + it.serial : ""); }', PLOT_JS)
+        self.assertIn('t: who(it.pid), ix: idxLabel(s.x, s, srcIdx(arr, j))', PLOT_JS)
+        self.assertIn('(d[l].seg || "level " + (l + 1)) + "[" + f(x) + "]"; }).join(" › ")', PLOT_JS)   # Test Results[7] › SiPM[5]
+        self.assertIn("free[k].at = rest % free[k].n; rest = Math.floor(rest / free[k].n);", PLOT_JS)   # flat → [m, n]
+        self.assertIn("afterBody: function (cs) {", PLOT_JS)
+        self.assertIn("if (String(window.getSelection && window.getSelection()).length) return;", PLOT_JS)
         plain = self.client.get(f"/hw/dev/plot/{PTID}/").content.decode()
         self.assertNotIn('data-embed="1"', plain)
         self.assertNotIn(".pl-panel, .pl-vsplit, .pl-bar, .pl-split, .pl-grid { display: none", plain)
@@ -405,13 +409,12 @@ class TestDataEndpointsTest(TestCase):
         self.assertIn('id="xidx"', html)
 
     def test_draw_expression_block_runs_in_node(self):
-        # #162: ROOT-style Draw — the pure block (tokenizer, parser, resolver, evaluator) exercised in node
+        # #162: ROOT-style Draw — plot-core.js (tokenizer, parser, resolver, evaluator) exercised in node
         node = shutil.which("node")
         if not node:
             self.skipTest("node is not installed")
-        html = self.client.get("/hw/dev/plot/T/").content.decode()
-        block = html[html.index("// [162-pure]"):html.index("// [/162-pure]")]
-        run = subprocess.run([node, "-e", block + DRAW_HARNESS], capture_output=True, text=True, timeout=60)
+        pre = "var C = require(" + json.dumps(str(PLOT_CORE)) + "); var exprCompile = C.exprCompile, exprResolve = C.exprResolve, exprEval = C.exprEval, exprSplit = C.exprSplit;\n"
+        run = subprocess.run([node, "-e", pre + DRAW_HARNESS], capture_output=True, text=True, timeout=60)
         self.assertEqual(run.returncode, 0, run.stderr)
         r = json.loads(run.stdout)
         K = "Test Results.SiPM.Result"
@@ -447,35 +450,35 @@ class TestDataEndpointsTest(TestCase):
         self.assertIn('<div class="pl-pop" id="dpop" hidden>', html)
         self.assertIn("<b>y : x</b><span>two axes — the first is Y, as in ROOT</span>", html)
         # an expression is a virtual key: "=expr" in the series' x / y, restored from the hash, evaluated per item, fetched by its identifiers
-        self.assertIn('function isExpr(p) { return typeof p === "string" && p.charAt(0) === "="; }', html)
-        self.assertIn('s.x = h.x && (isExpr(h.x) || acc.has(h.x)) ? h.x : ""; s.y = h.y && (isExpr(h.y) || acc.has(h.y)) ? h.y : "";', html)
-        self.assertIn("if (isExpr(p)) { var m = exprMeta(p); return m.err ? [] : exprEval(m.fn, m.ids.map(function (id) { return slotValues(item, id.p, id.ix, s); })); }", html)
-        self.assertIn("function seriesSpecs(s) {", html)
-        self.assertIn("function pairValues(it, s) {", html)        # X–Y pairing by entry when an expression dropped some
-        self.assertIn("items = newItems; pathCounts = counts; specDims = {}; exprCache = {};", html)
-        self.assertIn('if (exprErr(a)) { clear("Draw: " + exprErr(a)); return; }', html)
-        self.assertIn("function keyAsName(p, ix) {", html)         # the box shows a picked key as a name with its pins
-        self.assertIn('got[ax] = toks.length === 1 && toks[0].t === "id" && m.ids.length === 1 ? { p: m.ids[0].p, ix: m.ids[0].ix } : { p: "=" + side[ax], ix: null };', html)
+        self.assertIn('function isExpr(p) { return typeof p === "string" && p.charAt(0) === "="; }', PLOT_JS)
+        self.assertIn('s.x = h.x && (isExpr(h.x) || acc.has(h.x)) ? h.x : ""; s.y = h.y && (isExpr(h.y) || acc.has(h.y)) ? h.y : "";', PLOT_JS)
+        self.assertIn("if (isExpr(p)) { var m = exprMeta(p); return m.err ? [] : exprEval(m.fn, m.ids.map(function (id) { return slotValues(item, id.p, id.ix, s); })); }", PLOT_JS)
+        self.assertIn("function seriesSpecs(s) {", PLOT_JS)
+        self.assertIn("function pairValues(it, s) {", PLOT_JS)        # X–Y pairing by entry when an expression dropped some
+        self.assertIn("items = newItems; pathCounts = counts; specDims = {}; exprCache = {};", PLOT_JS)
+        self.assertIn('if (exprErr(a)) { clear("Draw: " + exprErr(a)); return; }', PLOT_JS)
+        self.assertIn("function keyAsName(p, ix) {", PLOT_JS)         # the box shows a picked key as a name with its pins
+        self.assertIn('got[ax] = toks.length === 1 && toks[0].t === "id" && m.ids.length === 1 ? { p: m.ids[0].p, ix: m.ids[0].ix } : { p: "=" + side[ax], ix: null };', PLOT_JS)
 
     def test_page_has_a_serial_filter(self):
         # Chao 2026-09-17: a distribution over a PID range should take HPK.* boards only, not SMB.*
         html = self.client.get("/hw/dev/plot/T/").content.decode()
         self.assertIn('<div class="pl-f"><span>Serial</span><input type="text" id="snf" placeholder="contains / regex"', html)
-        self.assertIn('var snf = (s.sn || "").trim(), snre = null;', html)
-        self.assertIn('if (snf && !(snre ? snre.test(it.serial || "") : (it.serial || "").toLowerCase().indexOf(snf.toLowerCase()) >= 0)) return false;', html)
-        self.assertIn("sn: s.sn || undefined,", html)         # rides in the hash …
-        self.assertIn('s.sn = h.sn || "";', html)              # … and comes back from it
-        self.assertIn('$("snf").addEventListener("input", function () { S().sn = $("snf").value; changed(); });', html)
+        self.assertIn('var snf = (s.sn || "").trim(), snre = null;', PLOT_JS)
+        self.assertIn('if (snf && !(snre ? snre.test(it.serial || "") : (it.serial || "").toLowerCase().indexOf(snf.toLowerCase()) >= 0)) return false;', PLOT_JS)
+        self.assertIn("sn: s.sn || undefined,", PLOT_JS)         # rides in the hash …
+        self.assertIn('s.sn = h.sn || "";', PLOT_JS)              # … and comes back from it
+        self.assertIn('$("snf").addEventListener("input", function () { S().sn = $("snf").value; changed(); });', PLOT_JS)
 
     def test_page_takes_a_pasted_list_of_pids_or_serials(self):
         # Chao 2026-09-17: PID / Serial filters from a pasted list — resolved to an exact PID filter
         html = self.client.get("/hw/dev/plot/T/").content.decode()
         self.assertIn('<div class="pl-f"><span>List</span><button type="button" class="pl-btn sm" id="list-btn"', html)
         self.assertIn('<dialog id="list-dlg" class="pl-dlg">', html)
-        self.assertIn('function listEntries() { return lta.value.split(/[\\s,;]+/).filter(Boolean); }', html)
-        self.assertIn('s.pid = listEntries().length ? pidAlternation(r.pids) : ""; s.item = "";', html)
-        self.assertIn('" · no item: " + r.missing.join(", ")', html)
-        self.assertIn("var m = /^\\^\\((.*)\\)\\$$/.exec(S().pid || \"\");", html)
+        self.assertIn('function listEntries() { return lta.value.split(/[\\s,;]+/).filter(Boolean); }', PLOT_JS)
+        self.assertIn('s.pid = listEntries().length ? pidAlternation(r.pids) : ""; s.item = "";', PLOT_JS)
+        self.assertIn('" · no item: " + r.missing.join(", ")', PLOT_JS)
+        self.assertIn("var m = /^\\^\\((.*)\\)\\$$/.exec(S().pid || \"\");", PLOT_JS)
 
     def test_page_carries_the_test_endpoints(self):
         html = self.client.get("/hw/dev/plot/T/").content.decode()
