@@ -279,7 +279,15 @@ manufacturer, born with the chosen status and flags — then linked with one
 reported; the parent stands. Architects can tick "remember for this type"
 so the choice (types, status, flags) comes pre-filled for everyone
 (`ChildMintSetting`). Anselmo's case: a PDS module and its four supercells,
-into which the SiPM boards are later linked (#153).
+into which the SiPM boards are later linked (#153). The chosen child types
+are read **before** the parent is minted: a type whose datasheet is EMPTY
+cannot have items created through the API at all (`{}` → "a
+'specifications' object matching the ComponentType definition is
+required", `{"DATA": {}}` → "missing fields", dev probe 2026-09-19 —
+Anselmo's supercell type), so such a type stops the whole mint with a
+message naming it and *Nothing minted*; an architect gets `"DATA": {}`
+defined on the child type on the spot (the #100 PATCH) and the mint goes
+on. The type's own empty datasheet is refused the same way before the POST.
 
 **Item Specs template (#100).** HWDB validates every item's specification
 keys against the type's datasheet ("The input specifications do not match

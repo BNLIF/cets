@@ -3950,6 +3950,16 @@ def explore_item_create_view(request, part_type_id):
                 messages.success(request, f"Type {part_type_id}: Item Specs "
                                           f"template now defines DATA.")
                 has_data = True
+        if not template and not has_data:
+            # HWDB refuses every create payload for a type with an empty datasheet (dev probe 2026-09-19)
+            messages.error(request, f"Type {part_type_id}: {EMPTY_TEMPLATE_MSG}. Nothing minted.")
+            return redirect(page_url)
+        records, child_errors = _child_type_records(api, request, inst, mint) if mint else ({}, [])
+        if child_errors:
+            for e in child_errors:
+                messages.error(request, f"Sub-component — {e}")
+            messages.error(request, "Nothing minted.")
+            return redirect(page_url)
         try:
             manufacturers = (type_record.get("data") or {}).get("manufacturers") or []
             payload = {
@@ -3980,7 +3990,7 @@ def explore_item_create_view(request, part_type_id):
                      part_id=part_id, part_type_id=part_type_id,
                      actor=activity.actor_of(request))
         linked, child_errors = _mint_children(api, inst, request, part_id, connectors,
-                                              mint, institution) if mint else ({}, [])
+                                              mint, institution, records) if mint else ({}, [])
         for ptid in [part_type_id] + [c["type_id"] for c in mint]:
             try:
                 # Mirror the new item(s) right away (incremental = detail + tests
@@ -4080,18 +4090,20 @@ def _child_choice(post, c: dict) -> dict:
             "certified_qaqc": post.get(f"cert_{tid}") == "1"}
 
 
-def _mint_children(api, inst, request, parent_pid, connectors, children, institution):
-    """#167: mint one item of each chosen child type per position that
-    accepts it — same institution as the parent, serial ``<parent>-<position>``,
-    the child type's own datasheet and single manufacturer, born with the
-    chosen status + QA/QC flags (``_mint_linkable``) (default Waiting on QA/QC; the form's
-    "virtual part" preset is Passed All + uploaded + certified, Hajime's
-    rule for bureaucratic parts nobody tests; HWDB links only statuses
-    100/110/120/140), then ONE subcomponents PATCH linking them all.
-    Returns ``({position: pid}, [error, …])``; a failed child leaves its
-    position empty, the parent stands."""
-    minted: dict[str, str] = {}
-    errors: list[str] = []
+EMPTY_TEMPLATE_MSG = ("its Item Specs template is empty, so HWDB can’t create items of it — "
+                      "an HWDB architect must define it first (the type’s New-item page offers this)")
+
+
+def _child_type_records(api, request, inst, children) -> tuple[dict, list[str]]:
+    """#167: the chosen child types' ``(datasheet template, manufacturers)``
+    by type id, read BEFORE the parent is minted so a type HWDB can't mint
+    stops everything (else the parent stands with empty positions —
+    Anselmo's D00800100002-00007, dev 2026-09-19). A type whose datasheet
+    is EMPTY is such a type: HWDB refuses every create payload for it
+    ({} → "a 'specifications' object matching the ComponentType definition
+    is required", {"DATA": {}} → "missing fields", dev probe 2026-09-19).
+    Architects get DATA defined on it here (#100); others are told."""
+    records, errors = {}, []
     for c in children:
         try:
             rec = api.get_component_type(c["type_id"])
@@ -4099,7 +4111,35 @@ def _mint_children(api, inst, request, parent_pid, connectors, children, institu
             errors.append(f"{c['name']}: couldn’t read the type — {_hwdb_error_detail(e)}")
             continue
         template = _spec_template(rec)
-        mans = (rec.get("data") or {}).get("manufacturers") or []
+        if not template:
+            if not _is_architect(request, inst, api):
+                errors.append(f"{c['name']}: {EMPTY_TEMPLATE_MSG}")
+                continue
+            derr = _define_type_spec_data(api, c["type_id"], rec)
+            if derr:
+                errors.append(f"{c['name']}: its Item Specs template is empty and HWDB "
+                              f"rejected defining it — {derr}")
+                continue
+            template = {"DATA": {}}
+        records[c["type_id"]] = (template, (rec.get("data") or {}).get("manufacturers") or [])
+    return records, errors
+
+
+def _mint_children(api, inst, request, parent_pid, connectors, children, institution, records):
+    """#167: mint one item of each chosen child type per position that
+    accepts it — same institution as the parent, serial ``<parent>-<position>``,
+    the child type's own datasheet and single manufacturer, born with the
+    chosen status + QA/QC flags (``_mint_linkable``) (default Waiting on QA/QC; the form's
+    "virtual part" preset is Passed All + uploaded + certified, Hajime's
+    rule for bureaucratic parts nobody tests; HWDB links only statuses
+    100/110/120/140), then ONE subcomponents PATCH linking them all.
+    ``records`` = ``_child_type_records``' output. Returns ``({position:
+    pid}, [error, …])``; a failed child leaves its position empty, the
+    parent stands."""
+    minted: dict[str, str] = {}
+    errors: list[str] = []
+    for c in children:
+        template, mans = records[c["type_id"]]   # read up front by _child_type_records
         for pos in c["positions"]:
             comment = f"Sub-component of {parent_pid}, position {pos}"
             payload = {"component_type": {"part_type_id": c["type_id"]},

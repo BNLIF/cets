@@ -1184,6 +1184,48 @@ class ItemCreateTest(TestCase):
         self.assertIn("Sub-component — ", html)
         self.assertIn("position “B”: 500 boom", html)
 
+    def test_a_child_type_with_an_empty_datasheet_stops_the_mint_before_the_parent(self):
+        # Anselmo, dev 2026-09-19: the supercell type's datasheet was {} — HWDB
+        # refuses every create payload for such a type, so the parent stood
+        # alone with empty positions. Now nothing is minted, and the user is told.
+        api = self._api_children()
+        parent = api.get_component_type.return_value
+        empty = {"data": {"manufacturers": [{"id": 7}], "connectors": {},
+                          "properties": {"specifications": [{"datasheet": {}}]}}}
+        api.get_component_type.side_effect = lambda t: parent if t == PTID else empty
+        m1, m2 = _mocked(api)
+        with m1, m2, mock.patch("explore.views._is_architect", return_value=False):
+            html = self.client.post(NEW_PAGE, {"institution_id": "128", "mint_child": [self.CHILD]},
+                                    follow=True).content.decode()
+        api.create_component.assert_not_called()
+        self.assertIn("its Item Specs template is empty, so HWDB can’t create items of it", html)
+        self.assertIn("Nothing minted.", html)
+        # an architect gets DATA defined on the child type first (#100), then everything mints
+        api.patch_component_type.return_value = {"status": "OK"}
+        with m1, m2, mock.patch("explore.views._is_architect", return_value=True):
+            html = self.client.post(NEW_PAGE, {"institution_id": "128", "mint_child": [self.CHILD]},
+                                    follow=True).content.decode()
+        env = api.patch_component_type.call_args.args[1]
+        self.assertEqual((api.patch_component_type.call_args.args[0], env["properties"]["specifications"]["datasheet"]),
+                         (self.CHILD, {"DATA": {}}))
+        self.assertNotIn("connectors", env)
+        self.assertEqual(api.create_component.call_args_list[1].args[1]["specifications"], {"DATA": {}})
+        self.assertIn("with 4 sub-components minted and linked", html)
+
+    def test_the_types_own_empty_datasheet_is_refused_before_minting(self):
+        api = self._api_create()
+        api.get_component_type.return_value["data"]["properties"] = {"specifications": [{"datasheet": {}}]}
+        m1, m2 = _mocked(api)
+        with m1, m2, mock.patch("explore.views._is_architect", return_value=False):
+            html = self.client.post(NEW_PAGE, {"institution_id": "128"}, follow=True).content.decode()
+        api.create_component.assert_not_called()
+        self.assertIn(f"Type {PTID}: its Item Specs template is empty", html)
+        # an architect who ticks "define DATA" gets past it
+        api.patch_component_type.return_value = {"status": "OK"}
+        with m1, m2, mock.patch("explore.views._is_architect", return_value=True):
+            self.client.post(NEW_PAGE, {"institution_id": "128", "define_type_data": "1"})
+        self.assertEqual(api.create_component.call_args.args[1]["specifications"], {"DATA": {}})
+
     def test_form_renders_with_institutions_and_checklist_hint(self):
         api = self._api_create()
         m1, m2 = _mocked(api)
