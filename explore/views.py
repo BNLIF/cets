@@ -2355,6 +2355,33 @@ def _is_architect(request, inst, api=None) -> bool:
     return flag
 
 
+def _is_admin(request, inst, api=None) -> bool:
+    """The account's HWDB ``administrator`` flag (``users/whoami``), cached
+    like ``_is_architect``. Hajime 2026-09-19: PATCHing a type needs admin,
+    not architect — architect is for CREATING types."""
+    key = f"hwdb_admin_{inst}"
+    cached = request.session.get(key)
+    if isinstance(cached, bool):
+        return cached
+    try:
+        if api is None:
+            api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], mint_for(request))
+        flag = (api.whoami().get("data") or {}).get("administrator") is True
+    except Exception as e:
+        logger.warning("admin check on %s failed: %s", inst, e)
+        return False
+    request.session[key] = flag
+    return flag
+
+
+def _may_patch_type(request, inst, api=None) -> bool:
+    """Who may change a type's Item Specs template (define ``DATA``, #100):
+    HWDB administrators — architects too, since every architect account
+    we've seen is one (both flags unverifiable apart: chaoz and Anselmo
+    hold both on dev)."""
+    return _is_architect(request, inst, api) or _is_admin(request, inst, api)
+
+
 def _patch_type_positions(request, api, part_type_id, record, connectors, ok_msg):
     """PATCH the type's complete envelope with ``connectors`` swapped in and
     flash the outcome — HWDB refusals (e.g. touching a position a linked item
@@ -3915,6 +3942,7 @@ def explore_item_create_view(request, part_type_id):
     template = _spec_template(type_record)
     has_data = isinstance(template.get("DATA"), dict)
     is_arch = _is_architect(request, inst, api)
+    may_define = _may_patch_type(request, inst, api)   # DATA on the type: admin or architect
     # #167: the type's positions grouped by the child type they accept — the
     # form offers to mint those along with the item, each with the status and
     # QA/QC flags it is born with; the remembered choice (architects,
@@ -3942,7 +3970,7 @@ def explore_item_create_view(request, part_type_id):
                 defaults={"children": [{k: c[k] for k in ("type_id", "status_id", "qaqc_uploaded", "certified_qaqc")}
                                        for c in mint],
                           "updated_by": activity.actor_of(request)})
-        if not has_data and is_arch and request.POST.get("define_type_data"):
+        if not has_data and may_define and request.POST.get("define_type_data"):
             derr = _define_type_spec_data(api, part_type_id, type_record)
             if derr:
                 messages.error(request, f"HWDB rejected the type update — {derr}")
@@ -4037,7 +4065,8 @@ def explore_item_create_view(request, part_type_id):
         "via_checklist": via if via in checklist_names else "",
         "spec_template": json.dumps(template, indent=2, ensure_ascii=False),
         "spec_has_data": has_data,
-        "can_define_type_data": (not has_data) and is_arch,
+        "spec_data_list": isinstance(template.get("DATA"), list),   # Hajime's 2023 convention
+        "can_define_type_data": (not has_data) and may_define,
         "child_types": child_types,
         "status_options": checklistforms.STATUS_OPTIONS,
         "item_status": NEW_ITEM_STATUS,
@@ -4091,7 +4120,7 @@ def _child_choice(post, c: dict) -> dict:
 
 
 EMPTY_TEMPLATE_MSG = ("its Item Specs template is empty, so HWDB can’t create items of it — "
-                      "an HWDB architect must define it first (the type’s New-item page offers this)")
+                      "an HWDB administrator must define it first (the type’s New-item page offers this)")
 
 
 def _child_type_records(api, request, inst, children) -> tuple[dict, list[str]]:
@@ -4102,7 +4131,8 @@ def _child_type_records(api, request, inst, children) -> tuple[dict, list[str]]:
     is EMPTY is such a type: HWDB refuses every create payload for it
     ({} → "a 'specifications' object matching the ComponentType definition
     is required", {"DATA": {}} → "missing fields", dev probe 2026-09-19).
-    Architects get DATA defined on it here (#100); others are told."""
+    Administrators (and architects) get DATA defined on it here (#100);
+    others are told."""
     records, errors = {}, []
     for c in children:
         try:
@@ -4112,7 +4142,7 @@ def _child_type_records(api, request, inst, children) -> tuple[dict, list[str]]:
             continue
         template = _spec_template(rec)
         if not template:
-            if not _is_architect(request, inst, api):
+            if not _may_patch_type(request, inst, api):
                 errors.append(f"{c['name']}: {EMPTY_TEMPLATE_MSG}")
                 continue
             derr = _define_type_spec_data(api, c["type_id"], rec)
@@ -4207,9 +4237,9 @@ def _ensure_spec_data(request, api, part_type_id) -> str | None:
         return _hwdb_error_detail(e)
     if isinstance(_spec_template(type_record).get("DATA"), dict):
         return None
-    if not _is_architect(request, instance_of(request), api):
-        return (f"the type {part_type_id}'s Item Specs template has no DATA key, "
-                f"which “→ Specs” fields need — an HWDB architect must define it "
+    if not _may_patch_type(request, instance_of(request), api):
+        return (f"the type {part_type_id}'s Item Specs template has no DATA object, "
+                f"which “→ Specs” fields need — an HWDB administrator must define it "
                 f"first (the type's New-item page offers this)")
     return _define_type_spec_data(api, part_type_id, type_record)
 

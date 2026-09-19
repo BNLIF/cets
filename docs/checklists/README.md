@@ -285,7 +285,7 @@ cannot have items created through the API at all (`{}` → "a
 'specifications' object matching the ComponentType definition is
 required", `{"DATA": {}}` → "missing fields", dev probe 2026-09-19 —
 Anselmo's supercell type), so such a type stops the whole mint with a
-message naming it and *Nothing minted*; an architect gets `"DATA": {}`
+message naming it and *Nothing minted*; an administrator (or architect) gets `"DATA": {}`
 defined on the child type on the spot (the #100 PATCH) and the mint goes
 on. The type's own empty datasheet is refused the same way before the POST.
 
@@ -297,14 +297,19 @@ the component type definition: missing fields: {'DATA'}" — seen on dev
 take care of it, mirroring test-type auto-creation:
 
 - **Checklist submit** — `_ensure_spec_data` runs before the item PATCH: an
-  architect submitter gets `"DATA": {}` merged into the type's template on
-  first use; anyone else gets a clear error naming the missing key and who
-  can add it.
+  administrator (or architect) submitter gets `"DATA": {}` merged into the
+  type's template on first use; anyone else gets a clear error naming the
+  missing key and who can add it. (Hajime 2026-09-19: PATCHing a type needs
+  the HWDB administrator flag, architect is for creating types — the gate
+  is `_may_patch_type`, either flag.)
 - **New Item page** — shows the type's template; when it lacks `DATA`,
-  architects see a pre-checked "define `DATA: {}` in the type's template
-  now" box (merged into the existing keys, never replacing them), and the
-  new item is then created with `DATA` too. Non-architects are told the
-  "→ Specs" fields won't save on this type until an architect does that.
+  administrators see a pre-checked "define `DATA: {}` in the type's template
+  now" box (merged into the existing keys), and the new item is then created
+  with `DATA` too. When `DATA` is a **list** (Hajime's 2023 test types, the
+  shipping-checklist convention) the box is offered unticked and says so:
+  ticking replaces the list with an object on the type — existing items keep
+  their own `DATA` under their datasheet version. Others are told the
+  "→ Specs" fields won't save on this type until an administrator does that.
 
 Existing items created before `DATA` was defined need nothing:
 `_patch_spec_data` adds `DATA` to the item at its first "→ Specs" write,

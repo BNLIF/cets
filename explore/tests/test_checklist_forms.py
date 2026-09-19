@@ -1199,6 +1199,7 @@ class ItemCreateTest(TestCase):
                                     follow=True).content.decode()
         api.create_component.assert_not_called()
         self.assertIn("its Item Specs template is empty, so HWDB can’t create items of it", html)
+        self.assertIn("an HWDB administrator must define it first", html)
         self.assertIn("Nothing minted.", html)
         # an architect gets DATA defined on the child type first (#100), then everything mints
         api.patch_component_type.return_value = {"status": "OK"}
@@ -1211,6 +1212,42 @@ class ItemCreateTest(TestCase):
         self.assertNotIn("connectors", env)
         self.assertEqual(api.create_component.call_args_list[1].args[1]["specifications"], {"DATA": {}})
         self.assertIn("with 4 sub-components minted and linked", html)
+
+    def test_an_administrator_without_the_architect_flag_may_define_data(self):
+        # Hajime 2026-09-19: patching a type needs admin, not architect
+        api = self._api_children()
+        parent = api.get_component_type.return_value
+        empty = {"data": {"manufacturers": [{"id": 7}], "connectors": {},
+                          "properties": {"specifications": [{"datasheet": {}}]}}}
+        api.get_component_type.side_effect = lambda t: parent if t == PTID else empty
+        api.whoami.return_value = {"data": {"architect": False, "administrator": True, "full_name": "A"}}
+        api.patch_component_type.return_value = {"status": "OK"}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.post(NEW_PAGE, {"institution_id": "128", "mint_child": [self.CHILD]},
+                                    follow=True).content.decode()
+        self.assertEqual(api.patch_component_type.call_args.args[0], self.CHILD)
+        self.assertIn("with 4 sub-components minted and linked", html)
+        api.whoami.return_value = {"data": {"architect": False, "administrator": False, "full_name": "B"}}
+        self.client.logout(); self.client.force_login(get_user_model().objects.create_user("u2", "u2@t.io", "pw"))
+        with m1, m2:
+            html = self.client.post(NEW_PAGE, {"institution_id": "128", "mint_child": [self.CHILD]},
+                                    follow=True).content.decode()
+        self.assertIn("an HWDB administrator must define it first", html)
+
+    def test_a_list_data_template_gets_its_own_hint_and_an_unticked_box(self):
+        api = self._api_create()
+        api.get_component_type.return_value["data"]["properties"] = {"specifications": [{"datasheet": {"DATA": []}}]}
+        m1, m2 = _mocked(api)
+        with m1, m2, mock.patch("explore.views._may_patch_type", return_value=True):
+            html = self.client.get(NEW_PAGE).content.decode()
+        self.assertIn("<code>DATA</code> is a list here", html)
+        self.assertIn('<input type="checkbox" name="define_type_data" value="1"> replace it with', html)
+        self.assertNotIn("No <code>DATA</code> key", html)
+        with m1, m2, mock.patch("explore.views._may_patch_type", return_value=False):
+            html = self.client.get(NEW_PAGE).content.decode()
+        self.assertIn("An HWDB administrator can change it from this page.", html)
+        self.assertNotIn('name="define_type_data"', html)
 
     def test_the_types_own_empty_datasheet_is_refused_before_minting(self):
         api = self._api_create()

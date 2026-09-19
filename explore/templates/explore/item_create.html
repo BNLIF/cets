@@ -101,11 +101,15 @@
       <span class="cl-lab">Item Specs template <span class="cl-hint">(the type's specifications datasheet — the new item starts from it)</span></span>
       <pre class="ic-spec">{{ spec_template }}</pre>
       {% if spec_has_data %}<div class="cl-hint">Defines <code>DATA</code> — checklist “→ Specs” fields write there.</div>
+      {% elif spec_data_list %}<div class="cl-hint"><code>DATA</code> is a list here — checklist “→ Specs” fields write named sections into a <code>DATA</code> object, so they can't save on this type as it is.</div>
+      {% if can_define_type_data %}<label class="ec-inline" style="display:inline-flex; gap:6px; align-items:center; margin-top:6px; font-size:12.5px; color:var(--dim);">
+        <input type="checkbox" name="define_type_data" value="1"> replace it with <code>"DATA": {}</code> in the type's template now (administrator action; existing items keep their own <code>DATA</code>)</label>
+      {% else %}<div class="cl-hint">An HWDB administrator can change it from this page.</div>{% endif %}
       {% else %}<div class="cl-hint">No <code>DATA</code> key — HWDB checks every item's specification keys against
         this template, so checklist “→ Specs” fields can't save on this type until <code>DATA</code> is defined here.</div>
       {% if can_define_type_data %}<label class="ec-inline" style="display:inline-flex; gap:6px; align-items:center; margin-top:6px; font-size:12.5px; color:var(--dim);">
-        <input type="checkbox" name="define_type_data" value="1" checked> define <code>"DATA": {}</code> in the type's template now (architect action; merged into the existing keys)</label>
-      {% else %}<div class="cl-hint">An HWDB architect can add it from this page, or it's added automatically the first time an architect submits a checklist with “→ Specs” fields.</div>{% endif %}
+        <input type="checkbox" name="define_type_data" value="1" checked> define <code>"DATA": {}</code> in the type's template now (administrator action; merged into the existing keys)</label>
+      {% else %}<div class="cl-hint">An HWDB administrator can add it from this page, or it's added automatically the first time an administrator submits a checklist with “→ Specs” fields.</div>{% endif %}
       {% endif %}
     </div>
     <button class="es-btn" style="margin-top:6px;">Create the item</button>
