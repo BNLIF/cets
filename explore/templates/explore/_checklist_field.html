@@ -123,11 +123,11 @@
     {% with sid=f.key|add:"-secs" %}{{ f.sections|json_script:sid }}{% endwith %}{% with fid=f.key|add:"-flds" %}{{ f.fields|json_script:fid }}{% endwith %}
     {% if f.reference %}{# a reference plot: the page as pasted, with its own PID range #}
     <iframe class="cl-plot-frame" src="{% url 'explore:plot' part_type_id=f.plot_type %}?embed=1{% if f.plot_hash %}#{{ f.plot_hash }}{% endif %}" title="{{ f.label|default:'plot' }}"></iframe>
-    <a class="cl-plot-open" href="{{ f.plot }}" target="_blank" rel="noopener">Open in Plots <span aria-hidden="true">&#x2197;</span></a>
+    <a class="cl-plot-open" href="{% url 'explore:plot' part_type_id=f.plot_type %}{% if f.plot_hash %}#{{ f.plot_hash }}{% endif %}" target="_blank" rel="noopener">Open in Plots <span aria-hidden="true">&#x2197;</span></a>
     {% else %}
     <div class="cl-hint cl-plot-empty">Enter PIDs or serial numbers of {{ f.plot_type }}{% if f.fields %} in {{ f.fields|join:", " }}{% elif f.sections %} in {{ f.sections|join:", " }}{% endif %} to see the plot.</div>
     <iframe class="cl-plot-frame" hidden title="{{ f.label|default:'plot' }}"></iframe>
-    <a class="cl-plot-open" href="{{ f.plot }}" target="_blank" rel="noopener" hidden>Open in Plots <span aria-hidden="true">&#x2197;</span></a>
+    <a class="cl-plot-open" href="{% url 'explore:plot' part_type_id=f.plot_type %}{% if f.plot_hash %}#{{ f.plot_hash }}{% endif %}" target="_blank" rel="noopener" hidden>Open in Plots <span aria-hidden="true">&#x2197;</span></a>
     {% endif %}
   </div>
 {% else %}

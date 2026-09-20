@@ -190,8 +190,10 @@
         n.className = "cl-hint cl-serial";
         n.setAttribute("data-for", el.id);
         n.setAttribute("data-pid", d.pid || "");
+        var many = (d.pids || []).length > 1;   // #168: a shared serial is never resolved for the user
         n.textContent = d.pid ? serial + " \u2192 " + d.pid
                       : d.failed ? "serial number lookup failed — offline? try again later"
+                      : many ? "serial number " + serial + " is on " + d.pids.length + " items: " + d.pids.join(", ") + " — enter the PID"
                       : "no item of type " + tid + " has serial " + serial;
         el.parentNode.appendChild(n);
         if (d.pid) {

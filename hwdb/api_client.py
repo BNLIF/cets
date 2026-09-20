@@ -74,16 +74,21 @@ class FnalDbApiClient:
         endpoint = f"component-types/{part1}/{part2}/{subsystem_id}"
         return self._make_request("GET", endpoint)
 
+    def find_components_by_serial(self, part_type_id, serial_number):
+        """Every component of the type carrying this serial number — HWDB
+        does not enforce unique serials (#168: 38 shared ones on one type),
+        so a resolver must see them all."""
+        body = self._make_request(
+            "GET", f"component-types/{part_type_id}/components",
+            params={"serial_number": serial_number})
+        return [r for r in (body.get("data") or []) if isinstance(r, dict)]
+
     def find_component_by_serial(self, part_type_id, serial_number):
         """Returns the first matching component dict, or None.
 
         Karla's ``isPartInHWDB`` flow — used by upload to decide create-vs-skip.
         """
-        endpoint = f"component-types/{part_type_id}/components"
-        body = self._make_request(
-            "GET", endpoint, params={"serial_number": serial_number}
-        )
-        data = body.get("data") or []
+        data = self.find_components_by_serial(part_type_id, serial_number)
         return data[0] if data else None
 
     def get_test_types(self, part_type_id):

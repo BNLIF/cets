@@ -31,14 +31,19 @@
     // The effective PID filter of a series: its Item box (exactly one PID) wins over the regex box.
     function pidFilter(s) { if (IDS) return idsFilter(); var it = (s.item || "").trim(); return it ? "^" + it.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$" : (s.pid || "").trim(); }
     // #160: an entry matches an item by PID, or by serial number — case-insensitive, leading zeros in a digit run ignored (HPK19843 = HPK019843)
+    // #168: a serial several items carry selects ALL of them (Chao: plotting
+    // every holder shows which one to keep) and is named with its PIDs in
+    // ``shared`` (HWDB doesn't enforce unique serials)
     function resolveIds(list) {
-        var byPid = {}, bySn = {}, pids = [], missing = [];
-        items.forEach(function (it) { byPid[it.pid.toLowerCase()] = it.pid; if (it.serial) bySn[normSn(it.serial)] = it.pid; });
+        var byPid = {}, bySn = {}, pids = [], missing = [], shared = [];
+        items.forEach(function (it) { byPid[it.pid.toLowerCase()] = it.pid; if (it.serial) (bySn[normSn(it.serial)] = bySn[normSn(it.serial)] || []).push(it.pid); });
         (list || []).forEach(function (id) {
-            var p = byPid[String(id).toLowerCase()] || bySn[normSn(id)];
-            if (!p) missing.push(id); else if (pids.indexOf(p) < 0) pids.push(p);
+            var p = byPid[String(id).toLowerCase()], s = p ? [p] : bySn[normSn(id)];
+            if (!s) { missing.push(id); return; }
+            if (s.length > 1) shared.push(id + " → " + s.join(", "));
+            s.forEach(function (x) { if (pids.indexOf(x) < 0) pids.push(x); });
         });
-        return { pids: pids, missing: missing };
+        return { pids: pids, missing: missing, shared: shared };
     }
     // Tooltips name a value's item as "PID · serial" and its place in the
     // item's array as [i, j] — the series' pins filled in, the free level
@@ -504,8 +509,10 @@
         if (IDS) {   // #160: what the checklist handed over, and what found no item
             var rid = resolveIds(IDS), hit = IDS.length - rid.missing.length;
             head = hit + " of " + IDS.length + " entr" + (IDS.length === 1 ? "y" : "ies") + " matched an item" + (rid.pids.length < hit ? " (" + rid.pids.length + " distinct)" : "")
-                 + (rid.missing.length ? " · no item: " + rid.missing.slice(0, 6).join(", ") + (rid.missing.length > 6 ? ", …" : "") : "") + " · " + head;
-            stats.title = rid.missing.length ? "No item of this type has PID or serial: " + rid.missing.join(", ") : "";
+                 + (rid.missing.length ? " · no item: " + rid.missing.slice(0, 6).join(", ") + (rid.missing.length > 6 ? ", …" : "") : "")
+                 + (rid.shared.length ? " · shared serial, all taken: " + rid.shared.join("; ") : "") + " · " + head;
+            stats.title = (rid.missing.length ? "No item of this type has PID or serial: " + rid.missing.join(", ") : "")
+                        + (rid.shared.length ? (rid.missing.length ? "\n" : "") + "Serial on several items, all plotted: " + rid.shared.join("; ") : "");
         }
         var skipped = [];       // series not drawn in this family
         function noteSkipped() { return skipped.length ? " · not drawn: " + skipped.join(", ") : ""; }
@@ -1235,7 +1242,8 @@
     function listNote() {
         var list = listEntries(), r = resolveIds(list);
         lnote.textContent = !list.length ? "" : r.pids.length + " item" + (r.pids.length === 1 ? "" : "s") + " of " + list.length + " entr" + (list.length === 1 ? "y" : "ies") +
-                            (r.missing.length ? " · no item: " + r.missing.join(", ") : "");
+                            (r.missing.length ? " · no item: " + r.missing.join(", ") : "") +
+                            (r.shared.length ? " · shared serial, all taken: " + r.shared.join("; ") : "");
         return r;
     }
     $("list-btn").addEventListener("click", function () {

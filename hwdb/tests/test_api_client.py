@@ -57,6 +57,20 @@ class FnalDbApiClientSessionTest(TestCase):
         self.assertIn("files", kwargs)
         self.assertNotIn("headers", kwargs)
 
+    def test_find_components_by_serial_returns_every_match(self):
+        """#168: HWDB doesn't enforce unique serials — the resolver needs
+        every holder; the older single-hit helper keeps its first-row rule."""
+        api = FnalDbApiClient("https://example/api", "fake-bearer")
+        fake_resp = mock.Mock(ok=True)
+        fake_resp.json.return_value = {"data": [{"part_id": "T-1"}, {"part_id": "T-2"}]}
+        with mock.patch.object(api.session, "request", return_value=fake_resp) as req:
+            rows = api.find_components_by_serial("T", "HPK1")
+            one = api.find_component_by_serial("T", "HPK1")
+        self.assertEqual([r["part_id"] for r in rows], ["T-1", "T-2"])
+        self.assertEqual(one, {"part_id": "T-1"})
+        args, kwargs = req.call_args
+        self.assertEqual((args[0], args[1], kwargs["params"]), ("GET", "https://example/api/component-types/T/components", {"serial_number": "HPK1"}))
+
     def test_patch_subcomponents_sends_vacated_positions_first(self):
         """HWDB applies the positions dict in order and refuses a PID still
         sitting in a later position ("already in use") — moving an item to

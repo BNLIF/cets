@@ -120,7 +120,7 @@ class PlotViewsTest(TestCase):
         self.assertIn("y = a.top + 6 + (EMBED ? 26 : 0)", PLOT_JS)
         self.assertIn("if (a.right - a.left < (EMBED ? 240 : 480)) return;", PLOT_JS)
         self.assertIn("function pidFilter(s) { if (IDS) return idsFilter();", PLOT_JS)
-        self.assertIn("bySn[normSn(it.serial)] = it.pid;", PLOT_JS)
+        self.assertIn("(bySn[normSn(it.serial)] = bySn[normSn(it.serial)] || []).push(it.pid);", PLOT_JS)   # #168: every holder
         self.assertIn('d.replace(/^0+(?=\\d)/, "")', PLOT_JS)          # HPK19843 finds HPK019843
         self.assertIn('window.addEventListener("hashchange"', PLOT_JS)
         self.assertIn('if (IDS && !EMBED) { var pf = idsFilter(); series.forEach(function (s) { s.item = ""; s.pid = pf; }); IDS = null; }', PLOT_JS)
@@ -548,6 +548,10 @@ class TestDataEndpointsTest(TestCase):
         self.assertIn('function listEntries() { return lta.value.split(/[\\s,;]+/).filter(Boolean); }', PLOT_JS)
         self.assertIn('s.pid = listEntries().length ? pidAlternation(r.pids) : ""; s.item = "";', PLOT_JS)
         self.assertIn('" · no item: " + r.missing.join(", ")', PLOT_JS)
+        # #168: a serial several items carry selects all of them — named with its PIDs (Chao)
+        self.assertIn('if (s.length > 1) shared.push(id + " → " + s.join(", "));', PLOT_JS)
+        self.assertIn('" · shared serial, all taken: " + r.shared.join("; ")', PLOT_JS)
+        self.assertIn('" · shared serial, all taken: " + rid.shared.join("; ")', PLOT_JS)
         self.assertIn("var m = /^\\^\\((.*)\\)\\$$/.exec(S().pid || \"\");", PLOT_JS)
 
     def test_page_carries_the_test_endpoints(self):

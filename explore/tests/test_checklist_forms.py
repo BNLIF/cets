@@ -1835,18 +1835,42 @@ class SerialResolveTest(TestCase):
         m1, m2 = _mocked(api)
         with m1, m2:
             d = self.client.get(f"/hw/dev/serial/{self.TID}/?serial=HPK19877").json()
-            self.assertEqual(d, {"pid": "Z00100300029-05316"})
-            api.find_component_by_serial.assert_not_called()
+            self.assertEqual(d, {"pid": "Z00100300029-05316", "pids": ["Z00100300029-05316"]})
+            api.find_components_by_serial.assert_not_called()
             # a mirror miss → exactly one HWDB call, scoped to the type
-            api.find_component_by_serial.return_value = {"part_id": f"{self.TID}-00007", "serial_number": "HPK7"}
+            api.find_components_by_serial.return_value = [{"part_id": f"{self.TID}-00007", "serial_number": "HPK7"}]
             d = self.client.get(f"/hw/dev/serial/{self.TID}/?serial=HPK7").json()
-            self.assertEqual(d, {"pid": "Z00100300029-00007"})
-            api.find_component_by_serial.assert_called_once_with(self.TID, "HPK7")
-            api.find_component_by_serial.return_value = None
-            self.assertEqual(self.client.get(f"/hw/dev/serial/{self.TID}/?serial=nope").json(), {"pid": None})
+            self.assertEqual(d, {"pid": "Z00100300029-00007", "pids": ["Z00100300029-00007"]})
+            api.find_components_by_serial.assert_called_once_with(self.TID, "HPK7")
+            api.find_components_by_serial.return_value = []
+            self.assertEqual(self.client.get(f"/hw/dev/serial/{self.TID}/?serial=nope").json(), {"pid": None, "pids": []})
             # the other instance's mirror row is not ours
-            self.assertEqual(self.client.get(f"/hw/dev/serial/{self.TID}/?serial=HPK00001").json(), {"pid": None})
-            self.assertEqual(self.client.get(f"/hw/dev/serial/{self.TID}/").json(), {"pid": None})
+            self.assertEqual(self.client.get(f"/hw/dev/serial/{self.TID}/?serial=HPK00001").json(), {"pid": None, "pids": []})
+            self.assertEqual(self.client.get(f"/hw/dev/serial/{self.TID}/").json(), {"pid": None, "pids": []})
+
+    def test_a_shared_serial_never_resolves_silently(self):
+        # #168 (Hajime): HWDB doesn't enforce unique serials — the endpoint
+        # names every holder and resolves none; a submit with one typed is refused
+        self.client.force_login(get_user_model().objects.create_user("s", "s@s.io", "pw"))
+        for sfx in ("00011", "00012"):
+            HwdbComponentEvent.objects.create(instance="dev", part_type_id=self.TID,
+                                              part_id=f"{self.TID}-{sfx}", serial_number="HPK19901")
+        schema = {"name": "t", "test_type_name": "T", "sections": [{"title": "S", "fields": [
+            {"type": "qr", "label": "Strip", "type_id": self.TID}]}]}
+        api = _api(schema=schema)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            d = self.client.get(f"/hw/dev/serial/{self.TID}/?serial=HPK19901").json()
+            self.assertEqual(d, {"pid": None, "pids": [f"{self.TID}-00011", f"{self.TID}-00012"]})
+            # HWDB's filter answering with two rows behaves the same (mirror miss)
+            api.find_components_by_serial.return_value = [{"part_id": f"{self.TID}-00021"}, {"part_id": f"{self.TID}-00020"}]
+            self.assertEqual(self.client.get(f"/hw/dev/serial/{self.TID}/?serial=HPK2").json()["pids"],
+                             [f"{self.TID}-00020", f"{self.TID}-00021"])
+            html = self.client.post(PAGE, {"f0-0": "HPK19901"}, follow=True).content.decode()
+        api.post_test.assert_not_called()
+        self.assertIn(f"serial number HPK19901 is on 2 items: {self.TID}-00011, {self.TID}-00012 — enter the PID", html)
+        # the fill page carries the wording for the live lookup
+        self.assertIn('many ? "serial number " + serial + " is on " + d.pids.length + " items: "', html)
 
     def test_submit_stores_the_pid_for_a_typed_serial(self):
         self.client.force_login(get_user_model().objects.create_user("s", "s@s.io", "pw"))
@@ -1858,7 +1882,7 @@ class SerialResolveTest(TestCase):
             {"type": "qr", "label": "Other", "type_id": self.TID, "sn": r"HPK\d{5}"},
             {"type": "qr", "label": "Plain", "type_id": self.TID}]}]
         api = _api(schema=schema)
-        api.find_component_by_serial.return_value = None
+        api.find_components_by_serial.return_value = []
         m1, m2 = _mocked(api)
         with m1, m2:
             html = self.client.get(PAGE).content.decode()
@@ -1870,7 +1894,7 @@ class SerialResolveTest(TestCase):
             self.client.post(PAGE, {"f0-0": "HPK19877", "f0-1": "HPK00000", "f0-2": "HPK19877"})
         data = api.post_test.call_args.args[1]["test_data"]["DATA"]
         self.assertEqual(data["S"], {"Strip": "Z00100300029-05316", "Plain": "Z00100300029-05316"})   # the unknown serial is dropped
-        api.find_component_by_serial.assert_called_once_with(self.TID, "HPK00000")
+        api.find_components_by_serial.assert_called_once_with(self.TID, "HPK00000")
 
 
 class ImageMapTest(TestCase):
@@ -2339,14 +2363,14 @@ class TableLinkTest(TestCase):
         api = self._api()
         api.get_image_response.return_value = mock.Mock(content=json.dumps(
             {**self.SCHEMA, "sections": [{"title": "S", "fields": [plain]}]}).encode())
-        api.find_component_by_serial.return_value = {"part_id": f"{self.SIPM}-05316"}
+        api.find_components_by_serial.return_value = [{"part_id": f"{self.SIPM}-05316"}]
         m1, m2 = _mocked(api)
         with m1, m2:
             html = self.client.get(PAGE).content.decode()
             self.assertIn(f'class="cl-pidcell" data-type-id="{self.SIPM}" data-serial-url="/hw/dev/serial/{self.SIPM}/"', html)
             self.assertIn(f'data-into="SC1" data-type-id="{self.SIPM}"', html)
             self.client.post(PAGE, {"f0-0-c0": "HPK19877"})
-        api.find_component_by_serial.assert_called_once_with(self.SIPM, "HPK19877")
+        api.find_components_by_serial.assert_called_once_with(self.SIPM, "HPK19877")
         self.assertEqual(api.patch_subcomponents.call_args.args[1]["subcomponents"]["P1"], f"{self.SIPM}-05316")
         # without ``into`` the item's own positions decide — all supercells here
         api.get_image_response.return_value = mock.Mock(content=json.dumps(
@@ -2639,7 +2663,9 @@ class PlotFieldTest(TestCase):
         self.assertIn("Enter PIDs or serial numbers of D00400300001 in Boards to see the plot.", html)
         self.assertNotIn("</script>-secs", html)
         self.assertIn('<iframe class="cl-plot-frame" hidden title="Vbd"></iframe>', html)
-        self.assertIn('class="cl-plot-open" href="' + self.URL.replace("&", "&amp;") + '"', html)
+        # the link is THIS server's Plots page (the URL was copied on twister, the test runs on localhost — Chao)
+        self.assertIn('class="cl-plot-open" href="' + self.URL.replace("https://x", "").replace("&", "&amp;") + '"', html)
+        self.assertNotIn('href="https://x/', html)
         # the collector: the frame's URL hash carries the entries, `sp` (a saved-plot id) is dropped
         self.assertIn('cfg.ids = ids; delete cfg.sp;', html)
         self.assertIn('var src = base + "?embed=1" + hash;', html)
@@ -2663,7 +2689,7 @@ class PlotFieldTest(TestCase):
         # the frame loads at once with the pasted state, the hint is absent, the link shows
         self.assertIn('<iframe class="cl-plot-frame" src="/hw/dev/plot/D00400300001/?embed=1#%7B%22src%22', html)
         self.assertNotIn("to see the plot.", html)
-        self.assertIn('<a class="cl-plot-open" href="' + self.URL.replace("&", "&amp;") + '" target="_blank" rel="noopener">Open in Plots', html)
+        self.assertIn('<a class="cl-plot-open" href="' + self.URL.replace("https://x", "").replace("&", "&amp;") + '" target="_blank" rel="noopener">Open in Plots', html)
         self.assertIn('if (p.hasAttribute("data-ref")) return;', html)
 
 
