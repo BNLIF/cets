@@ -156,6 +156,7 @@
   .cl-map-cols > div:first-child { min-width: 0; }
   .cl-map-cols .cl-map-list { grid-template-columns: 1fr; }   /* one slot per line beside the contents table */
   .cl-map-pos { border: 2px solid var(--good); border-radius: var(--r-lg); padding: 10px 12px; }
+  .cl-asm-pack { float: right; font-weight: 400; font-size: calc(12.5px * var(--cl-scale, 1)); }
   .cl-map-pos h3 { font-size: calc(13px * var(--cl-scale, 1)); margin: 0 0 6px; color: var(--ink); }
   .cl-map-pos h3 .cl-map-count { font-family: var(--font-mono); font-weight: 400; color: var(--faint); font-size: calc(12px * var(--cl-scale, 1)); }
   .cl-map-tbl { width: 100%; border-collapse: collapse; font-size: calc(13px * var(--cl-scale, 1)); }
@@ -216,6 +217,10 @@
   .cl-table input.cl-pidcell { font-family: var(--font-mono); font-size: calc(12px * var(--cl-scale, 1)); min-width: 19ch; }
   .cl-table td .cl-serial { display: block; font-size: calc(10.5px * var(--cl-scale, 1)); white-space: nowrap; }
   .cl-table input.cl-linked { border-color: var(--good); background: var(--good-bg); }
+  .cl-table td .cl-cell-act { display: flex; gap: 4px; justify-content: center; margin-top: 3px; }
+  .cl-cell-btn { font: inherit; font-size: calc(11px * var(--cl-scale, 1)); line-height: 1.4; padding: 0 7px; color: var(--dim);
+    background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm); cursor: pointer; }
+  .cl-cell-btn:hover { color: var(--ink); border-color: var(--rule-hard); }
   .cl-bad-text { color: var(--bad, #a33); }
 </style>
 <script>

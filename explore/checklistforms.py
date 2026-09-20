@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 FIELD_TYPES = {"check", "number", "table", "text", "textarea", "datetime",
                "select", "photo", "qr", "steps", "static", "link", "imagemap",
-               "plot"}
+               "plot", "assembly"}
 
 # Field types whose value may ALSO be folded into the item's latest
 # specifications DATA (the ``to_spec`` flag, #96 — "sometimes they do store
@@ -239,6 +239,11 @@ def _norm_field(f: dict) -> dict | None:
             out["thumb"] = False
         return out if (out["image"] or out["image_id"] or out["url"]
                        or out["note"] or out["checklist"]) else None
+    if t == "assembly":
+        # Hajime 2026-09-20: the item's positions and their occupants, live
+        # (the imagemap's contents table without a drawing) with a link to
+        # the Link items page; the submit stores the list as the value.
+        return {"type": t, "label": label}
     if t == "plot":
         # #160 (Anselmo): a Plots page view of the sub-components entered in
         # this form — ``plot`` is a Plots page URL (its type + ``#`` state),
@@ -790,7 +795,7 @@ def _bind_leaf(f: dict, v) -> None:
                       for i, s in enumerate(f["slots"])]
     elif t == "photo":
         f["existing"] = v if isinstance(v, dict) and v.get("image_id") else None
-    elif t not in ("static", "plot"):   # number, text, textarea, datetime, select, qr
+    elif t not in ("static", "plot", "assembly"):   # number, text, textarea, datetime, select, qr
         f["value"] = _fmt(v)
 
 
@@ -870,7 +875,7 @@ def parse(schema: dict, post, resolve=None) -> dict:
     data = {}
     for title, f in leaf_fields(schema):
         t, key = f["type"], f["key"]
-        if t in ("static", "photo", "plot"):
+        if t in ("static", "photo", "plot", "assembly"):   # an assembly's value is the view's snapshot
             continue
         if t == "check":
             raw = post.get(key) or ""
@@ -1161,6 +1166,10 @@ def export_rows(schema: dict, test_data: dict | None):
             continue
         sec = data.get(title)
         v = sec.get(f["label"]) if isinstance(sec, dict) else None
+        if f["type"] == "assembly":          # one row per linked position
+            for pos, pid in (v.items() if isinstance(v, dict) else ()):
+                yield title, f"{f['label']} · {pos}", str(pid)
+            continue
         if f["type"] == "photo" and isinstance(v, dict):
             note = v.get("comment")
             v = f"{v.get('image_name', '')} (image_id={v.get('image_id', '')})"

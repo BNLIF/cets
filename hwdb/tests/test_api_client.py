@@ -57,6 +57,21 @@ class FnalDbApiClientSessionTest(TestCase):
         self.assertIn("files", kwargs)
         self.assertNotIn("headers", kwargs)
 
+    def test_patch_subcomponents_sends_vacated_positions_first(self):
+        """HWDB applies the positions dict in order and refuses a PID still
+        sitting in a later position ("already in use") — moving an item to
+        an earlier-sorting position needs its old position vacated first
+        (Hajime, dev 2026-09-20)."""
+        api = FnalDbApiClient("https://example/api", "fake-bearer")
+        fake_resp = mock.Mock(ok=True)
+        fake_resp.json.return_value = {"status": "OK"}
+        with mock.patch.object(api.session, "request", return_value=fake_resp) as req:
+            api.patch_subcomponents("P-1", {"component": {"part_id": "P-1"}, "subcomponents": {
+                "LAr 12": "S-4", "LAr 13": None, "LAr 14": "S-9"}})
+        sent = req.call_args.kwargs["json"]
+        self.assertEqual(list(sent["subcomponents"].items()), [("LAr 13", None), ("LAr 12", "S-4"), ("LAr 14", "S-9")])
+        self.assertEqual(sent["component"], {"part_id": "P-1"})
+
     def test_post_test_type_hits_the_spec_endpoint_with_json_body(self):
         """Test-type creation (the ES auto-create) must POST the TestTypeIn
         body to ``component-types/{ptid}/test-types`` — the path is from the

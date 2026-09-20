@@ -266,6 +266,7 @@
         <option value="static">static</option>
         <option value="imagemap">image map</option>
         <option value="plot">plot</option>
+        <option value="assembly">assembly</option>
       </select>
       <input class="ff-label" placeholder="label">
       <select class="ff-place" style="flex:0 0 108px;"
@@ -449,7 +450,7 @@
     $(".g-pid", r).style.display = (t === "qr" || t === "link" || t === "imagemap" || (t === "table" && $(".ff-tbllink", r).checked)) ? "" : "none";
     $(".g-map", r).style.display = t === "imagemap" ? "" : "none";
     $(".ff-tospec-w", r).style.display = SPEC_OK.indexOf(t) !== -1 ? "" : "none";
-    $(".ff-label", r).placeholder = (t === "static" || t === "plot") ? "label (optional)" : "label";
+    $(".ff-label", r).placeholder = (t === "static" || t === "plot" || t === "assembly") ? "label (optional)" : "label";
   }
 
   function addField(secNode, f, place) {
@@ -643,7 +644,7 @@
            '" style="grid-area:' + it.r + "/" + it.c + "/auto/span " + it.s + '">' +
            it.rows.map(function (r, j) {
              var t = $(".ff-type", r).value, lab = $(".ff-label", r).value.trim() ||
-                     (t === "static" ? ($(".ff-note", r).value.trim() || $(".ff-checklist", r).value.trim() || "figure") : t === "plot" ? "plot" : "");
+                     (t === "static" ? ($(".ff-note", r).value.trim() || $(".ff-checklist", r).value.trim() || "figure") : t === "plot" ? "plot" : t === "assembly" ? "assembly" : "");
              return '<span class="lay-line' + (j ? " n2" : "") + '"><b>' + esc(t) + '</b>' + esc(lab) + '</span>';
            }).join("") + "</div>";
     });

@@ -2459,6 +2459,64 @@ class TableLinkTest(TestCase):
         self.assertIn("of the item in “SC1”", html)
         self.assertIn('class="es-btn quiet cl-tbl-lnk"', html)
         self.assertIn('class="es-btn quiet cl-tbl-chk"', html)
+        # Hajime: scan and pick per cell
+        self.assertIn('<button type="button" class="cl-scan cl-cell-btn" data-target="f0-0-c0"', html)
+        self.assertIn('<button type="button" class="cl-pick cl-cell-btn" data-target="f0-0-c0" data-free="1"', html)
+
+
+class AssemblyFieldTest(TestCase):
+    """Hajime 2026-09-20: the item's assembly list inside a checklist — live
+    positions, a link to the Link items page, the list stored at submit."""
+    SCHEMA = {"name": "SC", "test_type_name": "SC", "sections": [{"title": "S", "fields": [
+        {"type": "assembly", "label": "Sensors"}, {"type": "check", "label": "Done"}]}]}
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("t", "t@t.io", "pw"))
+
+    def test_normalize_keeps_it_and_parse_ignores_it(self):
+        schema = checklistforms.normalize(self.SCHEMA, "SC")
+        self.assertEqual(schema["sections"][0]["fields"][0], {"type": "assembly", "label": "Sensors", "key": "f0-0"})
+        self.assertEqual(checklistforms.parse(schema, {"f0-1": "pass"}), {"S": {"Done": True}})
+
+    def test_every_item_checklist_links_to_the_item_fnal_hwdb_and_link_subcomponents(self):
+        api = _api(schema=self.SCHEMA, test_types=("ES", "SC"))
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn(f'<span class="cl-crumb-links"><a href="/hw/dev/part/{PART}/">Item</a> · '
+                      f'<a href="https://dbweb2.fnal.gov:8443/cdbdev/edit/component/{PART}" target="_blank"', html)
+        self.assertIn(f'<a href="/hw/dev/part/{PART}/pack/" title="Link, unlink and move sub-components">Link subcomponents</a>', html)
+        with m1, m2:
+            html = self.client.get(f"/hw/dev/part/{PTID}-blank/checklist/{NAME}/").content.decode()
+        self.assertNotIn('<span class="cl-crumb-links">', html)
+
+    def test_fill_page_shows_the_live_list_and_the_link_items_link(self):
+        api = _api(schema=self.SCHEMA, test_types=("ES", "SC"))
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn(f'class="cl-map-pos cl-asm" data-link-url="/hw/dev/checklist-map/{PART}/"', html)
+        self.assertIn(f'href="/hw/dev/part/{PART}/pack/"', html)
+        self.assertIn('<table class="cl-map-tbl">', html)
+        with m1, m2:   # the blank (offline) form has no item
+            html = self.client.get(f"/hw/dev/part/{PTID}-blank/checklist/{NAME}/").content.decode()
+        self.assertIn("linked sub-components show here on its page", html)
+        self.assertNotIn('class="cl-map-pos cl-asm"', html)
+
+    def test_submit_stores_the_positions_as_the_value(self):
+        api = _api(schema=self.SCHEMA, test_types=("ES", "SC"))
+        api.get_subcomponents.return_value = {"data": [
+            {"functional_position": "LAr 1", "part_id": "Z00100300042-00593"},
+            {"functional_position": "LAr 2", "part_id": None},
+            {"functional_position": "LAr 3", "part_id": "Z00100300042-00596"}]}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"f0-1": "pass"})
+        data = api.post_test.call_args.args[1]["test_data"]["DATA"]
+        self.assertEqual(data["S"], {"Done": True, "Sensors": {"LAr 1": "Z00100300042-00593", "LAr 3": "Z00100300042-00596"}})
+        rows = list(checklistforms.export_rows(checklistforms.normalize(self.SCHEMA, "SC"), api.post_test.call_args.args[1]["test_data"]))
+        self.assertIn(("S", "Sensors · LAr 1", "Z00100300042-00593"), rows)
+        self.assertIn(("S", "Sensors · LAr 3", "Z00100300042-00596"), rows)
 
 
 class ChecklistLinkTest(TestCase):

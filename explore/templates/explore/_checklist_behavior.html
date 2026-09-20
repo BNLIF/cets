@@ -227,6 +227,8 @@
         st.textContent = (linked.length ? linked.length + " of " + pids.length + " linked" + (d.target ? " in " + d.target : "") : "")
                        + (d.error ? (linked.length ? " · " : "") + d.error : "");
         st.classList.toggle("cl-bad-text", !!d.error);
+        var lk = document.querySelector(LINKERS);   // the assembly / imagemap lists follow
+        if (lk) mapCall(lk);
       })
       .catch(function () { st.textContent = "couldn’t reach the server"; })
       .then(function () { b.disabled = false; });
@@ -265,7 +267,7 @@
       .then(function () { b.disabled = false; });
   });
 
-  var LINKERS = ".cl-map[data-link-url], .cl-lnk[data-link-url]";
+  var LINKERS = ".cl-map[data-link-url], .cl-lnk[data-link-url], .cl-asm[data-link-url]";
   function mapCall(map, body) {
     var opts = { credentials: "same-origin" };
     if (body) { opts.method = "POST"; opts.body = body; opts.headers = { "X-CSRFToken": csrf() }; }

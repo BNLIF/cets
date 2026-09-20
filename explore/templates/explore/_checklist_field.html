@@ -110,6 +110,13 @@
   {% if f.checklist %}{# #118: jump to another checklist — this item's, or another type's chooser #}
   <div><a href="{% if f.checklist_type %}{% url 'explore:type_checklist' part_type_id=f.checklist_type name=f.checklist %}{% elif part_id %}{% url 'explore:checklist' part_id=part_id name=f.checklist %}{% else %}{% url 'explore:type_checklist' part_type_id=part_type_id name=f.checklist %}{% endif %}"
     target="_blank" rel="noopener">&#9745; {{ f.checklist }} <span aria-hidden="true">&#x2197;</span></a></div>{% endif %}
+{% elif f.type == "assembly" %}{# the item's positions and occupants, live — mapState fills the table like an imagemap's; the submit stores the list #}
+  {% if f.label %}<span class="cl-lab">{{ f.label|clmd }}</span>{% endif %}
+  {% if part_id %}<div class="cl-map-pos cl-asm" data-link-url="{% url 'explore:checklist_map' part_id=part_id %}"><h3>Linked <span class="cl-map-count"></span> <a class="cl-asm-pack" href="{% url 'explore:box_pack' part_id=part_id %}" target="_blank" rel="noopener" title="Link, unlink and move items between positions">Link items &rarr;</a></h3>
+    <table class="cl-map-tbl"><thead><tr><th>Type</th><th>Position</th><th>Item</th><th></th></tr></thead>
+    <tbody><tr><td colspan="4" class="cl-hint">loading positions…</td></tr></tbody></table>
+    <div class="cl-map-err"></div></div>
+  {% else %}<div class="cl-hint">The item’s linked sub-components show here on its page.</div>{% endif %}
 {% elif f.type == "plot" %}{# #160: a Plots page view of the sub-components entered in this form — the collector script (_checklist_behavior.html) fills the frame #}
   {% if f.label %}<span class="cl-lab">{{ f.label|clmd }}</span>{% endif %}
   <div class="cl-plot-box cl-need-net" data-plot="{% url 'explore:plot' part_type_id=f.plot_type %}" data-hash="{{ f.plot_hash }}" data-type="{{ f.plot_type }}"{% if f.sn %} data-sn="{{ f.sn }}"{% endif %}{% if f.reference %} data-ref="1"{% endif %}>

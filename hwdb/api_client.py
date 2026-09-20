@@ -266,7 +266,18 @@ class FnalDbApiClient:
         ``{"component": {"part_id": …}, "subcomponents": {pos: pid|None, …}}``;
         the official clients always send the COMPLETE positions dict, with
         ``None`` for a position to be (or stay) empty.
+
+        HWDB walks the dict IN ORDER and refuses a PID that still sits in
+        a position it hasn't reached yet ("The component 'X' is already in
+        use" — Hajime, dev 2026-09-20: moving a sensor from position 13
+        back to 12 failed because "12" sorts before "13"). Vacated
+        positions go first, so a move within the item is one PATCH.
         """
+        subs = payload.get("subcomponents")
+        if isinstance(subs, dict):
+            payload = {**payload, "subcomponents": {
+                **{k: v for k, v in subs.items() if v is None},
+                **{k: v for k, v in subs.items() if v is not None}}}
         return self._make_request(
             "PATCH", f"components/{part_id}/subcomponents", data=payload
         )

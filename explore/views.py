@@ -3273,6 +3273,18 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
                                        {f"{req['label']} #{i + 1}": pid for i, pid in enumerate(req["pids"])})
         if lerr:
             return _mark(f"“{req['label']}”: not linked — {lerr}", lerr)
+    # an assembly field's value is what sits in the item's positions after
+    # the links above — the record carries the list (Hajime 2026-09-20)
+    asm = [(title, f["label"]) for title, f in checklistforms.leaf_fields(schema) if f["type"] == "assembly"]
+    if asm:
+        try:
+            rows = api.get_subcomponents(part_id).get("data") or []
+        except requests.RequestException as e:
+            return _mark(f"couldn’t read the item’s positions — {_hwdb_error_detail(e)}", e)
+        snap = {str(m.get("functional_position") or ""): m.get("part_id")
+                for m in rows if isinstance(m, dict) and m.get("part_id")}
+        for title, label in asm:
+            data.setdefault(title, {})[label] = snap
     # to_spec values (#96) also fold into the item's specifications. A
     # checklist OWNS the DATA sections named after its sections — this
     # submission replaces them, and sections its previous submission wrote
@@ -3476,6 +3488,7 @@ def explore_checklist_view(request, part_id, name):
         "active_nav": "hardware",
         "sidebar": navigation.sidebar_tree(inst, {}),
         "part_id": part_id,
+        "hwdb_ui_base": settings.HWDB_PROFILES[inst]["ui"],
         "cl_name": name,
         "schema": checklistforms.bind(schema, display_td),
         "item_card": checklistforms.item_card(
