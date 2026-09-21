@@ -206,6 +206,13 @@
   }
   document.querySelectorAll("input[data-type-id]").forEach(paintPid);
 
+  // Enter in a field never submits (Chao 2026-09-20: a scanner's or a
+  // finger's Enter went to "Submit to HWDB" as the form's first button) —
+  // only the buttons do; a textarea keeps its newline
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && e.target.matches && e.target.matches("#cl-form input") && e.target.type !== "file") e.preventDefault();
+  });
+
   // confirm the real submit (not draft/discard) — after the browser's own
   // validation, naming the item so a wrong page is caught (Hajime, 2026-09-03)
   document.addEventListener("submit", function (e) {

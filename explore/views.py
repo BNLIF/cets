@@ -3214,8 +3214,8 @@ def _checklist_item(api, part_id, schema) -> dict:
 
 def _checklist_submit(request, api, part_id, name, schema, prev_td,
                       item=None, opts=None) -> str | None:
-    """The whole submit pipeline (#95/#96/#103): photos → subcomponent links
-    → item PATCH + location (standard HWDB fields) → to_spec fold → test
+    """The whole submit pipeline (#95/#96/#103): subcomponent links → item
+    PATCH + location (standard HWDB fields) → to_spec fold → photos → test
     record. Returns an error string or None — a ``_HwdbDown`` string when
     HWDB was unreachable (#151)."""
     missing = checklistforms.unchecked_required(schema, request.POST)   # #131
@@ -3232,9 +3232,6 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
     data = checklistforms.parse(schema, request.POST, resolve)
     if shared:
         return _shared_serial_error(shared)
-    err = _checklist_photos(request, api, part_id, name, schema, prev_td, data)
-    if err:
-        return err
     # #103: the Item card — one PATCH for the changed standard fields, a
     # location post only when the institution changed (iPad order: item,
     # then location, then the test)
@@ -3313,6 +3310,14 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
     if err:
         return _mark(f"couldn’t create the “{schema['test_type_name']}” "
                      f"test type — {err}", err)
+    # Photos LAST (Chao 2026-09-20): an HWDB image is permanent, and every
+    # step above can refuse the submission (unchecked steps, a shared serial,
+    # a link HWDB won't take) — four orphan photos on -00149 came from
+    # refused submits that had already uploaded. Only the record post itself
+    # can now fail after them.
+    err = _checklist_photos(request, api, part_id, name, schema, prev_td, data)
+    if err:
+        return err
     try:
         body = api.post_test(part_id, checklistforms.test_payload(
             schema, data,

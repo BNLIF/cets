@@ -381,10 +381,30 @@ class ChecklistPageTest(TestCase):
         self.assertEqual(data["Visual Inspection"]["Planarity"], False)
         self.assertEqual(data["Visual Inspection"]["Photo 1"],
                          {"image_id": "img-77", "image_name": img_name})
-        # ordering: the photo upload happened before the record post
-        calls = [c[0] for c in api.mock_calls]
-        self.assertLess(calls.index("post_component_image"),
-                        calls.index("post_test"))
+        # ordering: the photo upload happens right before the record post —
+        # after everything that can refuse the submission (Chao 2026-09-20)
+        calls = [c[0] for c in api.mock_calls if c[0] in ("post_component_image", "post_test", "patch_component", "patch_subcomponents", "post_test_type")]
+        self.assertEqual(calls[-2:], ["post_component_image", "post_test"])
+
+    def test_a_refused_submit_uploads_no_photo(self):
+        # Chao 2026-09-20: four orphan photos on -00149 came from refused submits
+        api = _api(schema={**SCHEMA, "sections": [
+            {"title": "S", "fields": [{"type": "link", "label": "Child", "type_id": "Z00100300042"},
+                                      {"type": "photo", "label": "Shot"}]}]},
+                   test_types=("ES", "PCB Segments Interface"))
+        api.get_component_type.return_value = {"data": {"connectors": {"P1": "Z00100300042"}, "manufacturers": [],
+                                                        "properties": {"specifications": [{"datasheet": {"DATA": {}}}]}}}
+        api.get_subcomponents.return_value = {"data": [{"functional_position": "P1", "part_id": "Z00100300042-00009"}]}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.post(PAGE, {"f0-0": "Z00100300042-00001",
+                                           "f0-1": SimpleUploadedFile("shot.png", PNG, content_type="image/png")},
+                                    follow=True).content.decode()
+        self.assertIn("not linked", html)
+        api.post_component_image.assert_not_called()
+        api.post_test.assert_not_called()
+        # the fill page keeps Enter away from the submit button
+        self.assertIn('if (e.key === "Enter" && e.target.matches && e.target.matches("#cl-form input") && e.target.type !== "file") e.preventDefault();', html)
 
     def test_photo_comment_goes_to_hwdb_and_the_record(self):
         api = _api(test_types=("ES", "PCB Segments Interface"))

@@ -323,7 +323,11 @@ which HWDB accepts once the type has it.
   Nothing goes to HWDB (#151, reversing #127): a picked photo stays on the
   device it was taken on (see autosave below) until Submit, since an HWDB
   upload is permanent — append-only, a retaken photo leaves the first one
-  on the item. The draft pre-fills the next visit (winning over the last
+  on the item. At Submit the photos go up LAST, after every check and every
+  write that can refuse the submission (unchecked steps, a shared serial, a
+  link HWDB won't take), so a refused submit leaves no orphan image. Enter
+  in a field never submits the form — only the buttons do (a scanner's
+  trailing Enter used to reach *Submit to HWDB*). The draft pre-fills the next visit (winning over the last
   submission) and is deleted the moment a submission lands. **Discard
   draft** drops it.
 - **Browser autosave** (#151): every change to the form is also kept in
