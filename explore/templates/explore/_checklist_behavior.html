@@ -148,10 +148,15 @@
     var n = state.filter(function (p) { return p.part_id; }).length;
     var count = fld.querySelector(".cl-map-count"), tbody = fld.querySelector(".cl-map-tbl tbody"), errBox = fld.querySelector(".cl-map-err");
     if (count) count.textContent = n + " of " + state.length + " positions filled";
+    // each occupant links to its item page (Chao 2026-09-21); the URL pattern carries this item's PID to swap
+    var partUrl = tbody ? tbody.parentNode.getAttribute("data-part-url") || "" : "";
+    function partLink(pid) {
+      return partUrl ? '<a href="' + esc(partUrl.replace(/\/[A-Z]\d{11}-\d{5}\//, "/" + pid + "/")) + '">' + esc(pid) + "</a>" : esc(pid);
+    }
     if (tbody) tbody.innerHTML = state.length ? state.map(function (p) {
       return "<tr" + (p.part_id && p.part_id === just ? ' class="now"' : "") + "><td>" + esc(p.child_type_name) +
         "</td><td>" + esc(p.position) + "</td>" +
-        (p.part_id ? '<td class="mono">' + esc(p.part_id) + '</td><td><button type="button" class="cl-map-unl" data-pid="' +
+        (p.part_id ? '<td class="mono">' + partLink(p.part_id) + '</td><td><button type="button" class="cl-map-unl" data-pid="' +
                      esc(p.part_id) + '" title="Remove ' + esc(p.part_id) + ' from this item">Unlink</button></td>'
                    : '<td class="empty">— empty</td><td></td>') + "</tr>";
     }).join("") : '<tr><td colspan="4" class="empty">This type defines no positions.</td></tr>';

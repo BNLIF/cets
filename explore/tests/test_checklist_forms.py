@@ -2106,7 +2106,7 @@ class ImageMapLinkTest(TestCase):
             # #134: every slot gets a pick button; untyped map → type(s) come from the live state
             self.assertIn('cl-pick" data-target="f0-0-m1" data-free="1" data-slot="Board 2" hidden', html)
             self.assertIn('<div class="cl-map-cols">', html)          # packing-page layout
-            self.assertIn('<table class="cl-map-tbl">', html)
+            self.assertIn(f'<table class="cl-map-tbl" data-part-url="/hw/dev/part/{PART}/">', html)   # occupants link to their item pages
             # live state (type names from the mirror when known)
             d = self.client.get(f"/hw/dev/checklist-map/{PART}/").json()
             self.assertEqual(d["positions"][0], {"position": "CBL1", "child_type_id": "D08100100003",
@@ -2571,7 +2571,7 @@ class AssemblyFieldTest(TestCase):
             html = self.client.get(PAGE).content.decode()
         self.assertIn(f'class="cl-map-pos cl-asm" data-link-url="/hw/dev/checklist-map/{PART}/"', html)
         self.assertIn(f'href="/hw/dev/part/{PART}/pack/"', html)
-        self.assertIn('<table class="cl-map-tbl">', html)
+        self.assertIn(f'<table class="cl-map-tbl" data-part-url="/hw/dev/part/{PART}/">', html)   # occupants link to their item pages
         with m1, m2:   # the blank (offline) form has no item
             html = self.client.get(f"/hw/dev/part/{PTID}-blank/checklist/{NAME}/").content.decode()
         self.assertIn("linked sub-components show here on its page", html)

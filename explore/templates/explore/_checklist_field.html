@@ -96,7 +96,7 @@
   </div>
   {% if f.link and part_id %}</div>
   <div class="cl-map-pos"><h3>Linked <span class="cl-map-count"></span></h3>
-    <table class="cl-map-tbl"><thead><tr><th>Type</th><th>Position</th><th>Item</th><th></th></tr></thead>
+    <table class="cl-map-tbl" data-part-url="{% url 'explore:part' part_id=part_id %}"><thead><tr><th>Type</th><th>Position</th><th>Item</th><th></th></tr></thead>
     <tbody><tr><td colspan="4" class="cl-hint">loading positions…</td></tr></tbody></table>
     <div class="cl-map-err"></div></div></div>{% endif %}
 {% elif f.type == "static" %}
@@ -115,7 +115,7 @@
 {% elif f.type == "assembly" %}{# the item's positions and occupants, live — mapState fills the table like an imagemap's; the submit stores the list #}
   {% if f.label %}<span class="cl-lab">{{ f.label|clmd }}</span>{% endif %}
   {% if part_id %}<div class="cl-map-pos cl-asm" data-link-url="{% url 'explore:checklist_map' part_id=part_id %}{% if f.into %}?into={{ f.into|urlencode }}{% endif %}"{% if f.into %} data-pack-url="{% url 'explore:box_pack' part_id=part_id %}"{% endif %}><h3>Linked <span class="cl-map-count"></span>{% if f.into %} <span class="cl-hint cl-asm-in">in the item in “{{ f.into }}”</span>{% endif %} <a class="cl-asm-pack" href="{% url 'explore:box_pack' part_id=part_id %}" target="_blank" rel="noopener" title="Link, unlink and move items between positions">Link items &rarr;</a></h3>
-    <table class="cl-map-tbl"><thead><tr><th>Type</th><th>Position</th><th>Item</th><th></th></tr></thead>
+    <table class="cl-map-tbl" data-part-url="{% url 'explore:part' part_id=part_id %}"><thead><tr><th>Type</th><th>Position</th><th>Item</th><th></th></tr></thead>
     <tbody><tr><td colspan="4" class="cl-hint">loading positions…</td></tr></tbody></table>
     <div class="cl-map-err"></div></div>
   {% else %}<div class="cl-hint">The {% if f.into %}sub-components of the item in “{{ f.into }}”{% else %}item’s linked sub-components{% endif %} show here on its page.</div>{% endif %}
