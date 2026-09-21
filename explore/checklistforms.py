@@ -243,7 +243,12 @@ def _norm_field(f: dict) -> dict | None:
         # Hajime 2026-09-20: the item's positions and their occupants, live
         # (the imagemap's contents table without a drawing) with a link to
         # the Link items page; the submit stores the list as the value.
-        return {"type": t, "label": label}
+        # Chao 2026-09-21: ``into`` = one of the item's positions — the list
+        # is then the sub-assembly sitting there (a PDS module's supercell).
+        out = {"type": t, "label": label}
+        if str(f.get("into") or "").strip():
+            out["into"] = str(f["into"]).strip()
+        return out
     if t == "plot":
         # #160 (Anselmo): a Plots page view of the sub-components entered in
         # this form — ``plot`` is a Plots page URL (its type + ``#`` state),

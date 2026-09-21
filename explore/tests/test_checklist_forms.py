@@ -2577,6 +2577,66 @@ class AssemblyFieldTest(TestCase):
         self.assertIn("linked sub-components show here on its page", html)
         self.assertNotIn('class="cl-map-pos cl-asm"', html)
 
+    SC = "D00800100003"
+    INTO = {"name": "SC", "test_type_name": "SC", "sections": [{"title": "S", "fields": [
+        {"type": "assembly", "label": "Boards", "into": "SC1"}, {"type": "check", "label": "Done"}]}]}
+
+    def _into_api(self, occupied=True):
+        # the item holds a supercell in SC1; the supercell has 3 SiPM positions, one taken
+        api = _api(schema=self.INTO, test_types=("ES", "SC"))
+        api.get_component_type.side_effect = lambda t: {"data": {"connectors": (
+            {"P1": "D00400300001", "P2": "D00400300001", "P3": "D00400300001"} if t == self.SC else {"SC1": self.SC, "SC2": self.SC})}}
+        api.get_subcomponents.side_effect = lambda pid: {"data": (
+            ([{"functional_position": "SC1", "part_id": f"{self.SC}-00001"}] if occupied else []) if pid == PART
+            else [{"functional_position": "P3", "part_id": "D00400300001-00099"}])}
+        api.patch_subcomponents.return_value = {"status": "OK"}
+        return api
+
+    def test_into_lists_the_sub_assembly_in_that_position(self):
+        # Chao 2026-09-21: an assembly field may show the sub-components of
+        # the item in one of THIS item's positions (the supercell in SC1)
+        schema = checklistforms.normalize(self.INTO, "SC")
+        self.assertEqual(schema["sections"][0]["fields"][0], {"type": "assembly", "label": "Boards", "into": "SC1", "key": "f0-0"})
+        api = self._into_api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+            body = json.loads(self.client.get(f"/hw/dev/checklist-map/{PART}/?into=SC1").content)
+        self.assertIn(f'class="cl-map-pos cl-asm" data-link-url="/hw/dev/checklist-map/{PART}/?into=SC1" data-pack-url="/hw/dev/part/{PART}/pack/"', html)
+        self.assertIn('<span class="cl-hint cl-asm-in">in the item in “SC1”</span>', html)
+        # the map GET lists the supercell's positions and names it, so the page can point Link items at it
+        self.assertEqual(body["target"], f"{self.SC}-00001")
+        self.assertEqual([(p["position"], p["part_id"]) for p in body["positions"]],
+                         [("P1", None), ("P2", None), ("P3", "D00400300001-00099")])
+        # unlinking from that list patches the supercell, not the item
+        with m1, m2:
+            body = json.loads(self.client.post(f"/hw/dev/checklist-map/{PART}/?into=SC1",
+                                               {"action": "unlink", "pid": "D00400300001-00099"}).content)
+        self.assertIsNone(body["error"])
+        self.assertEqual(api.patch_subcomponents.call_args.args[0], f"{self.SC}-00001")
+        self.assertEqual(api.patch_subcomponents.call_args.args[1]["subcomponents"], {"P1": None, "P2": None, "P3": None})
+        # the blank form says whose list it is
+        with m1, m2:
+            html = self.client.get(f"/hw/dev/part/{PTID}-blank/checklist/{NAME}/").content.decode()
+        self.assertIn("The sub-components of the item in “SC1” show here on its page.", html)
+
+    def test_into_with_the_position_empty_is_an_error_and_the_submit_snapshots_the_sub_assembly(self):
+        api = self._into_api(occupied=False)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            body = json.loads(self.client.get(f"/hw/dev/checklist-map/{PART}/?into=SC1").content)
+        self.assertEqual(body["positions"], [])
+        self.assertEqual(body["error"], f"position “SC1” of {PART} is empty — link the sub-assembly there first.")
+        with m1, m2:
+            resp = self.client.post(PAGE, {"f0-1": "pass"})
+        api.post_test.assert_not_called()
+        api = self._into_api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"f0-1": "pass"})
+        data = api.post_test.call_args.args[1]["test_data"]["DATA"]
+        self.assertEqual(data["S"], {"Done": True, "Boards": {"P3": "D00400300001-00099"}})
+
     def test_submit_stores_the_positions_as_the_value(self):
         api = _api(schema=self.SCHEMA, test_types=("ES", "SC"))
         api.get_subcomponents.return_value = {"data": [

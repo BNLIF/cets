@@ -333,7 +333,7 @@
       <input class="ff-position" placeholder="functional position (blank = first free slot for the child&#8217;s type)" title="on an item&#8217;s page the field links live (link/unlink button) and a named position pre-fills its current occupant">
     </div>
     <div class="ec-row g-tbllink" style="display:none;">
-      <label class="ec-check" title="every plain cell takes a PID (or a serial number resolved to one) and the items are linked as sub-components — by the button under the table, or at submit"><input type="checkbox" class="ff-tbllink"> link the cells as sub-components</label>
+      <label class="ec-check ff-tbllink-w" title="every plain cell takes a PID (or a serial number resolved to one) and the items are linked as sub-components — by the button under the table, or at submit"><input type="checkbox" class="ff-tbllink"> link the cells as sub-components</label>
       <input class="ff-into" placeholder="into the item in position… (blank = this item)" style="flex:0 0 280px;"
         title="the position of THIS item whose occupant is the real parent — e.g. the supercell holding the SiPM boards">
     </div>
@@ -446,7 +446,9 @@
     $(".g-img", r).style.display = (t === "static" || t === "imagemap") ? "" : "none";
     $(".g-link", r).style.display = t === "link" ? "" : "none";
     $(".g-plot", r).style.display = t === "plot" ? "" : "none";          // #160
-    $(".g-tbllink", r).style.display = t === "table" ? "" : "none";
+    $(".g-tbllink", r).style.display = (t === "table" || t === "assembly") ? "" : "none";
+    $(".ff-tbllink-w", r).style.display = t === "table" ? "" : "none";
+    $(".ff-into", r).placeholder = t === "assembly" ? "the item in position… (blank = this item)" : "into the item in position… (blank = this item)";
     $(".g-pid", r).style.display = (t === "qr" || t === "link" || t === "imagemap" || (t === "table" && $(".ff-tbllink", r).checked)) ? "" : "none";
     $(".g-map", r).style.display = t === "imagemap" ? "" : "none";
     $(".ff-tospec-w", r).style.display = SPEC_OK.indexOf(t) !== -1 ? "" : "none";
@@ -1139,6 +1141,7 @@
       f.link = true;
       if ($(".ff-into", r).value.trim()) f.into = $(".ff-into", r).value.trim();
     }
+    if (t === "assembly" && $(".ff-into", r).value.trim()) f.into = $(".ff-into", r).value.trim();   // the sub-assembly's list
     if ($(".ff-tospec", r).checked && SPEC_OK.indexOf(t) !== -1) f.to_spec = true;
     return f;
   }

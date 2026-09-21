@@ -3155,7 +3155,9 @@ def explore_checklist_map_view(request, part_id):
     the submit rule) and ``action=unlink&pid=<PID>`` frees it. Both answer
     with the new state, plus ``error`` when HWDB refused. #153:
     ``action=link_table&pid=…&pid=…[&into=<position>]`` links a table's
-    PIDs at once and answers ``{target, linked, error}``."""
+    PIDs at once and answers ``{target, linked, error}``. ``?into=<position>``
+    on the URL (an assembly field, Chao 2026-09-21) makes the GET and the
+    unlink act on the sub-assembly sitting in that position instead."""
     try:
         bearer = mint_for(request)
     except (FnalLinkRequired, FnalUnavailable):
@@ -3163,6 +3165,12 @@ def explore_checklist_map_view(request, part_id):
     inst = instance_of(request)
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
     err = None
+    shown = part_id   # the item whose positions are listed
+    into = (request.GET.get("into") or "").strip()
+    if into:
+        shown, err = _link_target(api, part_id, into)
+        if err:
+            return JsonResponse({"positions": [], "target": None, "error": err})
     if request.method == "POST":
         action = request.POST.get("action") or ""
         pid = (request.POST.get("pid") or "").strip().upper()
@@ -3210,27 +3218,27 @@ def explore_checklist_map_view(request, part_id):
                 err = _checklist_link(api, inst, part_id, pid, slot if slot in connectors else "")
         elif action == "unlink":
             try:
-                state = _map_positions(api, inst, part_id)
+                state = _map_positions(api, inst, shown)
                 pos = next((p["position"] for p in state if p["part_id"] == pid), None)
                 if pos is None:
                     err = f"{pid} is not linked here."
                 else:
                     after = {**{p["position"]: p["part_id"] for p in state}, pos: None}
-                    body = api.patch_subcomponents(part_id, {
-                        "component": {"part_id": part_id}, "subcomponents": after})
+                    body = api.patch_subcomponents(shown, {
+                        "component": {"part_id": shown}, "subcomponents": after})
                     if body.get("status") != "OK":
                         err = str(body.get("data") or body)
                     else:
-                        _mirror_positions(inst, part_id, after)
+                        _mirror_positions(inst, shown, after)
             except requests.RequestException as e:
                 err = _hwdb_error_detail(e)
         else:
             err = "unknown action."
     try:
-        positions = _map_positions(api, inst, part_id)
+        positions = _map_positions(api, inst, shown)
     except Exception as e:
-        return JsonResponse({"positions": [], "error": err or f"couldn’t read the item’s positions — {e}"})
-    return JsonResponse({"positions": positions, "error": err})
+        return JsonResponse({"positions": [], "target": shown, "error": err or f"couldn’t read the item’s positions — {e}"})
+    return JsonResponse({"positions": positions, "target": shown, "error": err})
 
 
 def _checklist_role_gate(api, schema) -> str | None:
@@ -3353,16 +3361,23 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
             return _mark(f"“{req['label']}”: not linked — {lerr}", lerr)
     # an assembly field's value is what sits in the item's positions after
     # the links above — the record carries the list (Hajime 2026-09-20)
-    asm = [(title, f["label"]) for title, f in checklistforms.leaf_fields(schema) if f["type"] == "assembly"]
-    if asm:
-        try:
-            rows = api.get_subcomponents(part_id).get("data") or []
-        except requests.RequestException as e:
-            return _mark(f"couldn’t read the item’s positions — {_hwdb_error_detail(e)}", e)
-        snap = {str(m.get("functional_position") or ""): m.get("part_id")
-                for m in rows if isinstance(m, dict) and m.get("part_id")}
-        for title, label in asm:
-            data.setdefault(title, {})[label] = snap
+    # (with ``into``, the sub-assembly in that position — Chao 2026-09-21)
+    snaps = {}
+    for title, f in checklistforms.leaf_fields(schema):
+        if f["type"] != "assembly":
+            continue
+        into = f.get("into") or ""
+        if into not in snaps:
+            target, lerr = _link_target(api, part_id, into)
+            if lerr:
+                return _mark(f"“{f['label']}”: {lerr}", lerr)
+            try:
+                rows = api.get_subcomponents(target).get("data") or []
+            except requests.RequestException as e:
+                return _mark(f"couldn’t read the positions of {target} — {_hwdb_error_detail(e)}", e)
+            snaps[into] = {str(m.get("functional_position") or ""): m.get("part_id")
+                           for m in rows if isinstance(m, dict) and m.get("part_id")}
+        data.setdefault(title, {})[f["label"]] = snaps[into]
     # to_spec values (#96) also fold into the item's specifications. A
     # checklist OWNS the DATA sections named after its sections — this
     # submission replaces them, and sections its previous submission wrote

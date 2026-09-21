@@ -163,6 +163,12 @@
       d.slotBtn.closest(".cl-map-slot, .cl-lnk").insertAdjacentElement("afterend", msg);
     }
     if (errBox) errBox.textContent = d.error && !d.slotBtn ? d.error : "";
+    // an assembly list of the sub-assembly in a position: its Link items page is that item's
+    var packUrl = map.getAttribute("data-pack-url"), packA = fld.querySelector(".cl-asm-pack"), asmIn = fld.querySelector(".cl-asm-in");
+    if (packUrl && packA && d.target) {
+      packA.href = packUrl.replace(/\/[A-Z]\d{11}-\d{5}\//, "/" + d.target + "/");
+      if (asmIn) asmIn.textContent = "in " + d.target;
+    }
     var wants = {}, holds = {};
     state.forEach(function (p) { wants[p.position] = p.child_type_id; holds[p.position] = p.part_id; });
     // an empty slot named like a position shows what already sits there
@@ -227,8 +233,7 @@
         st.textContent = (linked.length ? linked.length + " of " + pids.length + " linked" + (d.target ? " in " + d.target : "") : "")
                        + (d.error ? (linked.length ? " · " : "") + d.error : "");
         st.classList.toggle("cl-bad-text", !!d.error);
-        var lk = document.querySelector(LINKERS);   // the assembly / imagemap lists follow
-        if (lk) mapCall(lk);
+        refreshLinkers();   // the assembly / imagemap lists follow
       })
       .catch(function () { st.textContent = "couldn’t reach the server"; })
       .then(function () { b.disabled = false; });
@@ -276,12 +281,16 @@
       .catch(function () { return { positions: (map._state || {}).positions || [], error: "HWDB not reachable" }; })
       .then(function (d) {
         mapState(map, d);
-        // every other linker on the page shows the same item — keep them in step (no error carried over)
-        document.querySelectorAll(LINKERS).forEach(function (o) { if (o !== map) mapState(o, { positions: d.positions }); });
+        // every other linker reading the same URL shows the same item — keep them in step (no error carried over)
+        var url = map.getAttribute("data-link-url");
+        document.querySelectorAll(LINKERS).forEach(function (o) { if (o !== map && o.getAttribute("data-link-url") === url) mapState(o, { positions: d.positions, target: d.target }); });
       });
   }
-  var first = document.querySelector(LINKERS);
-  if (first) mapCall(first);   // one GET fills all of them
+  function refreshLinkers() {   // one GET per distinct item shown (the item, a sub-assembly in a position)
+    var seen = {};
+    document.querySelectorAll(LINKERS).forEach(function (m) { var u = m.getAttribute("data-link-url"); if (!seen[u]) { seen[u] = 1; mapCall(m); } });
+  }
+  refreshLinkers();
   document.addEventListener("click", function (e) {
     var b = e.target.closest && e.target.closest(".cl-map-lnk, .cl-map-unl");
     if (!b) return;
