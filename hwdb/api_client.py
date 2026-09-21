@@ -9,6 +9,7 @@ Pattern: every method returns the parsed JSON body. Callers check the body's
 ``upload_result["status"]``). Network errors raise ``requests.RequestException``.
 """
 
+import copy
 import logging
 from pathlib import Path
 
@@ -18,7 +19,14 @@ logger = logging.getLogger(__name__)
 
 
 class FnalDbApiClient:
-    def __init__(self, base_url, bearer):
+    # #172: with ``memo=True`` these GETs are answered once per client —
+    # a checklist page with four supercell tables and lists asked for the
+    # same type and the same sub-components again and again. A client
+    # lives for one request, so the memo can't go stale across requests;
+    # any write through the client drops it.
+    MEMO_ENDPOINTS = ("component-types/", "/subcomponents")
+
+    def __init__(self, base_url, bearer, memo=False):
         self.base_url = base_url
         # One Session per client = one keep-alive TCP/TLS pool. Halves
         # per-call latency vs. fresh ``requests.request`` (no handshake).
@@ -26,8 +34,21 @@ class FnalDbApiClient:
         # constructs one client per worker thread.
         self.session = requests.Session()
         self.session.headers["Authorization"] = f"Bearer {bearer}"
+        self._memo = {} if memo else None
+
+    def _memo_key(self, method, endpoint, params):
+        if self._memo is None or method != "GET" or params:
+            return None
+        if not any(m in endpoint for m in self.MEMO_ENDPOINTS):
+            return None
+        return endpoint
 
     def _make_request(self, method, endpoint, data=None, params=None):
+        key = self._memo_key(method, endpoint, params)
+        if key is not None and key in self._memo:
+            return copy.deepcopy(self._memo[key])
+        if self._memo is not None and method != "GET":
+            self._memo.clear()   # a write may have changed what the memo holds
         url = f"{self.base_url}/{endpoint}"
         headers = {}
         if method in ("POST", "PATCH"):
@@ -51,7 +72,10 @@ class FnalDbApiClient:
                 f"{response.status_code} {response.reason} for {url}: {body}",
                 response=response,
             )
-        return response.json()
+        out = response.json()
+        if key is not None:
+            self._memo[key] = copy.deepcopy(out)
+        return out
 
     # ---- Reads ----------------------------------------------------------
 

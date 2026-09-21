@@ -3163,10 +3163,26 @@ def explore_checklist_map_view(request, part_id):
     except (FnalLinkRequired, FnalUnavailable):
         return JsonResponse({"positions": [], "error": "sign in to HWDB first"}, status=401)
     inst = instance_of(request)
-    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer, memo=True)   # #172
     err = None
+    intos = [x.strip() for x in request.GET.getlist("into")]
+    if request.method == "GET" and len(intos) > 1:
+        # #172: one round trip for every list on the page — the item's own
+        # positions (into "") and each sub-assembly's; the memo makes the
+        # item's sub-components and a shared child type one read each
+        lists = []
+        for into in intos:
+            shown, lerr = _link_target(api, part_id, into) if into else (part_id, None)
+            positions = []
+            if not lerr:
+                try:
+                    positions = _map_positions(api, inst, shown)
+                except Exception as e:
+                    lerr = f"couldn’t read the item’s positions — {e}"
+            lists.append({"into": into, "target": shown if not lerr else None, "positions": positions, "error": lerr})
+        return JsonResponse({"lists": lists})
     shown = part_id   # the item whose positions are listed
-    into = (request.GET.get("into") or "").strip()
+    into = intos[0] if intos else ""
     if into:
         shown, err = _link_target(api, part_id, into)
         if err:
@@ -3479,7 +3495,7 @@ def explore_checklist_view(request, part_id, name):
             return _checklist_pending(request, inst, part_id, name, page_url, FNAL_UNAVAILABLE)   # #151
         messages.error(request, FNAL_UNAVAILABLE)
         return redirect(_rev(request, "explore:part", args=[part_id]))
-    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer, memo=True)   # #172: types / sub-components read once
     ptid = part_id.rsplit("-", 1)[0]
     schema, msg = checklistforms.load(api, ptid, name)
     if schema is None:

@@ -90,6 +90,29 @@ ITEM_POST = {"item-card": "1", "item-manufacturer": "8", "item-status": "130",
              "item-arrived": "2026-08-26T10:00", "item-test_comments": "looks fine"}
 
 
+def _memo_client(api):
+    """#172: a REAL ``FnalDbApiClient(memo=True)`` whose session answers
+    type / sub-component GETs from the MagicMock ``api`` — so a view's
+    repeated reads are counted on the mock only when the memo misses."""
+    from hwdb.api_client import FnalDbApiClient
+    real = FnalDbApiClient("https://x/api", "b", memo=True)
+
+    def fake(method, url, headers=None, json=None, params=None):
+        path = url.split("/api/", 1)[1]
+        r = mock.Mock(); r.ok = True
+        if method == "GET" and path.startswith("component-types/") and path.count("/") == 1:
+            r.json.return_value = api.get_component_type(path.split("/")[1])
+        elif method == "GET" and path.endswith("/subcomponents"):
+            r.json.return_value = api.get_subcomponents(path.split("/")[1])
+        elif method == "PATCH" and path.endswith("/subcomponents"):
+            r.json.return_value = api.patch_subcomponents(path.split("/")[1], json)
+        else:
+            raise AssertionError(f"unexpected {method} {path}")
+        return r
+    real.session.request = fake
+    return real
+
+
 def _mocked(api):
     return (mock.patch("explore.views.mint_for", return_value="bearer"),
             mock.patch("explore.views.FnalDbApiClient", return_value=api))
@@ -2628,6 +2651,23 @@ class AssemblyFieldTest(TestCase):
         with m1, m2:
             html = self.client.get(f"/hw/dev/part/{PTID}-blank/checklist/{NAME}/").content.decode()
         self.assertIn("The sub-components of the item in “SC1” show here on its page.", html)
+
+    def test_one_map_get_answers_every_list_on_the_page(self):
+        # #172: the page asks for all its lists at once (into "" = the item
+        # itself) and each sub-assembly's reads happen once
+        api = self._into_api()
+        m1, m2 = _mocked(_memo_client(api))
+        with m1, m2:
+            body = json.loads(self.client.get(f"/hw/dev/checklist-map/{PART}/?into=&into=SC1&into=SC2").content)
+        self.assertEqual([(l["into"], l["target"], l["error"] is None) for l in body["lists"]],
+                         [("", PART, True), ("SC1", f"{self.SC}-00001", True), ("SC2", None, False)])
+        self.assertEqual([p["position"] for p in body["lists"][0]["positions"]], ["SC1", "SC2"])
+        self.assertEqual([(p["position"], p["part_id"]) for p in body["lists"][1]["positions"]],
+                         [("P1", None), ("P2", None), ("P3", "D00400300001-00099")])
+        self.assertEqual(body["lists"][2]["error"], f"position “SC2” of {PART} is empty — link the sub-assembly there first.")
+        # the memo: the item's sub-components and each type once
+        self.assertEqual(sorted(c.args[0] for c in api.get_subcomponents.call_args_list), [f"{self.SC}-00001", PART])
+        self.assertEqual(sorted(c.args[0] for c in api.get_component_type.call_args_list), [self.SC, PTID])
 
     def test_into_with_the_position_empty_is_an_error_and_the_submit_snapshots_the_sub_assembly(self):
         api = self._into_api(occupied=False)

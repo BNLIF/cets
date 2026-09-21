@@ -291,9 +291,23 @@
         document.querySelectorAll(LINKERS).forEach(function (o) { if (o !== map && o.getAttribute("data-link-url") === url) mapState(o, { positions: d.positions, target: d.target }); });
       });
   }
-  function refreshLinkers() {   // one GET per distinct item shown (the item, a sub-assembly in a position)
-    var seen = {};
-    document.querySelectorAll(LINKERS).forEach(function (m) { var u = m.getAttribute("data-link-url"); if (!seen[u]) { seen[u] = 1; mapCall(m); } });
+  function refreshLinkers() {   // one GET for every list on the page (the item, the sub-assemblies in positions)
+    var byUrl = {}, order = [];
+    document.querySelectorAll(LINKERS).forEach(function (m) { var u = m.getAttribute("data-link-url"); if (!byUrl[u]) { byUrl[u] = []; order.push(u); } byUrl[u].push(m); });
+    if (order.length <= 1) { if (order.length) mapCall(byUrl[order[0]][0]); return; }
+    var base = order[0].split("?")[0], intoOf = {};
+    order.forEach(function (u) { var q = u.split("?")[1] || "", m = /(?:^|&)into=([^&]*)/.exec(q); intoOf[u] = m ? decodeURIComponent(m[1]) : ""; });
+    fetch(base + "?" + order.map(function (u) { return "into=" + encodeURIComponent(intoOf[u]); }).join("&"), { credentials: "same-origin" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var lists = {};
+        (d.lists || []).forEach(function (l) { lists[l.into] = l; });
+        order.forEach(function (u) {
+          var l = lists[intoOf[u]] || { positions: [], error: d.error || "HWDB not reachable" };
+          byUrl[u].forEach(function (m) { mapState(m, { positions: l.positions, target: l.target, error: l.error }); });
+        });
+      })
+      .catch(function () { order.forEach(function (u) { byUrl[u].forEach(function (m) { mapState(m, { positions: [], error: "HWDB not reachable" }); }); }); });
   }
   refreshLinkers();
   document.addEventListener("click", function (e) {

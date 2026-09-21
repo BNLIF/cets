@@ -106,3 +106,44 @@ class FnalDbApiClientSessionTest(TestCase):
         self.assertEqual(args[0], "POST")
         self.assertEqual(args[1], "https://example/api/component-types/D00599800007/test-types")
         self.assertEqual(kwargs["json"], payload)
+
+
+class FnalDbApiClientMemoTest(TestCase):
+    """#172: ``memo=True`` answers a repeated type / sub-components GET from
+    the client's own memo — a checklist page with four supercell tables
+    read the same type eight times. Writes drop it; other GETs are never
+    memoised; the caller gets its own copy."""
+
+    def _api(self, memo=True):
+        api = FnalDbApiClient("https://example/api", "b", memo=memo)
+        self.calls = []
+
+        def fake(method, url, headers=None, json=None, params=None):
+            self.calls.append((method, url.split("/api/")[1]))
+            r = mock.Mock(); r.ok = True
+            r.json.return_value = {"status": "OK", "data": {"connectors": {"P1": "D004"}, "n": len(self.calls)}}
+            return r
+        api.session.request = fake
+        return api
+
+    def test_repeated_reads_hit_the_memo_and_writes_drop_it(self):
+        api = self._api()
+        a = api.get_component_type("Z104")
+        b = api.get_component_type("Z104")
+        api.get_subcomponents("Z104-00001"); api.get_subcomponents("Z104-00001")
+        self.assertEqual(self.calls, [("GET", "component-types/Z104"), ("GET", "components/Z104-00001/subcomponents")])
+        self.assertEqual(a, b)
+        a["data"]["connectors"]["P1"] = "changed"      # the caller's copy, not the memo's
+        self.assertEqual(api.get_component_type("Z104")["data"]["connectors"]["P1"], "D004")
+        api.patch_subcomponents("Z104-00001", {"component": {"part_id": "Z104-00001"}, "subcomponents": {}})
+        api.get_subcomponents("Z104-00001")
+        self.assertEqual([c for c in self.calls if c[0] == "GET"][-1], ("GET", "components/Z104-00001/subcomponents"))
+        self.assertEqual(len(self.calls), 4)                 # 2 reads, the write, the re-read
+
+    def test_other_reads_and_memo_off_are_untouched(self):
+        api = self._api()
+        api.get_component("Z104-00001"); api.get_component("Z104-00001")
+        self.assertEqual(len(self.calls), 2)
+        api = self._api(memo=False)
+        api.get_component_type("Z104"); api.get_component_type("Z104")
+        self.assertEqual(len(self.calls), 2)
