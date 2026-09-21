@@ -2852,6 +2852,25 @@ class PlotFieldTest(TestCase):
         self.assertIn('if (p.hasAttribute("data-ref")) return;', html)
 
 
+    def test_field_labels_are_found_when_the_named_section_is_misspelt(self):
+        # Chao 2026-09-21 (Anselmo's empty plot: section title mistyped):
+        # with `fields` set, labels the named sections don't hold are
+        # looked for in every section — the collector's fallback
+        schema = {"name": "PDS", "test_type_name": "PDS", "sections": [
+            {"title": "SiPMs boards and WLS bar", "fields": [{"type": "table", "label": "Boards", "link": True, "type_id": "D00400300001", "columns": ["1"]}]},
+            {"title": "Plots", "fields": [{"type": "plot", "label": "Vbd", "plot": self.URL, "sections": ["SiPM boards"], "fields": ["Boards"]}]}]}
+        api = _api(schema=schema, test_types=("ES", "PDS"))
+        api.get_component_type.return_value = {"data": {"connectors": {}, "properties": {"specifications": [{"datasheet": {"DATA": {}}}]}}}
+        api.get_subcomponents.return_value = {"data": []}
+        self.client.force_login(get_user_model().objects.create_user("t", "t@t.io", "pw"))
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('if (!picked.length && secs.length) picked = pick(Array.prototype.slice.call(document.querySelectorAll(".cl-sec[data-title]")));', html)
+        self.assertIn('["SiPM boards"]', html)   # the (wrong) section still travels with the field
+        self.assertIn('["Boards"]', html)
+
+
 class SectionGridTest(TestCase):
     """#120: a section's column grid — col/span/newline per field, placed
     server-side into explicit coordinates."""

@@ -405,10 +405,13 @@
     // the checklist's own sections only — not the Item card, not the page's controls
     var roots = Array.prototype.filter.call(document.querySelectorAll(".cl-sec[data-title]"), function (s) {
       return !secs.length || secs.indexOf(s.getAttribute("data-title")) >= 0; });
-    // named fields only (a table among three in one section), when the field says so
+    // named fields only (a table among three in one section), when the field says so;
+    // labels that the named sections don't hold are looked for in every section
+    // (Chao 2026-09-21: a unique table name shouldn't need the section spelled right)
     if (flds.length) {
-      var picked = [];
-      roots.forEach(function (r) { Array.prototype.forEach.call(r.querySelectorAll(".cl-field[data-label]"), function (f) { if (flds.indexOf(f.getAttribute("data-label")) >= 0) picked.push(f); }); });
+      var pick = function (rs) { var out = []; rs.forEach(function (r) { Array.prototype.forEach.call(r.querySelectorAll(".cl-field[data-label]"), function (f) { if (flds.indexOf(f.getAttribute("data-label")) >= 0) out.push(f); }); }); return out; };
+      var picked = pick(roots);
+      if (!picked.length && secs.length) picked = pick(Array.prototype.slice.call(document.querySelectorAll(".cl-sec[data-title]")));
       roots = picked;
     }
     var out = [], seen = {};
