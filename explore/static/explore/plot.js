@@ -412,18 +412,22 @@
     // ROOT-style stats box, one per drawn numeric series: Entries / Mean / Std Dev.
     var statsBox = { id: "statsBox", afterDatasetsDraw: function (ch) {
         var rows = (ch.options.plugins.statsBox || {}).rows; if (!rows || !rows.length) return;
-        var ctx = ch.ctx, a = ch.chartArea, w = 168, h = 58, x = a.right - w - 6, y = a.top + 6 + (EMBED ? 26 : 0);   // embed: below the floating buttons
-        if (a.right - a.left < (EMBED ? 240 : 480)) return;   // a narrow plot keeps its area; the status strip has the numbers (an embed is narrow by nature)
+        var ctx = ch.ctx, a = ch.chartArea, aw = a.right - a.left, w = 168, h = 58, fs = 11, x = a.right - w - 6, y = a.top + 6 + (EMBED ? 26 : 0);   // embed: below the floating buttons
+        if (!EMBED && aw < 480) return;   // a narrow plot keeps its area; the status strip has the numbers
+        if (EMBED && aw < 240) {          // a checklist cell (Anselmo 2026-09-21: one of four columns, 150-280 px): a compact box, top-left, the numbers still read
+            if (aw < 120) return;
+            w = Math.min(140, aw - 8); h = 50; fs = 9.5; x = a.left + 4;
+        }
         ctx.save();
         rows.forEach(function (r) {
             ctx.fillStyle = "rgba(254,252,247,.92)"; ctx.strokeStyle = r.color; ctx.lineWidth = 1;
             ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
             ctx.textBaseline = "middle"; ctx.textAlign = "left";
-            ctx.font = "600 11px 'IBM Plex Mono', ui-monospace, monospace"; ctx.fillStyle = r.color; ctx.fillText(r.name, x + 8, y + 12);
-            ctx.font = "11px 'IBM Plex Mono', ui-monospace, monospace"; ctx.fillStyle = "#2a241b";
+            ctx.font = "600 " + fs + "px 'IBM Plex Mono', ui-monospace, monospace"; ctx.fillStyle = r.color; ctx.fillText(r.name, x + 6, y + fs + 1);
+            ctx.font = fs + "px 'IBM Plex Mono', ui-monospace, monospace"; ctx.fillStyle = "#2a241b";
             [["Entries", r.n.toLocaleString()], ["Mean", fmt(r.mean)], ["Std Dev", fmt(r.sd)]].forEach(function (row, k) {
-                ctx.textAlign = "left"; ctx.fillText(row[0], x + 8, y + 26 + k * 13);
-                ctx.textAlign = "right"; ctx.fillText(row[1], x + w - 8, y + 26 + k * 13);
+                ctx.textAlign = "left"; ctx.fillText(row[0], x + 6, y + fs * 2.4 + k * (fs + 2));
+                ctx.textAlign = "right"; ctx.fillText(row[1], x + w - 6, y + fs * 2.4 + k * (fs + 2));
             });
             y += h + 6;
         });

@@ -118,7 +118,11 @@ class PlotViewsTest(TestCase):
         self.assertIn(".pl-status { display: none; }", html)
         self.assertIn(".pl-plotwrap > canvas { position: absolute; inset: 0; }", html)
         self.assertIn("y = a.top + 6 + (EMBED ? 26 : 0)", PLOT_JS)
-        self.assertIn("if (a.right - a.left < (EMBED ? 240 : 480)) return;", PLOT_JS)
+        self.assertIn("if (!EMBED && aw < 480) return;", PLOT_JS)
+        # Anselmo 2026-09-21: a plot in one of four grid columns (150-280 px) still gets its stats — a compact box, top-left
+        self.assertIn("if (EMBED && aw < 240) {", PLOT_JS)
+        self.assertIn("w = Math.min(140, aw - 8); h = 50; fs = 9.5; x = a.left + 4;", PLOT_JS)
+        self.assertIn("if (aw < 120) return;", PLOT_JS)
         self.assertIn("function pidFilter(s) { if (IDS) return idsFilter();", PLOT_JS)
         self.assertIn("(bySn[normSn(it.serial)] = bySn[normSn(it.serial)] || []).push(it.pid);", PLOT_JS)   # #168: every holder
         self.assertIn('d.replace(/^0+(?=\\d)/, "")', PLOT_JS)          # HPK19843 finds HPK019843
