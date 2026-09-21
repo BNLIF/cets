@@ -3591,7 +3591,7 @@ def explore_checklist_view(request, part_id, name):
     # a code of another type (or off the pattern) before it is sent
     bound = checklistforms.bind(schema, display_td)
     for _t, f in checklistforms.leaf_fields(bound):
-        if f["type"] == "table" and f.get("link"):
+        if (f["type"] == "table" and f.get("link")) or f["type"] in ("qr", "link"):   # #171: single fields too
             q = {"target": part_id, "free": "1"}
             if f.get("type_id"):
                 q["type"] = f["type_id"]

@@ -298,8 +298,15 @@
       fd.append("id", s.id); fd.append("ok", ok ? "1" : "0"); fd.append("message", msg);
       fetch(panel.getAttribute("data-ack"), { method: "POST", body: fd, credentials: "same-origin", headers: { "X-CSRFToken": csrf() } }).catch(function () {});
     }
-    function where(cell) {   // "Left · 2": the row label and the column header
-      var tbl = cell.closest("table"), td = cell.closest("td"), tr = td.parentNode, lab = tr.querySelector(".cl-rowlab");
+    function where(cell) {   // "Left · 2": the row label and the column header; a single field: its label
+      var tbl = cell.closest("table"), td = cell.closest("td");
+      if (!td) {   // the label without its hints ("type …", "links a sub-component …")
+        var l = cell.closest(".cl-field").querySelector(".cl-lab");
+        if (!l) return cell.name;
+        var c = l.cloneNode(true); c.querySelectorAll(".cl-hint").forEach(function (h) { h.remove(); });
+        return c.textContent.trim();
+      }
+      var tr = td.parentNode, lab = tr.querySelector(".cl-rowlab");
       var col = tbl.tHead ? tbl.tHead.rows[0].cells[Array.prototype.indexOf.call(tr.children, td)] : null;
       return (lab && lab.firstChild ? lab.firstChild.textContent.trim() + " · " : "") + (col ? col.textContent.trim() : "");
     }
@@ -310,6 +317,7 @@
       if (next) next.classList.add("cl-cursor");
     }
     function nextEmpty() {   // from the cursor on, wrapping to the cells before it
+      if (live.single) return live.placed ? null : live.cells[0];   // one field: the scan replaces its value, then done
       var n = live.cells.length, from = Math.max(live.cells.indexOf(live.cursor), 0);
       for (var k = 0; k < n; k++) { var c = live.cells[(from + k) % n]; if (!c.value.trim()) return c; }
       return null;
@@ -323,10 +331,10 @@
       live = null;
       paintCursor();
     }
-    function start(btn, scope, panel, what) {
+    function start(btn, scope, panel, what, single) {
       if (live) stop();
       if (since === null) since = +panel.getAttribute("data-since") || 0;
-      live = { btn: btn, scope: scope, panel: panel, cells: cellsOf(scope), cursor: null,
+      live = { btn: btn, scope: scope, panel: panel, cells: single ? [single] : cellsOf(scope), cursor: null, single: !!single,
                feed: panel.getAttribute("data-feed"), tbl: scope.closest("table") || scope, what: what, fresh: true };
       live.cursor = live.cells[0] || null;
       if (!nextEmpty()) { live = null; panel.hidden = false; panel.querySelector(".cl-phone-status").textContent = what + " is full"; return; }
@@ -338,7 +346,7 @@
     }
     function take(s) {
       var v = String(s.pid || "").trim(), panel = live.panel;
-      var all = cellsOf(live.tbl).map(function (i) { return i.value.trim().toUpperCase(); });
+      var all = live.single ? [] : cellsOf(live.tbl).map(function (i) { return i.value.trim().toUpperCase(); });
       if (all.indexOf(v.toUpperCase()) >= 0) { status(v + " is already in the table"); ack(panel, s, false, "already in the table"); return; }
       var cell = nextEmpty();
       if (!cell) { ack(panel, s, false, live.what + " is full — not placed"); stop(live.what + " is full — " + v + " not placed"); return; }
@@ -347,8 +355,8 @@
       cell.classList.remove("cl-just"); void cell.offsetWidth; cell.classList.add("cl-just");
       cell.dispatchEvent(new Event("input", { bubbles: true }));   // type guard / serial lookup as if typed
       cell.scrollIntoView({ block: "nearest", inline: "nearest" });
-      live.cursor = cell;
-      if (!nextEmpty()) { stop(live.what + " is full"); return; }
+      live.cursor = cell; live.placed = true;
+      if (!nextEmpty()) { stop(live.single ? v + " placed" : live.what + " is full"); return; }
       status(v + " placed — listening for " + live.what + "…");
       paintCursor();
     }
@@ -375,6 +383,8 @@
         var fld = b.closest(".cl-field"), panel = fld.querySelector(".cl-phone-panel");
         if (!panel) return;
         if (live && live.btn === b) { stop(); return; }
+        var one = b.getAttribute("data-target") ? document.getElementById(b.getAttribute("data-target")) : null;
+        if (one) { start(b, one, panel, "“" + where(one) + "”", one); return; }   // #171: a link / qr field
         var row = b.closest("tr");
         var lab = row ? row.querySelector(".cl-rowlab") : null;
         start(b, row || fld.querySelector("table"), panel, row ? "row “" + (lab && lab.firstChild ? lab.firstChild.textContent.trim() : "") + "”" : "the table");
