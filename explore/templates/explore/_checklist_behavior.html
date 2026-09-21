@@ -151,7 +151,7 @@
     // each occupant links to its item page (Chao 2026-09-21); the URL pattern carries this item's PID to swap
     var partUrl = tbody ? tbody.parentNode.getAttribute("data-part-url") || "" : "";
     function partLink(pid) {
-      return partUrl ? '<a href="' + esc(partUrl.replace(/\/[A-Z]\d{11}-\d{5}\//, "/" + pid + "/")) + '">' + esc(pid) + "</a>" : esc(pid);
+      return partUrl ? '<a href="' + esc(partUrl.replace(/\/[A-Z]\d{11}-\d{5}\//, "/" + pid + "/")) + '" target="_blank" rel="noopener">' + esc(pid) + "</a>" : esc(pid);
     }
     if (tbody) tbody.innerHTML = state.length ? state.map(function (p) {
       return "<tr" + (p.part_id && p.part_id === just ? ' class="now"' : "") + "><td>" + esc(p.child_type_name) +
