@@ -2852,10 +2852,10 @@ class PlotFieldTest(TestCase):
         self.assertIn('if (p.hasAttribute("data-ref")) return;', html)
 
 
-    def test_field_labels_are_found_when_the_named_section_is_misspelt(self):
-        # Chao 2026-09-21 (Anselmo's empty plot: section title mistyped):
-        # with `fields` set, labels the named sections don't hold are
-        # looked for in every section — the collector's fallback
+    def test_a_section_or_field_the_form_lacks_is_named_under_the_empty_box(self):
+        # Anselmo 2026-09-21: a misspelt section title left the plot empty
+        # without a word — the collector now says which name the form lacks
+        # (it never guesses another section: Anselmo called that dangerous)
         schema = {"name": "PDS", "test_type_name": "PDS", "sections": [
             {"title": "SiPMs boards and WLS bar", "fields": [{"type": "table", "label": "Boards", "link": True, "type_id": "D00400300001", "columns": ["1"]}]},
             {"title": "Plots", "fields": [{"type": "plot", "label": "Vbd", "plot": self.URL, "sections": ["SiPM boards"], "fields": ["Boards"]}]}]}
@@ -2866,9 +2866,9 @@ class PlotFieldTest(TestCase):
         m1, m2 = _mocked(api)
         with m1, m2:
             html = self.client.get(PAGE).content.decode()
-        self.assertIn('if (!picked.length && secs.length) picked = pick(Array.prototype.slice.call(document.querySelectorAll(".cl-sec[data-title]")));', html)
-        self.assertIn('["SiPM boards"]', html)   # the (wrong) section still travels with the field
-        self.assertIn('["Boards"]', html)
+        self.assertIn('return "no section named “" + t + "” in this form"', html)
+        self.assertIn('p._missing.push("no field named “" + l + "”"', html)
+        self.assertIn("check the plot field’s sections and fields.", html)
 
 
 class SectionGridTest(TestCase):

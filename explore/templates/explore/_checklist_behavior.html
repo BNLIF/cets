@@ -403,15 +403,17 @@
     var type = p.getAttribute("data-type"), secs = namesOf(p, "-secs"), flds = namesOf(p, "-flds"), re = null, sn = p.getAttribute("data-sn");
     if (sn) { try { re = new RegExp("^(?:" + sn + ")$", "i"); } catch (e) {} }
     // the checklist's own sections only — not the Item card, not the page's controls
-    var roots = Array.prototype.filter.call(document.querySelectorAll(".cl-sec[data-title]"), function (s) {
-      return !secs.length || secs.indexOf(s.getAttribute("data-title")) >= 0; });
-    // named fields only (a table among three in one section), when the field says so;
-    // labels that the named sections don't hold are looked for in every section
-    // (Chao 2026-09-21: a unique table name shouldn't need the section spelled right)
+    var all = Array.prototype.slice.call(document.querySelectorAll(".cl-sec[data-title]"));
+    var roots = all.filter(function (s) { return !secs.length || secs.indexOf(s.getAttribute("data-title")) >= 0; });
+    // a name the form doesn't have is said so under the empty box (Anselmo 2026-09-21:
+    // a section title spelt differently — the plot stayed empty without a word)
+    var have = all.map(function (s) { return s.getAttribute("data-title"); });
+    p._missing = secs.filter(function (t) { return have.indexOf(t) < 0; }).map(function (t) { return "no section named “" + t + "” in this form"; });
+    // named fields only (a table among three in one section), when the field says so
     if (flds.length) {
-      var pick = function (rs) { var out = []; rs.forEach(function (r) { Array.prototype.forEach.call(r.querySelectorAll(".cl-field[data-label]"), function (f) { if (flds.indexOf(f.getAttribute("data-label")) >= 0) out.push(f); }); }); return out; };
-      var picked = pick(roots);
-      if (!picked.length && secs.length) picked = pick(Array.prototype.slice.call(document.querySelectorAll(".cl-sec[data-title]")));
+      var picked = [], labels = [];
+      roots.forEach(function (r) { Array.prototype.forEach.call(r.querySelectorAll(".cl-field[data-label]"), function (f) { labels.push(f.getAttribute("data-label")); if (flds.indexOf(f.getAttribute("data-label")) >= 0) picked.push(f); }); });
+      if (!p._missing.length) flds.forEach(function (l) { if (labels.indexOf(l) < 0) p._missing.push("no field named “" + l + "”" + (secs.length ? " in " + secs.join(", ") : " in this form")); });
       roots = picked;
     }
     var out = [], seen = {};
@@ -437,7 +439,12 @@
     var hash = "#" + encodeURIComponent(JSON.stringify(cfg)), base = p.getAttribute("data-plot");
     open.href = base + hash; open.hidden = !ids.length;
     frame.hidden = !ids.length; empty.hidden = !!ids.length;
-    if (!ids.length) return;
+    if (!ids.length) {
+      if (!empty._text) empty._text = empty.textContent;
+      empty.textContent = (p._missing || []).length ? p._missing.join(" · ") + " — check the plot field’s sections and fields." : empty._text;
+      empty.classList.toggle("cl-bad-text", !!(p._missing || []).length);
+      return;
+    }
     var src = base + "?embed=1" + hash;
     if (frame.getAttribute("src") === src) return;
     // a loaded frame takes the new entries through its hash — same document,
