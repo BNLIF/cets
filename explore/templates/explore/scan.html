@@ -34,6 +34,11 @@
     <h1>Scan items into <span style="font-family:ui-monospace,monospace;">{{ box }}</span></h1>
     <p>Scanning as <strong>{{ user.get_username }}</strong> — each scanned item is added to the box
       immediately; you’ll see a warning here if one can’t be.</p>
+    {% elif target %}
+    <h1>Scan into the checklist of <span style="font-family:ui-monospace,monospace;">{{ target }}</span></h1>
+    <p>Scanning as <strong>{{ user.get_username }}</strong> — each code lands in the next cell of the
+      table row you started scanning for, on the checklist page you have open, if it is signed in as the same user.{% if scan_type %}
+      Items of type <span style="font-family:ui-monospace,monospace;">{{ scan_type }}</span>{% if scan_sn %}, or a serial number like <span style="font-family:ui-monospace,monospace;">{{ scan_sn }}</span>{% endif %}.{% endif %}</p>
     {% else %}
     <h1>Scan items into your packing page</h1>
     <p>Scanning as <strong>{{ user.get_username }}</strong> — PIDs appear on the “Add items” page
@@ -52,7 +57,7 @@
     <div id="zoomWrap"><input id="zoomSlider" type="range"></div>
     <div id="status">Tap “Start camera” and point at a label’s QR code or barcode.</div>
     <form id="manualForm" class="row">
-      <input type="text" id="manualText" placeholder="…or type/paste a PID" autocomplete="off"
+      <input type="text" id="manualText" placeholder="…or type/paste a {% if free %}PID or serial number{% else %}PID{% endif %}" autocomplete="off"
              autocapitalize="characters">
       <button class="btn" type="submit">Send</button>
     </form>
@@ -64,6 +69,29 @@
   (function () {
     var SUBMIT_URL = "{{ submit_url }}";
     var BOX = "{{ box }}";
+    var TARGET = "{{ target }}", FREE = {{ free|yesno:"true,false" }};   // #170: a checklist's table
+    var TYPE = "{{ scan_type }}", SN = "{{ scan_sn|escapejs }}", sentBefore = {};
+    var OUTCOME_URL = "{{ outcome_url }}", pending = {}, outcomeT = null;
+    // the checklist's table takes items of TYPE (a PID of another type is
+    // refused here, like the page's own Scan button) and serial numbers —
+    // any non-PID text, or a full match of SN when the table has a pattern.
+    // A code already sent in this session is refused: the page would refuse
+    // the duplicate anyway, and the scanner sees it here.
+    function extractPid(text) {
+      var m = /https?:\/\/[^\/\s]+\/(?:cdbdev|cdb)\/view\/component\/([A-Za-z]\d{11}-\d{5})/i.exec(text)
+           || /\b([A-Z]\d{11}-\d{5})\b/.exec(text)
+           || /\b([A-Z]\d{11}-\d{5})(?:-[A-Za-z0-9]+)*\b/.exec(text);
+      return m ? m[1].toUpperCase() : "";
+    }
+    function refused(text) {
+      if (!TARGET) return "";
+      var pid = extractPid(text), code = pid || text.trim();
+      if (pid) { if (TYPE && pid.indexOf(TYPE + "-") !== 0) return "expected type " + TYPE; }
+      else if (!FREE) return "no PID in the scanned text";
+      else if (SN) { try { if (!new RegExp("^(?:" + SN + ")$").test(code)) return "not a PID or a serial number like " + SN; } catch (e) {} }
+      if (sentBefore[code.toUpperCase()]) return "already scanned";
+      return "";
+    }
     var csrf = document.querySelector("#csrf input[name=csrfmiddlewaretoken]").value;
     var statusEl = document.getElementById("status");
     var sentList = document.getElementById("sent");
@@ -75,14 +103,18 @@
       var now = Date.now();
       if (recent[text] && now - recent[text] < 4000) return;
       recent[text] = now;
+      var why = refused(text);
+      if (why) { setStatus("✗ " + why + " — “" + text + "”", "bad"); if (navigator.vibrate) navigator.vibrate([120, 60, 120]); return; }
       var fd = new FormData();
       fd.append("csrfmiddlewaretoken", csrf);
       fd.append("text", text);
       if (BOX) fd.append("box", BOX);
+      if (TARGET) { fd.append("target", TARGET); if (FREE) fd.append("free", "1"); if (TYPE) fd.append("type", TYPE); }
       var r, j;
       try { r = await fetch(SUBMIT_URL, { method: "POST", body: fd }); j = await r.json(); }
       catch (e) { setStatus("✗ Send failed: " + e, "bad"); return; }
       if (!r.ok) { setStatus("✗ " + (j.error || "rejected") + " — “" + text + "”", "bad"); return; }
+      if (TARGET) sentBefore[String(j.pid || text).trim().toUpperCase()] = true;
       var okAdd = (j.ok !== false);  // null = legacy select mode, true = added
       if (j.ok === true) {
         setStatus("✓ " + j.pid + " " + j.message + " — keep scanning.", "ok");
@@ -90,11 +122,15 @@
       } else if (j.ok === false) {
         setStatus("✗ " + j.pid + " " + j.message, "bad");
         if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
+      } else if (TARGET) {
+        setStatus("✓ Sent " + j.pid + " — waiting for the checklist page…", "ok");
+        if (navigator.vibrate) navigator.vibrate(80);
       } else {
         setStatus("✓ Sent " + j.pid + " — keep scanning.", "ok");
         if (navigator.vibrate) navigator.vibrate(80);
       }
       var li = document.createElement("li");
+      if (TARGET && j.id) { pending[j.id] = { li: li, at: Date.now(), pid: j.pid }; if (!outcomeT) outcomeT = setInterval(pollOutcomes, 1500); }
       li.textContent = (j.ok === null || j.ok === undefined ? "" : (okAdd ? "✓ " : "✗ ")) + j.pid;
       if (j.message) {
         li.style.color = okAdd ? "#8fce8f" : "#e08a8a";
@@ -104,6 +140,33 @@
       t.className = "t"; t.textContent = new Date().toLocaleTimeString();
       li.appendChild(t);
       sentList.insertBefore(li, sentList.firstChild);
+    }
+
+    // the checklist page says what became of each scan (placed / row full /
+    // duplicate / nobody listening) — shown on the line and in the status;
+    // nothing heard in 15 s = no checklist page is listening
+    function settle(id, ok, msg) {
+      var p = pending[id];
+      if (!p) return;
+      delete pending[id];
+      p.li.textContent = (ok ? "✓ " : "✗ ") + p.pid + " — " + msg;
+      p.li.style.color = ok ? "#8fce8f" : "#e08a8a";
+      var t = document.createElement("span");
+      t.className = "t"; t.textContent = new Date().toLocaleTimeString();
+      p.li.appendChild(t);
+      setStatus((ok ? "✓ " : "✗ ") + p.pid + " — " + msg + (ok ? " — keep scanning." : ""), ok ? "ok" : "bad");
+      if (!ok && navigator.vibrate) navigator.vibrate([120, 60, 120]);
+    }
+    async function pollOutcomes() {
+      var ids = Object.keys(pending);
+      if (!ids.length) { clearInterval(outcomeT); outcomeT = null; return; }
+      var r, j;
+      try { r = await fetch(OUTCOME_URL + "?ids=" + ids.join(",")); j = await r.json(); } catch (e) { return; }
+      if (r.ok && j.scans) j.scans.forEach(function (s) { if (s.ok !== null) settle(s.id, s.ok, s.message); });
+      var now = Date.now();
+      Object.keys(pending).forEach(function (id) {
+        if (now - pending[id].at > 15000) settle(id, false, "no checklist page is listening — press the row’s scan button there");
+      });
     }
 
     // --- camera (the Dashboard's html5-qrcode recipe, continuous mode) ---

@@ -13,7 +13,7 @@ import requests
 from django.test import TestCase, override_settings
 
 from explore import checklistforms
-from explore.models import ChecklistDraft, HwdbComponentEvent, InstitutionPref
+from explore.models import PackScan, ChecklistDraft, HwdbComponentEvent, InstitutionPref
 from hwdb.fnal.bearer import FnalUnavailable
 
 PART = "Z00100300041-00150"
@@ -2506,6 +2506,36 @@ class TableLinkTest(TestCase):
         # Hajime: scan and pick per cell
         self.assertIn('<button type="button" class="cl-scan cl-cell-btn" data-target="f0-0-c0"', html)
         self.assertIn('<button type="button" class="cl-pick cl-cell-btn" data-target="f0-0-c0" data-free="1"', html)
+
+    def test_fill_page_offers_phone_scanning_per_row_and_for_the_table(self):
+        # #170 (Anselmo): a row is one physical location — its 📱 fills that
+        # row from the phone; the table's button fills in reading order. The
+        # panel carries the scan page (target = this item, free text) and
+        # the feed scoped to it, polled from the newest scan at load.
+        schema = {**self.SCHEMA, "sections": [{"title": "S", "fields": [
+            {**self.SCHEMA["sections"][0]["fields"][0], "rows": [{"label": "Left"}, {"label": "Right"}]}]}]}
+        api = _api(schema=schema, test_types=("ES", "SC"))
+        api.get_component_type.return_value = {"data": {"connectors": {"SC1": self.SC},
+                                                        "properties": {"specifications": [{"datasheet": {"DATA": {}}}]}}}
+        api.get_subcomponents.return_value = {"data": []}
+        old = PackScan.objects.create(instance="dev", username="t", part_id="X")
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('<th scope="row" class="cl-rowlab">Left <button type="button" class="cl-phone cl-cell-btn"', html)
+        self.assertIn('<th scope="row" class="cl-rowlab">Right <button type="button" class="cl-phone cl-cell-btn"', html)
+        self.assertIn('class="es-btn quiet cl-tbl-phone"', html)
+        self.assertIn(f'<div class="cl-phone-panel" hidden data-feed="/hw/dev/scan/feed/?target={PART}" data-ack="/hw/dev/scan/ack/" data-since="{old.id}">', html)
+        # the table's type and serial pattern ride on its scan page, so the phone can refuse a wrong code
+        self.assertIn(f'href="http://testserver/hw/dev/scan/?target={PART}&amp;free=1&amp;type={self.SIPM}&amp;sn=HPK%5Cd%7B5%7D"', html)
+        self.assertIn('<div class="cl-phone-qr"><svg', html)
+        self.assertIn("signed in as <strong>t</strong>", html)
+        # the device's blank form has no item to scan for
+        with m1, m2:
+            html = self.client.get(f"/hw/dev/part/{PTID}-blank/checklist/{NAME}/").content.decode()
+        self.assertNotIn('class="cl-phone cl-cell-btn"', html)
+        self.assertNotIn('class="es-btn quiet cl-tbl-phone"', html)
+        self.assertNotIn('<div class="cl-phone-panel"', html)
 
 
 class AssemblyFieldTest(TestCase):

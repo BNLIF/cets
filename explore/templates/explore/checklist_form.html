@@ -174,7 +174,7 @@
     el.classList.remove("cl-bad", "cl-ok");
     var v = el.value.trim().toUpperCase(), tid = el.getAttribute("data-type-id"), n = serialNote(el);
     clearTimeout(serialT[el.id]);
-    if (n && n.getAttribute("data-pid") !== v) n.remove();   // the "serial → PID" note follows its PID
+    if (n && n.getAttribute("data-pid") !== v) { n.remove(); if (el.classList.contains("cl-pidcell")) el.title = ""; }   // the "serial → PID" note follows its PID
     if (!v) return;
     if (v.indexOf(tid + "-") === 0) { el.classList.add("cl-ok"); return; }
     if (!snMatch(el, el.value.trim())) { el.classList.add("cl-bad"); return; }
@@ -195,6 +195,8 @@
                       : d.failed ? "serial number lookup failed — offline? try again later"
                       : many ? "serial number " + serial + " is on " + d.pids.length + " items: " + d.pids.join(", ") + " — enter the PID"
                       : "no item of type " + tid + " has serial " + serial;
+        // a table cell keeps its size: the resolution goes to the tooltip, only a failure shows under the cell (wrapped)
+        if (el.classList.contains("cl-pidcell")) { el.title = n.textContent; n.classList.toggle("cl-serial-err", !d.pid); }
         el.parentNode.appendChild(n);
         if (d.pid) {
           el.value = d.pid;
@@ -278,6 +280,113 @@
       var f = el.files && el.files[0];
       op("readwrite", function (st) { return f ? st.put(f, KEY + ":" + el.name) : st.delete(KEY + ":" + el.name); });
     });
+  })();
+
+  // #170: a linking table's cells fill from the user's phone — the row's 📱
+  // (or the table's "scan with phone") opens the panel with the scan page's
+  // QR, and the page polls this item's scan feed; each scan lands in the
+  // next empty cell of that row (the table: reading order) as if typed, so
+  // the type guard, serial lookup and "check" apply unchanged. Clicking a
+  // cell moves the cursor. One listener at a time.
+  (function () {
+    var live = null, timer = null, since = null;   // since: the newest scan seen, across listeners
+    function cellsOf(scope) { return Array.prototype.slice.call(scope.querySelectorAll("input.cl-pidcell")); }
+    function status(t) { if (live) live.panel.querySelector(".cl-phone-status").textContent = t; }
+    function csrf() { var i = document.querySelector('input[name="csrfmiddlewaretoken"]'); return i ? i.value : ""; }
+    function ack(panel, s, ok, msg) {   // the phone shows what became of the scan
+      var fd = new FormData();
+      fd.append("id", s.id); fd.append("ok", ok ? "1" : "0"); fd.append("message", msg);
+      fetch(panel.getAttribute("data-ack"), { method: "POST", body: fd, credentials: "same-origin", headers: { "X-CSRFToken": csrf() } }).catch(function () {});
+    }
+    function where(cell) {   // "Left · 2": the row label and the column header
+      var tbl = cell.closest("table"), td = cell.closest("td"), tr = td.parentNode, lab = tr.querySelector(".cl-rowlab");
+      var col = tbl.tHead ? tbl.tHead.rows[0].cells[Array.prototype.indexOf.call(tr.children, td)] : null;
+      return (lab && lab.firstChild ? lab.firstChild.textContent.trim() + " · " : "") + (col ? col.textContent.trim() : "");
+    }
+    function paintCursor() {
+      document.querySelectorAll("input.cl-cursor").forEach(function (i) { i.classList.remove("cl-cursor"); });
+      if (!live) return;
+      var next = nextEmpty();
+      if (next) next.classList.add("cl-cursor");
+    }
+    function nextEmpty() {   // from the cursor on, wrapping to the cells before it
+      var n = live.cells.length, from = Math.max(live.cells.indexOf(live.cursor), 0);
+      for (var k = 0; k < n; k++) { var c = live.cells[(from + k) % n]; if (!c.value.trim()) return c; }
+      return null;
+    }
+    function stop(msg) {
+      clearInterval(timer); timer = null;
+      if (!live) return;
+      live.panel.hidden = true;
+      live.btn.classList.remove("on");
+      status(msg || "");
+      live = null;
+      paintCursor();
+    }
+    function start(btn, scope, panel, what) {
+      if (live) stop();
+      if (since === null) since = +panel.getAttribute("data-since") || 0;
+      live = { btn: btn, scope: scope, panel: panel, cells: cellsOf(scope), cursor: null,
+               feed: panel.getAttribute("data-feed"), tbl: scope.closest("table") || scope, what: what, fresh: true };
+      live.cursor = live.cells[0] || null;
+      if (!nextEmpty()) { live = null; panel.hidden = false; panel.querySelector(".cl-phone-status").textContent = what + " is full"; return; }
+      panel.hidden = false; btn.classList.add("on");
+      status("listening for " + what + "…");
+      paintCursor();
+      poll();   // the first poll only clears what arrived while nobody listened
+      timer = setInterval(poll, 2000);
+    }
+    function take(s) {
+      var v = String(s.pid || "").trim(), panel = live.panel;
+      var all = cellsOf(live.tbl).map(function (i) { return i.value.trim().toUpperCase(); });
+      if (all.indexOf(v.toUpperCase()) >= 0) { status(v + " is already in the table"); ack(panel, s, false, "already in the table"); return; }
+      var cell = nextEmpty();
+      if (!cell) { ack(panel, s, false, live.what + " is full — not placed"); stop(live.what + " is full — " + v + " not placed"); return; }
+      ack(panel, s, true, "→ " + where(cell));
+      cell.value = v;
+      cell.classList.remove("cl-just"); void cell.offsetWidth; cell.classList.add("cl-just");
+      cell.dispatchEvent(new Event("input", { bubbles: true }));   // type guard / serial lookup as if typed
+      cell.scrollIntoView({ block: "nearest", inline: "nearest" });
+      live.cursor = cell;
+      if (!nextEmpty()) { stop(live.what + " is full"); return; }
+      status(v + " placed — listening for " + live.what + "…");
+      paintCursor();
+    }
+    function poll() {
+      if (!live) return;
+      var me = live;
+      fetch(me.feed + "&since=" + since, { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .catch(function () { return null; })
+        .then(function (j) {
+          if (!j || !j.scans || live !== me) return;
+          since = j.last;
+          // scans that arrived while nobody listened are not placed — the phone is told
+          if (me.fresh) { me.fresh = false; j.scans.forEach(function (s) { ack(me.panel, s, false, "nobody was listening — not placed"); }); return; }
+          // once the row filled (listener stopped), the rest of the batch is not placed
+          j.scans.forEach(function (s) { if (live === me) take(s); else ack(me.panel, s, false, me.what + " is full — not placed"); });
+        });
+    }
+    document.addEventListener("click", function (e) {
+      var x = e.target.closest && e.target.closest(".cl-phone-x");
+      if (x) { stop(); return; }
+      var b = e.target.closest && e.target.closest(".cl-phone, .cl-tbl-phone");
+      if (b) {
+        var fld = b.closest(".cl-field"), panel = fld.querySelector(".cl-phone-panel");
+        if (!panel) return;
+        if (live && live.btn === b) { stop(); return; }
+        var row = b.closest("tr");
+        var lab = row ? row.querySelector(".cl-rowlab") : null;
+        start(b, row || fld.querySelector("table"), panel, row ? "row “" + (lab && lab.firstChild ? lab.firstChild.textContent.trim() : "") + "”" : "the table");
+        return;
+      }
+      var c = e.target.closest && e.target.closest("input.cl-pidcell");
+      if (c && live && live.cells.indexOf(c) >= 0) { live.cursor = c; paintCursor(); }
+    });
+    document.addEventListener("input", function (e) {   // typing fills the cursor cell too
+      if (live && e.target.classList && e.target.classList.contains("cl-pidcell") && live.cells.indexOf(e.target) >= 0) paintCursor();
+    });
+    window.addEventListener("pagehide", function () { stop(); });
   })();
 
   // #151: browser autosave — the form's values go to localStorage on every

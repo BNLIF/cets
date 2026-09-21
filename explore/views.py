@@ -2221,16 +2221,31 @@ def explore_scan_view(request):
 
     Opened from a pack page, the URL carries ``?box=<PID>`` and each scan is
     linked into that box immediately (scan-to-cart); without a box, scans
-    just queue for the same username's open packing page (select mode)."""
+    just queue for the same username's open packing page (select mode).
+
+    #170: opened from a checklist's linking table, ``?target=<PID>`` names
+    the checklist item and ``free=1`` keeps the text as scanned (a serial
+    number as well as a PID) — the fill page resolves it in the cell."""
     inst = instance_of(request)
     if inst not in settings.HWDB_WRITE_INSTANCES:
         return HttpResponseForbidden("Scanning is not enabled here.")
     box = (request.GET.get("box") or "").strip()
     if not re.fullmatch(r"[A-Z]\d{11}-\d{5}", box):
         box = ""
+    target = (request.GET.get("target") or "").strip()
+    if not re.fullmatch(r"[A-Z]\d{11}-\d{5}", target):
+        target = ""
+    scan_type = (request.GET.get("type") or "").strip().upper()
+    if not target or not re.fullmatch(r"[A-Z]\d{11}", scan_type):
+        scan_type = ""
     return render(request, "explore/scan.html", {
         "submit_url": _rev(request, "explore:scan_submit"),
         "box": box,
+        "target": target,
+        "free": bool(target) and request.GET.get("free") == "1",
+        "outcome_url": _rev(request, "explore:scan_outcome"),
+        "scan_type": scan_type,   # the table's type: a PID of another type is refused on the phone
+        "scan_sn": (request.GET.get("sn") or "")[:200] if target else "",   # its serial pattern
     })
 
 
@@ -2249,7 +2264,28 @@ def explore_scan_submit_view(request):
     inst = instance_of(request)
     if inst not in settings.HWDB_WRITE_INSTANCES:
         return JsonResponse({"error": "writes disabled"}, status=403)
-    pid = scanning.extract_pid(request.POST.get("text") or "")
+    target = (request.POST.get("target") or "").strip()[:50]
+    text = (request.POST.get("text") or "").strip()
+    pid = scanning.extract_pid(text)
+    if target and request.POST.get("free") == "1" and not pid:   # #170: a serial number
+        pid = text[:50]
+        # with the table's type known, the serial must be on exactly one
+        # item of it — the phone hears "no item has it" / "shared" at once
+        # (the checklist page resolves it again when the cell fills)
+        tid = (request.POST.get("type") or "").strip().upper()
+        if re.fullmatch(r"[A-Z]\d{11}", tid):
+            try:
+                bearer = mint_for(request)
+            except (FnalLinkRequired, FnalUnavailable):
+                return JsonResponse(
+                    {"error": "FNAL sign-in expired — reload the scan page"}, status=403)
+            api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+            pids = _serial_pids(api, inst, tid, pid)
+            if not pids:
+                return JsonResponse({"error": f"no item of type {tid} has serial number {pid}"}, status=422)
+            if len(pids) > 1:
+                return JsonResponse({"error": SHARED_SERIAL_MSG.format(
+                    sn=pid, n=len(pids), pids=", ".join(pids))}, status=422)
     if not pid:
         return JsonResponse({"error": "no PID in the scanned text"}, status=422)
     user = request.user.get_username()
@@ -2274,7 +2310,7 @@ def explore_scan_submit_view(request):
             logger.warning("scan-add: state fetch for %s failed: %s", box, e)
             ok, result = False, f"couldn’t read the box’s state — {_hwdb_error_detail(e)}"
     row = PackScan.objects.create(instance=inst, username=user, part_id=pid,
-                                  box_part_id=box, ok=ok, result=result)
+                                  box_part_id=box, ok=ok, result=result, target=target)
     return JsonResponse({"pid": pid, "id": row.id, "ok": ok, "message": result})
 
 
@@ -2282,7 +2318,8 @@ def explore_scan_submit_view(request):
 @fnal_login_required
 def explore_scan_feed_view(request):
     """The desktop packing page's poll target: this user's scans newer than
-    ``?since=<id>``, oldest first."""
+    ``?since=<id>``, oldest first. ``?target=`` picks a checklist's scans
+    (#170); without it, the packing pages' (target-less) scans only."""
     inst = instance_of(request)
     if inst not in settings.HWDB_WRITE_INSTANCES:
         return JsonResponse({"error": "writes disabled"}, status=403)
@@ -2291,12 +2328,48 @@ def explore_scan_feed_view(request):
     except ValueError:
         since = 0
     rows = (PackScan.for_instance(inst)
-            .filter(username=request.user.get_username(), id__gt=since)
+            .filter(username=request.user.get_username(), id__gt=since,
+                    target=(request.GET.get("target") or "").strip()[:50])
             .order_by("id")[:100])
     scans = [{"id": r.id, "pid": r.part_id, "ok": r.ok, "message": r.result,
               "box": r.box_part_id} for r in rows]
     return JsonResponse({"scans": scans,
                          "last": scans[-1]["id"] if scans else since})
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_scan_ack_view(request):
+    """#170: the checklist page's word on one of this user's scans — placed
+    (ok) or not (row full, duplicate, nobody listening) — stored on the row
+    for the phone's outcome poll."""
+    inst = instance_of(request)
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return JsonResponse({"error": "writes disabled"}, status=403)
+    try:
+        sid = int(request.POST.get("id") or 0)
+    except ValueError:
+        sid = 0
+    n = (PackScan.for_instance(inst)
+         .filter(id=sid, username=request.user.get_username())
+         .update(ok=request.POST.get("ok") == "1",
+                 result=(request.POST.get("message") or "")[:300]))
+    return JsonResponse({"ok": bool(n)}, status=200 if n else 404)
+
+
+@login_not_required
+@fnal_login_required
+def explore_scan_outcome_view(request):
+    """#170: the phone's poll for what became of its scans — ``?ids=1,2``
+    (this user's rows only); ``ok`` null = nothing heard yet."""
+    inst = instance_of(request)
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return JsonResponse({"error": "writes disabled"}, status=403)
+    ids = [int(x) for x in re.findall(r"\d+", request.GET.get("ids") or "")][:50]
+    rows = PackScan.for_instance(inst).filter(id__in=ids, username=request.user.get_username())
+    return JsonResponse({"scans": [{"id": r.id, "pid": r.part_id, "ok": r.ok, "message": r.result}
+                                   for r in rows]})
 
 
 def _next_position_names(existing, prefix: str, count: int) -> list[str]:
@@ -3497,13 +3570,34 @@ def explore_checklist_view(request, part_id, name):
             checklistforms.email_body(
                 schema, part_id, prev_td, request.build_absolute_uri(page_url),
                 str(rec.get("created") or "")[:16].replace("T", " ")))
+    # #170: a linking table's rows take scans from the user's phone — each
+    # table's scan page carries this item as its target, keeps serial numbers
+    # as scanned, and the table's type / serial pattern so the phone refuses
+    # a code of another type (or off the pattern) before it is sent
+    bound = checklistforms.bind(schema, display_td)
+    for _t, f in checklistforms.leaf_fields(bound):
+        if f["type"] == "table" and f.get("link"):
+            q = {"target": part_id, "free": "1"}
+            if f.get("type_id"):
+                q["type"] = f["type_id"]
+            if f.get("sn"):
+                q["sn"] = f["sn"]
+            scan_path = _rev(request, "explore:scan") + "?" + urlencode(q)
+            f["scan_url"] = (settings.PUBLIC_ORIGIN + scan_path if settings.PUBLIC_ORIGIN
+                             else request.build_absolute_uri(scan_path))
+            f["scan_qr_svg"] = scanning.qr_svg(f["scan_url"])
     return render(request, "explore/checklist_form.html", {
         "active_nav": "hardware",
         "sidebar": navigation.sidebar_tree(inst, {}),
         "part_id": part_id,
         "hwdb_ui_base": settings.HWDB_PROFILES[inst]["ui"],
+        "scan_feed_url": _rev(request, "explore:scan_feed") + f"?target={part_id}",
+        "scan_ack_url": _rev(request, "explore:scan_ack"),
+        "scan_since": (PackScan.for_instance(inst)   # newest row at load — stale scans stay out
+                       .filter(username=request.user.get_username())
+                       .order_by("-id").values_list("id", flat=True).first()) or 0,
         "cl_name": name,
-        "schema": checklistforms.bind(schema, display_td),
+        "schema": bound,
         "item_card": checklistforms.item_card(
             schema, item, item_opts, (display_td or {}).get("DATA", {}).get("Item")
             if isinstance((display_td or {}).get("DATA"), dict) else None),

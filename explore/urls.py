@@ -32,6 +32,8 @@ urlpatterns = [
     path("scan/", views.explore_scan_view, name="scan"),
     path("scan/submit/", views.explore_scan_submit_view, name="scan_submit"),
     path("scan/feed/", views.explore_scan_feed_view, name="scan_feed"),
+    path("scan/ack/", views.explore_scan_ack_view, name="scan_ack"),
+    path("scan/outcome/", views.explore_scan_outcome_view, name="scan_outcome"),
     path("box-create/<str:part_type_id>/", views.explore_box_create_view,
          name="box_create"),
     path("test-date/<str:part_type_id>/", views.explore_test_date_view, name="test_date"),

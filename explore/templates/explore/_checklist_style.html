@@ -215,13 +215,27 @@
   }
   .cl-tbl-link { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }   /* #153; clear of the table's scrollbar */
   .cl-table input.cl-pidcell { font-family: var(--font-mono); font-size: calc(12px * var(--cl-scale, 1)); min-width: 19ch; }
-  .cl-table td .cl-serial { display: block; font-size: calc(10.5px * var(--cl-scale, 1)); white-space: nowrap; }
+  .cl-table td:has(.cl-pidcell) { vertical-align: top; }   /* a cell with a failure note doesn't unseat its row */
+  .cl-table td .cl-serial { display: none; }   /* resolved: the PID is in the cell, the serial in its tooltip */
+  .cl-table td .cl-serial.cl-serial-err { display: block; font-size: calc(10.5px * var(--cl-scale, 1)); max-width: 19ch; white-space: normal; overflow-wrap: anywhere; }
   .cl-table input.cl-linked { border-color: var(--good); background: var(--good-bg); }
   .cl-table td .cl-cell-act { display: flex; gap: 4px; justify-content: center; margin-top: 3px; }
   .cl-cell-btn { font: inherit; font-size: calc(11px * var(--cl-scale, 1)); line-height: 1.4; padding: 0 7px; color: var(--dim);
     background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm); cursor: pointer; }
   .cl-cell-btn:hover { color: var(--ink); border-color: var(--rule-hard); }
   .cl-bad-text { color: var(--bad, #a33); }
+  /* #170: phone scanning into a linking table */
+  .cl-rowlab .cl-phone { margin-left: 4px; vertical-align: middle; }
+  .cl-phone-ico { width: 1em; height: 1em; vertical-align: -0.15em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+  .cl-tbl-hint { flex-basis: 100%; }   /* the rule reads on its own line; the buttons keep their place */
+  .cl-rowlab .cl-phone.on, .cl-tbl-phone.on { color: var(--good); border-color: var(--good); }
+  .cl-phone-panel { flex-basis: 100%; display: flex; gap: 12px; align-items: center; padding: 8px 10px; border: 1px solid var(--rule); border-radius: var(--r-sm); background: var(--surface); }
+  .cl-phone-panel[hidden] { display: none; }
+  .cl-phone-qr svg { width: 96px; height: 96px; display: block; }
+  .cl-phone-txt { flex: 1; min-width: 200px; font-size: calc(12.5px * var(--cl-scale, 1)); color: var(--dim); overflow-wrap: anywhere; }
+  .cl-table input.cl-cursor { outline: 2px dashed var(--good); outline-offset: 1px; }
+  .cl-table input.cl-just { animation: cl-just 1.2s ease-out; }
+  @keyframes cl-just { from { background: var(--good-bg); } to { background: transparent; } }
 </style>
 <script>
 (function () {

@@ -352,11 +352,17 @@ class PackScan(InstanceScoped):
     Scan-to-cart: when the scan page is opened from a box's pack page its
     URL carries the box PID, and the submit endpoint links the item into
     that box immediately — ``ok``/``result`` record the outcome for both
-    screens. ``ok`` NULL = legacy select-only scan (no box context)."""
+    screens. ``ok`` NULL = legacy select-only scan (no box context).
+
+    #170: a checklist's linking table listens too — its scan page carries
+    ``target`` (the checklist item's PID) and ``free`` (the text as scanned,
+    a serial number as well as a PID); each page polls only its own target,
+    so a packing page open in another tab never takes a checklist's scans."""
 
     username = models.CharField(max_length=150, db_index=True)
     part_id = models.CharField(max_length=50)
     box_part_id = models.CharField(max_length=50, blank=True, default="")
+    target = models.CharField(max_length=50, blank=True, default="")
     ok = models.BooleanField(null=True, blank=True)
     result = models.CharField(max_length=300, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)

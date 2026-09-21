@@ -79,6 +79,74 @@ class ScanEndpointsTest(TestCase):
         self.assertEqual(resp.status_code, 422)
         self.assertEqual(PackScan.objects.count(), 0)
 
+    def test_checklist_scan_keeps_a_serial_number_and_its_target(self):
+        # #170: the scan page opened from a checklist posts target + free —
+        # a serial number is stored as scanned; the desktop resolves it
+        resp = self.client.post(SUBMIT, {"text": "HPK19901", "target": PID, "free": "1"})
+        self.assertEqual(resp.status_code, 200)
+        row = PackScan.objects.get()
+        self.assertEqual((row.part_id, row.target, row.ok), ("HPK19901", PID, None))
+        # a PID in a label / URL is still extracted
+        resp = self.client.post(SUBMIT, {"text": f"{PID}-US186", "target": PID, "free": "1"})
+        self.assertEqual(json.loads(resp.content)["pid"], PID)
+        # without free (or without a target), non-PID text is refused as before
+        self.assertEqual(self.client.post(SUBMIT, {"text": "HPK19901", "target": PID}).status_code, 422)
+        self.assertEqual(self.client.post(SUBMIT, {"text": "HPK19901", "free": "1"}).status_code, 422)
+
+    def test_checklist_scan_checks_a_serial_against_the_tables_type(self):
+        # #170 (Chao): random text must not reach the table — with the
+        # table's type posted, the serial has to be on exactly one item of it
+        api = mock.MagicMock()
+        api.find_components_by_serial.return_value = []
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.post(SUBMIT, {"text": "hello", "target": PID, "free": "1", "type": "D00400300001"})
+            self.assertEqual(resp.status_code, 422)
+            self.assertEqual(json.loads(resp.content)["error"], "no item of type D00400300001 has serial number hello")
+            api.find_components_by_serial.return_value = [{"part_id": "D00400300001-00019"}, {"part_id": "D00400300001-00039"}]
+            resp = self.client.post(SUBMIT, {"text": "3309", "target": PID, "free": "1", "type": "D00400300001"})
+            self.assertEqual(resp.status_code, 422)
+            self.assertIn("serial number 3309 is on 2 items: D00400300001-00019, D00400300001-00039 — enter the PID",
+                          json.loads(resp.content)["error"])
+            api.find_components_by_serial.return_value = [{"part_id": "D00400300001-00019"}]
+            resp = self.client.post(SUBMIT, {"text": "HPK19901", "target": PID, "free": "1", "type": "D00400300001"})
+            self.assertEqual(resp.status_code, 200)
+        self.assertEqual(PackScan.objects.get().part_id, "HPK19901")   # the page resolves it in the cell
+        api.find_components_by_serial.assert_called_with("D00400300001", "HPK19901")
+        # a PID is never looked up; no type = nothing to check against
+        with m1, m2:
+            self.client.post(SUBMIT, {"text": PID, "target": PID, "free": "1", "type": "D00400300001"})
+            self.client.post(SUBMIT, {"text": "anything", "target": PID, "free": "1"})
+        self.assertEqual(api.find_components_by_serial.call_count, 3)
+        self.assertEqual(PackScan.objects.count(), 3)
+
+    def test_page_acks_a_scan_and_the_phone_reads_the_outcome(self):
+        # #170: the checklist page records what became of each scan; the
+        # phone polls its own rows — never another user's
+        mine = PackScan.objects.create(instance="dev", username="w", part_id="HPK19901", target=PID)
+        other = PackScan.objects.create(instance="dev", username="other", part_id="HPK19902", target=PID)
+        resp = self.client.post("/hw/dev/scan/ack/", {"id": mine.id, "ok": "1", "message": "→ Left · 2"})
+        self.assertEqual(resp.status_code, 200)
+        mine.refresh_from_db()
+        self.assertEqual((mine.ok, mine.result), (True, "→ Left · 2"))
+        self.assertEqual(self.client.post("/hw/dev/scan/ack/", {"id": other.id, "ok": "0", "message": "x"}).status_code, 404)
+        other.refresh_from_db()
+        self.assertIsNone(other.ok)
+        body = json.loads(self.client.get(f"/hw/dev/scan/outcome/?ids={mine.id},{other.id}").content)
+        self.assertEqual(body["scans"], [{"id": mine.id, "pid": "HPK19901", "ok": True, "message": "→ Left · 2"}])
+
+    def test_feed_is_per_target(self):
+        # #170: a checklist's page polls its target; the packing pages see
+        # only target-less scans — neither takes the other's
+        PackScan.objects.create(instance="dev", username="w", part_id="HPK19901", target=PID)
+        plain = PackScan.objects.create(instance="dev", username="w", part_id="D05700300001-00013")
+        PackScan.objects.create(instance="dev", username="w", part_id="HPK19902", target="D05700300001-00099")
+        self.assertEqual([s["pid"] for s in json.loads(self.client.get(FEED).content)["scans"]],
+                         ["D05700300001-00013"])
+        body = json.loads(self.client.get(f"{FEED}?target={PID}").content)
+        self.assertEqual([s["pid"] for s in body["scans"]], ["HPK19901"])
+        self.assertEqual(body["last"], plain.id - 1)
+
     def test_feed_returns_only_newer_scans_for_this_user(self):
         mine1 = PackScan.objects.create(instance="dev", username="w", part_id=PID)
         PackScan.objects.create(instance="dev", username="other", part_id="D05700300001-00099")
@@ -194,6 +262,24 @@ class ScanEndpointsTest(TestCase):
         # A malformed box param falls back to the select-only page.
         html = self.client.get("/hw/dev/scan/?box=junk").content.decode()
         self.assertIn('var BOX = "";', html)
+
+
+    def test_scan_page_with_target_shows_checklist_mode(self):
+        html = self.client.get(f"/hw/dev/scan/?target={PID}&free=1&type=D00400300001&sn=HPK%5Cd%7B5%7D").content.decode()
+        self.assertIn("Scan into the checklist of", html)
+        self.assertIn(PID, html)
+        self.assertIn(f'var TARGET = "{PID}", FREE = true;', html)
+        # the table's type and serial pattern: the phone refuses a code of
+        # another type or off the pattern before sending it
+        self.assertIn('var TYPE = "D00400300001", SN = "HPK\\u005Cd{5}"', html)   # escapejs; JS reads HPK\d{5}
+        self.assertIn("Items of type <span", html)
+        self.assertIn("PID or serial number", html)
+        self.assertIn('var BOX = "";', html)
+        # a malformed target falls back to the packing page's select mode; free/type/sn need a target
+        html = self.client.get("/hw/dev/scan/?target=junk&free=1&type=D00400300001&sn=x").content.decode()
+        self.assertIn("Scan items into your packing page", html)
+        self.assertIn('var TARGET = "", FREE = false;', html)
+        self.assertIn('var TYPE = "", SN = ""', html)
 
 
 class PackPageHookupTest(TestCase):
