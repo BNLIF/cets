@@ -71,7 +71,10 @@ and refreshes the preview.
 ### Section keys (#98)
 
 - `"collapsed": true` — the section opens folded. Every section header is a
-  ▾/▸ toggle regardless, for long checklists.
+  ▾/▸ toggle regardless, for long checklists. A section the user toggles
+  stays that way on that device (per instance / checklist type / checklist /
+  user, in localStorage), across a refresh and on the same checklist of other
+  items; an untouched one follows the schema (Chao 2026-09-21).
 - `"when": {"field": "<select label>", "equals": "<option>"}` — the section
   shows only while that `select` field holds that option (Hajime's
   "pick H or J first, then see that variant's table and figure"). The select

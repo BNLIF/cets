@@ -106,6 +106,29 @@
   // Device storage (autosave, photos) is keyed per instance / item / checklist / user.
   var CL_PID = "{{ part_id|escapejs }}";
   var CL_KEY_PRE = "cl-auto:{{ hwdb_instance|escapejs }}:", CL_KEY_SUF = ":{{ cl_name|escapejs }}:{{ user.get_username|escapejs }}";
+  // Chao 2026-09-21: which sections are folded is remembered on this device,
+  // per instance / checklist type / checklist / user — the same checklist on
+  // another item opens the way it was left; only sections the user toggled
+  // are stored, so an untouched one still follows the schema's default
+  (function () {
+    var KEY = "cl-fold:{{ hwdb_instance|escapejs }}:" + CL_PID.split("-")[0] + CL_KEY_SUF, saved = {};
+    try { saved = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) {}
+    document.querySelectorAll(".cl-sec[data-title]").forEach(function (sec) {
+      var t = sec.getAttribute("data-title");
+      if (!(t in saved)) return;
+      sec.classList.toggle("cl-folded", !!saved[t]);
+      var b = sec.querySelector(".cl-fold"); if (b) b.setAttribute("aria-expanded", saved[t] ? "false" : "true");
+    });
+    document.addEventListener("click", function (e) {
+      var b = e.target.closest && e.target.closest(".cl-fold");
+      if (!b) return;
+      setTimeout(function () {   // after the fold handler has toggled the class
+        var sec = b.closest(".cl-sec");
+        saved[sec.getAttribute("data-title")] = sec.classList.contains("cl-folded");
+        try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) {}
+      }, 0);
+    });
+  })();
   // #159: ?from=<type>-blankN — this item was just minted for a checklist
   // filled without a PID; that placeholder's values and photos move here
   var CL_FROM = (/^[A-Za-z]\d{11}-blank\d*$/i.exec(new URLSearchParams(location.search).get("from") || "") || [""])[0];

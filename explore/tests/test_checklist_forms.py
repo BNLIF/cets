@@ -2871,6 +2871,19 @@ class PlotFieldTest(TestCase):
         self.assertIn("check the plot field’s sections and fields.", html)
 
 
+    def test_fill_page_remembers_folded_sections_on_the_device(self):
+        # Chao 2026-09-21: a refresh went back to the schema's collapsed
+        # defaults — the fold state is kept in localStorage per checklist type
+        api = _api(schema=self.SCHEMA_PLAIN if hasattr(self, "SCHEMA_PLAIN") else {"name": "t", "test_type_name": "T", "sections": [
+            {"title": "S", "collapsed": True, "fields": [{"type": "text", "label": "Note"}]}]}, test_types=("ES", "T"))
+        self.client.force_login(get_user_model().objects.create_user("t", "t@t.io", "pw"))
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('var KEY = "cl-fold:dev:" + CL_PID.split("-")[0] + CL_KEY_SUF, saved = {};', html)
+        self.assertIn('saved[sec.getAttribute("data-title")] = sec.classList.contains("cl-folded");', html)
+
+
 class SectionGridTest(TestCase):
     """#120: a section's column grid — col/span/newline per field, placed
     server-side into explicit coordinates."""
