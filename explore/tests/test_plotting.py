@@ -544,6 +544,20 @@ class TestDataEndpointsTest(TestCase):
         self.assertIn('s.sn = h.sn || "";', PLOT_JS)              # … and comes back from it
         self.assertIn('$("snf").addEventListener("input", function () { S().sn = $("snf").value; changed(); });', PLOT_JS)
 
+    def test_page_has_tolerance_limits(self):
+        # Anselmo 2026-09-22: SiPMs beyond the supercell's tolerance should show at a glance — two dotted
+        # lines (low / high) on the value axis, the axis stretched to show them; they ride in the hash as `lim`
+        html = self.client.get("/hw/dev/plot/T/").content.decode()
+        self.assertIn('<span>Limits</span><div class="pl-range"><input type="number" step="any" id="limmin" placeholder="low"><span>–</span><input type="number" step="any" id="limmax" placeholder="high"></div>', html)
+        self.assertIn('var limitLines = { id: "limitLines",', PLOT_JS)
+        self.assertIn('if (sc.options.min === undefined && lo - pad < sc.min) sc.min = lo - pad;', PLOT_JS)   # a range box or a zoom pins the axis
+        self.assertIn('ctx.setLineDash([3, 3]);', PLOT_JS)
+        self.assertIn('cfg.plugins = [statsBox, limitLines];', PLOT_JS)
+        self.assertIn('withLimits(oL, "y");', PLOT_JS)                       # value-vs-index line: horizontal
+        self.assertIn('var lim = withLimits(o1, "x"), ovx = ov.map(function (q) { return q.x; });', PLOT_JS)   # histogram: vertical, in the X range
+        self.assertIn('lim: rangeOf("lim") || undefined,', PLOT_JS)
+        self.assertIn('[["x", "xr"], ["y", "yr"], ["lim", "lim"]].forEach(', PLOT_JS)
+
     def test_page_takes_a_pasted_list_of_pids_or_serials(self):
         # Chao 2026-09-17: PID / Serial filters from a pasted list — resolved to an exact PID filter
         html = self.client.get("/hw/dev/plot/T/").content.decode()
