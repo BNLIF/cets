@@ -209,10 +209,16 @@ class ReceivingFlowTest(TestCase):
         m1, m2 = _mocked(api)
         with m1, m2:
             self.client.post(PAGE, {"action": "start", "route": "confirm_transshipping"})
-            self.client.post(PAGE, {"action": "advance", "confirm_list": "on"})
+            cl = BoxChecklist.for_instance("dev").get(part_id=BOX, workflow="receiving")
+            self.assertEqual(cl.current_scene, 2)      # Hajime 2026-09-22: no contents check — the box stays sealed
+            html = self.client.get(PAGE).content.decode()
+            self.assertIn('<span class="skip" title="not on this route">Step 1</span>', html)
+            self.assertIn("Change route", html)        # step 2 is this route's first
             self._receive_scene2()
         api.post_location.assert_called_once_with(BOX, PAYLOAD)
         api.patch_subcomponents.assert_not_called()
+        cl.refresh_from_db()
+        self.assertEqual(cl.current_scene, 3)
 
     def test_route_defaults_from_shipping_run(self):
         BoxChecklist.objects.create(instance="dev", part_id=BOX,

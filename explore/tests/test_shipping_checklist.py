@@ -304,13 +304,17 @@ class ShippingFlowTest(TestCase):
             self.client.post(PAGE, {"action": "start", "route": "confirm_non_surf"})
             self.client.post(PAGE, {"action": "advance", "confirm_list": "on"})
             self.client.post(PAGE, {"action": "advance"})                  # 2: no docs needed
-            self.client.post(PAGE, {"action": "advance"})                  # 3: no confirm needed
-            self.client.post(PAGE, {"action": "advance"})                  # 4: no approval needed
+            cl = BoxChecklist.for_instance("dev").get(part_id=BOX, workflow="shipping")
+            self.assertEqual(cl.current_scene, 5)                          # Hajime 2026-09-22: no approval email, no approval (3, 4)
+            html = self.client.get(PAGE).content.decode()
+            self.assertIn('<span class="skip" title="not on this route">Step 3</span>', html)
             self.client.post(PAGE, {"action": "advance",
                                     "shipment_time": "2026-07-13T08:00",
                                     "affirm_shipment": "on"})              # 5
         api.patch_component.assert_not_called()
         api.post_location.assert_called_once()
+        cl.refresh_from_db()
+        self.assertEqual(cl.current_scene, 6)
 
     @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_prod_is_forbidden(self):

@@ -5419,15 +5419,17 @@ def explore_preship_view(request, part_id):
                 cl.delete()
             BoxChecklist.objects.create(
                 instance=inst, part_id=part_id, workflow="preshipping",
-                route=route, created_by=request.user.get_username())
+                route=route, current_scene=checklists.first_scene("preshipping", route),
+                created_by=request.user.get_username())
             messages.success(request, "Pre-shipping checklist started.")
             return redirect(page_url)
         if cl is None:
             messages.error(request, "Start the checklist first.")
             return redirect(page_url)
         if action == "back":
-            # Back from step 1 reaches "step 0" — the route re-pick (#76).
-            cl.current_scene = max(0, cl.current_scene - 1)
+            # Back from the route's first step reaches "step 0" — the route
+            # re-pick (#76); steps the route skips are passed over.
+            cl.current_scene = checklists.step_from(cl.workflow, cl.route, cl.current_scene, back=True)
             cl.save(update_fields=["current_scene", "updated_at"])
             return redirect(page_url)
         if action == "set_route":
@@ -5436,7 +5438,7 @@ def explore_preship_view(request, part_id):
             route = request.POST.get("route")
             if route in dict(BoxChecklist.ROUTES):
                 cl.route = route
-            cl.current_scene = 1
+            cl.current_scene = checklists.first_scene(cl.workflow, cl.route)
             cl.save(update_fields=["route", "current_scene", "updated_at"])
             return redirect(page_url)
 
@@ -5504,7 +5506,7 @@ def explore_preship_view(request, part_id):
                          actor=activity.actor_of(request))
             return redirect(page_url)
 
-        cl.current_scene = scene + 1
+        cl.current_scene = checklists.step_from(cl.workflow, cl.route, scene)
         cl.save()
         return redirect(page_url)
 
@@ -5542,6 +5544,12 @@ def explore_preship_view(request, part_id):
         if scene == 0:                      # the route re-pick screen (#76)
             ctx["scene"] = 0
             return render(request, "explore/preship.html", ctx)
+        skipped = checklists.skipped_scenes(cl.workflow, cl.route)
+        if scene in skipped:                # a run parked on a step its route skips
+            scene = cl.current_scene = checklists.step_from(cl.workflow, cl.route, scene)
+            cl.save(update_fields=["current_scene", "updated_at"])
+        ctx["skipped"] = sorted(skipped)
+        ctx["first_scene"] = checklists.first_scene(cl.workflow, cl.route)
         ctx.update({"scene": scene, "scene_title": checklists.scene_title(scene),
                     "saved": _form_saved(cl.state.get(checklists.scene_key(scene), {}))})
         if scene == 1:
@@ -5633,22 +5641,24 @@ def explore_shipping_view(request, part_id):
                 cl.delete()
             BoxChecklist.objects.create(
                 instance=inst, part_id=part_id, workflow="shipping",
-                route=route, created_by=request.user.get_username())
+                route=route, current_scene=checklists.first_scene("shipping", route),
+                created_by=request.user.get_username())
             messages.success(request, "Shipping checklist started.")
             return redirect(page_url)
         if cl is None:
             messages.error(request, "Start the checklist first.")
             return redirect(page_url)
         if action == "back":
-            # Back from step 1 reaches "step 0" — the route re-pick (#76).
-            cl.current_scene = max(0, cl.current_scene - 1)
+            # Back from the route's first step reaches "step 0" — the route
+            # re-pick (#76); steps the route skips are passed over.
+            cl.current_scene = checklists.step_from(cl.workflow, cl.route, cl.current_scene, back=True)
             cl.save(update_fields=["current_scene", "updated_at"])
             return redirect(page_url)
         if action == "set_route":
             route = request.POST.get("route")
             if route in dict(BoxChecklist.ROUTES):
                 cl.route = route
-            cl.current_scene = 1
+            cl.current_scene = checklists.first_scene(cl.workflow, cl.route)
             cl.save(update_fields=["route", "current_scene", "updated_at"])
             return redirect(page_url)
 
@@ -5731,7 +5741,7 @@ def explore_shipping_view(request, part_id):
                          part_id=part_id, part_type_id=ptid,
                          actor=activity.actor_of(request))
         else:
-            cl.current_scene = scene + 1
+            cl.current_scene = checklists.step_from(cl.workflow, cl.route, scene)
             cl.save(update_fields=["current_scene", "updated_at"])
         return redirect(page_url)
 
@@ -5758,6 +5768,12 @@ def explore_shipping_view(request, part_id):
         if scene == 0:                      # the route re-pick screen (#76)
             ctx["scene"] = 0
             return render(request, "explore/shipping.html", ctx)
+        skipped = checklists.skipped_scenes(cl.workflow, cl.route)
+        if scene in skipped:                # a run parked on a step its route skips
+            scene = cl.current_scene = checklists.step_from(cl.workflow, cl.route, scene)
+            cl.save(update_fields=["current_scene", "updated_at"])
+        ctx["skipped"] = sorted(skipped)
+        ctx["first_scene"] = checklists.first_scene(cl.workflow, cl.route)
         ctx.update({"scene": scene,
                     "scene_title": checklists.shipping_scene_title(scene),
                     "saved": _form_saved(
@@ -5833,22 +5849,24 @@ def explore_receiving_view(request, part_id):
                 cl.delete()
             BoxChecklist.objects.create(
                 instance=inst, part_id=part_id, workflow="receiving",
-                route=route, created_by=request.user.get_username())
+                route=route, current_scene=checklists.first_scene("receiving", route),
+                created_by=request.user.get_username())
             messages.success(request, "Receiving checklist started.")
             return redirect(page_url)
         if cl is None:
             messages.error(request, "Start the checklist first.")
             return redirect(page_url)
         if action == "back":
-            # Back from step 1 reaches "step 0" — the route re-pick (#76).
-            cl.current_scene = max(0, cl.current_scene - 1)
+            # Back from the route's first step reaches "step 0" — the route
+            # re-pick (#76); steps the route skips are passed over.
+            cl.current_scene = checklists.step_from(cl.workflow, cl.route, cl.current_scene, back=True)
             cl.save(update_fields=["current_scene", "updated_at"])
             return redirect(page_url)
         if action == "set_route":
             route = request.POST.get("route")
             if route in dict(BoxChecklist.ROUTES):
                 cl.route = route
-            cl.current_scene = 1
+            cl.current_scene = checklists.first_scene(cl.workflow, cl.route)
             cl.save(update_fields=["route", "current_scene", "updated_at"])
             return redirect(page_url)
 
@@ -5903,7 +5921,7 @@ def explore_receiving_view(request, part_id):
                          part_id=part_id, part_type_id=ptid,
                          actor=activity.actor_of(request))
         else:
-            cl.current_scene = scene + 1
+            cl.current_scene = checklists.step_from(cl.workflow, cl.route, scene)
             cl.save(update_fields=["current_scene", "updated_at"])
         return redirect(page_url)
 
@@ -5922,6 +5940,12 @@ def explore_receiving_view(request, part_id):
         if scene == 0:                      # the route re-pick screen (#76)
             ctx["scene"] = 0
             return render(request, "explore/receiving.html", ctx)
+        skipped = checklists.skipped_scenes(cl.workflow, cl.route)
+        if scene in skipped:                # a run parked on a step its route skips
+            scene = cl.current_scene = checklists.step_from(cl.workflow, cl.route, scene)
+            cl.save(update_fields=["current_scene", "updated_at"])
+        ctx["skipped"] = sorted(skipped)
+        ctx["first_scene"] = checklists.first_scene(cl.workflow, cl.route)
         ctx.update({"scene": scene,
                     "scene_title": checklists.receiving_scene_title(scene),
                     "saved": cl.state.get(checklists.receiving_scene_key(scene), {})})

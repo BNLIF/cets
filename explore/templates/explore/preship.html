@@ -42,6 +42,7 @@
   .ps-bad { color: var(--bad, #a33); font-weight: 700; }
   .ps-steps { font-size: 12px; color: var(--faint); margin-bottom: 16px; }
   .ps-steps .cur { color: var(--accent-ink); font-weight: 700; }
+  .ps-steps .skip { text-decoration: line-through; }
   .ps-email { border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 12px;
     background: var(--surface); font-size: 13px; overflow-x: auto; }
   .ps-kv { width: 100%; border-collapse: collapse; font-size: 12.5px; }
@@ -83,7 +84,7 @@
     <form method="post" onsubmit="return confirm('Discard this completed run and start over?');">
       {% csrf_token %}<input type="hidden" name="action" value="start">
       <input type="hidden" name="route" value="{{ cl.route }}">
-      <div class="ps-actions">{% if sheet_url %}<a class="ps-btn" href="{{ sheet_url }}">Download shipping sheet</a>{% endif %}<button class="ps-btn quiet">Start a fresh run</button></div>
+      <div class="ps-actions">{% if sheet_url %}<a class="ps-btn" href="{{ sheet_url }}">Download shipping sheet</a>{% endif %}{% if not cl.is_surf %}<a class="ps-btn quiet" href="?csv=1">Download logistics CSV</a>{% endif %}<button class="ps-btn quiet">Start a fresh run</button></div>
     </form>
   </div>
 
@@ -103,7 +104,7 @@
   <p class="ps-sub">{{ cl.route_label }} · started by {{ cl.created_by|default:"—" }} · progress saved
     automatically, resume anytime.</p>
   <div class="ps-steps">
-    {% for n in "12345678" %}{% if forloop.counter == scene %}<span class="cur">Step {{ forloop.counter }}</span>{% else %}Step {{ forloop.counter }}{% endif %}{% if not forloop.last %} › {% endif %}{% endfor %}
+    {% for n in "12345678" %}{% if forloop.counter == scene %}<span class="cur">Step {{ forloop.counter }}</span>{% elif forloop.counter in skipped %}<span class="skip" title="not on this route">Step {{ forloop.counter }}</span>{% else %}Step {{ forloop.counter }}{% endif %}{% if not forloop.last %} › {% endif %}{% endfor %}
   </div>
 
   <form method="post" class="ps-card" {% if scene == 6 %}id="ps-email-scene"{% endif %}>
@@ -215,13 +216,14 @@
       {% endif %}
       {% endfor %}
       <div class="ps-actions" style="margin-top:6px;"><a class="ps-btn quiet" href="?sheet=1">Download shipping sheet</a>
-        <span class="ps-hint">Preview of the PDF that will be uploaded.</span></div>
+        <span class="ps-hint">Preview of the PDF that will be uploaded.</span>
+        {% if not cl.is_surf %}<a class="ps-btn quiet" href="?csv=1">Download logistics CSV</a>{% endif %}</div>
       <label class="inline" style="margin-top:8px;"><input type="checkbox" name="confirm_patch_hwdb" required>
         Upload the shipping sheet and patch the checklist into the {{ hwdb_instance }} HWDB.</label>
     {% endif %}
 
     <div class="ps-actions">
-      <button class="ps-btn quiet" name="action" value="back" formnovalidate>{% if scene == 1 %}‹ Change route{% else %}‹ Back{% endif %}</button>
+      <button class="ps-btn quiet" name="action" value="back" formnovalidate>{% if scene == first_scene %}‹ Change route{% else %}‹ Back{% endif %}</button>
       <button class="ps-btn" name="action" value="advance">{% if scene == n_scenes %}Write to HWDB{% else %}Continue ›{% endif %}</button>
       <span class="ps-hint">{{ cl.route_label }}</span>
     </div>

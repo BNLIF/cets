@@ -68,6 +68,39 @@ RECEIVING_SCENES = [
 ]
 N_RECEIVING_SCENES = len(RECEIVING_SCENES)
 
+# Hajime 2026-09-22: steps only the SURF route runs — the gate the SURF
+# procedure requires, the QA representative and the FD Logistics
+# correspondence. Transshipping also skips receiving's contents check: the
+# box travels on sealed (a CRU container inside a larger one to SURF).
+_SURF_ONLY = {"preshipping": {1, 2, 6, 7}, "shipping": {3, 4}}
+_TRANSSHIPPING_SKIPS = {"receiving": {1}}
+_N_SCENES = {"preshipping": N_SCENES, "shipping": N_SHIPPING_SCENES,
+             "receiving": N_RECEIVING_SCENES}
+
+
+def skipped_scenes(workflow: str, route: str) -> set[int]:
+    """The steps of ``workflow`` that ``route`` leaves out."""
+    if route == "confirm_transshipping":
+        return _SURF_ONLY.get(workflow, set()) | _TRANSSHIPPING_SKIPS.get(workflow, set())
+    if route == "confirm_non_surf":
+        return _SURF_ONLY.get(workflow, set())
+    return set()
+
+
+def step_from(workflow: str, route: str, scene: int, back: bool = False) -> int:
+    """The step the route runs next from ``scene`` — forward, or ``back`` —
+    passing over the skipped ones. 0 = before the first (the route
+    re-pick); the last step is never skipped."""
+    d, skip = (-1 if back else 1), skipped_scenes(workflow, route)
+    s = scene + d
+    while 1 <= s <= _N_SCENES[workflow] and s in skip:
+        s += d
+    return s
+
+
+def first_scene(workflow: str, route: str) -> int:
+    return step_from(workflow, route, 0)
+
 
 def scene_key(scene: int) -> str:
     return PRESHIPPING_SCENES[scene - 1][1]
@@ -807,7 +840,7 @@ def build_checklist_dict(checklist, info: dict, image_id) -> dict:
     }
     common_tail = {
         "Visual Inspection (YES = no damage)":
-            "YES" if p6.get("damage_status") == "no damage" else "NO",
+            ("YES" if p6.get("damage_status") == "no damage" else "NO") if p6.get("damage_status") else None,   # None: the route skipped the inspection step
         "Visual Inspection Damage": p6.get("damage_description"),
         "Image ID for this Shipping Sheet": image_id,
     }
