@@ -2958,6 +2958,13 @@ class SectionGridTest(TestCase):
             ("D", 3, 1, 3),                    # full width
             ("E", 4, 1, 3)])                   # clamped to the grid
 
+    def test_assembly_field_keeps_its_placement(self):
+        # Anselmo 2026-09-22: an assembly field with col 3 / span 2 on a 4-column grid
+        # sat in one column — the assembly branch of _norm_field dropped the hints
+        s = self._norm(4, [{"type": "text", "label": "A"},
+                           {"type": "assembly", "label": "Boards", "into": "SC1", "col": 3, "span": 2}])
+        self.assertEqual(self._g(s), [("A", 1, 1, 1), ("Boards", 1, 3, 2)])
+
     def test_col_already_passed_wraps_to_the_next_line(self):
         s = self._norm(3, [{"type": "text", "label": "A", "col": 2},
                            {"type": "text", "label": "B", "col": 1}])

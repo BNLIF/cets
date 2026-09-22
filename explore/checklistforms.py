@@ -248,6 +248,9 @@ def _norm_field(f: dict) -> dict | None:
         out = {"type": t, "label": label}
         if str(f.get("into") or "").strip():
             out["into"] = str(f["into"]).strip()
+        for k in ("col", "span", "newline", "align"):   # grid placement hints (Anselmo 2026-09-22: col 3 span 2 was ignored)
+            if f.get(k) is not None:
+                out[k] = f[k]
         return out
     if t == "plot":
         # #160 (Anselmo): a Plots page view of the sub-components entered in
