@@ -553,10 +553,15 @@ class TestDataEndpointsTest(TestCase):
         self.assertIn('if (sc.options.min === undefined && lo - pad < sc.min) sc.min = lo - pad;', PLOT_JS)   # a range box or a zoom pins the axis
         self.assertIn('ctx.setLineDash([3, 3]);', PLOT_JS)
         self.assertIn('cfg.plugins = [statsBox, limitLines];', PLOT_JS)
-        self.assertIn('withLimits(oL, "y");', PLOT_JS)                       # value-vs-index line: horizontal
-        self.assertIn('var lim = withLimits(o1, "x"), ovx = ov.map(function (q) { return q.x; });', PLOT_JS)   # histogram: vertical, in the X range
+        self.assertIn('var lim = withLimits(o1, "x", numsOf[used.indexOf(a)] || []), ovx = ov.map(function (q) { return q.x; });', PLOT_JS)   # histogram: vertical, in the X range
         self.assertIn('lim: rangeOf("lim") || undefined,', PLOT_JS)
         self.assertIn('[["x", "xr"], ["y", "yr"], ["lim", "lim"]].forEach(', PLOT_JS)
+        # Anselmo 2026-09-22 (2): the limits may be offsets from the highlighted series' mean, an amount or a percentage; `limm` in the hash
+        self.assertIn('<select id="limmode" title="absolute values, or offsets from the highlighted series\' mean"><option value="abs">absolute</option><option value="mean">mean ± value</option><option value="pct">mean ± %</option></select>', html)
+        self.assertIn('var x = mode === "pct" ? m * (1 + sign * d / 100) : m + sign * d;', PLOT_JS)
+        self.assertIn('withLimits(oL, "y", numsOf[used.indexOf(a)] || []);', PLOT_JS)
+        self.assertIn('limm: $("limmode").value !== "abs" ? $("limmode").value : undefined,', PLOT_JS)
+        self.assertIn('$("limmode").value = ["mean", "pct"].indexOf(cfg.limm) >= 0 ? cfg.limm : "abs"; limitPlaceholders();', PLOT_JS)
 
     def test_page_takes_a_pasted_list_of_pids_or_serials(self):
         # Chao 2026-09-17: PID / Serial filters from a pasted list — resolved to an exact PID filter

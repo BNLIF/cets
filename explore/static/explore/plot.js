@@ -463,25 +463,41 @@
             var ctx = ch.ctx, a = ch.chartArea, sc = ch.scales[L.ax];
             ctx.save(); ctx.strokeStyle = OVER; ctx.fillStyle = OVER; ctx.lineWidth = 1.5; ctx.setLineDash([3, 3]);
             ctx.font = "600 10px 'IBM Plex Mono', ui-monospace, monospace";
-            L.values.forEach(function (v) {
-                var p = sc.getPixelForValue(v);
+            L.values.forEach(function (v, i) {
+                var p = sc.getPixelForValue(v), tag = L.tags ? L.tags[i] : fmt(v);
                 ctx.beginPath();
                 if (L.ax === "y") {
                     if (p < a.top || p > a.bottom) return;
                     ctx.moveTo(a.left, p); ctx.lineTo(a.right, p); ctx.stroke();
-                    ctx.textAlign = "right"; ctx.textBaseline = "bottom"; ctx.fillText(fmt(v), a.right - 4, p - 2);
+                    ctx.textAlign = "right"; ctx.textBaseline = "bottom"; ctx.fillText(tag, a.right - 4, p - 2);
                 } else {
                     if (p < a.left || p > a.right) return;
                     ctx.moveTo(p, a.top); ctx.lineTo(p, a.bottom); ctx.stroke();
-                    ctx.textAlign = "left"; ctx.textBaseline = "top"; ctx.fillText(fmt(v), p + 3, a.top + 2);
+                    var right = p > (a.left + a.right) / 2;   // the label sits on the side with room, under the stats box when that is there
+                    var stats = ((ch.options.plugins.statsBox || {}).rows || []).length, ty = a.top + 2 + (right && stats && a.right - a.left >= 480 ? 68 + (EMBED ? 26 : 0) : 0);
+                    ctx.textAlign = right ? "right" : "left"; ctx.textBaseline = "top"; ctx.fillText(tag, p + (right ? -3 : 3), ty);
                 }
             });
             ctx.restore();
         } };
-    // The Limits boxes as numbers (either may be blank); hands them to the plot on axis `ax`.
-    function withLimits(o, ax) {
-        var r = rangeOf("lim"), v = r ? r.filter(function (q) { return q !== null; }) : [];
-        if (v.length) o.plugins.limits = { ax: ax, values: v };
+    // The Limits boxes (either may be blank) as values on axis `ax`: absolute, or
+    // (Anselmo 2026-09-22: a supercell's tolerance is relative, and vendor-dependent)
+    // below / above the mean of `vals` — the highlighted series' plotted values — by
+    // an amount or a percentage. A bad SiPM biases that mean a little, but still
+    // lands outside the band (Anselmo: the other 47 weigh more).
+    function withLimits(o, ax, vals) {
+        var r = rangeOf("lim"), mode = $("limmode").value, v = [], tags = [];
+        if (r && (mode === "abs" || (vals && vals.length))) {
+            var m = mode === "abs" ? 0 : meanSd(vals).mean;
+            function at(d, sign) {
+                if (mode === "abs") { v.push(d); tags.push(fmt(d)); return; }
+                var x = mode === "pct" ? m * (1 + sign * d / 100) : m + sign * d;
+                v.push(x); tags.push("mean " + (sign < 0 ? "−" : "+") + " " + d + (mode === "pct" ? "%" : "") + " = " + fmt(x));
+            }
+            if (r[0] !== null) at(r[0], -1);
+            if (r[1] !== null) at(r[1], +1);
+        }
+        if (v.length) o.plugins.limits = { ax: ax, values: v, tags: tags };
         return v;
     }
     function draw(cfg) { if (chart) chart.destroy(); cfg.plugins = [statsBox, limitLines]; applyRanges(cfg.options.scales); chart = new Chart($("plot"), cfg); $("plot-msg").hidden = true; }
@@ -502,7 +518,7 @@
     // a histogram, "label, count" lines over category bars).
     function controls(bins, overlay, limits) {
         $("bins").disabled = !bins; $("bins-l").classList.toggle("pl-off", !bins);
-        $("limmin").disabled = !limits; $("limmax").disabled = !limits; $("lim-l").classList.toggle("pl-off", !limits);
+        $("limmin").disabled = !limits; $("limmax").disabled = !limits; $("limmode").disabled = !limits; $("lim-l").classList.toggle("pl-off", !limits);
         $("bins-l").title = bins ? "" : "Bins apply to histograms only";
         $("ov").disabled = !overlay; $("ovn").disabled = !overlay;
         $("ov-l").classList.toggle("pl-off", !overlay); $("ovn").classList.toggle("pl-off", !overlay);
@@ -625,7 +641,7 @@
                     stats.textContent = head + " · " + infoL.join(" · ") + noteSkipped();
                     o.plugins.legend.display = series.length > 1;
                     o.plugins.tooltip = { callbacks: { title: function (cs) { return tipLines(cs[0].raw); }, label: function (c1) { return fmt(c1.raw.x) + ", " + fmt(c1.raw.y); } } };
-                    withLimits(o, "y");
+                    withLimits(o, "y", pts.map(function (q) { return q.y; }));
                     draw({ type: "line", data: { datasets: dsLn }, options: o });
                     controls(false, null, true);
                 } else {
@@ -646,7 +662,7 @@
                     o.plugins.tooltip = { callbacks: {
                         title: function (cs) { var g = cs[0].raw; return fmt(g.x) + ", " + fmt(g.y) + (g.n > 1 ? "  × " + g.n : ""); },
                         label: function (c) { var g = c.raw; return g.pids.concat(g.n > g.pids.length ? ["…"] : []); } } };
-                    withLimits(o, "y");
+                    withLimits(o, "y", pts.map(function (q) { return q.y; }));
                     draw({ type: "bubble", data: { datasets: dsS }, options: o });
                     controls(false, null, true);
                 }
@@ -715,7 +731,7 @@
                 if (logy) oL.scales.y.type = "logarithmic";
                 oL.plugins.legend.display = used.length > 1;
                 oL.plugins.tooltip.callbacks = { title: function (cs) { var q = cs[0].raw; return q.t ? tipLines(q) : fmt(q.x); } };
-                withLimits(oL, "y");
+                withLimits(oL, "y", numsOf[used.indexOf(a)] || []);
                 draw({ type: "line", data: { datasets: dsL.concat(ovDs) }, options: oL });
                 controls(false, "num", true);
                 return;
@@ -738,7 +754,7 @@
             var yT = (m1 === "cum" ? "cumulative " : "") + "count";
             var xKeys = used.map(function (s) { return s.x; }).filter(function (k, i, arr) { return arr.indexOf(k) === i; });
             var o1 = opts((xKeys.length > 1 ? xKeys.map(lastSeg).join(" · ") : showPath(xp)) + "  (bin width " + fmt(b1.w) + ")", yT);
-            var lim = withLimits(o1, "x"), ovx = ov.map(function (q) { return q.x; });
+            var lim = withLimits(o1, "x", numsOf[used.indexOf(a)] || []), ovx = ov.map(function (q) { return q.x; });
             var xmin = Math.min.apply(null, [b1.lo].concat(ovx, lim)), xmax = Math.max.apply(null, [b1.hi].concat(ovx, lim));
             if (lim.length) { var padx = (xmax - xmin) * 0.04; if (xmin < b1.lo) xmin -= padx; if (xmax > b1.hi) xmax += padx; }   // a limit past the bins gets room, not the axis edge
             o1.scales.x = { type: "linear", min: xmin, max: xmax, offset: false, grid: { offset: false }, title: o1.scales.x.title,
@@ -1006,7 +1022,7 @@
     }
     function writeHash() {
         var cfg = { src: source, series: series.map(packSeries), cur: cur || undefined, bins: +$("bins").value, by: binsY || undefined,
-                    ov: $("ov").value || undefined, ovn: $("ovn").value || undefined, xr: rangeOf("x") || undefined, yr: rangeOf("y") || undefined, lim: rangeOf("lim") || undefined,
+                    ov: $("ov").value || undefined, ovn: $("ovn").value || undefined, xr: rangeOf("x") || undefined, yr: rangeOf("y") || undefined, lim: rangeOf("lim") || undefined, limm: $("limmode").value !== "abs" ? $("limmode").value : undefined,
                     title: $("ptitle").value.trim() || undefined, xl: $("xlab").value.trim() || undefined, yl: $("ylab").value.trim() || undefined, sp: savedId || undefined,
                     rare: $("rare").checked ? undefined : false, m2: $("mode2d").value, m1: $("mode1d").value, logy: $("logy").checked || undefined, st: $("showstats").checked ? undefined : false,
                     ids: IDS || undefined };
@@ -1115,6 +1131,7 @@
         if (!series[0].x && paths.length) series[0].x = paths[0];
         $("bins").value = cfg.bins || 40; binsY = cfg.by >= 2 ? Math.floor(+cfg.by) : null;
         $("ov").value = cfg.ov || ""; $("ovn").value = cfg.ovn || "";
+        $("limmode").value = ["mean", "pct"].indexOf(cfg.limm) >= 0 ? cfg.limm : "abs"; limitPlaceholders();
         [["x", "xr"], ["y", "yr"], ["lim", "lim"]].forEach(function (ak) { var ax = ak[0], r = Array.isArray(cfg[ak[1]]) ? cfg[ak[1]] : [null, null]; $(ax + "min").value = r[0] === null || r[0] === undefined ? "" : r[0]; $(ax + "max").value = r[1] === null || r[1] === undefined ? "" : r[1]; });
         $("ptitle").value = cfg.title || ""; $("xlab").value = cfg.xl || ""; $("ylab").value = cfg.yl || "";
         $("mode2d").value = ["scatter", "line", "heat"].indexOf(cfg.m2) >= 0 ? cfg.m2 : "scatter";
@@ -1312,6 +1329,9 @@
     FACETS.forEach(function (k) { $("f-" + k).addEventListener("change", function () { if ($("f-" + k).value) S().f[k] = $("f-" + k).value; else delete S().f[k]; changed(); }); });
     ["bins", "mode2d", "mode1d", "logy", "showstats"].forEach(function (id) { $(id).addEventListener("change", changed); });
     ["xmin", "xmax", "ymin", "ymax", "limmin", "limmax"].forEach(function (id) { $(id).addEventListener("change", changed); });
+    // the boxes read low / high as absolutes, below / above in the mean modes
+    function limitPlaceholders() { var rel = $("limmode").value !== "abs"; $("limmin").placeholder = rel ? "below" : "low"; $("limmax").placeholder = rel ? "above" : "high"; }
+    $("limmode").addEventListener("change", function () { limitPlaceholders(); changed(); });
     ["ov", "ovn", "ptitle", "xlab", "ylab"].forEach(function (id) { $(id).addEventListener("input", changed); });
     $("zoom-reset").addEventListener("click", function () { if (chart && chart.resetZoom) chart.resetZoom(); });
     $("plot").addEventListener("dblclick", function () { if (chart && chart.resetZoom) chart.resetZoom(); });
