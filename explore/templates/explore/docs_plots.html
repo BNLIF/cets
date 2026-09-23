@@ -1,13 +1,14 @@
 {% extends 'explore/base.html' %}
-{% block title %}Draw syntax · Docs · HWDB Explorer{% endblock %}
+{% block title %}Plots page · Docs · HWDB Explorer{% endblock %}
 
 {% block content %}
 <style>
   .dd-page { padding: 26px 30px 56px; max-width: 860px; font-size: 14px; color: var(--dim); line-height: 1.5; }
   .dd-page h1 { font-size: 1.5rem; color: var(--ink); margin: 0 0 4px; letter-spacing: -0.01em; }
   .dd-sub { color: var(--dim); font-size: 13.5px; margin: 0 0 18px; }
-  .dd-sub a, .dd-page h2 a { color: var(--accent); text-decoration: none; }
+  .dd-page a { color: var(--accent); text-decoration: none; }
   .dd-page h2 { font-size: 15px; color: var(--ink); margin: 30px 0 6px; padding-top: 14px; border-top: 1px solid var(--rule); }
+  .dd-page h3 { font-size: 13.5px; color: var(--ink); margin: 16px 0 4px; }
   .dd-page p { margin: 6px 0; }
   .dd-page code, .dd-page pre { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
   .dd-page pre { margin: 8px 0; padding: 8px 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-lg); overflow-x: auto; white-space: pre; }
@@ -15,28 +16,91 @@
   .dd-page th, .dd-page td { text-align: left; vertical-align: top; padding: 6px 10px; border-top: 1px solid var(--rule); }
   .dd-page th { font-size: 11.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; border-top: none; font-weight: 600; }
   .dd-page td:first-child { white-space: nowrap; }
+  .dd-page ul, .dd-page ol { margin: 6px 0; padding-left: 22px; }
+  .dd-page li { margin: 2px 0; }
   .dd-toc { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; margin: 0 0 6px; }
-  .dd-toc a { color: var(--accent); text-decoration: none; }
   .dd-note { color: var(--faint); font-size: 12.5px; }
+  .dd-ui { font-weight: 600; color: var(--ink); }
   @media (max-width: 600px) { .dd-page { padding: 18px 16px 40px; } .dd-page td:first-child { white-space: normal; } }
 </style>
 
 <div class="dd-page">
-  <h1>Plots — Draw syntax</h1>
-  <p class="dd-sub">The Draw pane of a <a href="{% url 'explore:plots' %}">Plots</a> page reads ROOT's
-    <code>TTree::Draw(expression, selection, option)</code>: the <b>Draw</b> line is the expression,
-    <b>Select</b> the selection, <b>Option</b> the third argument. The keys are the Item Specifications
-    or the Test Results of the items of one component type — the tree in the X / Y pickers.
-    Enter applies a line; Shift+Enter breaks it; the Draw button applies all three.
-    An error shows under the line, with a 1-based character position.</p>
+  <h1>Plots page</h1>
+  <p class="dd-sub">The <a href="{% url 'explore:plots' %}">Plots</a> tab lists every component type with items; a type's page plots
+    distributions over its items' Item Specifications or Test Results. The left panel has three panes — <span class="dd-ui">Data</span>,
+    <span class="dd-ui">Cuts</span>, <span class="dd-ui">Series</span> — the chart sits on the right with an items grid below it.
+    The whole configuration lives in the page URL: <span class="dd-ui">Copy link</span> shares a plot, <span class="dd-ui">Save as…</span> keeps it in this browser.</p>
 
   <nav class="dd-toc">
-    <a href="#expr">Expression</a> <a href="#keys">Keys</a> <a href="#index">Indices</a> <a href="#values">Values</a>
+    <a href="#data">Data</a> <a href="#cuts">Cuts</a> <a href="#series">Series</a> <a href="#chart">Chart</a> <a href="#share">Sharing</a>
+    <a href="#draw">Draw</a> · <a href="#expr">Expression</a> <a href="#keys">Keys</a> <a href="#index">Indices</a> <a href="#values">Values</a>
     <a href="#ops">Operators</a> <a href="#funcs">Functions</a> <a href="#lists">Lists</a> <a href="#select">Select</a>
     <a href="#bins">Binning</a> <a href="#option">Option</a> <a href="#examples">Examples</a> <a href="#root">vs ROOT</a>
   </nav>
 
-  <h2 id="expr">Expression</h2>
+  <h2 id="data">Data</h2>
+  <p>The source select offers <b>Item Specifications</b> and one entry per test type that has records in the mirror, with its item count.</p>
+  <ul>
+    <li><b>Item Specifications</b> are fetched from HWDB into this browser when you first open the page (automatically up to 1,000 items, on request above that) and kept there; <span class="dd-ui">Refresh</span> fetches them again. The status line says when they were fetched.</li>
+    <li><b>Test data</b> is read from the server's mirror, which is filled by a sync: <span class="dd-ui">fetch test data from HWDB…</span> in the select (or <span class="dd-ui">Fetch new</span>) reads the latest test record of every item not yet mirrored; <span class="dd-ui">Refresh all</span> re-reads every item. The sync's log shows under the pane. A type whose tests were never synced has no test entries in the select.</li>
+  </ul>
+  <p>A test type's keys carry their list shapes (a badge with the length in the key picker), so <a href="#index">indices</a> apply. Keys present on fewer than 5% of items hide behind the picker's <span class="dd-ui">rare</span> box.</p>
+  <p>Below the source, the <a href="#draw">Draw</a> lines and the <span class="dd-ui">X</span> / <span class="dd-ui">Y</span> key pickers describe what the highlighted series plots;
+    <span class="dd-ui">Mode</span>, <span class="dd-ui">Bins</span>, <span class="dd-ui">log y</span> and <span class="dd-ui">stats</span> are shared by all series.</p>
+
+  <h2 id="cuts">Cuts</h2>
+  <p>Cuts pick <b>items</b> for the highlighted series; every filled box must match.</p>
+  <table>
+    <tr><th>Box</th><th>Matches</th></tr>
+    <tr><td>Item</td><td>exactly one PID — clicking a row of the items grid fills it, clicking again releases it</td></tr>
+    <tr><td>PID</td><td>a substring, a regular expression, or a range of the numeric suffix: <code>00120..06000</code>, <code>00120..</code>, <code>..06000</code>, also with the type prefix <code>D00400300001-00120..06000</code></td></tr>
+    <tr><td>Serial</td><td>a substring or a regular expression on the serial number, case-insensitive: <code>HPK.*</code></td></tr>
+    <tr><td>List › Paste…</td><td>PIDs or serial numbers, one per line or separated by spaces or commas; serials are resolved to PIDs (all holders of a shared serial), unmatched entries are named, and the result becomes an exact PID filter</td></tr>
+    <tr><td>Status, Creator, Manuf., Institution</td><td>one value each, from the values present in the dataset</td></tr>
+    <tr><td>On values</td><td><span class="dd-ui">+ cut</span> adds <i>key · operator · value</i>: <code>= ≠ &lt; ≤ &gt; ≥</code> compare numerically when both sides are numbers, else as text; <code>contains</code> is a case-insensitive substring. A list key passes when any entry does. <span class="dd-ui">Match</span> = all cuts or any cut.</td></tr>
+  </table>
+  <p class="dd-note">Cuts keep or drop whole items. To keep single entries of a list, use the Draw pane's <a href="#select">Select</a>.</p>
+
+  <h2 id="series">Series</h2>
+  <p>A plot holds one or more series over the same source. <span class="dd-ui">+ series</span> adds a copy of the highlighted one; the chips above the chart and
+    the list in the pane switch the highlight; the list also renames a series, sets its colour, and removes it. The Draw lines, key pickers and Cuts edit the highlighted series only.
+    A dimmed chip is a series the current mode does not draw.</p>
+  <table>
+    <tr><th>Control</th><th>Effect</th></tr>
+    <tr><td>Reference</td><td>a curve to draw over a single-key plot: <code>x, y</code> pairs one per line (for a category chart <code>label, count</code>), with a name for the legend</td></tr>
+    <tr><td>Limits</td><td>tolerance lines: dotted at each value, across a value plot or upright on a histogram, with the axis stretched to show them. The select reads the two boxes as <b>absolute</b> values, as <b>mean ± value</b> or <b>mean ± %</b> of the highlighted series' plotted values; the line labels spell out the result</td></tr>
+    <tr><td>Title, X label, Y label</td><td>text on the chart; blank = the key names / count</td></tr>
+    <tr><td>X range, Y range</td><td>axis limits; on a histogram the X range is the binning range and entries outside drop (ROOT's under/overflow). The Draw line's <a href="#bins"><code>&gt;&gt;</code> binning</a> writes the same boxes</td></tr>
+  </table>
+
+  <h2 id="chart">Chart</h2>
+  <table>
+    <tr><th>Axes</th><th>Mode</th><th>Draws</th></tr>
+    <tr><td>X only</td><td>histogram</td><td>counts per bin; text values give a bar per category</td></tr>
+    <tr><td>X only</td><td>cumulative</td><td>the running count, a step line</td></tr>
+    <tr><td>X only</td><td>line vs index</td><td>every value against its index — items in PID order, entries in order within an item: a waveform or curve</td></tr>
+    <tr><td>X and Y</td><td>scatter</td><td>one marker per (x, y) pair; identical pairs merge into one marker sized by their count</td></tr>
+    <tr><td>X and Y</td><td>line</td><td>the points connected in order</td></tr>
+    <tr><td>X and Y</td><td>2D histogram</td><td>a heat map; the Y bins follow Bins unless the binning line sets them</td></tr>
+  </table>
+  <p>Drag a box to zoom, shift-drag to pan, double-click or <span class="dd-ui">Reset zoom</span> to reset. <span class="dd-ui">⤓ PNG</span> saves the picture.
+    The <b>stats</b> box gives Entries, Mean and Std Dev per numeric series; off, a plain legend remains. Hovering a point names its item (PID and serial) and the entry's index.
+    The items grid under the chart lists the dataset's items with a filter box; a click plots that item alone.</p>
+
+  <h2 id="share">Sharing</h2>
+  <ul>
+    <li><span class="dd-ui">Copy link</span> copies the page URL, whose <code>#</code> part holds every setting — source, series with their keys, cuts and selections, mode, bins, ranges, limits, labels. Opening it on another server of the explorer works, since only the type and the state are in it; the data is fetched there.</li>
+    <li><span class="dd-ui">Save as…</span> stores the URL under a name in this browser; <span class="dd-ui">Load ▾</span> lists them, <span class="dd-ui">Save</span> overwrites the loaded one. The Plots tab lists all saved plots of this browser at the top. Nothing is stored on the server.</li>
+    <li>A checklist's <b>plot</b> field embeds this page for the items named in the form (see the <a href="{% url 'explore:docs_checklist_editor' %}#plot">checklist editor guide</a>); its <i>Open in Plots</i> opens the full page with those items as a PID filter.</li>
+  </ul>
+
+  <h2 id="draw">Draw</h2>
+  <p>The Draw pane reads ROOT's <code>TTree::Draw(expression, selection, option)</code>: the <b>Draw</b> line is the expression,
+    <b>Select</b> the selection, <b>Option</b> the third argument, over the keys of the current source.
+    Enter applies a line; Shift+Enter breaks it; the Draw button applies all three.
+    An error shows under the line, with a 1-based character position.</p>
+
+  <h3 id="expr">Expression</h3>
   <p>One expression draws its histogram. Two, separated by a colon, draw two axes — <b>the first is Y</b>, as in ROOT.
     One colon at most. An expression's result is a number; text keys are plotted by picking them in the X field below the pane.</p>
 <pre>Result[3]                      histogram of the 4th Result of every item
@@ -45,7 +109,7 @@ sqrt(Result_Err[3]) : Result[3]  any expression on either side</pre>
   <p>A plain key name (with or without indices) is the same as picking that key in the X / Y fields below the pane;
     the page writes the picked keys back into the Draw line, so the two stay in step.</p>
 
-  <h2 id="keys">Keys</h2>
+  <h3 id="keys">Keys</h3>
   <p>A key is its path in the record, segments joined by dots: <code>Test_Results.SiPM.Result</code>.
     The trailing segments are enough when they name one key — <code>SiPM.Result</code>, or just <code>Result</code>.</p>
   <table>
@@ -57,7 +121,7 @@ sqrt(Result_Err[3]) : Result[3]  any expression on either side</pre>
     <tr><td>Several keys still match: the error lists them, add a segment</td><td><code>“Result” matches 2 keys: …</code> → <code>SiPM.Result</code></td></tr>
   </table>
 
-  <h2 id="index">Indices</h2>
+  <h3 id="index">Indices</h3>
   <p>Some levels of a record are lists — the tree shows their length in a badge. Brackets pin one entry of a list level,
     counted from 0; a level without a pin plots every entry. Take a record of the shape
     <i>Test Results</i> (a list of runs) › <i>SiPM</i> (a list of 8 boards) › <i>V</i> (a list of 3 voltages):</p>
@@ -73,7 +137,7 @@ sqrt(Result_Err[3]) : Result[3]  any expression on either side</pre>
   <p class="dd-note">An index past the longest list of that level is an error; an item whose list is shorter gives nothing.
     Brackets on a segment that is not a list are an error too.</p>
 
-  <h2 id="values">Values</h2>
+  <h3 id="values">Values</h3>
   <table>
     <tr><th>Kind</th><th>Written as</th></tr>
     <tr><td>Numbers</td><td><code>3</code>, <code>0.25</code>, <code>1e-3</code>, <code>2.5E6</code></td></tr>
@@ -84,7 +148,7 @@ sqrt(Result_Err[3]) : Result[3]  any expression on either side</pre>
   <p>A key's value is used as it is: arithmetic reads it as a number (an entry that does not read as one drops out);
     comparisons are numeric when both sides read as numbers, otherwise on the text. Truth is a non-zero number or a non-empty text.</p>
 
-  <h2 id="ops">Operators</h2>
+  <h3 id="ops">Operators</h3>
   <table>
     <tr><th>Precedence</th><th>Operators</th><th>Notes</th></tr>
     <tr><td>highest</td><td><code>^</code></td><td>power, right-associative; binds tighter than the sign: <code>-x^2</code> = <code>-(x^2)</code></td></tr>
@@ -103,7 +167,7 @@ Result[3] &gt; 51 &amp;&amp; Result_Err[3] &lt; 0.1          1 or 0 per entry
 $serial =~ '^HPK'                              serial starts with HPK (any case)
 $manufacturer == 'Hamamatsu'                   text equality</pre>
 
-  <h2 id="funcs">Functions</h2>
+  <h3 id="funcs">Functions</h3>
   <p><code>sqrt abs log log10 exp pow sin cos tan atan atan2 min max floor ceil round</code> — as in JavaScript's Math:
     <code>log</code> is the natural logarithm, <code>pow(x, y)</code> = <code>x^y</code>, <code>atan2(y, x)</code>,
     <code>min</code> / <code>max</code> take any number of arguments, <code>round</code> to the nearest integer.</p>
@@ -111,7 +175,7 @@ $manufacturer == 'Hamamatsu'                   text equality</pre>
 round(Vbd * 10) / 10                           to one decimal
 max(V[0], V[1], V[2])</pre>
 
-  <h2 id="lists">Lists</h2>
+  <h3 id="lists">Lists</h3>
   <p>When an expression names several keys, their lists run together entry by entry, up to the shortest;
     a single value repeats along the list. An entry whose result is missing or not a finite number drops out,
     and a key with no value on an item gives nothing for that item.</p>
@@ -120,7 +184,7 @@ Result - Result[0]         every entry minus the first
 Result / Nominal           Nominal is one value: divides every entry</pre>
   <p>With two axes the X and Y expressions are paired by entry, so an entry dropped on one side is dropped on the other.</p>
 
-  <h2 id="select">Select</h2>
+  <h3 id="select">Select</h3>
   <p>A second expression, evaluated per entry alongside the Draw expression; an entry is kept when it is true (non-zero, or non-empty text).
     It may name keys the Draw line does not.</p>
 <pre>Result_Err[3] &lt; 0.1
@@ -131,7 +195,7 @@ Result &gt; 0                 keep the positive entries of a list, one by one</p
     The <b>Cuts</b> pane also keeps whole items — by status, institution, PID range, serial — where Select keeps entries.
     Both apply.</p>
 
-  <h2 id="bins">Binning</h2>
+  <h3 id="bins">Binning</h3>
   <p>A trailing <code>&gt;&gt;</code> sets the bins and the axis ranges, as ROOT's <code>&gt;&gt; name(nx,lo,hi)</code>. It must be the last thing on the line.</p>
   <table>
     <tr><th>Write</th><th>Sets</th></tr>
@@ -144,7 +208,7 @@ Result &gt; 0                 keep the positive entries of a list, one by one</p
   <p>The Bins box and the range boxes of the chart change together with it: editing one edits the other, and at least 2 bins are needed.
     The ranges also set the axis limits of a scatter or heat map.</p>
 
-  <h2 id="option">Option</h2>
+  <h3 id="option">Option</h3>
   <p>Words separated by spaces or commas, case-insensitive: the plot type and the switches, as ROOT's third argument.
     The line is the whole description — a mode it names is taken, a switch it leaves out is off.</p>
   <table>
@@ -162,7 +226,7 @@ Result &gt; 0                 keep the positive entries of a list, one by one</p
 cum
 colz</pre>
 
-  <h2 id="examples">Examples</h2>
+  <h3 id="examples">Examples</h3>
   <table>
     <tr><th>Draw</th><th>Select</th><th>Option</th><th>Result</th></tr>
     <tr><td><code>Vbd</code></td><td></td><td></td><td>breakdown-voltage distribution of all items</td></tr>
@@ -176,7 +240,7 @@ colz</pre>
   <p>Several series can be drawn together: add one with <b>+</b> in the series row and give each its own Draw and Select.
     The <b>Limits</b> row draws tolerance lines over any of them.</p>
 
-  <h2 id="root">Differences from ROOT</h2>
+  <h3 id="root">Differences from ROOT</h3>
   <table>
     <tr><th>ROOT</th><th>Here</th></tr>
     <tr><td>Branch names, exact</td><td>Key paths by their trailing segments, case- and space-insensitive; <code>"quoted"</code> segments for odd characters</td></tr>

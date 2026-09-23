@@ -6273,13 +6273,13 @@ def explore_docs_view(request):
 
 @login_not_required
 @fnal_login_required
-def explore_docs_plot_draw_view(request):
-    """The Plots page's Draw syntax, at length: ROOT's TTree::Draw as this
-    explorer reads it — keys, pins, operators, selection, binning, option —
-    each with examples. Static prose in the template; reached from the
-    "? syntax" popover and the Docs page."""
+def explore_docs_plots_view(request):
+    """The Plots page, at length: data sources, cuts, series, the chart and
+    sharing, then the Draw syntax — ROOT's TTree::Draw as this explorer
+    reads it, each rule with examples. Static prose in the template; reached
+    from the "? syntax" popover (at #draw) and the Docs page."""
     inst = instance_of(request)
-    return render(request, "explore/docs_plot_draw.html", {
+    return render(request, "explore/docs_plots.html", {
         "active_nav": "docs",
         "sidebar": navigation.sidebar_tree(inst, {}),
     })

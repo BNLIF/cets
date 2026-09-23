@@ -60,12 +60,13 @@
   .ship-pill.is-delivered { color: var(--good); background: var(--good-bg);
     border-color: color-mix(in oklch, var(--good) 30%, var(--rule)); }
   /* collapsible boxes card */
-  details.ship-boxes > summary { cursor: pointer; font-size: 14px; font-weight: 600;
+  details.ship-boxes > summary, details.chart-fold > summary { cursor: pointer; font-size: 14px; font-weight: 600;
     color: var(--ink); list-style: none; margin-bottom: 12px; }
-  details.ship-boxes > summary::-webkit-details-marker { display: none; }
-  details.ship-boxes > summary::before { content: "▾"; display: inline-block;
+  details.ship-boxes > summary::-webkit-details-marker, details.chart-fold > summary::-webkit-details-marker { display: none; }
+  details.ship-boxes > summary::before, details.chart-fold > summary::before { content: "▾"; display: inline-block;
     width: 16px; color: var(--faint); }
-  details.ship-boxes:not([open]) > summary::before { content: "▸"; }
+  details.ship-boxes:not([open]) > summary::before, details.chart-fold:not([open]) > summary::before { content: "▸"; }
+  details.chart-fold:not([open]) > summary { margin-bottom: 0; }
   /* shipments items table */
   .ship-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .ship-table th { text-align: left; font-weight: 600; color: var(--faint); font-size: 12px;
@@ -238,8 +239,9 @@
 
     {% if leaf.tests_synced_at %}
         {% for c in charts %}
-        <div class="chart-card" data-chart-panel="{{ c.slug }}">
-            <div class="panel-title" style="font-size: 14px; margin-bottom: 8px;">{{ c.name }}</div>
+        {# Items updated folds by default, Tests performed opens (Chao 2026-09-23); a toggle is remembered per chart in this browser. #}
+        <details class="chart-card chart-fold" data-chart-panel="{{ c.slug }}"{% if c.slug|slice:"-5:" != "_comp" %} open{% endif %}>
+            <summary class="panel-title" style="font-size: 14px; margin-bottom: 8px;">{{ c.name }}</summary>
             {% if c.empty %}
             <div class="explore-empty" style="padding: 24px 16px;">No {{ c.name|lower }} for this component type yet.</div>
             {% else %}
@@ -284,6 +286,13 @@
                     </label>
                     {% for f in c.filters %}{% if f.group == "QC flag" %}
                     <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;"><input type="checkbox" class="chart-filter-flag" value="{{ f.key }}">{{ f.label }}</label>
+                    {% endif %}{% endfor %}
+                </div>
+                {# Statuses left out of the total (Chao 2026-09-23): ticked = those items are subtracted from every bar and the cumulative line; Unknown by default, the choice kept in this browser. #}
+                <div class="chart-excl-row" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--faint);">
+                    <span title="Items with a ticked status are left out of the total — every bar and the cumulative line; an overlay of that status still shows it">Exclude</span>
+                    {% for f in c.filters %}{% if f.group == "Status" %}
+                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;"><input type="checkbox" class="chart-excl" value="{{ f.key }}">{{ f.label }}</label>
                     {% endif %}{% endfor %}
                 </div>
                 {% endif %}
@@ -363,7 +372,7 @@
                 {% endif %}
             </div>
             {% endif %}
-        </div>
+        </details>
         {% endfor %}
 
 
@@ -744,8 +753,31 @@
             addSavePng(barCanvas, c.slug + '_per-period');
             addSavePng(lineCanvas, c.slug + '_cumulative');
             var panel = document.querySelector('[data-chart-panel="' + c.slug + '"]'); if (!panel) return;
+            // The card is a <details>, closed by default: a canvas laid out while
+            // hidden has no size, so the charts resize when it opens; the toggle is remembered.
+            var foldKey = 'chartOpen:' + c.slug;
+            try { var saved = localStorage.getItem(foldKey); if (saved === '1' || saved === '0') panel.open = saved === '1'; } catch (e) {}
+            panel.addEventListener('toggle', function () {
+                try { localStorage.setItem(foldKey, panel.open ? '1' : '0'); } catch (e) {}
+                if (panel.open) { barChart.resize(); lineChart.resize(); }
+            });
             var sel = panel.querySelector('.chart-filter-sel');
             var flagBoxes = panel.querySelectorAll('.chart-filter-flag');
+            // Statuses left out of the total (Chao 2026-09-23): each ticked
+            // status' series is subtracted from the baseline, bin by bin (the
+            // overlays are precomputed on the baseline's labels). Unknown by
+            // default; the choice stays in this browser, per page and chart.
+            var exclBoxes = panel.querySelectorAll('.chart-excl');
+            var exclKey = 'chartExclude:' + location.pathname + '#' + c.slug.split('_').pop(), excl = null;
+            try { excl = JSON.parse(localStorage.getItem(exclKey)); } catch (e) { excl = null; }
+            if (!Array.isArray(excl)) excl = ['status:Unknown'];
+            exclBoxes.forEach(function (b) { b.checked = excl.indexOf(b.value) >= 0; });
+            function excluded(rangeKey) {
+                return Array.prototype.filter.call(exclBoxes, function (b) { return b.checked; }).map(function (b) {
+                    return (c.filters || []).find(function (x) { return x.key === b.value; });
+                }).filter(function (f) { return f && f.ranges[rangeKey]; });
+            }
+            function minus(d, e) { return Object.assign({}, d, { data: d.data.map(function (v, i) { return v - (e.data[i] || 0); }) }); }
             // Date window (#140): URL params <kind>_from / <kind>_to (kind =
             // "comp" | "test", the slug's suffix) so a windowed view and its
             // PNG are reproducible. Labels are ISO day or month strings, so
@@ -920,6 +952,10 @@
             function apply(rangeKey) {
                 var r = c.ranges[rangeKey]; if (!r) return;
                 var bar = r.bar_datasets.slice(), line = r.line_datasets.slice();
+                excluded(rangeKey).forEach(function (f) {
+                    bar[0] = minus(bar[0], f.ranges[rangeKey].bar_datasets[0]);
+                    line[0] = minus(line[0], f.ranges[rangeKey].line_datasets[0]);
+                });
                 overlayKeys().forEach(function (k) {
                     var f = (c.filters || []).find(function (x) { return x.key === k; });
                     if (!f || !f.ranges[rangeKey]) return;
@@ -947,6 +983,13 @@
                 });
             });
             if (sel) sel.addEventListener('change', function () { apply(currentRange()); });
+            exclBoxes.forEach(function (b) {
+                b.addEventListener('change', function () {
+                    excl = Array.prototype.filter.call(exclBoxes, function (x) { return x.checked; }).map(function (x) { return x.value; });
+                    try { localStorage.setItem(exclKey, JSON.stringify(excl)); } catch (e) {}
+                    apply(currentRange());
+                });
+            });
             fromIn.addEventListener('change', function () { userSet.from = true; syncUrl(); apply(currentRange()); });
             toIn.addEventListener('change', function () { userSet.to = true; syncUrl(); apply(currentRange()); });
             panel.querySelector('.chart-exp-add').addEventListener('click', function () {

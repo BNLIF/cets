@@ -174,7 +174,7 @@ Board 3 @ 4.5, 32</pre>
     and a phone button that shows a QR code: scanning it on a phone opens a scan page whose scans fill this field.</p>
 
   <h2 id="plot">Plot</h2>
-  <p>Embeds a Plots page for the items the form names — a Vbd distribution of the 32 boards just linked into a module. Recipe:</p>
+  <p>Embeds a <a href="{% url 'explore:docs_plots' %}">Plots page</a> for the items the form names — a Vbd distribution of the 32 boards just linked into a module. Recipe:</p>
   <ol>
     <li>On the sub-component type's Plots page, build the plot for one item and <span class="dd-ui">Copy link</span>.</li>
     <li>Paste it as the field's <span class="dd-ui">Plots page URL</span>. Only the type and the plot state are kept, so a link from another server works.</li>

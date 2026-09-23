@@ -502,7 +502,7 @@ class TestDataEndpointsTest(TestCase):
         self.assertIn('if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); applyDraw(); }', PLOT_JS)
         self.assertIn('<div class="pl-pop" id="dpop" hidden>', html)
         self.assertIn("<b>y : x</b><span>two axes — the first is Y, as in ROOT</span>", html)
-        self.assertIn('/docs/plot-draw/" target="_blank" rel="noopener" style="margin-left: auto;">Full guide with examples &#x2197;</a></div>', html)   # the popover's foot opens the full guide in a new tab
+        self.assertIn('/docs/plots/#draw" target="_blank" rel="noopener" style="margin-left: auto;">Full guide with examples &#x2197;</a></div>', html)   # the popover's foot opens the full guide in a new tab
         # an expression is a virtual key: "=expr" in the series' x / y, restored from the hash, evaluated per item, fetched by its identifiers
         self.assertIn('function isExpr(p) { return typeof p === "string" && p.charAt(0) === "="; }', PLOT_JS)
         self.assertIn('s.x = h.x && (isExpr(h.x) || acc.has(h.x)) ? h.x : ""; s.y = h.y && (isExpr(h.y) || acc.has(h.y)) ? h.y : "";', PLOT_JS)

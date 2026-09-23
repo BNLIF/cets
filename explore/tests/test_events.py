@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone as dt_timezone
 from unittest import mock
 
@@ -505,6 +506,17 @@ class ExplorePlotViewTest(TestCase):
         self.assertEqual(html.count('class="chart-filter-flag"'), 3)
         self.assertIn('value="qaqc_uploaded"', html)
         self.assertIn('"filters"', html)                      # overlay data in the JSON config
+        # The chart cards fold, closed by default, the name as the summary (Chao 2026-09-23)
+        self.assertIn('<details class="chart-card chart-fold" data-chart-panel="', html)
+        self.assertIn('<details class="chart-card chart-fold" data-chart-panel="' + node.part_type_id + '_comp">', html)        # Items updated: closed
+        self.assertIn('<details class="chart-card chart-fold" data-chart-panel="' + node.part_type_id + '_test" open>', html)   # Tests performed: open
+        self.assertIn('<summary class="panel-title" style="font-size: 14px; margin-bottom: 8px;">Items updated</summary>', html)
+        self.assertIn("if (panel.open) { barChart.resize(); lineChart.resize(); }", html)
+        # Exclude row (Chao 2026-09-23): one box per status, subtracted from the total; Unknown ticked by default
+        self.assertEqual(html.count('class="chart-excl"'), 1)
+        self.assertIn('<input type="checkbox" class="chart-excl" value="status:Passed">Passed</label>', html)
+        self.assertIn("if (!Array.isArray(excl)) excl = ['status:Unknown'];", html)
+        self.assertIn("bar[0] = minus(bar[0], f.ranges[rangeKey].bar_datasets[0]);", html)
 
     def test_qc_flag_tiles_render_with_unsynced_hint(self):
         node = _node(tests_synced_at=timezone.now(), n_tests=0)
