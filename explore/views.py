@@ -6273,6 +6273,20 @@ def explore_docs_view(request):
 
 @login_not_required
 @fnal_login_required
+def explore_docs_plot_draw_view(request):
+    """The Plots page's Draw syntax, at length: ROOT's TTree::Draw as this
+    explorer reads it — keys, pins, operators, selection, binning, option —
+    each with examples. Static prose in the template; reached from the
+    "? syntax" popover and the Docs page."""
+    inst = instance_of(request)
+    return render(request, "explore/docs_plot_draw.html", {
+        "active_nav": "docs",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+    })
+
+
+@login_not_required
+@fnal_login_required
 def explore_profile_view(request):
     """The signed-in user's HWDB identity for this instance: name, username,
     email, account flags, and the roles their FNAL account holds (``users/

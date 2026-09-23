@@ -1,0 +1,192 @@
+{% extends 'explore/base.html' %}
+{% block title %}Draw syntax · Docs · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .dd-page { padding: 26px 30px 56px; max-width: 860px; font-size: 14px; color: var(--dim); line-height: 1.5; }
+  .dd-page h1 { font-size: 1.5rem; color: var(--ink); margin: 0 0 4px; letter-spacing: -0.01em; }
+  .dd-sub { color: var(--dim); font-size: 13.5px; margin: 0 0 18px; }
+  .dd-sub a, .dd-page h2 a { color: var(--accent); text-decoration: none; }
+  .dd-page h2 { font-size: 15px; color: var(--ink); margin: 30px 0 6px; padding-top: 14px; border-top: 1px solid var(--rule); }
+  .dd-page p { margin: 6px 0; }
+  .dd-page code, .dd-page pre { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  .dd-page pre { margin: 8px 0; padding: 8px 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-lg); overflow-x: auto; white-space: pre; }
+  .dd-page table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 13px; }
+  .dd-page th, .dd-page td { text-align: left; vertical-align: top; padding: 6px 10px; border-top: 1px solid var(--rule); }
+  .dd-page th { font-size: 11.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; border-top: none; font-weight: 600; }
+  .dd-page td:first-child { white-space: nowrap; }
+  .dd-toc { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; margin: 0 0 6px; }
+  .dd-toc a { color: var(--accent); text-decoration: none; }
+  .dd-note { color: var(--faint); font-size: 12.5px; }
+  @media (max-width: 600px) { .dd-page { padding: 18px 16px 40px; } .dd-page td:first-child { white-space: normal; } }
+</style>
+
+<div class="dd-page">
+  <h1>Plots — Draw syntax</h1>
+  <p class="dd-sub">The Draw pane of a <a href="{% url 'explore:plots' %}">Plots</a> page reads ROOT's
+    <code>TTree::Draw(expression, selection, option)</code>: the <b>Draw</b> line is the expression,
+    <b>Select</b> the selection, <b>Option</b> the third argument. The keys are the Item Specifications
+    or the Test Results of the items of one component type — the tree in the X / Y pickers.
+    Enter applies a line; Shift+Enter breaks it; the Draw button applies all three.
+    An error shows under the line, with a 1-based character position.</p>
+
+  <nav class="dd-toc">
+    <a href="#expr">Expression</a> <a href="#keys">Keys</a> <a href="#index">Indices</a> <a href="#values">Values</a>
+    <a href="#ops">Operators</a> <a href="#funcs">Functions</a> <a href="#lists">Lists</a> <a href="#select">Select</a>
+    <a href="#bins">Binning</a> <a href="#option">Option</a> <a href="#examples">Examples</a> <a href="#root">vs ROOT</a>
+  </nav>
+
+  <h2 id="expr">Expression</h2>
+  <p>One expression draws its histogram. Two, separated by a colon, draw two axes — <b>the first is Y</b>, as in ROOT.
+    One colon at most. An expression's result is a number; text keys are plotted by picking them in the X field below the pane.</p>
+<pre>Result[3]                      histogram of the 4th Result of every item
+Result_Err[3] : Result[3]      Y = Result_Err[3] against X = Result[3]
+sqrt(Result_Err[3]) : Result[3]  any expression on either side</pre>
+  <p>A plain key name (with or without indices) is the same as picking that key in the X / Y fields below the pane;
+    the page writes the picked keys back into the Draw line, so the two stay in step.</p>
+
+  <h2 id="keys">Keys</h2>
+  <p>A key is its path in the record, segments joined by dots: <code>Test_Results.SiPM.Result</code>.
+    The trailing segments are enough when they name one key — <code>SiPM.Result</code>, or just <code>Result</code>.</p>
+  <table>
+    <tr><th>Rule</th><th>Example</th></tr>
+    <tr><td>Spaces in a name are written as <code>_</code></td><td><code>Test_Results</code> for “Test Results”</td></tr>
+    <tr><td>Other characters: quote the segment with double quotes</td><td><code>"Vbd (V)"</code>, <code>SiPM."Result-A"</code></td></tr>
+    <tr><td>Case does not matter</td><td><code>result</code> finds “Result”</td></tr>
+    <tr><td>… unless two keys differ only by case or spacing — then the exact spelling decides</td><td><code>Vbd</code> vs <code>VBD</code></td></tr>
+    <tr><td>Several keys still match: the error lists them, add a segment</td><td><code>“Result” matches 2 keys: …</code> → <code>SiPM.Result</code></td></tr>
+  </table>
+
+  <h2 id="index">Indices</h2>
+  <p>Some levels of a record are lists — the tree shows their length in a badge. Brackets pin one entry of a list level,
+    counted from 0; a level without a pin plots every entry. Take a record of the shape
+    <i>Test Results</i> (a list of runs) › <i>SiPM</i> (a list of 8 boards) › <i>V</i> (a list of 3 voltages):</p>
+  <table>
+    <tr><th>Write</th><th>Plots</th></tr>
+    <tr><td><code>V</code></td><td>every voltage of every board of every run</td></tr>
+    <tr><td><code>V[0]</code></td><td>the first run's — the leaf's brackets count list levels from the outermost, as ROOT's <code>a[i][j]</code></td></tr>
+    <tr><td><code>V[0][2]</code></td><td>the first run, the third board, all three voltages</td></tr>
+    <tr><td><code>V[][2]</code> or <code>V[*][2]</code></td><td>the third board of every run — an empty bracket skips a level</td></tr>
+    <tr><td><code>SiPM[2].V</code></td><td>brackets on an inner segment pin the level that segment names: the third board, every run</td></tr>
+    <tr><td><code>SiPM[2].V[0]</code></td><td>the same as <code>V[0][2]</code>: the leaf's brackets always count from the outermost level, whatever the inner segments pin</td></tr>
+  </table>
+  <p class="dd-note">An index past the longest list of that level is an error; an item whose list is shorter gives nothing.
+    Brackets on a segment that is not a list are an error too.</p>
+
+  <h2 id="values">Values</h2>
+  <table>
+    <tr><th>Kind</th><th>Written as</th></tr>
+    <tr><td>Numbers</td><td><code>3</code>, <code>0.25</code>, <code>1e-3</code>, <code>2.5E6</code></td></tr>
+    <tr><td>Text</td><td><code>'single quotes'</code> — double quotes name keys</td></tr>
+    <tr><td>Item fields</td><td><code>$pid</code> <code>$serial</code> <code>$status</code> <code>$creator</code> <code>$institution</code> <code>$manufacturer</code> — one value per item, repeated along its entries</td></tr>
+    <tr><td>Constants</td><td><code>pi</code>, <code>e</code></td></tr>
+  </table>
+  <p>A key's value is used as it is: arithmetic reads it as a number (an entry that does not read as one drops out);
+    comparisons are numeric when both sides read as numbers, otherwise on the text. Truth is a non-zero number or a non-empty text.</p>
+
+  <h2 id="ops">Operators</h2>
+  <table>
+    <tr><th>Precedence</th><th>Operators</th><th>Notes</th></tr>
+    <tr><td>highest</td><td><code>^</code></td><td>power, right-associative; binds tighter than the sign: <code>-x^2</code> = <code>-(x^2)</code></td></tr>
+    <tr><td></td><td><code>-x</code> <code>!x</code></td><td>negation, logical not (1 or 0)</td></tr>
+    <tr><td></td><td><code>* / %</code></td><td><code>%</code> is the remainder</td></tr>
+    <tr><td></td><td><code>+ -</code></td><td></td></tr>
+    <tr><td></td><td><code>&lt; &lt;= &gt; &gt;=</code></td><td>1 when true, 0 when false</td></tr>
+    <tr><td></td><td><code>== != =~</code></td><td><code>==</code> / <code>!=</code> compare text when a side is not a number; <code>=~</code> matches a regular expression, case-insensitive</td></tr>
+    <tr><td></td><td><code>&amp;&amp;</code></td><td>and</td></tr>
+    <tr><td>lowest</td><td><code>||</code></td><td>or</td></tr>
+  </table>
+  <p>Parentheses group as usual. A comparison is a number like any other, so <code>Result[3] &gt; 51</code> on its own
+    draws a histogram of 0s and 1s.</p>
+<pre>(Result[1] - Result[0]) / Result[0] * 100      percent change
+Result[3] &gt; 51 &amp;&amp; Result_Err[3] &lt; 0.1          1 or 0 per entry
+$serial =~ '^HPK'                              serial starts with HPK (any case)
+$manufacturer == 'Hamamatsu'                   text equality</pre>
+
+  <h2 id="funcs">Functions</h2>
+  <p><code>sqrt abs log log10 exp pow sin cos tan atan atan2 min max floor ceil round</code> — as in JavaScript's Math:
+    <code>log</code> is the natural logarithm, <code>pow(x, y)</code> = <code>x^y</code>, <code>atan2(y, x)</code>,
+    <code>min</code> / <code>max</code> take any number of arguments, <code>round</code> to the nearest integer.</p>
+<pre>log10(abs(Current))
+round(Vbd * 10) / 10                           to one decimal
+max(V[0], V[1], V[2])</pre>
+
+  <h2 id="lists">Lists</h2>
+  <p>When an expression names several keys, their lists run together entry by entry, up to the shortest;
+    a single value repeats along the list. An entry whose result is missing or not a finite number drops out,
+    and a key with no value on an item gives nothing for that item.</p>
+<pre>Result - Result_Err        entry 0 with entry 0, entry 1 with entry 1, …
+Result - Result[0]         every entry minus the first
+Result / Nominal           Nominal is one value: divides every entry</pre>
+  <p>With two axes the X and Y expressions are paired by entry, so an entry dropped on one side is dropped on the other.</p>
+
+  <h2 id="select">Select</h2>
+  <p>A second expression, evaluated per entry alongside the Draw expression; an entry is kept when it is true (non-zero, or non-empty text).
+    It may name keys the Draw line does not.</p>
+<pre>Result_Err[3] &lt; 0.1
+$serial =~ 'HPK' &amp;&amp; Result[3] &gt; 51
+$institution =~ 'BNL'
+Result &gt; 0                 keep the positive entries of a list, one by one</pre>
+  <p>A selection made only of item fields (no lists) keeps or drops the whole item.
+    The <b>Cuts</b> pane also keeps whole items — by status, institution, PID range, serial — where Select keeps entries.
+    Both apply.</p>
+
+  <h2 id="bins">Binning</h2>
+  <p>A trailing <code>&gt;&gt;</code> sets the bins and the axis ranges, as ROOT's <code>&gt;&gt; name(nx,lo,hi)</code>. It must be the last thing on the line.</p>
+  <table>
+    <tr><th>Write</th><th>Sets</th></tr>
+    <tr><td><code>expr &gt;&gt; (50)</code></td><td>50 bins, range automatic</td></tr>
+    <tr><td><code>expr &gt;&gt; (50, 30, 60)</code></td><td>50 bins from 30 to 60</td></tr>
+    <tr><td><code>expr &gt;&gt; (50, , 60)</code></td><td>a blank bound stays automatic</td></tr>
+    <tr><td><code>y : x &gt;&gt; (40, 0, 1, 20, 30, 60)</code></td><td>X 40 bins 0–1, Y 20 bins 30–60; <code>(nx,lo,hi,ny)</code> leaves Y's range automatic</td></tr>
+    <tr><td><code>expr &gt;&gt; hpk(50, 30, 60)</code></td><td>the same, and names the series “hpk” in the legend</td></tr>
+  </table>
+  <p>The Bins box and the range boxes of the chart change together with it: editing one edits the other, and at least 2 bins are needed.
+    The ranges also set the axis limits of a scatter or heat map.</p>
+
+  <h2 id="option">Option</h2>
+  <p>Words separated by spaces or commas, case-insensitive: the plot type and the switches, as ROOT's third argument.
+    The line is the whole description — a mode it names is taken, a switch it leaves out is off.</p>
+  <table>
+    <tr><th>Axes</th><th>Words</th><th>Draws</th></tr>
+    <tr><td>one</td><td><code>hist</code></td><td>histogram (the default)</td></tr>
+    <tr><td>one</td><td><code>cum</code> / <code>cumulative</code></td><td>cumulative distribution</td></tr>
+    <tr><td>one</td><td><code>line</code> / <code>l</code></td><td>the values against their index — item by item in PID order, entries in order within an item</td></tr>
+    <tr><td>two</td><td><code>scat</code> / <code>scatter</code> / <code>p</code></td><td>scatter (the default)</td></tr>
+    <tr><td>two</td><td><code>line</code> / <code>l</code></td><td>connected points</td></tr>
+    <tr><td>two</td><td><code>colz</code> / <code>col</code> / <code>box</code></td><td>2D heat map</td></tr>
+    <tr><td>any</td><td><code>logy</code> / <code>liny</code></td><td>logarithmic / linear Y</td></tr>
+    <tr><td>any</td><td><code>nostats</code> / <code>nostat</code> / <code>stats</code></td><td>hide / show the statistics box</td></tr>
+  </table>
+<pre>hist logy nostats
+cum
+colz</pre>
+
+  <h2 id="examples">Examples</h2>
+  <table>
+    <tr><th>Draw</th><th>Select</th><th>Option</th><th>Result</th></tr>
+    <tr><td><code>Vbd</code></td><td></td><td></td><td>breakdown-voltage distribution of all items</td></tr>
+    <tr><td><code>Vbd &gt;&gt; (60, 48, 56)</code></td><td><code>$serial =~ '^HPK'</code></td><td><code>hist</code></td><td>the HPK items only, 60 bins from 48 to 56 V</td></tr>
+    <tr><td><code>Result[3]</code></td><td><code>Result_Err[3] &lt; 0.1</code></td><td><code>logy</code></td><td>the 4th result where its error is small, log Y</td></tr>
+    <tr><td><code>Result_Err[3] : Result[3]</code></td><td></td><td><code>scat</code></td><td>error against value, one point per item</td></tr>
+    <tr><td><code>V : SiPM[2].I</code></td><td><code>$institution =~ 'BNL'</code></td><td><code>colz</code></td><td>2D map of voltage against the third board's current, items of one institution</td></tr>
+    <tr><td><code>(Result[1] - Result[0]) / Result[0] * 100</code></td><td><code>Result[0] != 0</code></td><td><code>cum</code></td><td>cumulative percent change, no division by zero</td></tr>
+    <tr><td><code>Result &gt;&gt; sipm(40)</code></td><td><code>Result &gt; 0</code></td><td><code>nostats</code></td><td>every list entry above zero, 40 bins, series named “sipm”</td></tr>
+  </table>
+  <p>Several series can be drawn together: add one with <b>+</b> in the series row and give each its own Draw and Select.
+    The <b>Limits</b> row draws tolerance lines over any of them.</p>
+
+  <h2 id="root">Differences from ROOT</h2>
+  <table>
+    <tr><th>ROOT</th><th>Here</th></tr>
+    <tr><td>Branch names, exact</td><td>Key paths by their trailing segments, case- and space-insensitive; <code>"quoted"</code> segments for odd characters</td></tr>
+    <tr><td><code>"double-quoted"</code> strings</td><td><code>'single-quoted'</code> text; double quotes belong to key names</td></tr>
+    <tr><td><code>z : y : x</code>, up to four dimensions</td><td>Two at most: <code>y : x</code></td></tr>
+    <tr><td><code>Entry$</code>, <code>Sum$</code>, <code>Length$</code>, <code>Alt$</code>…</td><td>Not available; the item fields <code>$pid</code> … <code>$manufacturer</code> instead</td></tr>
+    <tr><td>Selection as a weight</td><td>Selection as a filter only: kept when true</td></tr>
+    <tr><td>Regular expressions</td><td><code>=~</code>, case-insensitive</td></tr>
+    <tr><td><code>a[i][j]</code> pins from the first dimension</td><td>The same on the leaf; brackets on an inner segment pin the level that segment names; <code>[]</code> skips a level</td></tr>
+    <tr><td>Option words</td><td>Only the ones listed above; an unknown word is an error</td></tr>
+  </table>
+</div>
+{% endblock %}

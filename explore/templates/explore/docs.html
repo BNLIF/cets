@@ -22,8 +22,18 @@
 
 <div class="dc-page">
   <h1>Docs</h1>
-  <p class="dc-sub">External DUNE HWDB documentation and references. All links open in a new tab;
+  <p class="dc-sub">External DUNE HWDB documentation and references. External links open in a new tab;
     the FNAL ones need Fermilab SSO.</p>
+
+  <div class="dc-group">
+    <h2>HWDB Explorer</h2>
+    <div class="dc-list">
+      <a class="dc-row" href="{% url 'explore:docs_plot_draw' %}">
+        <span class="dc-name">Plots — Draw syntax</span>
+        <span class="dc-desc">The ROOT-style Draw / Select / Option lines of the Plots page, with examples.</span>
+      </a>
+    </div>
+  </div>
 
   <div class="dc-group">
     <h2>Start here</h2>

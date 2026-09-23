@@ -50,3 +50,32 @@ class DocsViewTest(TestCase):
         resp = self.client.get(reverse("explore:docs"))
         self.assertEqual(resp.status_code, 302)
         self.assertIn("login", resp["Location"])
+
+
+class DrawSyntaxGuideTest(TestCase):
+    """The Plots page's "? syntax" popover links a full guide page; the
+    Docs page lists it; both live under the Docs nav."""
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("dg", "g@g.io", "pw"))
+
+    def test_guide_renders_every_section(self):
+        html = self.client.get(reverse("explore:docs_plot_draw")).content.decode()
+        for anchor in ("expr", "keys", "index", "values", "ops", "funcs", "lists", "select", "bins", "option", "examples", "root"):
+            self.assertIn(f'<h2 id="{anchor}">', html)
+        self.assertIn("<code>TTree::Draw(expression, selection, option)</code>", html)
+        self.assertIn("<code>V[][2]</code> or <code>V[*][2]</code>", html)
+        self.assertIn("<code>expr &gt;&gt; hpk(50, 30, 60)</code>", html)
+        self.assertIn('class="eh-nav-item active" href="/hw/docs/"', html)
+
+    def test_docs_page_and_popover_link_the_guide(self):
+        url = reverse("explore:docs_plot_draw")
+        self.assertEqual(url, "/hw/docs/plot-draw/")
+        docs = self.client.get(reverse("explore:docs")).content.decode()
+        self.assertIn(f'<a class="dc-row" href="{url}">', docs)
+        self.assertIn("Plots — Draw syntax", docs)
+
+    def test_anonymous_is_redirected_to_login(self):
+        self.client.logout()
+        resp = self.client.get(reverse("explore:docs_plot_draw"))
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("login", resp["Location"])
