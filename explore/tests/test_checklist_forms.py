@@ -2822,6 +2822,8 @@ class PlotFieldTest(TestCase):
         self.assertIn("Enter PIDs or serial numbers of D00400300001 in Boards to see the plot.", html)
         self.assertNotIn("</script>-secs", html)
         self.assertIn('<iframe class="cl-plot-frame" hidden title="Vbd"></iframe>', html)
+        # Anselmo 2026-09-22: the frame's display rule must not beat its hidden attribute — a removed PID stayed plotted
+        self.assertIn(".cl-plot-frame[hidden], .cl-plot-open[hidden] { display: none; }", html)
         # the link is THIS server's Plots page (the URL was copied on twister, the test runs on localhost — Chao)
         self.assertIn('class="cl-plot-open" href="' + self.URL.replace("https://x", "").replace("&", "&amp;") + '"', html)
         self.assertNotIn('href="https://x/', html)
