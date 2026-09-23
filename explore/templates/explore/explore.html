@@ -289,8 +289,8 @@
                 {% endif %}
             </div>
             <div class="chart-pair">
-                <div><div style="font-size: 13px; color: var(--faint); margin-bottom: 6px; font-family: var(--font-mono);">Per period</div><div style="position: relative; height: 260px;"><canvas id="bar_{{ c.slug }}"></canvas></div></div>
-                <div><div style="font-size: 13px; color: var(--faint); margin-bottom: 6px; font-family: var(--font-mono);">Cumulative</div><div style="position: relative; height: 260px;"><canvas id="line_{{ c.slug }}"></canvas></div></div>
+                <div><div style="font-size: 13px; color: var(--faint); margin-bottom: 6px; font-family: var(--font-mono);">Per period</div><div style="position: relative; height: 320px;"><canvas id="bar_{{ c.slug }}"></canvas></div></div>
+                <div><div style="font-size: 13px; color: var(--faint); margin-bottom: 6px; font-family: var(--font-mono);">Cumulative</div><div style="position: relative; height: 320px;"><canvas id="line_{{ c.slug }}"></canvas></div></div>
             </div>
             {% endif %}
             <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">{{ c.caption }}</p>
@@ -723,7 +723,7 @@
                     top = y + 4;
                     ctx.beginPath(); ctx.moveTo(a.left, y); ctx.lineTo(a.right, y); ctx.stroke();
                     ctx.font = font; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
-                    ctx.fillText('Total to produce ' + p.total.toLocaleString(), a.left + 6, y - 3);   // left: the dated lines crowd the right
+                    ctx.fillText('Total to produce ' + p.total.toLocaleString(), a.left + 6, y - 4);   // left: the dated lines crowd the right; the axis headroom keeps it off the legend
                 }
             }
             [['done', 'Completed by '], ['need', 'Needed by ']].forEach(function (k) {   // both labels left of their line, hanging from the top
@@ -888,13 +888,16 @@
                 var span = labelSpan(start, end, monthly), at = {};
                 labels.forEach(function (l, i) { at[l] = i; });
                 // bar[k] and line[k] come from the same series, so the windowed
-                // cumulative is the running sum of the windowed counts.
+                // cumulative is the running sum of the windowed counts. Bins that
+                // start after today are null (Anselmo 2026-09-23: the production
+                // line stops at the current date), so the lines and their fill end there.
+                var today = new Date().toISOString().slice(0, 10), future = span.map(function (l) { return fullDate(l, false) > today; });
                 var wbar = bar.map(function (d) {
-                    return Object.assign({}, d, { data: span.map(function (l) { return l in at ? d.data[at[l]] : 0; }) });
+                    return Object.assign({}, d, { data: span.map(function (l, i) { return future[i] ? null : (l in at ? d.data[at[l]] : 0); }) });
                 });
                 var wline = line.map(function (d, k) {
                     var run = 0;
-                    return Object.assign({}, d, { data: wbar[k].data.map(function (v) { run += v; return run; }) });
+                    return Object.assign({}, d, { data: wbar[k].data.map(function (v) { if (v === null) return null; run += v; return run; }) });
                 });
                 return { labels: span, bar: wbar, line: wline };
             }
@@ -929,7 +932,7 @@
                 var ex = expectedDatasets(w.labels, w.line);
                 barChart.data.labels = w.labels; barChart.data.datasets = w.bar.concat(ex.bar); barChart.update();
                 lineChart.options.plugins.plan = (plan.total || plan.done || plan.need) ? plan : null;
-                if (plan.total > 0) lineChart.options.scales.y.suggestedMax = plan.total * 1.04; else delete lineChart.options.scales.y.suggestedMax;
+                if (plan.total > 0) lineChart.options.scales.y.suggestedMax = plan.total * 1.1; else delete lineChart.options.scales.y.suggestedMax;   // headroom: the label above the total line stays clear of the legend (Anselmo)
                 lineChart.data.labels = w.labels; lineChart.data.datasets = w.line.concat(ex.line); lineChart.update();
             }
             function currentRange() {
