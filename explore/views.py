@@ -3319,9 +3319,44 @@ def explore_checklist_map_view(request, part_id):
     return JsonResponse({"positions": positions, "target": shown, "error": err})
 
 
-def _checklist_role_gate(api, schema) -> str | None:
+def _role_names(request, inst, api) -> dict:
+    """HWDB's role id → name (``GET roles``), session-cached; empty when the
+    listing can't be read — callers fall back to the bare id."""
+    key = f"hwdb_role_names_{inst}"
+    cached = request.session.get(key)
+    if isinstance(cached, dict):
+        return {int(k): v for k, v in cached.items()}
+    try:
+        rows = api.get_roles().get("data")
+    except Exception as e:
+        logger.warning("roles listing on %s failed: %s", inst, e)
+        return {}
+    if not isinstance(rows, list):
+        return {}
+    names = {r["id"]: str(r.get("name") or r["id"]) for r in rows
+             if isinstance(r, dict) and isinstance(r.get("id"), int)}
+    request.session[key] = {str(k): v for k, v in names.items()}   # JSON session: string keys
+    return names
+
+
+def _schema_role_gate(request, inst, api, schema) -> dict | None:
+    """#97's roles, said up front (Chao 2026-09-23: the page showed bare ids
+    and only refused at submit): ``{"required": [names], "mine": [names] |
+    None, "ok": True | False | None}`` — None ``mine`` / ``ok`` = the
+    account's roles couldn't be read. None when the schema names no roles."""
+    if not schema["roles"]:
+        return None
+    names = _role_names(request, inst, api)
+    mine = _my_roles(request, inst, api)
+    return {"required": [names.get(r) or str(r) for r in schema["roles"]],
+            "mine": None if mine is None else [r["name"] for r in mine],
+            "ok": None if mine is None else bool({r["id"] for r in mine} & set(schema["roles"]))}
+
+
+def _checklist_role_gate(request, inst, api, schema) -> str | None:
     """#97: a schema may pin submission to HWDB role ids (the ES signee
-    convention); an empty list means anyone. Error string or None."""
+    convention); an empty list means anyone. A live whoami — the submit is
+    the moment of truth. Error string (roles by name) or None."""
     if not schema["roles"]:
         return None
     try:
@@ -3332,8 +3367,9 @@ def _checklist_role_gate(api, schema) -> str | None:
         return _mark(f"couldn’t verify your HWDB roles — {e}", e)
     if mine & set(schema["roles"]):
         return None
+    names = _role_names(request, inst, api)
     return ("your HWDB account lacks the role required to submit this "
-            f"checklist (needs one of: {', '.join(map(str, schema['roles']))})")
+            f"checklist (needs one of: {', '.join(names.get(r) or str(r) for r in schema['roles'])})")
 
 
 def _checklist_item_opts(api, ptid, schema) -> dict:
@@ -3623,7 +3659,7 @@ def explore_checklist_view(request, part_id, name):
             messages.error(request, "This checklist schema names no "
                                     "test_type_name — fix the schema JSON.")
             return redirect(page_url)
-        err = _checklist_role_gate(api, schema)
+        err = _checklist_role_gate(request, inst, api, schema)
         if err is None:
             err = _checklist_submit(request, api, part_id, name, schema,
                                     display_td, item=item, opts=item_opts)
@@ -3703,6 +3739,7 @@ def explore_checklist_view(request, part_id, name):
         "clear_local": request.GET.get("clear") == "1",   # #151
         "state_at": _checklist_state_at(rec, draft),
         "role_gate": _type_role_gate(request, inst, api, ptid),
+        "schema_roles": _schema_role_gate(request, inst, api, schema),
     })
 
 

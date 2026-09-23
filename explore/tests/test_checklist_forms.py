@@ -371,7 +371,7 @@ class ChecklistPageTest(TestCase):
         with m1, m2:
             html = self.client.get(PAGE).content.decode()
         self.assertIn('value="1709.5"', html)
-        self.assertIn("Pre-filled from the latest submission", html)
+        self.assertNotIn("Pre-filled from the latest submission", html)   # Chao 2026-09-23: less text — the values say it
         self.assertIn("p.jpg", html)                          # existing photo shown
         self.assertIn('class="cl-photo-prev" alt="p.jpg" data-lightbox', html)   # #130 thumbnail
         self.assertIn("/hw/dev/shipment-image/img-1/?thumb=1", html)
@@ -1045,10 +1045,12 @@ class RolesGateTest(TestCase):
     def test_submission_refused_without_the_role(self):
         api = _api(schema=CFG_GATED, test_types=("PCB Segments Interface",))
         self._whoami(api, [7])
+        api.get_roles.return_value = {"data": [{"id": 41, "name": "PDS tester"}, {"id": 7, "name": "CE tester"}]}
         m1, m2 = _mocked(api)
         with m1, m2:
-            self.client.post(PAGE, {"f0-0": "PCB0001"})
+            html = self.client.post(PAGE, {"f0-0": "PCB0001"}, follow=True).content.decode()
         api.post_test.assert_not_called()
+        self.assertIn("needs one of: PDS tester)", html)      # by name, not "41"
 
     def test_submission_allowed_with_the_role(self):
         api = _api(schema=CFG_GATED, test_types=("PCB Segments Interface",))
@@ -1059,12 +1061,27 @@ class RolesGateTest(TestCase):
         api.post_test.assert_called_once()
 
     def test_form_names_the_required_roles(self):
+        # Chao 2026-09-23: names, not ids, and whether the account holds one — before filling anything
         api = _api(schema=CFG_GATED)
+        api.get_roles.return_value = {"data": [{"id": 41, "name": "PDS tester"}, {"id": 7, "name": "CE tester"}]}
+        self._whoami(api, [7])
         m1, m2 = _mocked(api)
         with m1, m2:
             html = self.client.get(PAGE).content.decode()
-        self.assertIn("requires HWDB role id", html)
-        self.assertIn("41", html)
+        self.assertIn("Submitting this checklist needs one of the HWDB roles <b>PDS tester</b>. Your account holds <b>role7</b>, so the submit will be refused.", html)
+        self.client.logout(); self.client.force_login(self.user)   # a fresh session: roles are session-cached
+        self._whoami(api, [41])
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("Submitting needs one of the HWDB roles <b>PDS tester</b> — your account holds one.", html)
+        self.assertNotIn("will be refused", html)
+
+    def test_form_falls_back_to_role_ids_when_the_listing_fails(self):
+        api = _api(schema=CFG_GATED)      # get_roles / whoami unconfigured: nothing readable
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("Submitting needs one of the HWDB roles <b>41</b>.", html)
 
     def test_ungated_schema_never_calls_whoami(self):
         api = _api(test_types=("PCB Segments Interface",))

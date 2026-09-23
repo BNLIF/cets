@@ -208,7 +208,8 @@ Colors:
 
 - `roles: [41, …]` — HWDB role ids allowed to submit; empty/absent = anyone
   (the ES signee convention). Checked live against `whoami` at submit; the
-  form names the required roles up front. The EDITOR stays open to every
+  form names the required roles up front — by name, with a ⚠ banner when
+  the account holds none (session-cached whoami and roles listing). The EDITOR stays open to every
   write-instance user — schemas are versioned in HWDB, so a bad edit is
   always recoverable, and dev culture favors low friction.
   Separately, the component TYPE's own HWDB roles (`component-types/<id>`

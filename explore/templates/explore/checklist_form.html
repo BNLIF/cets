@@ -48,13 +48,11 @@
 
   {# the schema's display title and the checklist's (file)name can differ — show both so the link text that got you here is recognizable #}
   <h1>{{ schema.name }}{% if cl_name != schema.name %} <span class="mono" style="font-size:.7em; font-weight:400; color:var(--dim);">· {{ cl_name }}</span>{% endif %}</h1>
-  <p class="es-sub" id="cl-sub">Checklist on <span class="mono" data-cl-pid>{{ part_id }}</span> — submissions post straight
-    to HWDB as <span class="mono">{{ schema.test_type_name }}</span> test records; this page keeps no
-    local state.{% if prefilled %} Pre-filled from the latest submission — edit and re-submit to
-    supersede it.{% endif %}</p>
+  <p class="es-sub" id="cl-sub">Checklist on <span class="mono" data-cl-pid>{{ part_id }}</span> — submitted to HWDB as
+    <span class="mono">{{ schema.test_type_name }}</span> test records.</p>
   {% if schema.instructions %}<p class="es-sub">{{ schema.instructions|clmd }}</p>{% endif %}
-  {% if schema.roles %}<p class="es-sub">Submitting requires HWDB role id{{ schema.roles|pluralize }}
-    <span class="mono">{{ schema.roles|join:", " }}</span>.</p>{% endif %}
+  {% if schema_roles %}{% if schema_roles.ok == False %}<div class="banner banner-warn" style="margin: 0 0 14px;">&#9888; Submitting this checklist needs one of the HWDB roles <b>{{ schema_roles.required|join:", " }}</b>. Your account holds {% if schema_roles.mine %}<b>{{ schema_roles.mine|join:", " }}</b>{% else %}no roles{% endif %}, so the submit will be refused.</div>
+  {% else %}<p class="es-sub">Submitting needs one of the HWDB roles <b>{{ schema_roles.required|join:", " }}</b>{% if schema_roles.ok %} — your account holds one{% endif %}.</p>{% endif %}{% endif %}
 
   {% if no_test_type %}
   <div class="es-flash error">This checklist's schema names no <span class="mono">test_type_name</span>,
