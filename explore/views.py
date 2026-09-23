@@ -6287,6 +6287,20 @@ def explore_docs_plot_draw_view(request):
 
 @login_not_required
 @fnal_login_required
+def explore_docs_checklist_editor_view(request):
+    """The checklist editor, at length: the checklist card, sections and
+    rules, placement and the grid, every field type with its controls, the
+    table column syntax, the schema JSON. Static prose in the template;
+    reached from the editor's header and the Docs page."""
+    inst = instance_of(request)
+    return render(request, "explore/docs_checklist_editor.html", {
+        "active_nav": "docs",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+    })
+
+
+@login_not_required
+@fnal_login_required
 def explore_profile_view(request):
     """The signed-in user's HWDB identity for this instance: name, username,
     email, account flags, and the roles their FNAL account holds (``users/

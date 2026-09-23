@@ -1,0 +1,227 @@
+{% extends 'explore/base.html' %}
+{% block title %}Checklist editor · Docs · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .dd-page { padding: 26px 30px 56px; max-width: 880px; font-size: 14px; color: var(--dim); line-height: 1.5; }
+  .dd-page h1 { font-size: 1.5rem; color: var(--ink); margin: 0 0 4px; letter-spacing: -0.01em; }
+  .dd-sub { color: var(--dim); font-size: 13.5px; margin: 0 0 18px; }
+  .dd-page a { color: var(--accent); text-decoration: none; }
+  .dd-page h2 { font-size: 15px; color: var(--ink); margin: 30px 0 6px; padding-top: 14px; border-top: 1px solid var(--rule); }
+  .dd-page h3 { font-size: 13.5px; color: var(--ink); margin: 16px 0 4px; }
+  .dd-page p { margin: 6px 0; }
+  .dd-page code, .dd-page pre { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  .dd-page pre { margin: 8px 0; padding: 8px 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-lg); overflow-x: auto; white-space: pre; }
+  .dd-page table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 13px; }
+  .dd-page th, .dd-page td { text-align: left; vertical-align: top; padding: 6px 10px; border-top: 1px solid var(--rule); }
+  .dd-page th { font-size: 11.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; border-top: none; font-weight: 600; }
+  .dd-page td:first-child { white-space: nowrap; }
+  .dd-page ul { margin: 6px 0; padding-left: 22px; }
+  .dd-page li { margin: 2px 0; }
+  .dd-toc { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; margin: 0 0 6px; }
+  .dd-note { color: var(--faint); font-size: 12.5px; }
+  .dd-ui { font-weight: 600; color: var(--ink); }
+  @media (max-width: 600px) { .dd-page { padding: 18px 16px 40px; } .dd-page td:first-child { white-space: normal; } }
+</style>
+
+<div class="dd-page">
+  <h1>Checklist editor</h1>
+  <p class="dd-sub">A checklist is a form that every item of one component type carries; filling it out and pressing
+    <span class="dd-ui">Submit to HWDB</span> posts a test record on the item. The editor builds the form: a type page's
+    <span class="dd-ui">Add/Edit checklists</span> link opens it. Left, the editor and the schema JSON; right, a live preview
+    of exactly what the fill page renders — click a field in the preview to jump to it in the editor.
+    <span class="dd-ui">Save to HWDB</span> uploads the schema onto the type; HWDB keeps every version and the newest wins,
+    so a bad edit is always one save away from repair.</p>
+
+  <nav class="dd-toc">
+    <a href="#checklist">Checklist card</a> <a href="#sections">Sections</a> <a href="#placing">Placing fields</a>
+    <a href="#types">Field types</a> <a href="#number">Numbers</a> <a href="#table">Tables</a> <a href="#steps">Steps</a>
+    <a href="#static">Static</a> <a href="#pid">PID fields</a> <a href="#plot">Plot</a> <a href="#assembly">Assembly</a>
+    <a href="#text">Text</a> <a href="#json">JSON</a> <a href="#fill">On the fill page</a>
+  </nav>
+
+  <h2 id="checklist">Checklist card</h2>
+  <table>
+    <tr><th>Control</th><th>Meaning</th></tr>
+    <tr><td>Name</td><td>The link text on every item's page and the file name in HWDB (<code>Checklist_&lt;type&gt;_&lt;Name&gt;.json</code>). Saving under a new name makes a second checklist; the type's existing ones are listed above the card, ✎ to edit one.</td></tr>
+    <tr><td>Start from</td><td>Templates shipped with the explorer — <i>PCB Segments Interface</i>, <i>PCB Panel Interface</i>, <i>Variant-dependent sections</i>. <span class="dd-ui">Load template</span> replaces the editor contents.</td></tr>
+    <tr><td>Title</td><td>The heading of the form.</td></tr>
+    <tr><td>Test type</td><td>Required. The HWDB test type the submission posts to; created on first use if it does not exist.</td></tr>
+    <tr><td>Instructions</td><td>Optional intro under the title. <a href="#text">Formatting</a> applies.</td></tr>
+    <tr><td>Roles</td><td>HWDB role ids allowed to submit, comma-separated; blank = anyone. The form names them by name and warns an account that holds none. (The type's own HWDB roles gate every write regardless.)</td></tr>
+    <tr><td>Shipping</td><td>Marks a packing / shipping / assembly procedure: linked from the <span class="dd-ui">Add items</span> / <span class="dd-ui">Link items</span> page of every item, and on a shipping box listed in step 1 of the pre-shipping checklist, which waits for it to be completed.</td></tr>
+    <tr><td>Item fields</td><td>HWDB's standard item fields shown in an <b>Item</b> card at the top of the form and written to the item on submit — manufacturer, status, installed, QA/QC flags, location, serial number, comments. All ticked by default; untick what the checklist should not touch.</td></tr>
+  </table>
+
+  <h2 id="sections">Sections</h2>
+  <p>A form is a list of sections, each a titled card of fields. ▲▼ reorder, ✕ removes. Every section header on the fill page folds;
+    <span class="dd-ui">start collapsed</span> opens it folded.</p>
+  <h3>Show a section only when…</h3>
+  <p>The <span class="dd-ui">— always —</span> select lists the checklist's <code>select</code> and PID fields:</p>
+  <ul>
+    <li><b>A select field</b> = an option: the section shows while that option is chosen. Two sections on the same field with different options give "pick H or J, then see that variant's table".</li>
+    <li><b>A PID field</b> › a key = a value: the section shows while the scanned item's stored value at that key equals the value — read live from HWDB. A bare key such as <code>Side</code> reads the item's Item Specifications; <code>serial_number</code> or <code>location.name</code> read the standard fields; dots walk deeper.</li>
+  </ul>
+  <p class="dd-note">A hidden section's fields are left out of the submission; values typed before switching are kept in case you switch back. A rule that matches nothing shows the section rather than hiding it.</p>
+
+  <h2 id="placing">Placing fields</h2>
+  <p>Order is the layout: fields render top to bottom in editor order. Each field's placement select says where it goes relative to the field above:</p>
+  <table>
+    <tr><th>Placement</th><th>Result</th></tr>
+    <tr><td>↵ new line</td><td>below the field above (the default)</td></tr>
+    <tr><td>→ beside</td><td>a new cell to the right of the field above; the row stacks on phones</td></tr>
+    <tr><td>↓ same cell</td><td>below the field above, inside its cell — e.g. one step text on the left, three figure links stacked on the right</td></tr>
+  </table>
+  <h3>Column grid</h3>
+  <p>Set <span class="dd-ui">columns</span> on a section to 2–6 and every field gets <span class="dd-ui">col</span> (start column, auto = next free slot),
+    <span class="dd-ui">span</span> (columns occupied, or <i>full</i>), <span class="dd-ui">new line</span> and <span class="dd-ui">align</span>
+    (bottom, top or middle when the line is taller than the field). Fields flow left to right into the next free slot; a span that does not fit wraps.
+    Unequal widths come from spans on a finer grid: six columns with a text spanning 3 beside three 1-wide inputs is a 3 : 1 : 1 : 1 row.
+    On phones the grid collapses to one column in field order.</p>
+  <p><span class="dd-ui">layout…</span> opens a schematic of the grid: click a chip and move it with the arrows, change its span or alignment,
+    drag it to a cell, drop it onto another chip to stack the two in one cell, <span class="dd-ui">unstack</span> to split a stack. Every change rewrites the field order and hints.</p>
+
+  <h2 id="types">Field types</h2>
+  <table>
+    <tr><th>Type</th><th>On the form</th><th>Stored</th></tr>
+    <tr><td>check</td><td>a ✓ / ✗ toggle</td><td><code>true</code> / <code>false</code>; untouched = omitted</td></tr>
+    <tr><td>number</td><td>a numeric box with units and an accepted range, red when out of it</td><td>the number</td></tr>
+    <tr><td>table</td><td>a grid of cells — inputs, computed, fixed text, pass/fail; optional named rows</td><td><code>{column: value}</code>, or <code>{row: {column: value}}</code> with rows</td></tr>
+    <tr><td>text / textarea</td><td>one line / several</td><td>the text</td></tr>
+    <tr><td>date/time</td><td>a date-time picker</td><td><code>YYYY-MM-DDTHH:MM</code></td></tr>
+    <tr><td>select</td><td>a dropdown of the options (comma-separated in the editor)</td><td>the chosen option</td></tr>
+    <tr><td>photo</td><td>take or pick a picture, with an optional comment; uploaded to the item at submit</td><td>the HWDB image id and name</td></tr>
+    <tr><td>QR / PID</td><td>scan or type a PID (or a serial number), with Scan, Pick and phone buttons</td><td>the PID</td></tr>
+    <tr><td>link child</td><td>a PID field that also links the item as a sub-component, live or at submit</td><td>the PID</td></tr>
+    <tr><td>steps</td><td>a list of steps to tick off, indented as written</td><td><code>{step: true/false}</code></td></tr>
+    <tr><td>static</td><td>a note, a reference link, a drawing or a jump to another checklist — nothing to fill</td><td>nothing</td></tr>
+    <tr><td>image map</td><td>a drawing with numbered slots; tap a slot to scan into it</td><td><code>{slot: PID}</code></td></tr>
+    <tr><td>plot</td><td>a Plots page embedded for the items named in the form</td><td>nothing</td></tr>
+    <tr><td>assembly</td><td>the item's positions and what sits in them, read live, with Unlink and Link items</td><td><code>{position: PID}</code></td></tr>
+  </table>
+  <p>Every field has a <b>label</b>; the label is the key under which the value is stored, inside its section's title
+    (<code>{section: {label: value}}</code>). <span class="dd-ui">→ Specs</span> on a value field also writes the value into the item's
+    Item Specifications, so it shows on the item's page — the checklist owns those sections and rewrites them wholesale at every submit.</p>
+
+  <h2 id="number">Numbers</h2>
+  <p>A number field (and every plain cell of a table) takes <span class="dd-ui">units</span> and one of two ranges:
+    <span class="dd-ui">nominal</span> with <span class="dd-ui">± tol</span>, or <span class="dd-ui">min</span> / <span class="dd-ui">max</span>.
+    A value outside turns red as it is typed; the submission is still accepted.</p>
+
+  <h2 id="table">Tables</h2>
+  <h3>Columns</h3>
+  <p>The columns box takes one column per line or comma-separated. A column is one of:</p>
+  <table>
+    <tr><th>Write</th><th>Cell</th></tr>
+    <tr><td><code>P1</code></td><td>an input</td></tr>
+    <tr><td><code>Total = C1 + C2*(C3/C4)</code></td><td>computed from the row's other cells, read-only; <code>C&lt;n&gt;</code> is the n-th column counting every column; only <code>+ - * / ( )</code> and numbers; unresolvable = empty</td></tr>
+    <tr><td><code>Expected = "3.1 +- 0.1"</code></td><td>fixed text, not editable; no commas in the text. A formula reads it as a number when it is one or a <code>value ± tolerance</code> string</td></tr>
+    <tr><td><code>OK = check</code></td><td>a pass/fail cell (— / ✓ / ✗)</td></tr>
+    <tr><td><code>Diff = C2 - C1 [0 ± 0.1]</code>, <code>P1 [1.4..1.6]</code></td><td>the column's own accepted range, beating the table's; not on fixed or check columns</td></tr>
+    <tr><td><code>Batch No. {yellow}</code></td><td>tints that column's cells</td></tr>
+  </table>
+<pre>P1, P2, P3
+Mean = (C1 + C2 + C3) / 3 [1.5 ± 0.1]
+Expected = "1.5 +- 0.1"
+OK = check</pre>
+  <h3>Rows</h3>
+  <p>Without rows a table is one unnamed row. <span class="dd-ui">rows…</span> opens a grid: the header cells hold the column syntax above,
+    each body row has a label (unique, shown in a left cell) and one cell per column — blank means an input, text is that row's fixed text,
+    and a range in brackets (<code>[0 ± 0.01]</code>, <code>[-0.01..0.01]</code>, or <code>3.1 [3.0..3.2]</code> after the text) beats the column's for that row.
+    Formula and check columns take no row text. Untouched rows are left out of the record.</p>
+  <p><span class="dd-ui">Import…</span> fills the grid from cells pasted out of a spreadsheet or a <code>.csv</code> file: the first line is the headers,
+    a chosen column labels the rows (else the row number), non-empty cells become fixed text and empty ones inputs; ticking a column under
+    <i>User fills in</i> blanks it. It replaces the existing columns and rows.</p>
+  <h3>Looks</h3>
+  <p><span class="dd-ui">tint</span> colors the cells (not the header) to match a reference drawing — yellow, green, blue, red, gray or any <code>#rrggbb</code>,
+    light shades read best; a column's or a row's tint beats the table's. <span class="dd-ui">borders</span> draws cell borders like a real table.</p>
+  <h3>Linking table</h3>
+  <p><span class="dd-ui">link the cells as sub-components</span>: every plain cell takes a PID (or a serial number resolved to one) and the items are
+    linked into the item's free positions — by the <span class="dd-ui">link now</span> button under the table or at submit;
+    <span class="dd-ui">check</span> is the dry run naming what each cell would get. <span class="dd-ui">into the item in position…</span> links them into
+    the sub-assembly sitting in that position of this item instead — the PDS module's supercell in <code>SC1</code> holding eight SiPM boards, one table per supercell.
+    Type ID and serial pattern work as on a <a href="#pid">PID field</a>. Each row gets a 📱 that takes scans from a phone straight into its next empty cell.</p>
+
+  <h2 id="steps">Steps</h2>
+  <p>One step per line. Leading spaces indent — Tab / Shift+Tab in the box, two spaces per level. <a href="#text">Formatting</a> applies to each line.
+    <span class="dd-ui">all steps required to submit</span> refuses Submit to HWDB until every step is ticked (a section hidden by a rule is exempt; Save draft is unaffected).</p>
+<pre>Unpack the crate
+  Check the seals
+  Photograph any damage
+Verify the serial against the shipping sheet</pre>
+
+  <h2 id="static">Static</h2>
+  <p>Display only, in any combination:</p>
+  <ul>
+    <li><b>Note</b> — a paragraph of text, with <a href="#text">formatting</a>.</li>
+    <li><b>Reference URL</b> — an external link, e.g. an EDMS drawing.</li>
+    <li><b>Reference image</b> — upload a picture or a PDF drawing (stored on the type in HWDB), or type the id of one already there. It shows inline as a thumbnail that opens full size (a PDF shows its first page and opens in the PDF viewer); untick <span class="dd-ui">thumbnail</span> to show the label as the link instead — a column of drawing numbers rather than pictures.</li>
+    <li><b>Link to checklist</b> — a jump to another checklist by name: blank Type ID = this item's checklist of that name; a Type ID = that type's PID chooser. Opens in a new tab; save a draft first if half done.</li>
+  </ul>
+
+  <h2 id="pid">PID fields — QR / PID, link child, image map</h2>
+  <table>
+    <tr><th>Control</th><th>Effect</th></tr>
+    <tr><td>required Type ID</td><td>a scan or a typed PID of any other type does not register: the scanner keeps scanning, typed input paints red, a mismatch is dropped at submit. Blank = any type.</td></tr>
+    <tr><td>serial-number pattern</td><td>a regular expression such as <code>HPK\d{5}</code>: a value matching it in full is taken as a serial number and swapped for the PID of the item of the Type ID carrying it. Blank = every value that is not a PID is tried as a serial. Needs a Type ID. A serial that several items carry is never resolved — the box names them and asks for the PID.</td></tr>
+    <tr><td>functional position (link child)</td><td>the position to link into; blank = the first free position accepting the child's type. On the item's page the field links live with a link / unlink button, and a named position pre-fills its occupant.</td></tr>
+    <tr><td>slots (image map)</td><td>one per line, <code>label @ x, y</code> in percent of the image — or click the image to drop them; <span class="dd-ui">Zoom</span> places them on the full-size drawing. <span class="dd-ui">link scanned item</span> links each scanned item at submit: a slot named like one of the type's positions goes there, any other takes the first free position for its type.</td></tr>
+  </table>
+<pre>Board 1 @ 4.5, 8
+Board 2 @ 4.5, 20
+Board 3 @ 4.5, 32</pre>
+  <p>On the fill page every PID field has <span class="dd-ui">Scan</span> (camera), <span class="dd-ui">Pick</span> (a list of the type's items, free ones for linking fields)
+    and a phone button that shows a QR code: scanning it on a phone opens a scan page whose scans fill this field.</p>
+
+  <h2 id="plot">Plot</h2>
+  <p>Embeds a Plots page for the items the form names — a Vbd distribution of the 32 boards just linked into a module. Recipe:</p>
+  <ol>
+    <li>On the sub-component type's Plots page, build the plot for one item and <span class="dd-ui">Copy link</span>.</li>
+    <li>Paste it as the field's <span class="dd-ui">Plots page URL</span>. Only the type and the plot state are kept, so a link from another server works.</li>
+    <li>Optionally name the <span class="dd-ui">sections</span> and <span class="dd-ui">fields</span> to read PIDs and serial numbers from (blank = every section, every field), and a <span class="dd-ui">serial-number pattern</span> so only matching words count as serials.</li>
+  </ol>
+  <p>The plot follows the form as it is filled; a section or field name the form does not have is reported under the empty box.
+    <span class="dd-ui">reference plot</span> shows the page exactly as pasted, with its own PID range, reading nothing from the form —
+    a distribution to compare a fresh measurement with. Tolerance lines come from the Plots page's <i>Limits</i> boxes and travel in the link.
+    The sub-component type's test data must have been synced on its Plots page once.</p>
+
+  <h2 id="assembly">Assembly</h2>
+  <p>Shows the item's positions with their occupants, read live, each PID a link, an <span class="dd-ui">Unlink</span> per row and
+    <span class="dd-ui">Link items →</span> to the packing page. Nothing to fill in; the submit stores the list as it stands.
+    <span class="dd-ui">the item in position…</span> shows the positions of the sub-assembly in that position instead (the supercell in <code>SC1</code>).</p>
+
+  <h2 id="text">Text formatting</h2>
+  <p>Instructions, field labels, a static note and each step accept <code>**bold**</code>, <code>*italic*</code> and line breaks. HTML stays escaped.
+    Stored keys are the raw text, markers included. The fill page and the preview carry an A− / A+ / ↺ control that scales the whole checklist's text; the choice is remembered per device.</p>
+
+  <h2 id="json">Schema JSON</h2>
+  <p>The JSON pane mirrors the editor as you work. Hand-edit or paste a schema and press <span class="dd-ui">Apply JSON to the editor</span>. The shape:</p>
+<pre>{
+  "name": "Reception",
+  "test_type_name": "Reception",
+  "instructions": "Unpack, inspect, measure.",
+  "sections": [
+    {"title": "Identification", "fields": [
+      {"type": "qr", "label": "Batch PID", "type_id": "D00300100002"},
+      {"type": "number", "label": "Thickness", "units": "mm",
+       "nominal": 1.6, "tol": 0.1, "to_spec": true}
+    ]},
+    {"title": "Measurements", "grid": 4, "fields": [
+      {"type": "table", "label": "Resistance", "span": "full",
+       "columns": ["P1", "P2", "Mean = (C1 + C2) / 2 [10 ± 1]"]},
+      {"type": "steps", "label": "Procedure", "require_all": true,
+       "steps": ["Power on", "  Wait 5 min", "Record"]}
+    ]}
+  ]
+}</pre>
+  <p class="dd-note">Unknown types and malformed entries are dropped silently on render. The templates in <span class="dd-ui">Start from</span> are the format reference.</p>
+
+  <h2 id="fill">On the fill page</h2>
+  <ul>
+    <li><b>Submit to HWDB</b> posts, in order: photos to the item, links into sub-components, → Specs values, then one test record of the checklist's test type with <code>{section: {label: value}}</code>. The latest submission pre-fills the next visit.</li>
+    <li><b>Save draft</b> keeps the values server-side per item, checklist and user; the browser also autosaves every change on the device. <b>Save CSV / Load CSV</b> work offline; <b>Print</b> gives a procedure sheet; <b>Email</b> opens a mail draft.</li>
+    <li>A page opened once online comes back offline, with its drawings. Submitting is online-only.</li>
+    <li>The type page lists the checklists; each opens a <b>PID chooser</b> (scan, type, or click an item), with <b>+ New item</b> to mint an item first and land in the checklist.</li>
+  </ul>
+</div>
+{% endblock %}

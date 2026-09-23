@@ -79,3 +79,31 @@ class DrawSyntaxGuideTest(TestCase):
         resp = self.client.get(reverse("explore:docs_plot_draw"))
         self.assertEqual(resp.status_code, 302)
         self.assertIn("login", resp["Location"])
+
+
+class ChecklistEditorGuideTest(TestCase):
+    """The checklist editor's header links a full guide page; the Docs page
+    lists it under HWDB Explorer."""
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("cg", "c@c.io", "pw"))
+
+    def test_guide_renders_every_section(self):
+        html = self.client.get(reverse("explore:docs_checklist_editor")).content.decode()
+        for anchor in ("checklist", "sections", "placing", "types", "number", "table", "steps", "static", "pid", "plot", "assembly", "text", "json", "fill"):
+            self.assertIn(f'<h2 id="{anchor}">', html)
+        self.assertIn("<code>Total = C1 + C2*(C3/C4)</code>", html)
+        self.assertIn("<pre>Board 1 @ 4.5, 8\n", html)
+        self.assertIn('class="eh-nav-item active" href="/hw/docs/"', html)
+
+    def test_docs_page_links_the_guide(self):
+        url = reverse("explore:docs_checklist_editor")
+        self.assertEqual(url, "/hw/docs/checklist-editor/")
+        docs = self.client.get(reverse("explore:docs")).content.decode()
+        self.assertIn(f'<a class="dc-row" href="{url}">', docs)
+        self.assertIn("Checklist editor", docs)
+
+    def test_anonymous_is_redirected_to_login(self):
+        self.client.logout()
+        resp = self.client.get(reverse("explore:docs_checklist_editor"))
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("login", resp["Location"])

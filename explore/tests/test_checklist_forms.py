@@ -740,6 +740,7 @@ class ChecklistEditorTest(TestCase):
         self.assertIn('class="ff-place"', html)            # placement control (#117)
         self.assertIn("&#8595; same cell", html)
         self.assertIn("&#8594; Specs", html)               # to_spec control
+        self.assertIn('<a href="/hw/dev/docs/checklist-editor/" target="_blank" rel="noopener">Full guide &#x2197;</a>', html)   # the header opens the guide in a new tab
 
     def test_editing_an_existing_checklist_loads_its_raw_json(self):
         api = _api()
