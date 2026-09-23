@@ -197,8 +197,8 @@
             {% elif can_edit_type %}<span class="sep">|</span><form method="post" action="{% url 'explore:shipping_type_toggle' part_type_id=leaf.part_type_id %}" style="display:inline; margin:0;">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><button class="linkish" title="Treat this type’s items as shipping containers: Shipments tab, packing, ship/receive checklists (needs the HWDB architect role)">treat as shipping-container</button></form>{% endif %}</dd>
         <dt>System</dt><dd>{{ leaf.system_name }} ({{ leaf.system_id }})</dd>
         <dt>Subsystem</dt><dd>{{ leaf.subsystem_name }} ({{ leaf.subsystem_id }})</dd>
-        <dt>{% if is_shipping %}Boxes in HWDB{% else %}Items in HWDB{% endif %}</dt><dd>{{ leaf.n_components }}</dd>
-        <dt>Test events</dt><dd>{{ leaf.n_tests }}</dd>
+        <dt>{% if is_shipping %}Boxes in HWDB{% else %}Items in HWDB{% endif %}</dt><dd>{{ leaf.n_components }}<span class="chart-plan-note" data-kind="comp"></span></dd>
+        <dt>Test events</dt><dd>{{ leaf.n_tests }}<span class="chart-plan-note" data-kind="test"></span></dd>
         {# #110: fill-out links for the type's consortium checklists — each opens the PID chooser (scan / items table / new item). Filled lazily so the mirror-only render never waits on HWDB; no checklists = no row. #}
         <dt id="cl-names-dt" hidden>Checklists</dt><dd id="cl-names-dd" class="span" hidden
             data-names-url="{% url 'explore:checklist_names' part_type_id=leaf.part_type_id %}"
@@ -251,19 +251,28 @@
                 </div>
                 {# Date window (#140): clips every series to [from, to]; the cumulative restarts at 0 at "from". #}
                 <div class="chart-window" style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--faint);">
-                    <input type="date" class="chart-win-from" title="From" style="font: inherit; color: var(--ink); padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff);">
+                    <input type="month" class="chart-win-from" title="From (month)" placeholder="YYYY-MM" pattern="\d{4}-\d{2}" style="font: inherit; color: var(--ink); padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff);">
                     <span>–</span>
-                    <input type="date" class="chart-win-to" title="To" style="font: inherit; color: var(--ink); padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff);">
+                    <input type="month" class="chart-win-to" title="To (month)" placeholder="YYYY-MM" pattern="\d{4}-\d{2}" style="font: inherit; color: var(--ink); padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff);">
                 </div>
-                {# Expected points (#141): "N by date" → dashed line in the baseline color; kept in this browser only. #}
+                {# Projected points (#141): "N by date" → dashed line in the baseline color from today's count; kept in this browser only. #}
                 <div class="chart-expect" style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--faint);">
-                    <span>Expected</span>
+                    <span>Projected</span>
                     <input type="number" class="chart-exp-n" min="0" step="1" placeholder="count" style="font: inherit; color: var(--ink); width: 84px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff);">
                     <span>by</span>
-                    <input type="date" class="chart-exp-date" style="font: inherit; color: var(--ink); padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff);">
+                    <input type="month" class="chart-exp-date" title="By the end of (month)" placeholder="YYYY-MM" pattern="\d{4}-\d{2}" style="font: inherit; color: var(--ink); padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff);">
                     <select class="chart-exp-series" hidden style="font: inherit; color: var(--ink); padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff); max-width: 200px;"></select>
                     <button type="button" class="chart-exp-add" style="font: inherit; color: var(--ink); border: 1px solid var(--rule); border-radius: 6px; padding: 2px 8px; background: var(--page); cursor: pointer;">+</button>
                     <span class="chart-exp-list" style="display: inline-flex; gap: 6px; flex-wrap: wrap;"></span>
+                </div>
+                {# Plan lines (TB via Anselmo 2026-09-23): total to produce, completed-by and needed-by dates → dashed lines on the cumulative; kept in this browser only until they live on the type in HWDB. #}
+                <div class="chart-plan" style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--faint);">
+                    <span>Plan</span>
+                    <input type="number" class="chart-plan-total" min="0" step="1" placeholder="total to produce" title="Total to produce" style="font: inherit; color: var(--ink); width: 118px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff);">
+                    <span>completed by</span>
+                    <input type="month" class="chart-plan-done" title="Completed by (month)" placeholder="YYYY-MM" pattern="\d{4}-\d{2}" style="font: inherit; color: var(--ink); padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff);">
+                    <span>needed by</span>
+                    <input type="month" class="chart-plan-need" title="Needed by (month, at SURF)" placeholder="YYYY-MM" pattern="\d{4}-\d{2}" style="font: inherit; color: var(--ink); padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff);">
                 </div>
                 {% if c.filters %}
                 <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--faint);">
@@ -691,12 +700,47 @@
         var commonOpts = { responsive: true, maintainAspectRatio: false,
             plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 13 }, color: '#3a414b' } }, tooltip: { intersect: false, mode: 'index' } },
             scales: { x: { ticks: { font: { size: 12 }, color: '#3a414b', maxRotation: 0, autoSkipPadding: 24 } }, y: { beginAtZero: true, ticks: { precision: 0, font: { size: 12 }, color: '#3a414b' } } } };
+        function ownOpts() { return JSON.parse(JSON.stringify(commonOpts)); }   // each chart mutates its own (plan, suggestedMax)
+        // Plan lines (TB via Anselmo 2026-09-23) on the cumulative chart: a dashed
+        // horizontal at the total to produce, dashed verticals at the completed-by
+        // and needed-by dates. A monthly label marks its month's end, so a date
+        // sits between the previous label and its own, by day of month.
+        var PLAN_COLOR = '#c2410c';
+        // Plan dates are months (Anselmo: month precision is enough) and mean "by the end of that month".
+        function monthEnd(ym) { var y = +ym.slice(0, 4), m = +ym.slice(5, 7); return ym.slice(0, 7) + '-' + String(new Date(Date.UTC(y, m, 0)).getUTCDate()); }
+        function pixelForDate(xs, labels, ym) {
+            var iso = monthEnd(ym), n = labels[0].length, i = labels.indexOf(iso.slice(0, n));
+            return i < 0 ? null : xs.getPixelForValue(i);   // a monthly label marks its month's end; a daily one is the day itself
+        }
+        var planLines = { id: 'planLines', afterDatasetsDraw: function (ch) {
+            var p = ch.options.plugins.plan, labels = ch.data.labels || []; if (!p || !labels.length) return;
+            var ctx = ch.ctx, a = ch.chartArea, xs = ch.scales.x, ys = ch.scales.y;
+            ctx.save(); ctx.strokeStyle = PLAN_COLOR; ctx.fillStyle = PLAN_COLOR; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+            var font = '600 12px ' + Chart.defaults.font.family, top = a.top + 4;   // the date labels hang from below the total line
+            if (p.total > 0) {
+                var y = ys.getPixelForValue(p.total);
+                if (y >= a.top && y <= a.bottom) {
+                    top = y + 4;
+                    ctx.beginPath(); ctx.moveTo(a.left, y); ctx.lineTo(a.right, y); ctx.stroke();
+                    ctx.font = font; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+                    ctx.fillText('Total to produce ' + p.total.toLocaleString(), a.left + 6, y - 3);   // left: the dated lines crowd the right
+                }
+            }
+            [['done', 'Completed by '], ['need', 'Needed by ']].forEach(function (k) {   // both labels left of their line, hanging from the top
+                var d = p[k[0]]; if (!d) return;
+                var x = pixelForDate(xs, labels, d); if (x === null || x < a.left || x > a.right) return;
+                ctx.beginPath(); ctx.moveTo(x, a.top); ctx.lineTo(x, a.bottom); ctx.stroke();
+                ctx.save(); ctx.translate(x - 4, top); ctx.rotate(-Math.PI / 2);
+                ctx.font = font; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; ctx.fillText(k[1] + d, 0, 0); ctx.restore();
+            });
+            ctx.restore();
+        } };
         JSON.parse(cfgEl.textContent).forEach(function (c) {
             if (c.empty) return;
             var initial = c.ranges['all'];
             var barCanvas = document.getElementById('bar_' + c.slug), lineCanvas = document.getElementById('line_' + c.slug);
-            var barChart = new Chart(barCanvas, { type: 'bar', data: { labels: initial.labels, datasets: initial.bar_datasets }, options: commonOpts });
-            var lineChart = new Chart(lineCanvas, { type: 'line', data: { labels: initial.labels, datasets: initial.line_datasets }, options: commonOpts });
+            var barChart = new Chart(barCanvas, { type: 'bar', data: { labels: initial.labels, datasets: initial.bar_datasets }, options: ownOpts() });
+            var lineChart = new Chart(lineCanvas, { type: 'line', data: { labels: initial.labels, datasets: initial.line_datasets }, options: ownOpts(), plugins: [planLines] });
             addSavePng(barCanvas, c.slug + '_per-period');
             addSavePng(lineCanvas, c.slug + '_cumulative');
             var panel = document.querySelector('[data-chart-panel="' + c.slug + '"]'); if (!panel) return;
@@ -709,7 +753,7 @@
             var kind = c.slug.split('_').pop();
             var fromIn = panel.querySelector('.chart-win-from'), toIn = panel.querySelector('.chart-win-to');
             var params = new URLSearchParams(location.search);
-            fromIn.value = params.get(kind + '_from') || ''; toIn.value = params.get(kind + '_to') || '';
+            fromIn.value = (params.get(kind + '_from') || '').slice(0, 7); toIn.value = (params.get(kind + '_to') || '').slice(0, 7);   // months (an older day link is cut to its month)
             // Until the user edits a picker (or the URL sets it) it shows the
             // plotted range's own bounds and follows the range toggle.
             var userSet = { from: !!fromIn.value, to: !!toIn.value };
@@ -720,18 +764,39 @@
             }
             function defaultPickers(labels) {
                 if (!labels.length) return;
-                if (!userSet.from) fromIn.value = fullDate(labels[0], false);
-                if (!userSet.to) {
-                    // Extend to the last expected point so the dashed line is visible.
-                    var end = fullDate(labels[labels.length - 1], true);
-                    expected.forEach(function (e) { if (e.d > end) end = e.d; });
-                    toIn.value = end;
+                if (!userSet.from) fromIn.value = labels[0].slice(0, 7);
+                // The window reaches the last projected point and the plan dates so the
+                // dashed lines show — even a hand-set end grows when a new date lies past
+                // it (Chao 2026-09-23), with a month of room for the line's label.
+                var end = fullDate(labels[labels.length - 1], true), dated = '';
+                expected.forEach(function (e) { if (monthEnd(e.d) > dated) dated = monthEnd(e.d); });
+                [plan.done, plan.need].forEach(function (d) { if (d && monthEnd(d) > dated) dated = monthEnd(d); });
+                if (dated > end) end = new Date(Date.parse(dated + 'T00:00:00Z') + 31 * dayMs).toISOString().slice(0, 10);
+                if (!userSet.to || (dated && toIn.value && monthEnd(toIn.value) < dated)) {
+                    var was = toIn.value; toIn.value = end.slice(0, 7);
+                    if (userSet.to && toIn.value !== was) syncUrl();
                 }
             }
-            // Expected points (#141): [{d: 'YYYY-MM-DD', n: count, s: series
+            // Plan (TB via Anselmo 2026-09-23): {total, done, need}, this browser only
+            // (localStorage per page + chart) until it lives on the type in HWDB.
+            var planKey = 'chartPlan:' + location.pathname + '#' + kind, plan = {};
+            try { plan = JSON.parse(localStorage.getItem(planKey) || '{}') || {}; } catch (e) { plan = {}; }
+            var planIn = { total: panel.querySelector('.chart-plan-total'), done: panel.querySelector('.chart-plan-done'), need: panel.querySelector('.chart-plan-need') };
+            var planNote = document.querySelector('.chart-plan-note[data-kind="' + kind + '"]');
+            function savePlan() {
+                var ym = function (v) { return /^\d{4}-\d{2}/.test(v || '') ? v.slice(0, 7) : ''; };   // months; a typed fallback or an old day value is cut to one
+                plan = { total: parseInt(planIn.total.value, 10) > 0 ? parseInt(planIn.total.value, 10) : 0, done: ym(planIn.done.value), need: ym(planIn.need.value) };
+                try { if (plan.total || plan.done || plan.need) localStorage.setItem(planKey, JSON.stringify(plan)); else localStorage.removeItem(planKey); } catch (e) {}
+                if (planNote) planNote.textContent = (plan.total ? ' · of ' + plan.total.toLocaleString() + ' to produce' : '')
+                    + (plan.done ? ' · completed by ' + plan.done : '') + (plan.need ? ' · needed by ' + plan.need : '');
+            }
+            planIn.total.value = plan.total > 0 ? plan.total : ''; planIn.done.value = (plan.done || '').slice(0, 7); planIn.need.value = (plan.need || '').slice(0, 7);
+            Object.keys(planIn).forEach(function (k) { planIn[k].addEventListener('change', function () { savePlan(); apply(currentRange()); }); });
+            // Projected points (#141): [{d: 'YYYY-MM-DD', n: count, s: series
             // label}], this browser only (localStorage per page + chart).
             var expKey = 'chartExpected:' + location.pathname + '#' + kind, expected = [];
             try { expected = JSON.parse(localStorage.getItem(expKey) || '[]'); } catch (e) { expected = []; }
+            expected.forEach(function (e) { e.d = String(e.d || '').slice(0, 7); });   // months, meaning the month's end (an older day point is cut to its month)
             var expN = panel.querySelector('.chart-exp-n'), expDate = panel.querySelector('.chart-exp-date');
             var expList = panel.querySelector('.chart-exp-list'), expSeries = panel.querySelector('.chart-exp-series');
             // Series picker: the lines currently drawn (baseline + chosen
@@ -760,10 +825,12 @@
             }
             var dayMs = 86400000;
             function dayOf(iso) { return Date.parse(iso + 'T00:00:00Z') / dayMs; }
-            // One dashed line per series that has expected points, in that
-            // series' color: piecewise-linear cumulative through (window
-            // start, 0) and the points, sampled at each label's bin end; null
-            // past the last point so the line stops there. Per-period = diffs.
+            // One dashed line per series that has projected points, in that
+            // series' color: piecewise-linear cumulative from today's count
+            // (Anselmo 2026-09-23: from the origin it read as a constant
+            // production rate) through the points still ahead, sampled at
+            // each label's bin end; null before today and past the last
+            // point so the line spans just the projection. Per-period = diffs.
             function expectedDatasets(labels, lineDs) {
                 var out = { bar: [], line: [] };
                 if (!expected.length || !labels.length || !lineDs.length) return out;
@@ -771,30 +838,33 @@
                 expected.forEach(function (e) { (bySeries[e.s || ''] = bySeries[e.s || ''] || []).push(e); });
                 Object.keys(bySeries).forEach(function (sName) {
                     var ds = lineDs.find(function (d) { return d.label === sName; }) || lineDs[0];
-                    var one = expectedLine(labels, bySeries[sName], ds.borderColor, lineDs.length > 1 ? ' · ' + ds.label : '');
+                    var one = expectedLine(labels, bySeries[sName], ds, lineDs.length > 1 ? ' · ' + ds.label : '');
                     out.bar = out.bar.concat(one.bar); out.line = out.line.concat(one.line);
                 });
                 return out;
             }
-            function expectedLine(labels, points, color, suffix) {
-                var pts = [{ x: dayOf(fullDate(labels[0], false)), y: 0 }].concat(
-                    points.map(function (e) { return { x: dayOf(e.d), y: e.n }; }));
+            function expectedLine(labels, points, ds, suffix) {
+                var today = new Date().toISOString().slice(0, labels[0].length), ti = -1;
+                labels.forEach(function (l, i) { if (l <= today) ti = i; });
+                var start = ti >= 0 && ds.data[ti] != null ? { x: dayOf(fullDate(labels[ti], true)), y: ds.data[ti] }
+                                                            : { x: dayOf(fullDate(labels[0], false)), y: 0 };
+                var pts = [start].concat(points.map(function (e) { return { x: dayOf(monthEnd(e.d)), y: e.n }; }).filter(function (p) { return p.x > start.x; }));
                 var cum = labels.map(function (l) {
                     var x = dayOf(fullDate(l, true));
-                    if (x > pts[pts.length - 1].x) return null;
+                    if (pts.length < 2 || x > pts[pts.length - 1].x || x < pts[0].x) return null;
                     for (var i = 1; i < pts.length; i++) {
                         if (x <= pts[i].x) {
                             var a = pts[i - 1], b = pts[i];
                             return b.x === a.x ? b.y : a.y + (b.y - a.y) * (x - a.x) / (b.x - a.x);
                         }
                     }
-                    return pts[0].y;
+                    return null;
                 });
-                var per = cum.map(function (v, i) { return v === null ? null : v - (i ? (cum[i - 1] || 0) : 0); });
-                var base = { borderColor: color, borderDash: [6, 4], borderWidth: 2, pointRadius: 0, fill: false, tension: 0 };
+                var per = cum.map(function (v, i) { return v === null || cum[i - 1] == null ? null : v - cum[i - 1]; });
+                var base = { borderColor: ds.borderColor, borderDash: [6, 4], borderWidth: 2, pointRadius: 0, fill: false, tension: 0 };
                 return {
-                    bar: [Object.assign({ type: 'line', label: 'Expected / period' + suffix, data: per }, base)],
-                    line: [Object.assign({ label: 'Expected' + suffix, data: cum }, base)],
+                    bar: [Object.assign({ type: 'line', label: 'Projected / period' + suffix, data: per }, base)],
+                    line: [Object.assign({ label: 'Projected' + suffix, data: cum }, base)],
                 };
             }
             // Every label from start to end at the range's granularity (month
@@ -813,7 +883,7 @@
                 var from = fromIn.value, to = toIn.value;
                 if ((!from && !to) || !labels.length) return { labels: labels, bar: bar, line: line };
                 var n = labels[0].length, monthly = n === 7;
-                var start = from ? from.slice(0, n) : labels[0], end = to ? to.slice(0, n) : labels[labels.length - 1];
+                var start = from ? (monthly ? from.slice(0, 7) : from.slice(0, 7) + '-01') : labels[0], end = to ? (monthly ? to.slice(0, 7) : monthEnd(to)) : labels[labels.length - 1];
                 if (start > end) return { labels: [], bar: bar.map(function (d) { return Object.assign({}, d, { data: [] }); }), line: line.map(function (d) { return Object.assign({}, d, { data: [] }); }) };
                 var span = labelSpan(start, end, monthly), at = {};
                 labels.forEach(function (l, i) { at[l] = i; });
@@ -856,8 +926,10 @@
                 defaultPickers(r.labels);
                 var w = windowed(r.labels, bar, line);
                 fillSeriesPicker(line);
-                var ex = expectedDatasets(w.labels, line);
+                var ex = expectedDatasets(w.labels, w.line);
                 barChart.data.labels = w.labels; barChart.data.datasets = w.bar.concat(ex.bar); barChart.update();
+                lineChart.options.plugins.plan = (plan.total || plan.done || plan.need) ? plan : null;
+                if (plan.total > 0) lineChart.options.scales.y.suggestedMax = plan.total * 1.04; else delete lineChart.options.scales.y.suggestedMax;
                 lineChart.data.labels = w.labels; lineChart.data.datasets = w.line.concat(ex.line); lineChart.update();
             }
             function currentRange() {
@@ -875,14 +947,14 @@
             fromIn.addEventListener('change', function () { userSet.from = true; syncUrl(); apply(currentRange()); });
             toIn.addEventListener('change', function () { userSet.to = true; syncUrl(); apply(currentRange()); });
             panel.querySelector('.chart-exp-add').addEventListener('click', function () {
-                var n = parseInt(expN.value, 10);
-                if (!expDate.value || isNaN(n) || n < 0) return;
+                var n = parseInt(expN.value, 10), ym = expDate.value.slice(0, 7);
+                if (!/^\d{4}-\d{2}$/.test(ym) || isNaN(n) || n < 0) return;
                 var sName = expSeries.hidden ? '' : expSeries.value;
-                expected = expected.filter(function (e) { return !(e.d === expDate.value && (e.s || '') === sName); });
-                expected.push({ d: expDate.value, n: n, s: sName });
+                expected = expected.filter(function (e) { return !(e.d === ym && (e.s || '') === sName); });
+                expected.push({ d: ym, n: n, s: sName });
                 expN.value = ''; saveExpected(); apply(currentRange());
             });
-            saveExpected();
+            saveExpected(); savePlan();
             apply('all');
             flagBoxes.forEach(function (b) { b.addEventListener('change', function () { apply(currentRange()); }); });
         });

@@ -475,6 +475,20 @@ class ExplorePlotViewTest(TestCase):
         self.assertIn(f"bar_{node.part_type_id}_test", html)   # tests-recorded chart
         self.assertIn("Components updated", html)
         self.assertIn("amc_bandwidth_test", html)
+        # TB via Anselmo 2026-09-23: plan row (total / completed by / needed by), echoed in the summary
+        # panel, and the inclined line is "Projected" from today's count, not "Expected" from the origin
+        self.assertIn('<input type="number" class="chart-plan-total"', html)
+        self.assertIn('<input type="month" class="chart-plan-done" title="Completed by (month)"', html)   # Anselmo: month precision is enough
+        self.assertIn('<input type="month" class="chart-plan-need" title="Needed by (month, at SURF)"', html)
+        self.assertIn('<span class="chart-plan-note" data-kind="comp"></span>', html)
+        self.assertIn('<span class="chart-plan-note" data-kind="test"></span>', html)
+        self.assertIn("<span>Projected</span>", html)
+        # months everywhere (Anselmo): the window, the projection and the plan dates
+        self.assertIn('<input type="month" class="chart-win-from" title="From (month)"', html)
+        self.assertIn('<input type="month" class="chart-win-to" title="To (month)"', html)
+        self.assertIn('<input type="month" class="chart-exp-date" title="By the end of (month)"', html)
+        self.assertIn("label: 'Projected' + suffix", html)
+        self.assertNotIn("<span>Expected</span>", html)
 
     def test_overlay_selector_renders_on_components_chart_only(self):
         node = _node(tests_synced_at=timezone.now(), n_tests=1)
