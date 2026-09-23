@@ -1256,6 +1256,25 @@ class ItemCreateTest(TestCase):
         self.assertEqual(api.create_component.call_args_list[1].args[1]["specifications"], {"DATA": {}})
         self.assertIn("with 4 sub-components minted and linked", html)
 
+    def test_a_child_type_whose_roles_the_account_lacks_stops_the_mint_before_the_parent(self):
+        # Chao 2026-09-23: the child type's roles (any one) gate its mint too — HWDB would
+        # refuse the children after the parent stood, so nothing is minted and the row says why
+        api = self._api_children()
+        parent = api.get_component_type.return_value
+        gated = {"data": {**parent["data"], "connectors": {}, "roles": [{"id": 4, "name": "PDS tester"}]}}
+        api.get_component_type.side_effect = lambda t: parent if t == PTID else gated
+        api.whoami.return_value = {"data": {"roles": [{"id": 1, "name": "CE tester"}]}}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(NEW_PAGE).content.decode()
+            self.assertIn("minting needs one of the HWDB roles PDS tester — your account holds CE tester", html)
+            self.assertNotIn("HWDB will refuse the write", html)     # the parent type itself has no roles
+            html = self.client.post(NEW_PAGE, {"institution_id": "128", "mint_child": [self.CHILD]},
+                                    follow=True).content.decode()
+        api.create_component.assert_not_called()
+        self.assertIn("minting its items needs one of the HWDB roles PDS tester — your account holds CE tester", html)
+        self.assertIn("Nothing minted.", html)
+
     def test_an_administrator_without_the_architect_flag_may_define_data(self):
         # Hajime 2026-09-19: patching a type needs admin, not architect
         api = self._api_children()

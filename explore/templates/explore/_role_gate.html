@@ -1,0 +1,1 @@
+{% if role_gate %}<div class="banner banner-warn" style="margin: 0 0 14px;">&#9888; Items of this type need one of the HWDB roles <b>{{ role_gate.required|join:", " }}</b> to be created, edited, linked or tested. Your account holds {% if role_gate.mine %}<b>{{ role_gate.mine|join:", " }}</b>{% else %}no roles{% endif %}, so HWDB will refuse the write.</div>{% endif %}

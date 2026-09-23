@@ -45,7 +45,7 @@ def _api():
     api = mock.MagicMock()
     api.get_component_type.return_value = {"data": TYPE_RECORD}
     api.patch_component_type.return_value = {"status": "OK", "data": "Updated"}
-    api.whoami.return_value = {"data": {"architect": True}}
+    api.whoami.return_value = {"data": {"architect": True, "administrator": True}}
     return api
 
 
@@ -132,6 +132,35 @@ class BoxTypeViewTest(TestCase):
         with m1, m2:
             resp = self.client.get(PAGE)
         self.assertEqual(resp.status_code, 403)
+
+    def test_administrator_edits_but_cannot_clone(self):
+        # Hajime 2026-09-22: editing positions needs the administrator flag, creating a type the architect flag
+        api = _api()
+        api.whoami.return_value = {"data": {"architect": False, "administrator": True}}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+            self.assertIn("cloning into a new type needs the architect flag — your account lacks it", html)
+            self.assertIn('class="pk-submit" disabled>Create new type in HWDB', html)
+            self.assertIn('class="pk-submit">Add to the type in HWDB', html)
+            self.client.post(PAGE, {"action": "edit", "op": "delete", "position": "FEB2"})
+            resp = self.client.post(PAGE, {"action": "clone", "new_name": "Copy", "type_number": ""})
+        self.assertEqual(resp.status_code, 403)
+        api.patch_component_type.assert_called_once()
+        api.post_component_type.assert_not_called()
+
+    def test_architect_clones_but_cannot_edit(self):
+        api = _api()
+        api.whoami.return_value = {"data": {"architect": True, "administrator": False}}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+            self.assertIn("Editing positions needs the HWDB administrator flag — your account lacks it", html)
+            self.assertIn('name="op" value="save" disabled', html)
+            self.assertIn('class="pk-submit" disabled>Add to the type in HWDB', html)
+            resp = self.client.post(PAGE, {"prefix": "FEMB", "count": "1", "child_type": "D05700300001"})
+        self.assertEqual(resp.status_code, 403)
+        api.patch_component_type.assert_not_called()
 
     def test_add_positions_patches_complete_envelope(self):
         api = _api()
@@ -294,6 +323,15 @@ class LeafLinkTest(TestCase):
         with m1, m2:
             html = self.client.get(navigation.leaf_path_for("dev", PTID)).content.decode()
         self.assertIn(f"/hw/dev/box-type/{PTID}/", html)
+
+    def test_administrator_sees_the_positions_link_too(self):
+        api = _api()
+        api.whoami.return_value = {"data": {"architect": False, "administrator": True}}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(navigation.leaf_path_for("dev", PTID)).content.decode()
+        self.assertIn(f'/hw/dev/box-type/{PTID}/" target="_blank" rel="noopener" title="Type-level change:', html)
+        self.assertIn("&#9888; Positions", html)
 
     def test_non_architect_does_not_see_the_link(self):
         api = _api()

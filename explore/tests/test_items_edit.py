@@ -190,6 +190,28 @@ class ViewTest(TestCase):
         _rows()
         self.client.force_login(get_user_model().objects.create_user("w", "w@w.io", "pw"))
 
+    def test_type_roles_the_account_lacks_are_named_up_front(self):
+        # Hajime 2026-09-22: a type's roles (any one of them) gate writes to its items — say so before HWDB refuses
+        api = _api()
+        api.get_component_type.return_value = {"data": {"manufacturers": [], "roles": [
+            {"id": 4, "name": "shipper"}, {"id": 9, "name": "PDS tester"}]}}
+        api.whoami.return_value = {"data": {"roles": [{"id": 1, "name": "CE tester"}]}}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(URL).content.decode()
+        self.assertIn("need one of the HWDB roles <b>shipper, PDS tester</b>", html)
+        self.assertIn("Your account holds <b>CE tester</b>, so HWDB will refuse the write.", html)
+
+    def test_a_matching_role_or_a_role_free_type_shows_no_warning(self):
+        api = _api()                       # the fixture's type has no roles
+        api.whoami.return_value = {"data": {"roles": [{"id": 1, "name": "CE tester"}]}}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.assertNotIn("HWDB will refuse", self.client.get(URL).content.decode())
+        api.get_component_type.return_value = {"data": {"manufacturers": [], "roles": [{"id": 1, "name": "CE tester"}]}}
+        with m1, m2:
+            self.assertNotIn("HWDB will refuse", self.client.get(URL).content.decode())
+
     def test_form_renders_with_type_manufacturers(self):
         api = _api()
         m1, m2 = _mocked(api)

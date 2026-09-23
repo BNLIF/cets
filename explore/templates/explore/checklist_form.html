@@ -44,6 +44,7 @@
     lookups are paused.</div>
   {% endif %}
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+  {% include "explore/_role_gate.html" %}
 
   {# the schema's display title and the checklist's (file)name can differ — show both so the link text that got you here is recognizable #}
   <h1>{{ schema.name }}{% if cl_name != schema.name %} <span class="mono" style="font-size:.7em; font-weight:400; color:var(--dim);">· {{ cl_name }}</span>{% endif %}</h1>

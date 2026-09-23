@@ -58,6 +58,7 @@
   {% for m in messages %}<div class="pk-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
 
   <h1>{{ type_name }} — <span class="mono">{{ part_type_id }}</span></h1>
+  {% if not can_edit or not can_clone %}<div class="banner banner-warn" style="margin: 0 0 14px;">&#9888; Type-level change. Editing positions needs the HWDB administrator flag{% if not can_edit %} — your account lacks it{% endif %}; cloning into a new type needs the architect flag{% if not can_clone %} — your account lacks it{% endif %}.</div>{% endif %}
   <p class="pk-sub">The named positions every box of this type has, and which component type each accepts.
     Changes apply to the type — every existing and future box of it.</p>
 
@@ -80,9 +81,9 @@
                 {% csrf_token %}
                 <input type="hidden" name="action" value="edit">
                 <input type="hidden" name="position" value="{{ p.name }}">
-                <button type="submit" class="bt-mini" name="op" value="save"
+                <button type="submit" class="bt-mini" name="op" value="save"{% if not can_edit %} disabled{% endif %}
                         title="Rename the position and/or change what it accepts">Save</button>
-                <button type="submit" class="bt-mini bt-danger" name="op" value="delete" formnovalidate
+                <button type="submit" class="bt-mini bt-danger" name="op" value="delete" formnovalidate{% if not can_edit %} disabled{% endif %}
                         onclick="return confirm('Delete position {{ p.name }} from every box of this type?')">Delete</button>
               </form>
             </td>
@@ -117,7 +118,7 @@
     <p class="pk-hint" style="margin:10px 0 0;">Names continue the numbering: with FEMB1…FEMB10 present,
       adding 2 × “FEMB” creates FEMB11 and FEMB12. The accepting type can be any component type id, not
       just ones already used.</p>
-    <button type="submit" class="pk-submit">Add to the type in HWDB</button>
+    <button type="submit" class="pk-submit"{% if not can_edit %} disabled{% endif %}>Add to the type in HWDB</button>
   </form>
 
   <form method="post" class="pk-group">
@@ -135,7 +136,7 @@
     </div>
     <p class="pk-hint" style="margin:10px 0 0;">Component types cannot be deleted from HWDB — double-check
       the name before creating.</p>
-    <button type="submit" class="pk-submit">Create new type in HWDB</button>
+    <button type="submit" class="pk-submit"{% if not can_clone %} disabled{% endif %}>Create new type in HWDB</button>
   </form>
 </div>
 {% endblock %}

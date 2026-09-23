@@ -230,6 +230,7 @@
       <div class="sd-card">
         <h2>Item{% if can_edit_item and not editing %} <a class="sd-edit" href="?edit=1" title="Edit the item’s HWDB fields: manufacturer, status, installed, QA/QC flags, serial number, comments, location">&#9998; Edit</a>{% endif %}</h2>
         {% if editing %}
+        {% include "explore/_role_gate.html" %}
         {# #104: edit form for the standard fields — same widgets/diff as the checklist Item card (#103) #}
         <form method="post" action="{% url 'explore:part_edit' part_id=part_id %}" class="sd-editform">
           {% csrf_token %}<input type="hidden" name="item-card" value="1">

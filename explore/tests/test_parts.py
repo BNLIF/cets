@@ -643,6 +643,21 @@ class PartViewTest(TestCase):
                           "certified_qaqc": True})
         self.assertEqual(ActivityEvent.objects.filter(kind="item").count(), 1)
 
+    def test_item_edit_mode_names_the_type_roles_the_account_lacks(self):
+        # Chao 2026-09-23: ?edit=1 showed no warning although the save would be refused — the
+        # type's roles (any one) gate the write; read only in edit mode
+        api = self._api()
+        api.get_component_type.return_value = {"data": {
+            "manufacturers": [], "roles": [{"id": 4, "name": "PDS tester"}]}}
+        api.whoami.return_value = {"data": {"roles": [{"id": 1, "name": "CE tester"}]}}
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            plain = self.client.get(self.url).content.decode()
+            html = self.client.get(self.url + "?edit=1").content.decode()
+        self.assertNotIn("HWDB will refuse", plain)             # the default render stays cheap
+        self.assertIn("need one of the HWDB roles <b>PDS tester</b>", html)
+        self.assertIn("Your account holds <b>CE tester</b>, so HWDB will refuse the write.", html)
+
     @mock.patch("django.conf.settings.HWDB_WRITE_INSTANCES", ["dev"])
     def test_item_edit_absent_and_forbidden_off_write_instances(self):
         api = self._api()

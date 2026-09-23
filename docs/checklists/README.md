@@ -211,6 +211,16 @@ Colors:
   form names the required roles up front. The EDITOR stays open to every
   write-instance user — schemas are versioned in HWDB, so a bad edit is
   always recoverable, and dev culture favors low friction.
+  Separately, the component TYPE's own HWDB roles (`component-types/<id>`
+  → `roles`, any one of them) gate every write to its items: the fill
+  page, the item page's edit mode, *New item*, *Edit items* and *Link items* show a ⚠ banner
+  naming the required roles and the account's own when it holds none
+  (Hajime/Anselmo 2026-09-22) — a warning only, HWDB still decides. The
+  exception is *New item*'s sub-components: a child type whose roles the
+  account lacks is named on its row, and a submit that ticks it mints
+  nothing (HWDB would refuse the children after the parent stood). Type
+  level: the *Positions* page opens for administrators (edit positions) and
+  architects (clone into a new type); the other flag's actions are disabled.
 
 - `shipping: true` (#150) — marks a packing / shipping / assembly
   procedure (editor: the *Shipping* checkbox). Such a checklist is linked

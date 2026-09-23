@@ -210,6 +210,8 @@ def explore_view(request, trail=None):
     # comes from a session-cached whoami, so the mirror-only render costs at
     # most one live call per session.
     can_edit_type = can_edit_es and _is_architect(request, inst)
+    # Positions page (type-level change): administrators edit, architects clone (Hajime 2026-09-22)
+    can_edit_positions = can_edit_es and _may_patch_type(request, inst)
     # #101: "Add to Shipments" — an override row on top of curation.yaml;
     # yaml-curated types can't be removed from the UI
     shipping_override = bool(leaf) and leaf.part_type_id in curation.shipping_overrides(inst)
@@ -318,7 +320,7 @@ def explore_view(request, trail=None):
             "empty_boxes_page": empty_boxes_page,
             "can_create_box": can_create_box,
             "can_edit_es": can_edit_es,
-            "can_edit_type": can_edit_type,
+            "can_edit_type": can_edit_type, "can_edit_positions": can_edit_positions,
             "phys_label": phys,                       # #146
             "date_setting": date_setting,
             "date_setting_path": list(date_setting.path) if date_setting else None,
@@ -1303,6 +1305,8 @@ def explore_part_view(request, part_id):
         "can_edit_item": can_edit_item,
         "editing": editing,
         "item_edit": item_edit,
+        # the type's roles gate the save (Chao 2026-09-23: no warning on ?edit=1) — read only in edit mode
+        "role_gate": _type_role_gate(request, inst, api, ptid) if editing else None,
         "institutions": _institution_options(api) if show_location_form else [],
         "inst_pick": _inst_pick(insts, "location_id", req=True,
                                 sel=_default_institution(request, api, inst, insts))
@@ -2062,6 +2066,7 @@ def explore_box_pack_view(request, part_id):
             "scan_feed_url": _rev(request, "explore:scan_feed"),
             "scan_since": scan_since,
             "ship_checklists": _shipping_checklists(request, api, inst, part_id, ptid),   # #150
+            "role_gate": _type_role_gate(request, inst, api, ptid),
         })
 
     # POST. htmx requests (the pack page's per-group, add-by-PID and unlink
@@ -2455,6 +2460,54 @@ def _may_patch_type(request, inst, api=None) -> bool:
     return _is_architect(request, inst, api) or _is_admin(request, inst, api)
 
 
+def _my_roles(request, inst, api) -> list[dict] | None:
+    """The account's HWDB roles on this instance (``users/whoami`` →
+    ``roles: [{id, name}]``), session-cached like the architect flag. None =
+    unknown (whoami failed or an odd shape); a gate never fires on unknown."""
+    key = f"hwdb_roles_{inst}"
+    cached = request.session.get(key)
+    if isinstance(cached, list):
+        return cached
+    try:
+        roles = (api.whoami().get("data") or {}).get("roles")
+    except Exception as e:
+        logger.warning("roles check on %s failed: %s", inst, e)
+        return None
+    if not isinstance(roles, list):
+        return None
+    roles = [{"id": r["id"], "name": str(r.get("name") or r["id"])}
+             for r in roles if isinstance(r, dict) and r.get("id") is not None]
+    request.session[key] = roles
+    return roles
+
+
+def _type_role_gate(request, inst, api, ptid, record=None) -> dict | None:
+    """Hajime 2026-09-22: a component type's ``roles`` (``component-types/{id}``)
+    say who may create, edit, link or test its items — the account needs ONE
+    of them (the list is all ORs). Returns ``{"required": [names], "mine":
+    [names]}`` when the account holds none, so a page can say so before HWDB
+    refuses (Anselmo hit a bare refusal linking a sub-component); None when
+    the type has no roles, the account holds one, or either side couldn't be
+    read. ``record`` = the type record when the page already fetched it."""
+    try:
+        if record is None:
+            record = api.get_component_type(ptid).get("data") or {}
+        need = record.get("roles") if isinstance(record, dict) else None
+    except Exception as e:
+        logger.warning("type roles for %s failed: %s", ptid, e)
+        return None
+    if not isinstance(need, list):
+        return None
+    need = [r for r in need if isinstance(r, dict) and r.get("id") is not None]
+    if not need:
+        return None
+    mine = _my_roles(request, inst, api)
+    if mine is None or {r["id"] for r in mine} & {r["id"] for r in need}:
+        return None
+    return {"required": [str(r.get("name") or r["id"]) for r in need],
+            "mine": [r["name"] for r in mine]}
+
+
 def _patch_type_positions(request, api, part_type_id, record, connectors, ok_msg):
     """PATCH the type's complete envelope with ``connectors`` swapped in and
     flash the outcome — HWDB refusals (e.g. touching a position a linked item
@@ -2596,9 +2649,13 @@ def explore_box_type_view(request, part_type_id):
         messages.error(request, FNAL_UNAVAILABLE)
         return redirect(_rev(request, "explore:home"))
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
-    if not _is_architect(request, inst, api):
+    # Hajime 2026-09-22: editing a type's positions needs the HWDB
+    # administrator flag, creating a type (the clone) the architect flag.
+    can_edit, can_clone = _is_admin(request, inst, api), _is_architect(request, inst, api)
+    if not (can_edit or can_clone):
         return HttpResponseForbidden(
-            "Editing component types needs the HWDB architect role.")
+            "Editing component types needs the HWDB administrator flag (positions) "
+            "or the architect flag (cloning).")
 
     try:
         record = api.get_component_type(part_type_id).get("data") or {}
@@ -2608,8 +2665,12 @@ def explore_box_type_view(request, part_type_id):
     connectors = dict(record.get("connectors") or {})
 
     if request.method == "POST" and (request.POST.get("action") or "extend") == "clone":
+        if not can_clone:
+            return HttpResponseForbidden("Creating a component type needs the HWDB architect flag.")
         return _clone_box_type(request, api, inst, part_type_id, record,
                                connectors, page_url)
+    if request.method == "POST" and not can_edit:
+        return HttpResponseForbidden("Editing a type's positions needs the HWDB administrator flag.")
 
     if request.method == "POST" and request.POST.get("action") == "edit":
         pos = request.POST.get("position") or ""
@@ -2675,6 +2736,7 @@ def explore_box_type_view(request, part_type_id):
              for pos, ctid in connectors.items()), key=lambda p: p["name"]),
         "child_options": [{"id": c, "name": child_names.get(c, "")} for c in child_ids],
         "leaf_path": navigation.leaf_path_for(inst, part_type_id) if leaf else None,
+        "can_edit": can_edit, "can_clone": can_clone,
     })
 
 
@@ -3640,6 +3702,7 @@ def explore_checklist_view(request, part_id, name):
         "no_test_type": not schema["test_type_name"],
         "clear_local": request.GET.get("clear") == "1",   # #151
         "state_at": _checklist_state_at(rec, draft),
+        "role_gate": _type_role_gate(request, inst, api, ptid),
     })
 
 
@@ -4119,6 +4182,9 @@ def explore_item_create_view(request, part_type_id):
         ChildMintSetting.for_instance(inst).filter(part_type_id=part_type_id)
         .values_list("children", flat=True).first() or []) if isinstance(d, dict)}
     child_types = _child_types(inst, connectors, remembered)
+    if request.method != "POST":   # each child type's own roles gate its mint — said beside the row
+        for c in child_types:
+            c["role_gate"] = _type_role_gate(request, inst, api, c["type_id"])
 
     if request.method == "POST":
         institution = next(
@@ -4238,6 +4304,7 @@ def explore_item_create_view(request, part_type_id):
         "status_options": checklistforms.STATUS_OPTIONS,
         "item_status": NEW_ITEM_STATUS,
         "is_arch": is_arch,
+        "role_gate": _type_role_gate(request, inst, api, part_type_id, type_record.get("data")),
     })
 
 
@@ -4306,6 +4373,13 @@ def _child_type_records(api, request, inst, children) -> tuple[dict, list[str]]:
             rec = api.get_component_type(c["type_id"])
         except requests.RequestException as e:
             errors.append(f"{c['name']}: couldn’t read the type — {_hwdb_error_detail(e)}")
+            continue
+        # Chao 2026-09-23: the child type's own roles gate its mint — a refusal
+        # after the parent is minted would leave it standing with empty positions
+        gate = _type_role_gate(request, inst, api, c["type_id"], rec.get("data") if isinstance(rec, dict) else None)
+        if gate:
+            errors.append(f"{c['name']}: minting its items needs one of the HWDB roles "
+                          f"{', '.join(gate['required'])} — your account holds {', '.join(gate['mine']) or 'no roles'}")
             continue
         template = _spec_template(rec)
         if not template:
@@ -4601,6 +4675,7 @@ def explore_items_edit_view(request, part_type_id):
         except requests.RequestException as e:
             messages.error(request, f"Couldn’t read the items from HWDB — {_hwdb_error_detail(e)}")
     ctx = {"part_type_id": part_type_id, "type_name": node.name if node else "",
+           "role_gate": _type_role_gate(request, inst, api, part_type_id),
            "status_options": checklistforms.STATUS_OPTIONS, "manufacturers": manufacturers,
            "flags": [(f, checklistforms.ITEM_FIELD_LABELS[f], post.get(f) or "")
                      for f in itemsedit.FLAGS],

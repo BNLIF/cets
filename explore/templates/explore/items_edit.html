@@ -41,6 +41,7 @@
   </div>
 
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+  {% include "explore/_role_gate.html" %}
 
   <h1>Edit <span class="mono">{{ part_type_id }}</span> items</h1>
   <p class="es-sub">{% if type_name %}{{ type_name }} · {% endif %}Writes the chosen fields to every listed item in the HWDB. Nothing is written before Apply.</p>

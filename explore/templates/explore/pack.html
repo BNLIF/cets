@@ -91,6 +91,7 @@
   </div>
 
   <h1>{% if is_box %}Add items to{% else %}Link items into{% endif %} <span class="mono">{{ part_id }}</span></h1>
+  {% include "explore/_role_gate.html" %}
   <p class="pk-sub">Pick items below (or type/scan PIDs) and they’ll be linked into the {{ noun }}’s
     free positions in the {{ hwdb_instance }} HWDB. Only the statuses the Shipping Procedure
     allows to be linked (In Fabrication, Waiting on QA/QC Tests, Passed All, Use As Is) can be

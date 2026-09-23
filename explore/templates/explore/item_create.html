@@ -34,6 +34,7 @@
   </div>
 
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+  {% include "explore/_role_gate.html" %}
 
   <h1>New <span class="mono">{{ part_type_id }}</span> item</h1>
   <p class="es-sub">Mints the item in the HWDB — the PID is assigned there.
@@ -75,6 +76,7 @@
         <label class="ec-inline" style="display:flex; gap:6px; align-items:center; font-size:13px;">
           <input type="checkbox" name="mint_child" value="{{ c.type_id }}"{% if c.checked %} checked{% endif %}>
           {{ c.positions|length }} × {{ c.name }} <span class="cl-hint">({% if c.name != c.type_id %}<span class="mono">{{ c.type_id }}</span> · {% endif %}{{ c.positions|join:", " }})</span></label>
+        {% if c.role_gate %}<div class="cl-hint cl-bad-text">&#9888; minting needs one of the HWDB roles {{ c.role_gate.required|join:", " }} — your account holds {% if c.role_gate.mine %}{{ c.role_gate.mine|join:", " }}{% else %}no roles{% endif %}</div>{% endif %}
         <div class="ic-child-opts">
           <select name="status_{{ c.type_id }}">{% for o in status_options %}<option value="{{ o.value }}"{% if o.value == c.status_id %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>
           <label><input type="checkbox" name="up_{{ c.type_id }}" value="1"{% if c.qaqc_uploaded %} checked{% endif %}> QA/QC uploaded</label>
