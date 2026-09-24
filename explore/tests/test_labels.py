@@ -97,6 +97,12 @@ class EngineTest(TestCase):
         self.assertIn(f"{T}-00012-US186", text)
         self.assertIn("SN HPK-12", text)
 
+    def test_presets_fit_their_text_elements(self):
+        for name, lay in labels.LAYOUTS.items():
+            for el in lay["elements"]:
+                if el["element type"] in ("part id", "external id", "part name"):
+                    self.assertTrue(el.get("fit width"), f"{name}: {el['element type']}")
+
     def test_fit_width_shrinks_long_text(self):
         long = labels.item_data(_rec(component_type={"part_type_id": T, "name": "A very long component type name indeed"}))
         el = {"element type": "part name", "anchor": ["50%", "50%"], "alignment": "top-center",

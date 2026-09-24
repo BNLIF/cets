@@ -278,7 +278,7 @@
     change();
   }
   $("lb-add").addEventListener("click", function () {
-    layout.elements.push({"element type": "text", "text": "", "alignment": "top-center", "anchor": ["50%", "50%"], "font size": "6%"});
+    layout.elements.push({"element type": "text", "text": "", "alignment": "top-center", "anchor": ["50%", "50%"], "font size": "6%", "fit width": true});
     curRow = layout.elements.length - 1; render();
   });
   $("lb-field").addEventListener("change", function () {

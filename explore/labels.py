@@ -121,12 +121,13 @@ def _qr_layout(template, orientation, qr_anchor, qr_size, id_y, name_y, font):
         {"element type": "qr", "alignment": "top-center", "anchor": qr_anchor,
          "size": qr_size, "preserve aspect ratio": True},
         {"element type": "part id", "alignment": "top-center", "anchor": ["50%", id_y],
-         "font size": font},
+         "font size": font, "fit width": True},
         {"element type": "part name", "alignment": "top-center", "anchor": ["50%", name_y],
-         "font size": font}]}
+         "font size": font, "fit width": True}]}
 
 
-# The utility's default layouts — the editor's presets.
+# The utility's default layouts — the editor's presets. Their text elements
+# carry "fit width" (our extension) so a long part name shrinks to the label.
 LAYOUTS = {
     "QR-A4-3x4-Generic": _qr_layout("A4-3x4-Generic", "portrait", ["50%", "4%"], ["100%", "73%"], "82%", "90%", "5%"),
     "QR-A4-6x11-Herma_10107": _qr_layout("A4-6x11-Herma", "portrait", ["50%", "4%"], ["75%", "75%"], "83%", "90%", "5%"),
@@ -139,18 +140,18 @@ LAYOUTS = {
             {"element type": "qr", "alignment": "top-left", "anchor": ["4%", "4%"],
              "size": ["90%", "90%"], "preserve aspect ratio": True},
             {"element type": "part id", "alignment": "top-center", "anchor": ["70%", "35%"],
-             "font size": "10%"},
+             "font size": "10%", "fit width": True},
             {"element type": "part name", "alignment": "top-center", "anchor": ["70%", "53%"],
-             "font size": "10%"}]},
+             "font size": "10%", "fit width": True}]},
     "QR-Letter-3x5-Avery": _qr_layout("Letter-3x5-Avery", "landscape", ["50%", "4%"], ["100%", "73%"], "82%", "90%", "5%"),
     "Bar-Letter-2x7-Avery": {
         "label template": "Letter-2x7-Avery", "orientation": "portrait", "elements": [
             {"element type": "bar", "alignment": "top-center", "anchor": ["50%", "10%"],
              "size": ["90%", "55%"], "preserve aspect ratio": False},
             {"element type": "external id", "alignment": "top-center", "anchor": ["50%", "68%"],
-             "font size": "10%"},
+             "font size": "10%", "fit width": True},
             {"element type": "part name", "alignment": "top-center", "anchor": ["50%", "81%"],
-             "font size": "8%", "font face": "Helvetica"}]},
+             "font size": "8%", "font face": "Helvetica", "fit width": True}]},
 }
 
 ELEMENT_TYPES = ["qr", "bar", "part id", "external id", "part name", "text"]
