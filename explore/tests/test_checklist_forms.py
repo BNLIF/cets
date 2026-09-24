@@ -3839,6 +3839,32 @@ class SumFieldTest(TestCase):
         self.assertNotIn("spec", f_note)
         data = checklistforms.parse(schema, {f_num["key"]: "100", f_note["key"]: "x"})
         self.assertEqual(data, {"Batch": {"Number of items received": 100, "Note": "x"}})   # the record keeps the label
-        self.assertEqual(checklistforms.spec_values(schema, data), {"Batch": {"Received": 100}})   # the Specs use the key
+        self.assertEqual(checklistforms.spec_values(schema, data), {"Received": 100})   # the Specs use the key, at the top of DATA
         bound = checklistforms.bind(schema, {"DATA": data})
         self.assertEqual(bound["sections"][0]["fields"][0]["value"], "100")   # a previous submit reads back by label
+
+    def test_spec_keys_clash_stay_under_their_sections(self):
+        # two fields naming the same Specs key, or a key that is a section title, nest as before
+        schema = checklistforms.normalize(
+            {"name": "t", "test_type_name": "T", "sections": [
+                {"title": "A", "fields": [{"type": "number", "label": "Count A", "to_spec": True, "spec": "n"},
+                                          {"type": "number", "label": "Count B", "to_spec": True, "spec": "B"}]},
+                {"title": "B", "fields": [{"type": "number", "label": "Count C", "to_spec": True, "spec": "n"},
+                                          {"type": "number", "label": "Plain", "to_spec": True}]}]}, "t")
+        data = {"A": {"Count A": 1, "Count B": 2}, "B": {"Count C": 3, "Plain": 4}}
+        self.assertEqual(checklistforms.spec_values(schema, data),
+                         {"A": {"n": 1, "B": 2}, "B": {"n": 3, "Plain": 4}})
+
+    def test_dotted_spec_keys_nest_and_merge(self):
+        # Chao 2026-09-24: "batch.received" → DATA.batch.received; two fields under batch. share the object
+        schema = checklistforms.normalize(
+            {"name": "t", "test_type_name": "T", "sections": [
+                {"title": "Batch", "fields": [
+                    {"type": "number", "label": "Number received", "to_spec": True, "spec": "batch.received"},
+                    {"type": "number", "label": "Number ordered", "to_spec": True, "spec": "batch.ordered"},
+                    {"type": "text", "label": "Who", "to_spec": True, "spec": "Batch.who"}]}]}, "t")
+        data = {"Batch": {"Number received": 100, "Number ordered": 250, "Who": "me"}}
+        self.assertEqual(checklistforms.spec_values(schema, data),
+                         {"batch": {"received": 100, "ordered": 250},
+                          "Batch": {"Batch.who": "me"}})   # first segment = a section title → stays under it
+

@@ -481,12 +481,17 @@
           if (!row.pid) return;
           seen++;
           if (want.length && want.indexOf(String(row.status || "").toLowerCase()) < 0) return;
-          var d = row.data || {}, v = null;
+          var d = row.data || {}, v = null, path = key.split(".").filter(Boolean);
+          function at(o) {   // the value at the dotted path, or the literal key, in o
+            if (o && typeof o === "object" && key in o) return o[key];
+            for (var i = 0; i < path.length; i++) { if (!o || typeof o !== "object" || !(path[i] in o)) return null; o = o[path[i]]; }
+            return o === undefined ? null : o;
+          }
           Object.keys(d).forEach(function (sec) {
             var s = d[sec];
-            if (v === null && s && typeof s === "object" && key in s) v = s[key];
+            if (v === null && s && typeof s === "object") v = at(s);
           });
-          if (v === null && key in d) v = d[key];
+          if (v === null) v = at(d);
           var num = typeof v === "number" ? v : parseFloat(String(v === null || v === undefined ? "" : v).replace(/,/g, ""));
           if (isNaN(num)) return;
           sum += num; n++;

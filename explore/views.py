@@ -3501,7 +3501,8 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
     sv = checklistforms.spec_values(schema, data)
     prev_data = (prev_td or {}).get("DATA")
     owned = ({s["title"] for s in schema["sections"]}
-             | set(prev_data.keys() if isinstance(prev_data, dict) else ()))
+             | set(prev_data.keys() if isinstance(prev_data, dict) else ())
+             | set(sv.keys()))   # #176: a field's top-level Specs key is this checklist's too
     if sv or prev_data:
         serr = ((_ensure_spec_data(request, api, part_id.rsplit("-", 1)[0]) if sv else None)
                 or _patch_spec_data(api, part_id, sv, owned))

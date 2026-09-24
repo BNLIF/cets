@@ -1101,12 +1101,33 @@ def spec_values(schema: dict, data: dict) -> dict:
     the item's latest specifications DATA (the test record keeps the full
     set regardless)."""
     out = {}
+    # #176 (Chao): a field's Specs key goes to the top of DATA (``DATA.received``),
+    # not under its section; dots nest (``batch.received`` → DATA.batch.received,
+    # two fields under ``batch.`` share the one object) — unless two fields claim
+    # the same path, or the first segment names a section: those stay nested
+    # under their sections, by the key as written
+    titles = {t for t, _ in leaf_fields(schema)}
+    counts = {}
+    for _, f in leaf_fields(schema):
+        if f.get("to_spec") and f.get("spec"):
+            counts[f["spec"]] = counts.get(f["spec"], 0) + 1
     for title, f in leaf_fields(schema):
         if not f.get("to_spec"):
             continue
         sec = data.get(title)
-        if isinstance(sec, dict) and f["label"] in sec:
-            out.setdefault(title, {})[f.get("spec") or f["label"]] = sec[f["label"]]
+        if not (isinstance(sec, dict) and f["label"] in sec):
+            continue
+        key = f.get("spec")
+        path = [p for p in key.split(".") if p] if key else []
+        if path and counts[key] == 1 and path[0] not in titles:
+            node = out
+            for p in path[:-1]:
+                if not isinstance(node.get(p), dict):
+                    node[p] = {}
+                node = node[p]
+            node[path[-1]] = sec[f["label"]]
+        else:
+            out.setdefault(title, {})[key or f["label"]] = sec[f["label"]]
     return out
 
 

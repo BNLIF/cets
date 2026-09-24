@@ -279,7 +279,7 @@
       </select>
       <label class="ec-inline ff-tospec-w" title="value is also saved to the item's Specifications"><input type="checkbox" class="ff-tospec"> &#8594; Specs</label>
       <input class="ff-spec" placeholder="Specs key (blank = the label)" style="flex:0 1 190px; display:none;"
-        title="the key the value is stored under in the item's Specifications — a short key for a descriptive label; what a sum field names">
+        title="stored at the top of the item's Specifications DATA under this key (not under the section by its label); dots nest, e.g. batch.received — a short key for a descriptive label; what a sum field names">
       <button type="button" class="ec-del clc-x" title="Remove field">&#x2715;</button>
     </div>
     <div class="ec-row g-num" style="display:none;">
@@ -316,7 +316,7 @@
         title="set when the target checklist belongs to a different component type — the link opens that type&#8217;s PID chooser">
     </div>
     <div class="ec-row g-sum" style="display:none;">
-      <input class="ff-sumkey" placeholder="Specs key of the number field to add up (its label unless it sets a Specs key)" style="flex:1 1 300px;"
+      <input class="ff-sumkey" placeholder="Specs key of the number field to add up (its label unless it sets a Specs key; dots nest)" style="flex:1 1 300px;"
         title="the total of this key over every item of the type — the number field must have → Specs ticked, so its value is in the Item Specs">
       <input class="ff-sumstatus" placeholder="count only items with status…, comma-separated (blank = every item)" style="flex:1 1 260px;">
     </div>

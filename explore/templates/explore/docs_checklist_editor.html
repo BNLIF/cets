@@ -103,7 +103,9 @@
   <p>Every field has a <b>label</b>; the label is the key under which the value is stored, inside its section's title
     (<code>{section: {label: value}}</code>). <span class="dd-ui">→ Specs</span> on a value field also writes the value into the item's
     Item Specifications, so it shows on the item's page — the checklist owns those sections and rewrites them wholesale at every submit.
-    A <span class="dd-ui">Specs key</span> stores it under that key instead of the label: a descriptive label with a short key.</p>
+    A <span class="dd-ui">Specs key</span> stores it at the top of DATA under that key (<code>DATA.received</code>) instead of under the
+    section by its label: a descriptive label with a short key. Dots nest — <code>batch.received</code> and <code>batch.ordered</code>
+    share one <code>batch</code> object. Two fields with the same key stay under their sections.</p>
 
   <h2 id="number">Numbers</h2>
   <p>A number field (and every plain cell of a table) takes <span class="dd-ui">units</span> and one of two ranges:
