@@ -4833,7 +4833,9 @@ def explore_labels_view(request, part_type_id):
     ctx = {"part_type_id": part_type_id, "type_name": node.name if node else "",
            "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
            "templates": {k: {"description": v["description"], "label size": v["label size"],
-                             "units": labels.PAGE_SIZES[v["page size"]]["units"]}
+                             "units": labels.PAGE_SIZES[v["page size"]]["units"],
+                             "page size": v["page size"], "h": v["horizontal offsets"],
+                             "v": v["vertical offsets"]}
                          for k, v in labels.TEMPLATES.items()},
            "presets": labels.LAYOUTS,
            "element_types": labels.ELEMENT_TYPES, "alignments": labels.ALIGNMENTS,
@@ -4842,11 +4844,19 @@ def explore_labels_view(request, part_type_id):
         return render(request, "explore/labels.html", ctx)
     try:
         layouts = json.loads(post.get("layouts") or "[]")
-        assert isinstance(layouts, list) and layouts
-        assert all(isinstance(lay, dict) and lay.get("label template") in labels.TEMPLATES
+        assert isinstance(layouts, list) and layouts and all(isinstance(lay, dict) for lay in layouts)
+        assert all(lay.get("sheet") is not None or lay.get("label template") in labels.TEMPLATES
                    for lay in layouts)
+        shift = tuple(float(post.get(k) or 0) for k in ("shift_x", "shift_y"))
+        assert all(abs(s) <= labels.SHIFT_MAX for s in shift)
     except (ValueError, AssertionError):
         return JsonResponse({"error": "Bad layout."}, status=400)
+    try:
+        for lay in layouts:
+            if lay.get("sheet") is not None:
+                labels.sheet_template(lay["sheet"])     # a custom sheet — ValueError says what is wrong
+    except ValueError as e:
+        return JsonResponse({"error": f"Sheet: {e}"}, status=400)
     res = itemsedit.resolve(inst, part_type_id, post.get("items"))
     pids = [r.part_id for r in res["rows"]]
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
@@ -4880,7 +4890,7 @@ def explore_labels_view(request, part_type_id):
     except requests.RequestException as e:
         return JsonResponse({"error": f"Couldn’t read the items from HWDB — {_hwdb_error_detail(e)}"},
                             status=502)
-    pdf = labels.build_pdf(layouts, items, ui, intro=post.get("intro") == "1")
+    pdf = labels.build_pdf(layouts, items, ui, intro=post.get("intro") == "1", shift_mm=shift)
     resp = HttpResponse(pdf, content_type="application/pdf")
     resp["Content-Disposition"] = f'attachment; filename="labels_{part_type_id}.pdf"'
     return resp

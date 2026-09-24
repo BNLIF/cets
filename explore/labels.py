@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import logging
 import re
 import time
@@ -268,18 +269,74 @@ def _pct(s, size):
     return float(s or 0)
 
 
-def _template(name: str) -> dict:
-    t = deepcopy(TEMPLATES[name])
+SHIFT_MAX = 50.0   # mm — a printer's feed offset is a few mm; anything more is a wrong sheet
+
+
+def sheet_template(spec: dict) -> dict:
+    """Hajime 2026-09-24: a user-defined sheet — ``{"page size": "A4"|"Letter",
+    "units": "mm"|"inch", "label size": [w, h], "columns": n, "rows": m,
+    "left": x0, "top": y0, "pitch": [dx, dy]}`` (pitch = label size when
+    omitted) — as a TEMPLATES-shaped dict, offsets computed. The grid must
+    fit the page. ValueError names what is wrong."""
+    if not isinstance(spec, dict):
+        raise ValueError("sheet must be an object")
+    page = PAGE_SIZES.get(spec.get("page size"))
+    if not page:
+        raise ValueError("paper must be A4 or Letter")
+    units = spec.get("units") or page["units"]
+    if units not in ("mm", "inch"):
+        raise ValueError("units must be mm or inch")
+
+    def num(v, what, lo=0.0):
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            raise ValueError(f"{what} must be a number")
+        if x < lo or x != x:
+            raise ValueError(f"{what} must be at least {lo:g}")
+        return x
+
+    size = spec.get("label size") or [None, None]
+    lw, lh = num(size[0], "label width", 1e-3), num(size[1], "label height", 1e-3)
+    cols, rows = int(num(spec.get("columns"), "columns", 1)), int(num(spec.get("rows"), "rows", 1))
+    left, top = num(spec.get("left", 0), "left margin"), num(spec.get("top", 0), "top margin")
+    pitch = spec.get("pitch") or [lw, lh]
+    dx, dy = num(pitch[0], "column pitch", 1e-3), num(pitch[1], "row pitch", 1e-3)
+    scale = 1.0 if units == page["units"] else (25.4 if units == "mm" else 1 / 25.4)
+    pw, ph = page["size"][0] * scale, page["size"][1] * scale   # the page in the sheet's units
+    right, bottom = left + (cols - 1) * dx + lw, top + (rows - 1) * dy + lh
+    if right > pw + 1e-6 or bottom > ph + 1e-6:
+        raise ValueError(f"the grid runs off the page — {right:g} × {bottom:g} {units} "
+                         f"on {pw:g} × {ph:g} {units}")
+    return {"description": f"{spec['page size']}, {cols}×{rows} of {lw:g}×{lh:g} {units} labels, "
+                           f"{cols * rows} per sheet (custom)",
+            "page size": spec["page size"], "units": units, "label size": [lw, lh],
+            "horizontal offsets": [left + i * dx for i in range(cols)],
+            "vertical offsets": [top + j * dy for j in range(rows)],
+            "rounding": 0.0}
+
+
+def template_for(layout: dict) -> dict:
+    """The layout's sheet, derived: a custom ``sheet`` when it carries one,
+    else its named template."""
+    if isinstance(layout.get("sheet"), dict):
+        t = sheet_template(layout["sheet"])
+    else:
+        t = deepcopy(TEMPLATES[layout.get("label template") or "A4-3x4-Generic"])
     page = PAGE_SIZES[t["page size"]]
-    u = UNITS[page["units"]]
+    u = UNITS[t.get("units") or page["units"]]
     t["unit"] = u
-    t["page"] = [u * x for x in page["size"]]
+    t["page"] = [UNITS[page["units"]] * x for x in page["size"]]
     t["label"] = [u * x for x in t["label size"]]
     t["round"] = u * t.get("rounding", 0)
     t["h"] = [u * x for x in t["horizontal offsets"]]
     t["v"] = [u * x for x in t["vertical offsets"]]
     t["per_page"] = len(t["h"]) * len(t["v"])
     return t
+
+
+def _template(name: str) -> dict:
+    return template_for({"label template": name})
 
 
 def _draw_code(cvs, kind: str, value: str, x, y, w, h, align: str, preserve: bool, rotate):
@@ -428,48 +485,53 @@ def _intro_page(cvs, tpl, num_pages):
     cvs.showPage()
 
 
-def _template_page(cvs, tpl):
+def _template_page(cvs, tpl, shift=(0.0, 0.0)):
     pw, ph = tpl["page"]
     lw, lh = tpl["label"]
+    sx, sy = shift
     cvs.setPageSize((pw, ph))
     cvs.setLineWidth(1)
     cvs.setStrokeColorRGB(0.8, 0.8, 0.8)
     cvs.setFillColorRGB(0.9, 0.9, 0.9)
     for v in tpl["v"]:
         for h in tpl["h"]:
-            cvs.roundRect(h, ph - v - lh, lw, lh, tpl["round"], fill=1)
+            cvs.roundRect(h + sx, ph - v - sy - lh, lw, lh, tpl["round"], fill=1)
     cvs.showPage()
 
 
-def build_pdf(layouts: list[dict], items: list[dict], ui_base: str, intro: bool = True) -> bytes:
-    """The label sheets: for every sheet template the chosen layouts use,
-    the intro + alignment pages (``intro``) and then one label per (layout,
-    item) — every item under the first layout, then under the next, as the
-    utility's label sets print."""
+def build_pdf(layouts: list[dict], items: list[dict], ui_base: str, intro: bool = True,
+              shift_mm: tuple[float, float] = (0.0, 0.0)) -> bytes:
+    """The label sheets: for every sheet the chosen layouts use, the intro +
+    alignment pages (``intro``) and then one label per (layout, item) —
+    every item under the first layout, then under the next, as the utility's
+    label sets print. ``shift_mm`` (right, down) moves everything on every
+    sheet, alignment page included — Hajime 2026-09-24: the small correction
+    a particular printer needs."""
     buf = io.BytesIO()
     cvs = rl_canvas.Canvas(buf)
     cvs.setTitle("HWDB Item Bar/QR Code Labels")
     cvs.setAuthor("HWDB Explorer")
-    groups: dict[str, list[tuple[dict, dict]]] = {}
+    sx, sy = (max(-SHIFT_MAX, min(SHIFT_MAX, float(s or 0))) * units.mm for s in shift_mm)
+    groups: dict[str, list] = {}
     for lay in layouts:
-        tname = lay.get("label template")
-        if tname not in TEMPLATES:
+        try:
+            tpl = template_for(lay)
+        except (KeyError, ValueError):
             continue
-        for it in items:
-            groups.setdefault(tname, []).append((lay, it))
-    for tname, jobs in groups.items():
-        tpl = _template(tname)
+        key = json.dumps(lay.get("sheet"), sort_keys=True) if lay.get("sheet") else lay.get("label template")
+        groups.setdefault(key, [tpl, []])[1].extend((lay, it) for it in items)
+    for tpl, jobs in groups.values():
         pw, ph = tpl["page"]
         pages = -(-len(jobs) // tpl["per_page"])
         if intro:
             _intro_page(cvs, tpl, pages)
-            _template_page(cvs, tpl)
+            _template_page(cvs, tpl, (sx, sy))
         cvs.setPageSize((pw, ph))
         slots = [(h, v) for v in tpl["v"] for h in tpl["h"]]
         for i, (lay, it) in enumerate(jobs):
             h, v = slots[i % tpl["per_page"]]
             cvs.saveState()
-            cvs.translate(h, ph - v)
+            cvs.translate(h + sx, ph - v - sy)
             draw_label(cvs, tpl, lay, it, ui_base, outline=bool(lay.get("draw outline")))
             cvs.restoreState()
             if (i + 1) % tpl["per_page"] == 0 or i + 1 == len(jobs):
@@ -481,7 +543,7 @@ def build_pdf(layouts: list[dict], items: list[dict], ui_base: str, intro: bool 
 def preview_png(layout: dict, data: dict, ui_base: str, dpi: int = 220) -> bytes:
     """One label (the sheet's label size, grey outline) as a PNG for the
     editor — the same drawing code as the sheets, rasterised by pymupdf."""
-    tpl = _template(layout.get("label template") or "A4-3x4-Generic")
+    tpl = template_for(layout)
     lw, lh = tpl["label"]
     buf = io.BytesIO()
     cvs = rl_canvas.Canvas(buf, pagesize=(lw, lh))

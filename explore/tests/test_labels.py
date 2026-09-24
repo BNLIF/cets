@@ -182,6 +182,7 @@ class ViewTest(TestCase):
         self.assertContains(r, "QR-A4-3x4-Generic")
         self.assertContains(r, "Letter-2x7-Avery")
         self.assertContains(r, 'id="lb-form"')
+        self.assertContains(r, '"h": [16.1, 46.58')   # a preset's geometry, for the sheet row to show
 
     def test_unlinked_user_goes_to_the_link_page(self):
         with mock.patch("explore.views.mint_for", side_effect=FnalLinkRequired("x")):
@@ -257,3 +258,74 @@ class ViewTest(TestCase):
             self.assertEqual(r.json(), {"text": "HPK-1\nHPK-2"})
             r = self.client.post(URL, {"step": "file"})
             self.assertEqual(r.status_code, 400)
+
+
+class CustomSheetTest(TestCase):
+    """Hajime 2026-09-24: a user-defined sheet (paper, label size, grid,
+    margins, pitch) and an overall print shift for a particular printer."""
+
+    SHEET = {"page size": "A4", "units": "mm", "label size": [70, 36], "columns": 3, "rows": 8,
+             "left": 0, "top": 4.5}
+
+    def test_sheet_template_computes_the_grid(self):
+        t = labels.sheet_template(self.SHEET)
+        self.assertEqual(t["horizontal offsets"], [0.0, 70.0, 140.0])
+        self.assertEqual(t["vertical offsets"][:3], [4.5, 40.5, 76.5])
+        self.assertEqual(t["description"], "A4, 3×8 of 70×36 mm labels, 24 per sheet (custom)")
+        t = labels.sheet_template({**self.SHEET, "pitch": [70, 36.5]})
+        self.assertEqual(t["vertical offsets"][1], 41.0)
+        # inch labels on A4: the page is converted for the fit check
+        labels.sheet_template({"page size": "A4", "units": "inch", "label size": [4, 2], "columns": 2, "rows": 5, "left": 0.1, "top": 0.5})
+        for bad, msg in (({**self.SHEET, "columns": 4}, "runs off the page"),
+                         ({**self.SHEET, "page size": "A5"}, "A4 or Letter"),
+                         ({**self.SHEET, "label size": ["x", 36]}, "label width"),
+                         ({**self.SHEET, "rows": 0}, "rows"),
+                         ("nope", "object")):
+            with self.assertRaises(ValueError) as cm:
+                labels.sheet_template(bad)
+            self.assertIn(msg, str(cm.exception))
+
+    def test_pdf_uses_the_custom_sheet_and_the_shift(self):
+        lay = {"label template": "custom", "sheet": self.SHEET, "elements": [
+            {"element type": "part id", "anchor": ["50%", "40%"], "alignment": "top-center", "font size": "20%"}]}
+        items = [labels.item_data(_rec(n)) for n in range(1, 26)]   # 25 on a 24-per-sheet grid
+        pdf = labels.build_pdf([lay], items, UI)
+        self.assertEqual(_pages(pdf), [(595, 842)] * 4)   # intro, alignment, 2 label pages
+
+        def first_text_top(pdf):
+            doc = fitz.open(stream=pdf, filetype="pdf")
+            try:
+                return doc[0].get_text("dict")["blocks"][0]["lines"][0]["bbox"][1]
+            finally:
+                doc.close()
+        plain = labels.build_pdf([lay], items[:1], UI, intro=False)
+        moved = labels.build_pdf([lay], items[:1], UI, intro=False, shift_mm=(0, 10))
+        self.assertAlmostEqual(first_text_top(moved) - first_text_top(plain), 10 * 72 / 25.4, places=1)
+        self.assertEqual(labels.preview_png(lay, items[0], UI, dpi=72)[:4], b"\x89PNG")
+        # a shift beyond the cap is clamped, not honoured
+        far = labels.build_pdf([lay], items[:1], UI, intro=False, shift_mm=(0, 500))
+        self.assertAlmostEqual(first_text_top(far) - first_text_top(plain), labels.SHIFT_MAX * 72 / 25.4, places=1)
+
+
+class CustomSheetViewTest(TestCase):
+    def setUp(self):
+        HwdbComponentEvent.objects.create(instance="dev", part_type_id=T, part_id=f"{T}-00001",
+                                          serial_number="HPK-1", status="Unknown", status_id=0)
+        self.client.force_login(get_user_model().objects.create_user("w", "w@w.io", "pw"))
+
+    def test_custom_sheet_and_shift_are_accepted_and_bad_ones_named(self):
+        lay = {"label template": "custom", "sheet": CustomSheetTest.SHEET,
+               "elements": labels.LAYOUTS["QR-A4-3x4-Generic"]["elements"]}
+        p1, p2 = _mocked(_api())
+        with p1, p2:
+            r = self.client.post(URL, {"step": "preview", "items": "1", "layouts": json.dumps([lay])})
+            self.assertEqual(r.status_code, 200)
+            r = self.client.post(URL, {"step": "pdf", "items": "1", "layouts": json.dumps([lay]),
+                                       "shift_x": "1.5", "shift_y": "-2"})
+            self.assertEqual((r.status_code, r["Content-Type"]), (200, "application/pdf"))
+            bad = dict(lay, sheet={**CustomSheetTest.SHEET, "columns": 9})
+            r = self.client.post(URL, {"step": "pdf", "items": "1", "layouts": json.dumps([bad])})
+            self.assertEqual(r.status_code, 400)
+            self.assertIn("runs off the page", r.json()["error"])
+            r = self.client.post(URL, {"step": "pdf", "items": "1", "layouts": json.dumps([lay]), "shift_y": "80"})
+            self.assertEqual(r.json(), {"error": "Bad layout."})

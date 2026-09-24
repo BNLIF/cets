@@ -32,6 +32,7 @@
   .lb-row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 13px; margin: 8px 0; }
   .lb-row label { color: var(--dim); display: inline-flex; align-items: center; gap: 6px; }
   /* the checklist sheet styles inputs only inside .cl-field — same look here */
+  .lb-row input.n { width: 5.4em; }
   .lb-row select, .lb-row input[type=text], .lb-el input[type=text], .lb-el select, .lb-pick-bar input[type=search] {
     font: inherit; font-size: 13px; color: var(--ink); background: var(--cl-input-bg, var(--surface));
     border: 1px solid var(--cl-input-rule, var(--rule)); border-radius: var(--r-sm); padding: 5px 8px; }
@@ -61,6 +62,7 @@
   .lb-cap { font-size: 12px; color: var(--faint); margin: 6px 0 0; overflow-wrap: anywhere; }
   .lb-actions { margin-top: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   details.lb-json { font-size: 13px; margin-top: 8px; }
+  details.lb-diagram svg { display: block; margin: 6px 0 2px; color: var(--ink); max-width: 100%; height: auto; }
   details.lb-json summary { color: var(--dim); cursor: pointer; }
 </style>
 
@@ -131,6 +133,48 @@
             <label>Orientation <select id="lb-orient"><option value="portrait">portrait</option><option value="landscape">landscape</option></select></label>
             <span class="cl-hint" id="lb-tpl-desc"></span>
           </div>
+          <div class="lb-row" id="lb-sheet">
+            <label>Paper <select id="sh-paper"><option value="A4">A4</option><option value="Letter">Letter</option></select></label>
+            <label>Units <select id="sh-units"><option value="mm">mm</option><option value="inch">inch</option></select></label>
+            <label>Label <input type="text" id="sh-w" class="n" size="5"> × <input type="text" id="sh-h" class="n" size="5"></label>
+            <label>Columns <input type="text" id="sh-cols" class="n" size="3"></label>
+            <label>Rows <input type="text" id="sh-rows" class="n" size="3"></label>
+            <label>Left margin <input type="text" id="sh-left" class="n" size="5"></label>
+            <label>Top margin <input type="text" id="sh-top" class="n" size="5"></label>
+            <label title="from one label’s edge to the same edge of the next label = label size + gap; blank = the label size (no gap)">Pitch <input type="text" id="sh-px" class="n" size="5" placeholder="= width"> × <input type="text" id="sh-py" class="n" size="5" placeholder="= height"></label>
+            <button type="button" class="es-btn quiet" id="sh-auto" title="Spread columns × rows evenly over the paper: 8 mm margins, a 2 mm gap between labels — then adjust">Estimate from columns × rows</button>
+          </div>
+          <details class="lb-json lb-diagram"><summary>What these numbers measure</summary>
+            <svg viewBox="0 0 340 250" width="340" height="250" role="img" aria-label="a sheet with its margins, label size and pitch marked">
+              <g fill="none" stroke="currentColor" stroke-width="1">
+                <rect x="80" y="30" width="150" height="170" fill="var(--page)"/>
+                <g fill="var(--accent-soft)">
+                  <rect x="104" y="56" width="50" height="34"/><rect x="166" y="56" width="50" height="34"/>
+                  <rect x="104" y="102" width="50" height="34"/><rect x="166" y="102" width="50" height="34"/>
+                  <rect x="104" y="148" width="50" height="34"/><rect x="166" y="148" width="50" height="34"/>
+                </g>
+              </g>
+              <g stroke="currentColor" stroke-width="1" fill="none">
+                <path d="M80 22 v-8 M104 22 v-8 M80 18 h24"/>
+                <path d="M72 30 h-8 M72 56 h-8 M68 30 v26"/>
+                <path d="M104 216 v-8 M166 216 v-8 M104 212 h62" stroke-dasharray="3 2"/>
+                <path d="M104 232 v-8 M154 232 v-8 M104 228 h50"/>
+                <path d="M234 56 h8 M234 90 h8 M238 56 v34"/>
+                <path d="M250 56 h8 M250 102 h8 M254 56 v46" stroke-dasharray="3 2"/>
+              </g>
+              <g font-size="10" fill="currentColor" font-family="var(--font-sans)">
+                <text x="92" y="10" text-anchor="middle">left margin</text>
+                <text x="62" y="46" text-anchor="end">top margin</text>
+                <text x="172" y="215">pitch ×</text>
+                <text x="129" y="243" text-anchor="middle">label width</text>
+                <text x="246" y="76">label height</text>
+                <text x="262" y="100">pitch</text>
+                <text x="170" y="20" text-anchor="middle" fill="var(--faint)">paper</text>
+                <text x="160" y="194" text-anchor="middle" fill="var(--faint)">columns × rows</text>
+              </g>
+            </svg>
+            <p class="cl-hint">Pitch = from one label’s edge to the same edge of the next = label size + gap. With no gap between labels, leave it blank.</p>
+          </details>
           <div class="lb-scroll"><table class="lb-el">
             <thead><tr><th>Element</th><th>Text</th><th>Anchor x</th><th>y</th><th>Align</th><th>Width</th><th>Height</th><th title="codes: preserve aspect ratio · text: shrink the font to fit the width">Aspect / fit</th><th>Font</th><th>Size</th><th>Rotate</th><th></th></tr></thead>
             <tbody id="lb-els"></tbody>
@@ -156,6 +200,10 @@
         <div class="es-card">
           <h2>Print</h2>
           <label class="lb-row"><input type="checkbox" name="intro" value="1" id="lb-intro" checked> Intro and alignment-template pages</label>
+          <div class="lb-row" title="moves everything on every sheet, the alignment page too — the few mm a particular printer feeds off; kept in this browser">
+            <label>Shift right <input type="text" name="shift_x" id="lb-shx" class="n" size="4" value="0"> mm</label>
+            <label>down <input type="text" name="shift_y" id="lb-shy" class="n" size="4" value="0"> mm</label>
+          </div>
           <div class="lb-actions">
             <button type="submit" class="es-btn quiet" id="lb-pdf">Download PDF</button>
             <span class="cl-hint" id="lb-pdf-note"></span>
@@ -196,8 +244,9 @@
     layout = clone(lay);
     layout.elements = layout.elements || [];
     $("lb-name").value = name;
-    $("lb-tpl").value = layout["label template"];
+    $("lb-tpl").value = layout.sheet ? "custom" : layout["label template"];
     $("lb-orient").value = layout.orientation || "portrait";
+    syncSheet();
     curRow = 0;
     render();
   }
@@ -227,7 +276,62 @@
 
   // --- sheet + orientation ---
   Object.keys(TEMPLATES).forEach(function (n) { opt($("lb-tpl"), n, n); });
-  $("lb-tpl").addEventListener("change", function () { layout["label template"] = this.value; render(); });
+  opt($("lb-tpl"), "custom", "custom sheet…");
+  // --- a custom sheet (Hajime 2026-09-24): paper, label size, grid, margins, pitch ---
+  var PAPER = { A4: [210, 297, "mm"], Letter: [8.5, 11, "inch"] };
+  var SHEET_DEFAULT = { "page size": "A4", "units": "mm", "label size": [70, 36], "columns": 3, "rows": 8, "left": 0, "top": 4.5 };
+  var SH = ["paper", "units", "w", "h", "cols", "rows", "left", "top", "px", "py"];
+  // a named sheet's geometry as a custom sheet: first offsets = margins, second minus first = pitch
+  function sheetFrom(name) {
+    var t = TEMPLATES[name]; if (!t) return clone(SHEET_DEFAULT);
+    var r = function (x) { return +(+x).toFixed(4); };
+    return { "page size": t["page size"], units: t.units, "label size": [t["label size"][0], t["label size"][1]],
+             columns: t.h.length, rows: t.v.length, left: r(t.h[0]), top: r(t.v[0]),
+             pitch: [r(t.h.length > 1 ? t.h[1] - t.h[0] : t["label size"][0]), r(t.v.length > 1 ? t.v[1] - t.v[0] : t["label size"][1])] };
+  }
+  function syncSheet() {
+    // the row always shows: a named sheet's own numbers, which editing turns into a custom copy
+    var s = layout.sheet || sheetFrom(layout["label template"]);
+    $("sh-paper").value = s["page size"] || "A4"; $("sh-units").value = s.units || "mm";
+    $("sh-w").value = (s["label size"] || [])[0] == null ? "" : s["label size"][0]; $("sh-h").value = (s["label size"] || [])[1] == null ? "" : s["label size"][1];
+    $("sh-cols").value = s.columns == null ? "" : s.columns; $("sh-rows").value = s.rows == null ? "" : s.rows;
+    $("sh-left").value = s.left == null ? "" : s.left; $("sh-top").value = s.top == null ? "" : s.top;
+    $("sh-px").value = s.pitch ? s.pitch[0] : ""; $("sh-py").value = s.pitch ? s.pitch[1] : "";
+  }
+  function readSheet() {
+    var num = function (id) { var v = parseFloat($(id).value); return isNaN(v) ? null : v; };
+    var s = { "page size": $("sh-paper").value, units: $("sh-units").value, "label size": [num("sh-w"), num("sh-h")],
+              columns: num("sh-cols"), rows: num("sh-rows"), left: num("sh-left") || 0, top: num("sh-top") || 0 };
+    if (num("sh-px") != null || num("sh-py") != null) s.pitch = [num("sh-px") == null ? s["label size"][0] : num("sh-px"), num("sh-py") == null ? s["label size"][1] : num("sh-py")];
+    layout.sheet = s;
+  }
+  function sheetDesc(s) {
+    var w = s["label size"][0], h = s["label size"][1], p = PAPER[s["page size"]], scale = s.units === p[2] ? 1 : (s.units === "mm" ? 25.4 : 1 / 25.4);
+    var pw = p[0] * scale, ph = p[1] * scale, px = s.pitch ? s.pitch[0] : w, py = s.pitch ? s.pitch[1] : h;
+    if (!(w > 0 && h > 0 && s.columns >= 1 && s.rows >= 1)) return ["fill in the label size, columns and rows", true];
+    var right = s.left + (s.columns - 1) * px + w, bottom = s.top + (s.rows - 1) * py + h, over = right > pw + 1e-6 || bottom > ph + 1e-6;
+    return [s.columns * s.rows + " per sheet · grid " + (+right.toFixed(2)) + " × " + (+bottom.toFixed(2)) + " " + s.units + " on " + (+pw.toFixed(2)) + " × " + (+ph.toFixed(2)) + " " + s.units + (over ? " — runs off the page" : ""), over];
+  }
+  // "Estimate": an even grid of columns × rows on the paper — 8 mm margins, 2 mm gaps (Chao 2026-09-24)
+  $("sh-auto").addEventListener("click", function () {
+    if (!layout.sheet) { layout["label template"] = "custom"; $("lb-tpl").value = "custom"; readSheet(); }
+    var s = layout.sheet, p = PAPER[s["page size"]], mm = s.units === "mm", scale = s.units === p[2] ? 1 : (mm ? 25.4 : 1 / 25.4);
+    var pw = p[0] * scale, ph = p[1] * scale, cols = Math.max(1, Math.round(s.columns || 0)), rows = Math.max(1, Math.round(s.rows || 0));
+    var margin = mm ? 8 : 0.3125, gap = mm ? 2 : 0.08, r = function (x) { return +x.toFixed(mm ? 1 : 3); };
+    var px = (pw - 2 * margin + gap) / cols, py = (ph - 2 * margin + gap) / rows;
+    s.columns = cols; s.rows = rows; s.left = r(margin); s.top = r(margin);
+    s["label size"] = [r(px - gap), r(py - gap)]; s.pitch = [r(px), r(py)];
+    syncSheet(); render();
+  });
+  SH.forEach(function (k) { $("sh-" + k).addEventListener("input", function () {
+    if (!layout.sheet) { layout["label template"] = "custom"; $("lb-tpl").value = "custom"; }   // a preset edited = a custom copy of it
+    readSheet(); render();
+  }); });
+  $("lb-tpl").addEventListener("change", function () {
+    if (this.value === "custom") { layout["label template"] = "custom"; layout.sheet = layout.sheet || clone(SHEET_DEFAULT); }
+    else { layout["label template"] = this.value; delete layout.sheet; }
+    syncSheet(); render();
+  });
   $("lb-orient").addEventListener("change", function () { layout.orientation = this.value; render(); });
 
   // --- element rows ---
@@ -243,7 +347,9 @@
   }
   function render() {
     var body = $("lb-els"); body.innerHTML = "";
-    $("lb-tpl-desc").textContent = (TEMPLATES[layout["label template"]] || {}).description || "";
+    var desc = $("lb-tpl-desc");
+    if (layout.sheet) { var d = sheetDesc(layout.sheet); desc.textContent = d[0]; desc.className = "cl-hint" + (d[1] ? " lb-warn" : ""); }
+    else { desc.textContent = (TEMPLATES[layout["label template"]] || {}).description || ""; desc.className = "cl-hint"; }
     layout.elements.forEach(function (el, i) {
       var tr = document.createElement("tr"); if (i === curRow) tr.className = "cur";
       tr.addEventListener("focusin", function () { if (curRow !== i) { curRow = i; body.querySelectorAll("tr").forEach(function (r, j) { r.className = j === i ? "cur" : ""; }); } });
@@ -297,9 +403,9 @@
   $("lb-json-apply").addEventListener("click", function () {
     try {
       var j = JSON.parse($("lb-json").value);
-      if (!j || typeof j !== "object" || !TEMPLATES[j["label template"]]) throw new Error("no label template");
+      if (!j || typeof j !== "object" || !(TEMPLATES[j["label template"]] || (j.sheet && typeof j.sheet === "object"))) throw new Error("no label template or sheet");
       j.elements = Array.isArray(j.elements) ? j.elements : [];
-      load($("lb-name").value, j); $("lb-tpl").value = j["label template"];
+      load($("lb-name").value, j);
     } catch (e) { $("lb-cap").textContent = "Layout JSON: " + e.message; $("lb-cap").className = "lb-cap lb-warn"; }
   });
 
@@ -319,7 +425,7 @@
         var cap = $("lb-cap"), st = $("lb-items-status");
         if (!res.ok || res.j.error) { cap.textContent = res.j.error || "Preview failed."; cap.className = "lb-cap lb-warn"; return; }
         $("lb-prev").src = "data:image/png;base64," + res.j.png;
-        var tpl = TEMPLATES[layout["label template"]], inch = tpl.units === "mm" ? 25.4 : 1;
+        var tpl = layout.sheet || TEMPLATES[layout["label template"]], inch = tpl.units === "mm" ? 25.4 : 1;
         $("lb-prev").style.width = Math.round(tpl["label size"][0] / inch * 96 * 1.6) + "px";
         cap.className = "lb-cap";
         cap.textContent = res.j.first ? "First item " + res.j.first + " on " + tpl["label size"].join(" × ") + " " + tpl.units + " labels" : "No item yet — a sample record on " + tpl["label size"].join(" × ") + " " + tpl.units + " labels";
@@ -440,6 +546,10 @@
       .then(function () { btn.disabled = false; });
   });
 
+  ["lb-shx", "lb-shy"].forEach(function (id) {
+    try { var v = localStorage.getItem("labels:" + id); if (v !== null) $(id).value = v; } catch (e) {}
+    $(id).addEventListener("input", function () { try { localStorage.setItem("labels:" + id, this.value); } catch (e) {} });
+  });
   fillPick();
   var first = Object.keys(saved).sort()[0];
   $("lb-pick").value = first ? "s:" + first : "p:" + Object.keys(PRESETS)[0];
