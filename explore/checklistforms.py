@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 FIELD_TYPES = {"check", "number", "table", "text", "textarea", "datetime",
                "select", "photo", "qr", "steps", "static", "link", "imagemap",
-               "plot", "assembly"}
+               "plot", "assembly", "sum"}
 
 # Field types whose value may ALSO be folded into the item's latest
 # specifications DATA (the ``to_spec`` flag, #96 — "sometimes they do store
@@ -288,10 +288,35 @@ def _norm_field(f: dict) -> dict | None:
             if f.get(k) is not None:
                 out[k] = f[k]
         return out
+    if t == "sum":
+        # #176 (Hajime, CPA batch ledger): the total of ``sum`` — a to_spec
+        # number field's label — over every item of the type, read live
+        # from the type's specifications sweep when the form opens; display
+        # only. ``status``: count only items in one of these statuses.
+        # ``sum`` names the field to add up (``key`` is every field's form name)
+        total_of = str(f.get("sum") or "").strip()
+        if not total_of or not label:
+            return None
+        out = {"type": t, "label": label, "sum": total_of}
+        st = f.get("status")
+        if isinstance(st, str):
+            st = st.split(",")
+        st = [str(x).strip() for x in st if str(x).strip()] if isinstance(st, list) else []
+        if st:
+            out["status"] = st
+        for k in ("col", "span", "newline", "align"):
+            if f.get(k) is not None:
+                out[k] = f[k]
+        return out
     if t not in FIELD_TYPES or not label:
         return None
     out = {"type": t, "label": label, "units": str(f.get("units") or "").strip(),
            "to_spec": bool(f.get("to_spec")) and t in SPEC_CAPABLE}
+    # #176 (Chao): ``spec`` = the key the value is stored under in the item's
+    # specifications when it differs from the label — a descriptive label
+    # ("Number of items received") with a short key ("Received") for a sum field
+    if out["to_spec"] and str(f.get("spec") or "").strip():
+        out["spec"] = str(f["spec"]).strip()
     # #120: grid placement hints — only consumed in a section that declares
     # ``grid``; popped (or dropped) by normalize either way.
     for k in ("col", "span", "newline", "align"):   # align: #123
@@ -803,7 +828,7 @@ def _bind_leaf(f: dict, v) -> None:
                       for i, s in enumerate(f["slots"])]
     elif t == "photo":
         f["existing"] = v if isinstance(v, dict) and v.get("image_id") else None
-    elif t not in ("static", "plot", "assembly"):   # number, text, textarea, datetime, select, qr
+    elif t not in ("static", "plot", "assembly", "sum"):   # number, text, textarea, datetime, select, qr
         f["value"] = _fmt(v)
 
 
@@ -883,7 +908,7 @@ def parse(schema: dict, post, resolve=None) -> dict:
     data = {}
     for title, f in leaf_fields(schema):
         t, key = f["type"], f["key"]
-        if t in ("static", "photo", "plot", "assembly"):   # an assembly's value is the view's snapshot
+        if t in ("static", "photo", "plot", "assembly", "sum"):   # an assembly's value is the view's snapshot
             continue
         if t == "check":
             raw = post.get(key) or ""
@@ -1081,7 +1106,7 @@ def spec_values(schema: dict, data: dict) -> dict:
             continue
         sec = data.get(title)
         if isinstance(sec, dict) and f["label"] in sec:
-            out.setdefault(title, {})[f["label"]] = sec[f["label"]]
+            out.setdefault(title, {})[f.get("spec") or f["label"]] = sec[f["label"]]
     return out
 
 
@@ -1170,7 +1195,7 @@ def export_rows(schema: dict, test_data: dict | None):
             v = f"{v.get('name', '')} (id={v.get('id', '')})"
         yield "Item", label, _fmt(v)
     for title, f in leaf_fields(schema):
-        if f["type"] in ("static", "plot"):
+        if f["type"] in ("static", "plot", "sum"):
             continue
         sec = data.get(title)
         v = sec.get(f["label"]) if isinstance(sec, dict) else None

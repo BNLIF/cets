@@ -458,6 +458,47 @@
     frame.src = src;
   }
   window.clPlots = function () { Array.prototype.forEach.call(document.querySelectorAll(".cl-plot-box"), update); };
+
+  // #176: sum fields — one sweep of the type's specifications per field (the
+  // Plots page's NDJSON stream), adding the key's value from the latest
+  // specifications DATA of every item (any section holding the key), in the
+  // named statuses when given. Read once when the form opens.
+  Array.prototype.forEach.call(document.querySelectorAll(".cl-sum-box"), function (box) {
+    var key = box.dataset.sumKey, want = (box.dataset.sumStatus || "").split("|").filter(Boolean).map(function (x) { return x.toLowerCase(); });
+    var tot = box.querySelector(".cl-sum-total"), note = box.querySelector(".cl-sum-note");
+    function fail(msg) { tot.textContent = "—"; note.textContent = msg; box.classList.add("err"); }
+    if (!box.dataset.sumUrl) return fail("the total shows on the form");   // the editor's preview
+    if (!navigator.onLine) return fail("offline — the total needs the connection");
+    var tokenInput = document.querySelector('input[name="csrfmiddlewaretoken"]');   // csrf() lives in the first script block
+    fetch(box.dataset.sumUrl, { method: "POST", credentials: "same-origin", headers: { "X-CSRFToken": tokenInput ? tokenInput.value : "" } })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
+      .then(function (text) {
+        var sum = 0, n = 0, seen = 0, latest = "", err = "";
+        text.split("\n").forEach(function (line) {
+          if (!line.trim()) return;
+          var row; try { row = JSON.parse(line); } catch (e) { return; }
+          if (row.error) { err = row.error; return; }
+          if (!row.pid) return;
+          seen++;
+          if (want.length && want.indexOf(String(row.status || "").toLowerCase()) < 0) return;
+          var d = row.data || {}, v = null;
+          Object.keys(d).forEach(function (sec) {
+            var s = d[sec];
+            if (v === null && s && typeof s === "object" && key in s) v = s[key];
+          });
+          if (v === null && key in d) v = d[key];
+          var num = typeof v === "number" ? v : parseFloat(String(v === null || v === undefined ? "" : v).replace(/,/g, ""));
+          if (isNaN(num)) return;
+          sum += num; n++;
+          if (row.pid > latest) latest = row.pid;
+        });
+        if (err) return fail(err);
+        tot.textContent = Number.isInteger(sum) ? sum.toLocaleString() : sum.toLocaleString(undefined, { maximumFractionDigits: 3 });
+        note.textContent = "over " + n + " of " + seen + " item" + (seen === 1 ? "" : "s") + (want.length ? " in " + (box.dataset.sumStatus || "").split("|").join(" / ") : "") + (latest ? " · latest " + latest : "");
+        box.classList.remove("err");
+      })
+      .catch(function (e) { fail("couldn’t read the type’s items — " + e.message); });
+  });
   var timer = null;
   function schedule() { clearTimeout(timer); timer = setTimeout(window.clPlots, 800); }
   document.addEventListener("input", schedule);

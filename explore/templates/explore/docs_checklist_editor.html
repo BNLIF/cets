@@ -36,7 +36,7 @@
   <nav class="dd-toc">
     <a href="#checklist">Checklist card</a> <a href="#sections">Sections</a> <a href="#placing">Placing fields</a>
     <a href="#types">Field types</a> <a href="#number">Numbers</a> <a href="#table">Tables</a> <a href="#steps">Steps</a>
-    <a href="#static">Static</a> <a href="#pid">PID fields</a> <a href="#plot">Plot</a> <a href="#assembly">Assembly</a>
+    <a href="#static">Static</a> <a href="#pid">PID fields</a> <a href="#plot">Plot</a> <a href="#assembly">Assembly</a> <a href="#sum">Sum</a>
     <a href="#text">Text</a> <a href="#json">JSON</a> <a href="#fill">On the fill page</a>
   </nav>
 
@@ -98,10 +98,12 @@
     <tr><td>image map</td><td>a drawing with numbered slots; tap a slot to scan into it</td><td><code>{slot: PID}</code></td></tr>
     <tr><td>plot</td><td>a Plots page embedded for the items named in the form</td><td>nothing</td></tr>
     <tr><td>assembly</td><td>the item's positions and what sits in them, read live, with Unlink and Link items</td><td><code>{position: PID}</code></td></tr>
+    <tr><td>sum</td><td>the total of a number field over every item of the type, read live</td><td>nothing</td></tr>
   </table>
   <p>Every field has a <b>label</b>; the label is the key under which the value is stored, inside its section's title
     (<code>{section: {label: value}}</code>). <span class="dd-ui">→ Specs</span> on a value field also writes the value into the item's
-    Item Specifications, so it shows on the item's page — the checklist owns those sections and rewrites them wholesale at every submit.</p>
+    Item Specifications, so it shows on the item's page — the checklist owns those sections and rewrites them wholesale at every submit.
+    A <span class="dd-ui">Specs key</span> stores it under that key instead of the label: a descriptive label with a short key.</p>
 
   <h2 id="number">Numbers</h2>
   <p>A number field (and every plain cell of a table) takes <span class="dd-ui">units</span> and one of two ranges:
@@ -184,6 +186,13 @@ Board 3 @ 4.5, 32</pre>
     <span class="dd-ui">reference plot</span> shows the page exactly as pasted, with its own PID range, reading nothing from the form —
     a distribution to compare a fresh measurement with. Tolerance lines come from the Plots page's <i>Limits</i> boxes and travel in the link.
     The sub-component type's test data must have been synced on its Plots page once.</p>
+
+  <h2 id="sum">Sum</h2>
+  <p>Shows the total of one number field over every item of the type — a batch ledger: each delivery is a new item of the type
+    whose form records the quantity received, and the sum is the running stock. Set the field's <span class="dd-ui">label to add up</span>
+    to that number field's Specs key (its label unless it sets one); the number field must have <span class="dd-ui">→ Specs</span> ticked, since the total is read from
+    the items' specifications in one sweep when the form opens. Optionally list the <span class="dd-ui">statuses</span> that count, so a
+    batch entered by mistake and re-flagged drops out. Nothing to fill in; nothing is submitted.</p>
 
   <h2 id="assembly">Assembly</h2>
   <p>Shows the item's positions with their occupants, read live, each PID a link, an <span class="dd-ui">Unlink</span> per row and

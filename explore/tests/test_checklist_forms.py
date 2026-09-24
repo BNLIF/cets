@@ -3754,3 +3754,91 @@ class BlankFillPageTest(TestCase):
         with m1, m2:
             html = self.client.get("/hw/dev/profile/").content.decode()
         self.assertIn(f'window.clWarm(["{self.CHOOSER}", "{self.URL}"]);', html)
+
+
+class SumFieldTest(TestCase):
+    """#176 (Hajime, CPA batch ledger): the total of a to_spec number over
+    every item of the type, read live by the fill page from the type's
+    specifications stream; display only."""
+
+    def _norm(self, **f):
+        secs = checklistforms.normalize(
+            {"name": "t", "test_type_name": "T", "sections": [
+                {"title": "S", "fields": [{"type": "sum", **f}]}]}, "t")["sections"]
+        return secs[0]["fields"] if secs else []
+
+    def test_normalize_keeps_key_and_statuses(self):
+        f = self._norm(label="Total received", sum="Received", status="Received, Checked")
+        self.assertEqual((f[0]["type"], f[0]["label"], f[0]["sum"], f[0]["status"]),
+                         ("sum", "Total received", "Received", ["Received", "Checked"]))
+        self.assertNotIn("to_spec", f[0])
+        self.assertNotIn("status", self._norm(label="Total", sum="Received")[0])
+
+    def test_normalize_drops_a_sum_without_key_or_label(self):
+        self.assertEqual(self._norm(label="Total"), [])
+        self.assertEqual(self._norm(sum="Received"), [])
+
+    def test_display_only(self):
+        schema = checklistforms.normalize(
+            {"name": "t", "test_type_name": "T", "sections": [
+                {"title": "S", "fields": [{"type": "sum", "label": "Total", "sum": "Received"},
+                                          {"type": "number", "label": "Received", "to_spec": True}]}]}, "t")
+        key = schema["sections"][0]["fields"][1]["key"]
+        self.assertEqual(checklistforms.parse(schema, {key: "100"}), {"S": {"Received": 100}})
+        self.assertEqual(checklistforms.spec_values(schema, {"S": {"Received": 100}}), {"S": {"Received": 100}})
+        self.assertEqual([r[1] for r in checklistforms.export_rows(schema, {"DATA": {"S": {"Received": 100}}})],
+                         ["Received"])
+        checklistforms.bind(schema, None)
+
+    def test_fill_page_renders_the_box_for_the_sweep(self):
+        user = get_user_model().objects.create_user("sm", "sm@s.io", "pw")
+        self.client.force_login(user)
+        schema = dict(SCHEMA)
+        schema["sections"] = [{"title": "Batch", "fields": [
+            {"type": "number", "label": "Received", "to_spec": True},
+            {"type": "sum", "label": "Total received", "sum": "Received", "status": ["Received", "In stock"]}]}]
+        m1, m2 = _mocked(_api(schema=schema))
+        with m1, m2:
+            html = self.client.get(f"/hw/dev/part/{PART}/checklist/{NAME}/").content.decode()
+        self.assertIn(f'<div class="cl-sum-box" data-sum-url="/hw/dev/plot/{PTID}/data/" '
+                      'data-sum-key="Received" data-sum-status="Received|In stock">', html)
+        # Chao 2026-09-24: a blank form (no item yet) must show the total too — it must not be a cl-need-net element
+        self.assertIn('querySelectorAll(".cl-sum-box")', html)
+        # Chao 2026-09-24: the device's blank form (no item yet) shows the total too — the page hides
+        # every cl-need-net element there, so the box must not be one
+        with m1, m2:
+            blank = self.client.get(f"/hw/dev/part/{PTID}-blank/checklist/{NAME}/").content.decode()
+        self.assertIn(f'<div class="cl-sum-box" data-sum-url="/hw/dev/plot/{PTID}/data/" data-sum-key="Received"', blank)
+        self.assertNotIn('cl-sum-box cl-need-net', blank)
+
+    def test_editor_preview_renders_without_an_item(self):
+        # Chao 2026-09-24: the preview crashed on the sum field — no item, no PID in its context
+        user = get_user_model().objects.create_user("sp", "sp@s.io", "pw")
+        self.client.force_login(user)
+        schema = dict(SCHEMA)
+        schema["sections"] = [{"title": "Batch", "fields": [
+            {"type": "number", "label": "Received", "to_spec": True},
+            {"type": "sum", "label": "Total received", "sum": "Received"}]}]
+        m1, m2 = _mocked(_api(schema=schema))
+        with m1, m2:
+            html = self.client.post(f"{CONFIG_PAGE}preview/", {
+                "config_json": json.dumps(schema), "cl_name": NAME}).content.decode()
+        # the editor's preview knows the type, so the total sweeps there too
+        self.assertIn(f'<div class="cl-sum-box" data-sum-url="/hw/dev/plot/{PTID}/data/" data-sum-key="Received">', html)
+
+    def test_spec_key_stores_a_descriptive_label_under_a_short_key(self):
+        # Chao 2026-09-24: "Number of items received" on the form, "Received" in the Specs and for the sum
+        schema = checklistforms.normalize(
+            {"name": "t", "test_type_name": "T", "sections": [
+                {"title": "Batch", "fields": [
+                    {"type": "number", "label": "Number of items received", "to_spec": True, "spec": "Received"},
+                    {"type": "text", "label": "Note", "spec": "ignored without to_spec"},
+                    {"type": "sum", "label": "Total received", "sum": "Received"}]}]}, "t")
+        f_num, f_note = schema["sections"][0]["fields"][:2]
+        self.assertEqual(f_num["spec"], "Received")
+        self.assertNotIn("spec", f_note)
+        data = checklistforms.parse(schema, {f_num["key"]: "100", f_note["key"]: "x"})
+        self.assertEqual(data, {"Batch": {"Number of items received": 100, "Note": "x"}})   # the record keeps the label
+        self.assertEqual(checklistforms.spec_values(schema, data), {"Batch": {"Received": 100}})   # the Specs use the key
+        bound = checklistforms.bind(schema, {"DATA": data})
+        self.assertEqual(bound["sections"][0]["fields"][0]["value"], "100")   # a previous submit reads back by label

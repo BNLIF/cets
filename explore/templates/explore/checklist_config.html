@@ -268,6 +268,7 @@
         <option value="imagemap">image map</option>
         <option value="plot">plot</option>
         <option value="assembly">assembly</option>
+        <option value="sum">sum</option>
       </select>
       <input class="ff-label" placeholder="label">
       <select class="ff-place" style="flex:0 0 108px;"
@@ -277,6 +278,8 @@
         <option value="stack">&#8595; same cell</option>
       </select>
       <label class="ec-inline ff-tospec-w" title="value is also saved to the item's Specifications"><input type="checkbox" class="ff-tospec"> &#8594; Specs</label>
+      <input class="ff-spec" placeholder="Specs key (blank = the label)" style="flex:0 1 190px; display:none;"
+        title="the key the value is stored under in the item's Specifications — a short key for a descriptive label; what a sum field names">
       <button type="button" class="ec-del clc-x" title="Remove field">&#x2715;</button>
     </div>
     <div class="ec-row g-num" style="display:none;">
@@ -311,6 +314,11 @@
         title="a jump link to another checklist — blank type = the same item&#8217;s">
       <input class="ff-checklisttype" placeholder="its Type ID (blank = this item)" style="flex:0 0 200px;"
         title="set when the target checklist belongs to a different component type — the link opens that type&#8217;s PID chooser">
+    </div>
+    <div class="ec-row g-sum" style="display:none;">
+      <input class="ff-sumkey" placeholder="Specs key of the number field to add up (its label unless it sets a Specs key)" style="flex:1 1 300px;"
+        title="the total of this key over every item of the type — the number field must have → Specs ticked, so its value is in the Item Specs">
+      <input class="ff-sumstatus" placeholder="count only items with status…, comma-separated (blank = every item)" style="flex:1 1 260px;">
     </div>
     <div class="ec-row g-plot" style="display:none;">
       <input class="ff-plot" placeholder="Plots page URL" style="flex:1 1 100%;"
@@ -447,12 +455,14 @@
     $(".g-img", r).style.display = (t === "static" || t === "imagemap") ? "" : "none";
     $(".g-link", r).style.display = t === "link" ? "" : "none";
     $(".g-plot", r).style.display = t === "plot" ? "" : "none";          // #160
+    $(".g-sum", r).style.display = t === "sum" ? "" : "none";            // #176
     $(".g-tbllink", r).style.display = (t === "table" || t === "assembly") ? "" : "none";
     $(".ff-tbllink-w", r).style.display = t === "table" ? "" : "none";
     $(".ff-into", r).placeholder = t === "assembly" ? "the item in position… (blank = this item)" : "into the item in position… (blank = this item)";
     $(".g-pid", r).style.display = (t === "qr" || t === "link" || t === "imagemap" || (t === "table" && $(".ff-tbllink", r).checked)) ? "" : "none";
     $(".g-map", r).style.display = t === "imagemap" ? "" : "none";
     $(".ff-tospec-w", r).style.display = SPEC_OK.indexOf(t) !== -1 ? "" : "none";
+    $(".ff-spec", r).style.display = (SPEC_OK.indexOf(t) !== -1 && $(".ff-tospec", r).checked) ? "" : "none";
     $(".ff-label", r).placeholder = (t === "static" || t === "plot" || t === "assembly") ? "label (optional)" : "label";
   }
 
@@ -464,6 +474,8 @@
     $(".ff-label", r).value = f.label || "";
     $(".ff-place", r).value = place || "";
     $(".ff-tospec", r).checked = !!f.to_spec;
+    $(".ff-spec", r).value = f.spec || "";                             // #176
+    $(".ff-spec", r).style.display = f.to_spec ? "" : "none";
     ["units", "nominal", "tol", "min", "max", "options", "note", "url", "image", "position"]
       .forEach(function (k) {
         var el = $(".ff-" + k, r);
@@ -488,6 +500,8 @@
     $(".ff-plotflds", r).value = (f.fields || []).join(", ");
     $(".ff-plotsn", r).value = f.type === "plot" ? (f.sn || "") : "";
     $(".ff-plotref", r).checked = f.type === "plot" && f.reference === true;
+    $(".ff-sumkey", r).value = f.type === "sum" ? (f.sum || "") : "";     // #176
+    $(".ff-sumstatus", r).value = f.type === "sum" ? (f.status || []).join(", ") : "";
     $(".ff-gcol", r).value = f.col ? String(f.col) : "auto";           // #120
     $(".ff-gspan", r).value = f.span ? String(f.span) : "1";
     $(".ff-gnl", r).checked = !!f.newline;
@@ -1090,6 +1104,13 @@
       if (cl && clType) f.part_type_id = clType;
       return (note || url || image || imageId || cl) ? f : null;
     }
+    if (t === "sum") {                                                  // #176
+      var skey = $(".ff-sumkey", r).value.trim(), sst = list($(".ff-sumstatus", r).value, /,/);
+      if (!skey || !label) return null;
+      f.sum = skey;
+      if (sst.length) f.status = sst;
+      return f;
+    }
     if (t === "plot") {                                                 // #160
       var purl = $(".ff-plot", r).value.trim(), psecs = list($(".ff-plotsecs", r).value, /,/),
           pflds = list($(".ff-plotflds", r).value, /,/), psn = $(".ff-plotsn", r).value.trim();
@@ -1143,7 +1164,10 @@
       if ($(".ff-into", r).value.trim()) f.into = $(".ff-into", r).value.trim();
     }
     if (t === "assembly" && $(".ff-into", r).value.trim()) f.into = $(".ff-into", r).value.trim();   // the sub-assembly's list
-    if ($(".ff-tospec", r).checked && SPEC_OK.indexOf(t) !== -1) f.to_spec = true;
+    if ($(".ff-tospec", r).checked && SPEC_OK.indexOf(t) !== -1) {
+      f.to_spec = true;
+      if ($(".ff-spec", r).value.trim()) f.spec = $(".ff-spec", r).value.trim();   // #176
+    }
     return f;
   }
 
@@ -1454,6 +1478,7 @@
     var r = e.target.closest && e.target.closest(".clc-fld");
     if (r && e.target.classList.contains("ff-imgfile")) { uploadRef(r, e.target); return; }
     if (r && e.target.classList.contains("ff-type")) { syncType(r); syncMap(r); }
+    if (r && e.target.classList.contains("ff-tospec")) syncType(r);   // #176: the Specs-key box follows the tick
     if (e.target.id !== "clc-json") refresh();
   });
 
