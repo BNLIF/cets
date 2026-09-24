@@ -1,0 +1,449 @@
+{% extends 'explore/base.html' %}
+{% block title %}Labels · {{ part_type_id }} · HWDB Explorer{% endblock %}
+
+{% block content %}
+{% include "explore/_checklist_style.html" %}
+<style>
+  .es-page { padding: 22px 30px 56px; max-width: none; }
+  .es-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .es-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .es-crumbs a:hover { text-decoration: underline; }
+  .es-crumbs .sep { color: var(--faint); margin: 0 7px; }
+  .es-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 2px; }
+  .es-page h1 .mono, .lb-mono { font-family: var(--font-mono); }
+  .es-sub { color: var(--dim); font-size: 13px; margin: 0 0 12px; }
+  .es-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
+  .es-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
+    border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+  .lb-cols { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 0 18px; align-items: start; }
+  .lb-side { position: sticky; top: 12px; }
+  @media (max-width: 900px) { .lb-cols { grid-template-columns: 1fr; } }
+  details.lb-pick { font-size: 13px; margin: 8px 0 0; }
+  details.lb-pick summary { color: var(--dim); cursor: pointer; }
+  .lb-pick-bar { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin: 8px 0 4px; }
+  .lb-pick-bar input[type=search] { width: 260px; max-width: 100%; }
+  .lb-pick-bar .n { color: var(--faint); }
+  .lb-rows { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .lb-rows th { color: var(--faint); font-weight: 500; text-align: left; padding: 2px 6px; }
+  .lb-rows td { padding: 2px 6px; border-top: 1px solid var(--rule); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+  .lb-rows tr.on td { background: var(--accent-soft); }
+  .lb-rows tr { cursor: pointer; }
+  #items { font-family: var(--font-mono); width: 100%; box-sizing: border-box; min-height: 6em; }
+  .lb-row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 13px; margin: 8px 0; }
+  .lb-row label { color: var(--dim); display: inline-flex; align-items: center; gap: 6px; }
+  /* the checklist sheet styles inputs only inside .cl-field — same look here */
+  .lb-row select, .lb-row input[type=text], .lb-el input[type=text], .lb-el select, .lb-pick-bar input[type=search] {
+    font: inherit; font-size: 13px; color: var(--ink); background: var(--cl-input-bg, var(--surface));
+    border: 1px solid var(--cl-input-rule, var(--rule)); border-radius: var(--r-sm); padding: 5px 8px; }
+  .lb-el input[type=text], .lb-el select { font-size: 12px; padding: 3px 5px; box-sizing: border-box; }
+  /* a disabled cell reads as plain text, not as a field one could type in */
+  .lb-el input:disabled, .lb-el select:disabled { background: transparent; border-color: transparent; color: var(--faint);
+    -webkit-text-fill-color: var(--faint); opacity: 1; appearance: none; -webkit-appearance: none; }
+  #lb-del:not(:disabled) { color: var(--bad, #a33); }
+  .lb-pick-bar .btn { background: var(--page); border-color: var(--dim); color: var(--ink); font-weight: 600; }
+  .lb-pick-bar .btn:disabled { color: var(--faint); border-color: var(--rule); }
+  .lb-status { font-size: 13px; margin: 6px 0 0; }
+  .lb-warn { color: var(--bad, #a33); }
+  .lb-scroll { overflow-x: auto; margin: 6px 0; }
+  .lb-el { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .lb-el th { color: var(--faint); font-weight: 500; text-align: left; padding: 2px 4px; white-space: nowrap; }
+  .lb-el td { padding: 2px 3px; border-top: 1px solid var(--rule); vertical-align: middle; }
+  .lb-el input, .lb-el select { font: inherit; font-size: 12px; box-sizing: border-box; }
+  .lb-el input.n { width: 4.4em; }
+  .lb-el input.t { width: 100%; min-width: 110px; font-family: var(--font-mono); }
+  .lb-el select { max-width: 7.5em; }
+  .lb-el td:last-child { white-space: nowrap; }
+  .lb-el tr.cur td { background: var(--accent-soft); }
+  .lb-el button { font: inherit; font-size: 13px; background: none; border: 0; color: var(--dim); cursor: pointer; padding: 0 4px; }
+  .lb-el button:hover { color: var(--ink); }
+  #lb-json { width: 100%; box-sizing: border-box; min-height: 9em; font-family: var(--font-mono); font-size: 12px; }
+  #lb-prev { display: block; max-width: 100%; height: auto; border: 1px solid var(--rule); background: #fff; }
+  .lb-cap { font-size: 12px; color: var(--faint); margin: 6px 0 0; overflow-wrap: anywhere; }
+  .lb-actions { margin-top: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  details.lb-json { font-size: 13px; margin-top: 8px; }
+  details.lb-json summary { color: var(--dim); cursor: pointer; }
+</style>
+
+<div class="es-page">
+  <div class="es-crumbs">
+    <a href="{% url 'explore:home' %}">Explorer</a>
+    <span class="sep">›</span><a href="{{ type_url }}">{{ type_name|default:part_type_id }}</a>
+    <span class="sep">›</span>Labels
+  </div>
+
+  {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+
+  <h1>Labels for <span class="mono">{{ part_type_id }}</span> items</h1>
+  <p class="es-sub">{% if type_name %}{{ type_name }} · {% endif %}QR / bar-code label sheets, as the HWDB Python utility’s <span class="lb-mono">hwdb-labels</span> prints them. The QR code holds the item’s HWDB page, the barcode its external ID.</p>
+
+  {{ templates|json_script:"lb-templates" }}
+  {{ presets|json_script:"lb-presets" }}
+
+  <form method="post" id="lb-form">
+    {% csrf_token %}
+    <input type="hidden" name="step" value="pdf">
+    <input type="hidden" name="layouts" id="lb-layouts">
+    <div class="lb-cols">
+      <div>
+        <div class="es-card">
+          <h2>Items</h2>
+          <div class="cl-field">
+            <label class="cl-lab" for="items">Items <span class="cl-hint">(PIDs, serial numbers or a range like 00120..06000 — one per line, or comma / space separated)</span></label>
+            <textarea id="items" name="items">{{ items_text }}</textarea>
+          </div>
+          <div class="cl-field">
+            <label class="cl-lab" for="lb-file">Or a CSV / Excel file <span class="cl-hint">(the column headed PID or serial, else the first column — appended to the list above)</span></label>
+            <input type="file" id="lb-file" accept=".csv,.tsv,.txt,.xlsx,.xlsm">
+          </div>
+          <p class="lb-status" id="lb-items-status"></p>
+          <details class="lb-pick" id="lb-table">
+            <summary>Or pick from the type’s items</summary>
+            <div class="lb-pick-bar">
+              <input type="search" id="lb-q" placeholder="filter: words or regexes, all must match" title="Space-separated terms, each matched against the row’s PID, serial, status, manufacturer and institution (case-insensitive; a term is a regex when it parses as one, e.g. ^HPK or Passed|Unknown)">
+              <span class="n" id="lb-rows-n"></span>
+              <button type="button" class="btn btn-sm" id="lb-page-all" title="Add every row of this page to the list">tick page</button>
+              <button type="button" class="btn btn-sm" id="lb-page-none" title="Remove this page’s rows from the list">untick page</button>
+              <button type="button" class="btn btn-sm" id="lb-none" title="Empty the list">untick all</button>
+              <span><span id="lb-page"></span>
+                <button type="button" class="btn btn-sm" id="lb-pg-first" title="First page">«</button>
+                <button type="button" class="btn btn-sm" id="lb-pg-prev" title="Previous page">‹</button>
+                <button type="button" class="btn btn-sm" id="lb-pg-next" title="Next page">›</button>
+                <button type="button" class="btn btn-sm" id="lb-pg-last" title="Last page">»</button></span>
+            </div>
+            <table class="lb-rows">
+              <thead><tr><th></th><th>PID</th><th>Serial</th><th>Status</th><th>Manufacturer</th><th>Institution</th></tr></thead>
+              <tbody id="lb-rows"></tbody>
+            </table>
+          </details>
+        </div>
+
+        <div class="es-card">
+          <h2>Layout</h2>
+          <div class="lb-row">
+            <label>Layout <select id="lb-pick"><optgroup label="Saved" id="lb-saved"></optgroup><optgroup label="Presets" id="lb-presetgrp"></optgroup></select></label>
+            <button type="button" class="es-btn quiet" id="lb-del" title="Forget the chosen saved layout">Delete</button>
+            <span class="cl-hint">·</span>
+            <label>Name <input type="text" id="lb-name" size="22" autocomplete="off"></label>
+            <button type="button" class="es-btn quiet" id="lb-save" title="Keep the layout below in this browser under the name">Save</button>
+          </div>
+          <div class="lb-row">
+            <label>Sheet <select id="lb-tpl"></select></label>
+            <label>Orientation <select id="lb-orient"><option value="portrait">portrait</option><option value="landscape">landscape</option></select></label>
+            <span class="cl-hint" id="lb-tpl-desc"></span>
+          </div>
+          <div class="lb-scroll"><table class="lb-el">
+            <thead><tr><th>Element</th><th>Text</th><th>Anchor x</th><th>y</th><th>Align</th><th>Width</th><th>Height</th><th title="codes: preserve aspect ratio · text: shrink the font to fit the width">Aspect / fit</th><th>Font</th><th>Size</th><th>Rotate</th><th></th></tr></thead>
+            <tbody id="lb-els"></tbody>
+          </table></div>
+          <div class="lb-row">
+            <button type="button" class="es-btn quiet" id="lb-add">Add element</button>
+            <label>Insert field <select id="lb-field"><option value="">—</option></select></label>
+            <span class="cl-hint">into the highlighted row’s text (a matched item adds its specifications) · positions and sizes are % of the label or points</span>
+          </div>
+          <details class="lb-json"><summary>Layout JSON</summary>
+            <textarea id="lb-json" spellcheck="false"></textarea>
+            <div class="lb-row"><button type="button" class="es-btn quiet" id="lb-json-apply">Apply JSON</button><span class="cl-hint">the utility’s layout format — paste one from custom_labels.py, or copy this one to share it</span></div>
+          </details>
+        </div>
+      </div>
+
+      <div class="lb-side">
+        <div class="es-card">
+          <h2>Preview</h2>
+          <img id="lb-prev" alt="label preview">
+          <p class="lb-cap" id="lb-cap"></p>
+        </div>
+        <div class="es-card">
+          <h2>Print</h2>
+          <label class="lb-row"><input type="checkbox" name="intro" value="1" id="lb-intro" checked> Intro and alignment-template pages</label>
+          <div class="lb-actions">
+            <button type="submit" class="es-btn quiet" id="lb-pdf">Download PDF</button>
+            <span class="cl-hint" id="lb-pdf-note"></span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </form>
+</div>
+
+<script>
+(function () {
+  var TEMPLATES = JSON.parse(document.getElementById("lb-templates").textContent);
+  var PRESETS = JSON.parse(document.getElementById("lb-presets").textContent);
+  var TYPES = {{ element_types|safe }}, ALIGNS = {{ alignments|safe }}, FONTS = {{ fonts|safe }};
+  var LIMIT = {{ limit }};
+  var KEY = "labels:" + location.pathname;
+  var $ = function (id) { return document.getElementById(id); };
+  var form = $("lb-form"), csrf = form.querySelector("[name=csrfmiddlewaretoken]").value;
+  var saved = {};
+  try { saved = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { saved = {}; }
+  var layout = null, curRow = 0;
+
+  function opt(sel, value, text) { var o = document.createElement("option"); o.value = value; o.textContent = text || value; sel.appendChild(o); return o; }
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+
+  // --- layout chooser: saved (this browser) + the utility's presets ---
+  function fillPick() {
+    var sv = $("lb-saved"), pg = $("lb-presetgrp");
+    sv.innerHTML = ""; pg.innerHTML = "";
+    Object.keys(saved).sort().forEach(function (n) { opt(sv, "s:" + n, n); });
+    Object.keys(PRESETS).forEach(function (n) { opt(pg, "p:" + n, n); });
+    pickChanged();
+  }
+  function pickChanged() { $("lb-del").disabled = $("lb-pick").value[0] !== "s"; }
+  function load(name, lay) {
+    layout = clone(lay);
+    layout.elements = layout.elements || [];
+    $("lb-name").value = name;
+    $("lb-tpl").value = layout["label template"];
+    $("lb-orient").value = layout.orientation || "portrait";
+    curRow = 0;
+    render();
+  }
+  function loadPick() {
+    var v = $("lb-pick").value, n = v.slice(2);
+    pickChanged();
+    load(n, v[0] === "s" ? saved[n] : PRESETS[n]);
+  }
+  $("lb-pick").addEventListener("change", loadPick);
+  $("lb-save").addEventListener("click", function () {
+    var n = $("lb-name").value.trim();
+    if (!n) { $("lb-name").focus(); return; }
+    saved[n] = clone(layout);
+    try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) {}
+    fillPick(); $("lb-pick").value = "s:" + n; pickChanged();
+  });
+  $("lb-del").addEventListener("click", function () {
+    var v = $("lb-pick").value, n = v.slice(2);
+    if (v[0] !== "s" || !(n in saved)) return;
+    if (!confirm("Forget the saved layout “" + n + "”?")) return;
+    delete saved[n];
+    try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) {}
+    fillPick();
+    var first = Object.keys(saved).sort()[0];
+    $("lb-pick").value = first ? "s:" + first : "p:" + Object.keys(PRESETS)[0]; loadPick();
+  });
+
+  // --- sheet + orientation ---
+  Object.keys(TEMPLATES).forEach(function (n) { opt($("lb-tpl"), n, n); });
+  $("lb-tpl").addEventListener("change", function () { layout["label template"] = this.value; render(); });
+  $("lb-orient").addEventListener("change", function () { layout.orientation = this.value; render(); });
+
+  // --- element rows ---
+  function cell(tr, el) { var td = document.createElement("td"); td.appendChild(el); tr.appendChild(td); return el; }
+  function sel(list, value, onchange) {
+    var s = document.createElement("select");
+    list.forEach(function (v) { opt(s, v); });
+    s.value = value; s.addEventListener("change", onchange); return s;
+  }
+  function num(value, onchange) {
+    var i = document.createElement("input"); i.type = "text"; i.className = "n"; i.value = value == null ? "" : value;
+    i.addEventListener("input", onchange); return i;
+  }
+  function render() {
+    var body = $("lb-els"); body.innerHTML = "";
+    $("lb-tpl-desc").textContent = (TEMPLATES[layout["label template"]] || {}).description || "";
+    layout.elements.forEach(function (el, i) {
+      var tr = document.createElement("tr"); if (i === curRow) tr.className = "cur";
+      tr.addEventListener("focusin", function () { if (curRow !== i) { curRow = i; body.querySelectorAll("tr").forEach(function (r, j) { r.className = j === i ? "cur" : ""; }); } });
+      cell(tr, sel(TYPES, el["element type"] || "text", function () { el["element type"] = this.value; if (this.value !== "text") delete el.text; render(); }));
+      var t = document.createElement("input"); t.type = "text"; t.className = "t"; t.value = el.text || "";
+      t.disabled = el["element type"] !== "text"; t.placeholder = t.disabled ? "" : "SN ${serial_number}";
+      t.addEventListener("input", function () { el.text = this.value; change(); });
+      cell(tr, t);
+      var anchor = el.anchor || [0, 0], size = el.size || ["100%", "100%"];
+      cell(tr, num(anchor[0], function () { el.anchor = [this.value, (el.anchor || [0, 0])[1]]; change(); }));
+      cell(tr, num(anchor[1], function () { el.anchor = [(el.anchor || [0, 0])[0], this.value]; change(); }));
+      cell(tr, sel(ALIGNS, el.alignment || "top-left", function () { el.alignment = this.value; change(); }));
+      var code = el["element type"] === "qr" || el["element type"] === "bar";
+      var w = cell(tr, num(size[0], function () { el.size = [this.value, (el.size || size)[1]]; change(); }));
+      var h = cell(tr, num(size[1], function () { el.size = [(el.size || size)[0], this.value]; change(); }));
+      var a = document.createElement("input"); a.type = "checkbox"; a.checked = code ? !!el["preserve aspect ratio"] : !!el["fit width"];
+      a.title = code ? "preserve aspect ratio" : "shrink the font to fit the width, keeping clear of the label edges";
+      a.addEventListener("change", function () { el[code ? "preserve aspect ratio" : "fit width"] = this.checked; if (!code) render(); else change(); });
+      cell(tr, a);
+      var f = cell(tr, sel(FONTS, el["font face"] || "Helvetica-Bold", function () { el["font face"] = this.value; change(); }));
+      var fs = cell(tr, num(el["font size"] == null ? "5%" : el["font size"], function () { el["font size"] = this.value; change(); }));
+      w.disabled = !code && !el["fit width"]; h.disabled = !code; f.disabled = fs.disabled = code;
+      cell(tr, num(el.rotate || 0, function () { el.rotate = parseFloat(this.value) || 0; change(); }));
+      var ops = document.createElement("span");
+      [["↑", function () { if (i > 0) { layout.elements.splice(i - 1, 0, layout.elements.splice(i, 1)[0]); curRow = i - 1; render(); } }],
+       ["↓", function () { if (i < layout.elements.length - 1) { layout.elements.splice(i + 1, 0, layout.elements.splice(i, 1)[0]); curRow = i + 1; render(); } }],
+       ["✕", function () { layout.elements.splice(i, 1); curRow = Math.max(0, Math.min(curRow, layout.elements.length - 1)); render(); }]
+      ].forEach(function (b) { var bt = document.createElement("button"); bt.type = "button"; bt.textContent = b[0]; bt.addEventListener("click", b[1]); ops.appendChild(bt); });
+      cell(tr, ops);
+      body.appendChild(tr);
+    });
+    change();
+  }
+  $("lb-add").addEventListener("click", function () {
+    layout.elements.push({"element type": "text", "text": "", "alignment": "top-center", "anchor": ["50%", "50%"], "font size": "6%"});
+    curRow = layout.elements.length - 1; render();
+  });
+  $("lb-field").addEventListener("change", function () {
+    var fld = this.value; this.value = "";
+    if (!fld) return;
+    var el = layout.elements[curRow];
+    if (!el) return;
+    if (el["element type"] !== "text") { el["element type"] = "text"; }
+    var ins = "${" + fld + "}";
+    var t = $("lb-els").querySelectorAll("tr")[curRow].querySelector("input.t");
+    var s = t.selectionStart == null ? t.value.length : t.selectionStart;
+    el.text = (t.value || "").slice(0, s) + ins + (t.value || "").slice(t.selectionEnd == null ? s : t.selectionEnd);
+    render();
+    var t2 = $("lb-els").querySelectorAll("tr")[curRow].querySelector("input.t"); t2.focus(); t2.selectionStart = t2.selectionEnd = s + ins.length;
+  });
+  $("lb-json-apply").addEventListener("click", function () {
+    try {
+      var j = JSON.parse($("lb-json").value);
+      if (!j || typeof j !== "object" || !TEMPLATES[j["label template"]]) throw new Error("no label template");
+      j.elements = Array.isArray(j.elements) ? j.elements : [];
+      load($("lb-name").value, j); $("lb-tpl").value = j["label template"];
+    } catch (e) { $("lb-cap").textContent = "Layout JSON: " + e.message; $("lb-cap").className = "lb-cap lb-warn"; }
+  });
+
+  // --- preview: the first item's label, re-rendered on every change ---
+  var timer = null, seq = 0;
+  function change() {
+    $("lb-json").value = JSON.stringify(layout, null, 2);
+    clearTimeout(timer); timer = setTimeout(preview, 350);
+  }
+  function preview() {
+    var my = ++seq, fd = new FormData();
+    fd.set("step", "preview"); fd.set("items", $("items").value); fd.set("layouts", JSON.stringify([layout]));
+    fetch(location.href, { method: "POST", body: fd, credentials: "same-origin", headers: { "X-CSRFToken": csrf } })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (my !== seq) return;
+        var cap = $("lb-cap"), st = $("lb-items-status");
+        if (!res.ok || res.j.error) { cap.textContent = res.j.error || "Preview failed."; cap.className = "lb-cap lb-warn"; return; }
+        $("lb-prev").src = "data:image/png;base64," + res.j.png;
+        var tpl = TEMPLATES[layout["label template"]], inch = tpl.units === "mm" ? 25.4 : 1;
+        $("lb-prev").style.width = Math.round(tpl["label size"][0] / inch * 96 * 1.6) + "px";
+        cap.className = "lb-cap";
+        cap.textContent = res.j.first ? "First item " + res.j.first + " on " + tpl["label size"].join(" × ") + " " + tpl.units + " labels" : "No item yet — a sample record on " + tpl["label size"].join(" × ") + " " + tpl.units + " labels";
+        var parts = [res.j.n + " item" + (res.j.n === 1 ? "" : "s") + " matched"];
+        if (res.j.over) parts.push("only the first " + LIMIT + " print");
+        if (res.j.unmatched.length) parts.push("not in the mirror: " + res.j.unmatched.join(", "));
+        if (res.j.shared.length) parts.push("serial on several items, paste the PID: " + res.j.shared.join(", "));
+        st.textContent = parts.join(" · "); st.className = "lb-status" + (res.j.unmatched.length || res.j.shared.length ? " lb-warn" : "");
+        $("lb-pdf").disabled = !res.j.n;
+        var fs = $("lb-field"), keep = fs.value; fs.innerHTML = ""; opt(fs, "", "—");
+        (res.j.fields || []).forEach(function (f) { opt(fs, f); });
+        fs.value = keep;
+      })
+      .catch(function (e) { $("lb-cap").textContent = "Preview failed: " + e; $("lb-cap").className = "lb-cap lb-warn"; });
+  }
+  $("items").addEventListener("input", change);
+  $("lb-file").addEventListener("change", function () {
+    var f = this.files[0]; if (!f) return;
+    var fd = new FormData(); fd.set("step", "file"); fd.set("file", f);
+    fetch(location.href, { method: "POST", body: fd, credentials: "same-origin", headers: { "X-CSRFToken": csrf } })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j.error) { $("lb-items-status").textContent = j.error; $("lb-items-status").className = "lb-status lb-warn"; return; }
+        var t = $("items"); t.value = (t.value.trim() ? t.value.replace(/\s+$/, "") + "\n" : "") + j.text; change();
+      })
+      .catch(function (e) { $("lb-items-status").textContent = "Upload failed: " + e; });
+    this.value = "";
+  });
+
+  // --- pick table: the type's mirror rows, loaded on first open; a tick adds the PID to the list ---
+  var rows = null, page = 0, PER = 25;
+  function listed() {
+    var set = {};
+    $("items").value.split(/[\s,;]+/).forEach(function (e) { if (e) set[e] = 1; });
+    return set;
+  }
+  function toggle(pid, on) {
+    var t = $("items"), ents = t.value.split(/[\s,;]+/).filter(Boolean);
+    if (on && ents.indexOf(pid) < 0) ents.push(pid);
+    if (!on) ents = ents.filter(function (e) { return e !== pid; });
+    t.value = ents.join("\n");
+  }
+  function drawRows() {
+    if (!rows) return;
+    // every term must match the row (regex when it parses, else substring), case-insensitive
+    var terms = $("lb-q").value.trim().split(/\s+/).filter(Boolean).map(function (t) {
+      try { return new RegExp(t, "i"); } catch (e) { return t.toLowerCase(); }
+    });
+    var list = terms.length ? rows.filter(function (r) {
+      var line = r.join(" ");
+      return terms.every(function (t) { return typeof t === "string" ? line.toLowerCase().indexOf(t) >= 0 : t.test(line); });
+    }) : rows;
+    var pages = Math.max(1, Math.ceil(list.length / PER)); page = Math.min(page, pages - 1);
+    $("lb-rows-n").textContent = list.length.toLocaleString() + " item" + (list.length === 1 ? "" : "s");
+    $("lb-page").textContent = list.length ? (page + 1) + " / " + pages : "";
+    $("lb-pg-prev").disabled = $("lb-pg-first").disabled = page === 0;
+    $("lb-pg-next").disabled = $("lb-pg-last").disabled = page >= pages - 1;
+    var have = listed(), body = $("lb-rows"); body.textContent = "";
+    list.slice(page * PER, (page + 1) * PER).forEach(function (r) {
+      var tr = document.createElement("tr"), on = !!have[r[0]] || !!have[r[0].slice(-5)];
+      if (on) tr.className = "on";
+      var c = document.createElement("input"); c.type = "checkbox"; c.checked = on;
+      var td = document.createElement("td"); td.appendChild(c); tr.appendChild(td);
+      r.forEach(function (v, i) { var d = document.createElement("td"); if (!i) d.className = "lb-mono"; d.textContent = v || ""; d.title = v || ""; tr.appendChild(d); });
+      tr.addEventListener("click", function (ev) {
+        if (ev.target !== c && String(window.getSelection && window.getSelection()).length) return;
+        var now = ev.target === c ? c.checked : !c.checked;
+        c.checked = now; tr.className = now ? "on" : ""; toggle(r[0], now); change();
+      });
+      body.appendChild(tr);
+    });
+  }
+  $("lb-table").addEventListener("toggle", function () {
+    if (!this.open || rows) return;
+    var fd = new FormData(); fd.set("step", "rows");
+    $("lb-rows-n").textContent = "loading…";
+    fetch(location.href, { method: "POST", body: fd, credentials: "same-origin", headers: { "X-CSRFToken": csrf } })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { rows = j.rows || []; drawRows(); })
+      .catch(function (e) { $("lb-rows-n").textContent = "Couldn’t load the items: " + e; });
+  });
+  $("lb-q").addEventListener("input", function () { page = 0; drawRows(); });
+  $("lb-pg-first").addEventListener("click", function () { page = 0; drawRows(); });
+  $("lb-pg-prev").addEventListener("click", function () { page--; drawRows(); });
+  $("lb-pg-next").addEventListener("click", function () { page++; drawRows(); });
+  $("lb-pg-last").addEventListener("click", function () { page = 1e9; drawRows(); });
+  $("lb-page-all").addEventListener("click", function () {
+    $("lb-rows").querySelectorAll("tr").forEach(function (tr) { toggle(tr.children[1].textContent, true); });
+    drawRows(); change();
+  });
+  $("lb-page-none").addEventListener("click", function () {
+    $("lb-rows").querySelectorAll("tr").forEach(function (tr) { toggle(tr.children[1].textContent, false); });
+    drawRows(); change();
+  });
+  $("lb-none").addEventListener("click", function () { $("items").value = ""; drawRows(); change(); });
+  $("items").addEventListener("input", drawRows);
+
+  // --- print: fetched and saved as a blob, so the page stays a plain GET (a reload never re-posts) ---
+  form.addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var note = $("lb-pdf-note"), btn = $("lb-pdf");
+    $("lb-layouts").value = JSON.stringify([layout]);
+    var fd = new FormData(form);
+    if (!$("lb-intro").checked) fd.delete("intro");
+    note.textContent = "Building the PDF…"; note.className = "cl-hint"; btn.disabled = true;
+    fetch(location.href, { method: "POST", body: fd, credentials: "same-origin", headers: { "X-CSRFToken": csrf } })
+      .then(function (r) {
+        if ((r.headers.get("Content-Type") || "").indexOf("application/pdf") < 0) return r.json().then(function (j) { throw new Error(j.error || "request failed"); });
+        return r.blob();
+      })
+      .then(function (blob) {
+        var a = document.createElement("a"), url = URL.createObjectURL(blob);
+        a.href = url; a.download = "labels_{{ part_type_id }}.pdf"; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+        note.textContent = "";
+      })
+      .catch(function (e) { note.textContent = e.message; note.className = "cl-hint lb-warn"; })
+      .then(function () { btn.disabled = false; });
+  });
+
+  fillPick();
+  var first = Object.keys(saved).sort()[0];
+  $("lb-pick").value = first ? "s:" + first : "p:" + Object.keys(PRESETS)[0];
+  loadPick();
+})();
+</script>
+{% endblock %}

@@ -52,6 +52,7 @@ urlpatterns = [
     path("checklist-config/<str:part_type_id>/asset/",
          views.explore_checklist_asset_view, name="checklist_asset"),
     path("items-edit/<str:part_type_id>/", views.explore_items_edit_view, name="items_edit"),
+    path("labels/<str:part_type_id>/", views.explore_labels_view, name="labels"),
     path("part-new/<str:part_type_id>/", views.explore_item_create_view,
          name="item_create"),
     path("checklist/<str:part_type_id>/<str:name>/",

@@ -1,3 +1,4 @@
+import base64
 import io
 import itertools
 import json
@@ -33,7 +34,7 @@ from hwdb.fnal import session as fnal_session
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for, verify_link
 
 from . import (activity, charts, checklistforms, checklists, curation, events,
-               execsummary, itemsedit, navigation, parts, plotting, scanning, watches)
+               execsummary, itemsedit, labels, navigation, parts, plotting, scanning, watches)
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, refresh_component_row, sync_test_events
 from .hierarchy import sync_hierarchy, sync_system
@@ -4780,6 +4781,108 @@ def explore_items_edit_view(request, part_type_id):
                          part_type_id=part_type_id, actor=activity.actor_of(request))
         return JsonResponse({"done": len(done)})
     return render(request, "explore/items_edit.html", ctx)
+
+
+@login_not_required
+@fnal_login_required
+def explore_labels_view(request, part_type_id):
+    """#175 (Hajime 2026-09-24): QR / bar-code label sheets for a list of the
+    type's items — the utility's ``hwdb-labels`` in the Explorer. The list
+    is the Edit items paste box (PIDs, serials, ranges), an uploaded CSV /
+    Excel column (``step=file`` returns it as text for the box) or rows
+    ticked in the type's mirror table (``step=rows`` lists them); the layout
+    is edited on the page and posted as JSON. ``step=preview`` renders the
+    first item's label as a PNG and lists the record's fields for the text
+    picker; ``step=pdf`` fetches every item and returns the sheets (the page
+    fetches it and saves the blob, so a reload never re-posts). Every step
+    answers JSON errors. Reads only, any FNAL-linked user, any instance."""
+    inst = instance_of(request)
+    page_url = _rev(request, "explore:labels", args=[part_type_id])
+    post = request.POST if request.method == "POST" else {}
+    step = post.get("step") or ""
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        if step:
+            return JsonResponse({"error": "FNAL link expired — reload the page."}, status=401)
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        if step:
+            return JsonResponse({"error": FNAL_UNAVAILABLE}, status=503)
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(_rev(request, "explore:home"))
+    ui = settings.HWDB_PROFILES[inst]["ui"]
+    node = (HierarchyNode.for_instance(inst)
+            .filter(level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first())
+    if step == "rows":
+        rows = (HwdbComponentEvent.for_instance(inst).filter(part_type_id=part_type_id)
+                .order_by("-part_id")
+                .values_list("part_id", "serial_number", "status", "manufacturer", "institution"))
+        return JsonResponse({"rows": list(rows)})
+    if step == "file":
+        f = request.FILES.get("file")
+        if not f or f.size > labels.UPLOAD_MAX:
+            return JsonResponse({"error": "Choose a CSV or Excel file under 5 MB."}, status=400)
+        try:
+            return JsonResponse({"text": labels.upload_entries(f.name, f.read())})
+        except Exception as e:
+            logger.warning("labels: upload parse failed: %s", e)
+            return JsonResponse({"error": f"Couldn’t read {f.name}."}, status=400)
+    ctx = {"part_type_id": part_type_id, "type_name": node.name if node else "",
+           "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
+           "templates": {k: {"description": v["description"], "label size": v["label size"],
+                             "units": labels.PAGE_SIZES[v["page size"]]["units"]}
+                         for k, v in labels.TEMPLATES.items()},
+           "presets": labels.LAYOUTS,
+           "element_types": labels.ELEMENT_TYPES, "alignments": labels.ALIGNMENTS,
+           "fonts": labels.FONTS, "limit": labels.ITEMS_MAX}
+    if step not in ("preview", "pdf"):
+        return render(request, "explore/labels.html", ctx)
+    try:
+        layouts = json.loads(post.get("layouts") or "[]")
+        assert isinstance(layouts, list) and layouts
+        assert all(isinstance(lay, dict) and lay.get("label template") in labels.TEMPLATES
+                   for lay in layouts)
+    except (ValueError, AssertionError):
+        return JsonResponse({"error": "Bad layout."}, status=400)
+    res = itemsedit.resolve(inst, part_type_id, post.get("items"))
+    pids = [r.part_id for r in res["rows"]]
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    if step == "preview":
+        data, fields = None, []
+        if pids:
+            try:
+                data = labels.get_item(api, pids[0])
+                fields = labels.field_paths(data)
+            except requests.RequestException as e:
+                return JsonResponse({"error": f"Couldn’t read {pids[0]} — {_hwdb_error_detail(e)}"},
+                                    status=502)
+        if data is None:
+            data = labels.item_data({"part_id": f"{part_type_id}-00000", "country_code": "US",
+                                     "institution": {"id": 0},
+                                     "component_type": {"part_type_id": part_type_id,
+                                                        "name": ctx["type_name"]}})
+        png = labels.preview_png(layouts[0], data, ui)
+        return JsonResponse({"png": base64.b64encode(png).decode(), "n": len(pids),
+                             "first": pids[0] if pids else "",
+                             "fields": fields or labels.STANDARD_FIELDS,
+                             "unmatched": res["unmatched"],
+                             "shared": [sn for sn, _ in res["shared"]],
+                             "over": max(0, len(pids) - labels.ITEMS_MAX)})
+    if not pids:
+        return JsonResponse({"error": "No items matched the list."}, status=400)
+    pids = pids[:labels.ITEMS_MAX]
+    try:
+        items = labels.fetch_items(
+            pids, lambda: FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer))
+    except requests.RequestException as e:
+        return JsonResponse({"error": f"Couldn’t read the items from HWDB — {_hwdb_error_detail(e)}"},
+                            status=502)
+    pdf = labels.build_pdf(layouts, items, ui, intro=post.get("intro") == "1")
+    resp = HttpResponse(pdf, content_type="application/pdf")
+    resp["Content-Disposition"] = f'attachment; filename="labels_{part_type_id}.pdf"'
+    return resp
 
 
 @login_not_required
