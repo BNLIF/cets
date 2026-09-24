@@ -2138,13 +2138,13 @@ class ImageMapLinkTest(TestCase):
             self.assertIn('cl-pick" data-target="f0-1" data-free="1" title=', html)     # typed: no live type
             # #171 (Anselmo): Scan uses this device's camera — a phone button + panel per field,
             # the scan page carrying the field's type when it has one
-            self.assertIn('<button type="button" class="es-btn cl-phone" data-target="f0-0" title="Scan with your phone">', html)
-            self.assertIn('<button type="button" class="es-btn cl-phone" data-target="f0-1" title="Scan with your phone">', html)
+            self.assertIn('<button type="button" class="es-btn quiet cl-phone" data-target="f0-0" title="Scan with your phone">', html)
+            self.assertIn('<button type="button" class="es-btn quiet cl-phone" data-target="f0-1" title="Scan with your phone">', html)
             self.assertIn(f'href="http://testserver/hw/dev/scan/?target={PART}&amp;free=1"', html)
             self.assertIn(f'href="http://testserver/hw/dev/scan/?target={PART}&amp;free=1&amp;type=D05700300001"', html)
             self.assertEqual(html.count('<div class="cl-phone-panel" hidden'), 2)
             blank = self.client.get(f"/hw/dev/part/{PTID}-blank/checklist/{NAME}/").content.decode()
-            self.assertNotIn('class="es-btn cl-phone"', blank)   # the device's blank form has no item to scan for
+            self.assertNotIn('class="es-btn quiet cl-phone"', blank)   # the device's blank form has no item to scan for
             self.assertIn('cl-map-lnk" data-slot="" data-for="f0-1" hidden', html)        # unpositioned: first free
         # no item (type preview) → a plain field, nothing to link into
         from django.template.loader import render_to_string

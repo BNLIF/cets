@@ -37,7 +37,7 @@
     item details and earlier submissions are not available. Keep filling: everything stays on this device.
     Submit and Save draft need the connection; Pick, link and lookups are paused.</div>
   <div id="cl-back" class="es-flash success" hidden>
-    <span>Back online.</span> <a class="es-btn" href="" style="text-decoration:none;">Reload for the item's details</a></div>
+    <span>Back online.</span> <a class="es-btn quiet" href="" style="text-decoration:none;">Reload for the item's details</a></div>
   {% else %}
   <div id="cl-offline" class="es-flash error" hidden>Offline — this is the page as last seen online. Keep
     filling: everything stays on this device. Submit and Save draft need the connection; Pick, link and
@@ -88,7 +88,7 @@
     <div class="es-row" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
       <button class="es-btn cl-need-net">Submit to HWDB</button>
       <button class="es-btn quiet cl-need-net" name="action" value="draft" formnovalidate title="Saves the values on the server for you (any device); nothing goes to HWDB — photos stay on this device until you submit">Save draft</button>
-      {% if blank %}<a class="es-btn cl-need-net" id="cl-create" hidden style="text-decoration:none;" href="{% url 'explore:item_create' part_type_id=part_type_id %}?checklist={{ cl_name|urlencode }}" title="Mint the item in HWDB — a PID is assigned there — and continue with these values on it">Create item in HWDB</a>{% endif %}
+      {% if blank %}<a class="es-btn quiet cl-need-net" id="cl-create" hidden style="text-decoration:none;" href="{% url 'explore:item_create' part_type_id=part_type_id %}?checklist={{ cl_name|urlencode }}" title="Mint the item in HWDB — a PID is assigned there — and continue with these values on it">Create item in HWDB</a>{% endif %}
       <button type="button" class="es-btn quiet" onclick="window.print()" title="print, or save as PDF from the print dialog — useful for procedure sheets">&#9113; Print</button>
       <button type="button" class="es-btn quiet" id="cl-csv-save" title="The form as it stands, as a CSV file on this device — works offline; photos are not in the file">Save CSV</button>
       <button type="button" class="es-btn quiet" id="cl-csv-load" title="Fill the form from a CSV saved here, or edited in a spreadsheet">Load CSV</button>
@@ -485,7 +485,7 @@
           + '<button type="button" class="es-btn quiet" data-undo>Undo</button>';
       bar.innerHTML = newer ? restoredMsg
         : '<span>Unsaved changes from ' + when + ' on this device — older than what is loaded.</span>'
-          + '<button type="button" class="es-btn" data-restore>Restore</button>'
+          + '<button type="button" class="es-btn quiet" data-restore>Restore</button>'
           + '<button type="button" class="es-btn quiet" data-drop>Discard</button>';
       form.parentNode.insertBefore(bar, form);
       if (newer) apply(saved.v, saved.n);

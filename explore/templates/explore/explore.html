@@ -140,12 +140,12 @@
             <input type="hidden" name="part_type_id" value="{{ leaf.part_type_id }}">
             <input type="hidden" name="label" value="{{ leaf.name }}">
             <input type="hidden" name="next" value="{{ request.get_full_path }}">
-            <button class="btn {% if leaf_watching %}btn-primary{% else %}btn-ghost{% endif %}" type="submit"
+            <button class="btn {% if not leaf_watching %}btn-ghost{% endif %}" type="submit"
                     title="{% if leaf_watching %}Stop watching this type{% else %}Watch this type — its events show under Activities › Watching and count on your avatar badge{% endif %}">
                 {% if leaf_watching %}★ Watching{% else %}☆ Watch{% endif %}</button>
         </form>
         {% else %}
-        <button id="refresh-btn" class="btn btn-primary" type="button" title="Walk the curated systems into the local mirror">
+        <button id="refresh-btn" class="btn" type="button" title="Walk the curated systems into the local mirror">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
             Refresh hierarchy
         </button>
@@ -165,16 +165,19 @@
         <div style="text-align: right; white-space: nowrap;">
             <div style="display: flex; gap: 6px; justify-content: flex-end; align-items: center;">
                 <span class="cell-muted" style="font-size: 12px; margin-right: 6px;">{% if leaf.tests_synced_at %}synced {{ leaf.tests_synced_at|timesince }} ago{% else %}never synced{% endif %}<span id="sync-new-note" hidden></span></span>
-                <button class="btn btn-sm btn-primary node-sync-btn" type="button" data-mode="incremental"
+                <span class="btn-group">
+                <button class="btn btn-sm node-sync-btn" type="button" data-mode="incremental"
                         data-sync-url="{% url 'explore:node_sync' part_type_id=leaf.part_type_id %}"
                         title="Fetch newly-added items only (cheap)">Sync new</button>
-                <button class="btn btn-sm btn-ghost node-sync-btn" type="button" data-mode="components"
+                <button class="btn btn-sm node-sync-btn" type="button" data-mode="components"
                         data-sync-url="{% url 'explore:node_sync' part_type_id=leaf.part_type_id %}"
                         title="Refresh ‘updated’ for all items — no test re-fetch (medium)">Shallow re-sync</button>
-                <button class="btn btn-sm btn-ghost node-sync-btn" type="button" data-mode="full"
+                <button class="btn btn-sm node-sync-btn" type="button" data-mode="full"
                         data-sync-url="{% url 'explore:node_sync' part_type_id=leaf.part_type_id %}"
                         title="Re-fetch everything incl. all tests (slow)">Full re-sync</button>
-                <a class="btn btn-sm btn-ghost" href="{% url 'explore:plot' part_type_id=leaf.part_type_id %}" title="Distributions over this type’s Item Specifications">Plot</a>
+                </span>
+                <a class="btn btn-sm" style="margin-left: 8px;" href="{% url 'explore:plot' part_type_id=leaf.part_type_id %}" title="Distributions over this type’s Item Specifications">Plot</a>
+                <a class="btn btn-sm" href="{% url 'explore:labels' part_type_id=leaf.part_type_id %}" title="QR / bar-code label sheets for a list of this type’s items">Labels</a>
             </div>
         </div>
     </div>
@@ -230,7 +233,7 @@
         {% else %}
         <div class="explore-empty" style="padding: 24px 16px;">
             <p>This cable type’s ENDs aren’t mirrored yet.</p>
-            <p><button id="system-walk-btn" class="btn btn-sm btn-primary" type="button"
+            <p><button id="system-walk-btn" class="btn btn-sm" type="button"
                        data-sync-url="{% url 'explore:system_sync' system_id=leaf.system_id %}?project={{ leaf.project }}">Re-walk this system</button></p>
         </div>
         {% endif %}
@@ -322,7 +325,7 @@
                     <select id="td-key" title="Date-looking fields seen in the newest mirrored records" style="font: inherit; color: var(--ink); padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff); max-width: 260px;"><option value="">field…</option></select>
                     <select name="style" id="td-style" style="font: inherit; color: var(--ink); padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff); max-width: 260px;">{% for v, l in date_styles %}<option value="{{ v }}"{% if date_setting.style == v %} selected{% endif %}>{{ l }}</option>{% endfor %}</select>
                     <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;"><input type="checkbox" name="day_first"{% if not date_setting or date_setting.day_first %} checked{% endif %}> day first when ambiguous</label>
-                    <button class="btn btn-sm btn-primary">Save</button>
+                    <button class="btn btn-sm">Save</button>
                     {% else %}
                     <span>No mirrored test records to list fields from — <a href="{% url 'explore:plot' part_type_id=leaf.part_type_id %}">fetch test data on the Plot page</a> first.</span>
                     {% endif %}
@@ -441,7 +444,7 @@
             <span class="cell-muted" style="font-size: 12px; margin-right: 8px;">
                 {% if shipment_synced_at %}synced {{ shipment_synced_at|timesince }} ago{% else %}never synced{% endif %}
             </span>
-            <button class="btn btn-sm btn-primary" id="shipment-sync-btn" type="button"
+            <button class="btn btn-sm" id="shipment-sync-btn" type="button"
                     data-sync-url="{% url 'explore:shipment_sync' part_type_id=leaf.part_type_id %}"
                     title="Re-read each box’s latest location from HWDB">Sync shipments</button>
         </div>
@@ -548,7 +551,7 @@
     <div class="banner banner-warn" style="margin: 10px 0;">Last walk error: {{ view.overflow_system.tests_sync_error }}</div>
     <div class="explore-empty">
         <p>This system hasn’t been loaded from HWDB.</p>
-        <p><button id="system-walk-btn" class="btn btn-primary" type="button"
+        <p><button id="system-walk-btn" class="btn" type="button"
                    data-sync-url="{% url 'explore:system_sync' system_id=view.overflow_system.system_id %}?project={{ view.overflow_system.project }}">Retry loading this system</button></p>
     </div>
     {% else %}

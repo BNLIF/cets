@@ -199,18 +199,27 @@ a.eh-user:hover { color: var(--ink); }
 .btn {
   display: inline-flex; align-items: center; gap: 6px;
   height: 32px; padding: 0 14px;
-  border: 1px solid var(--rule); background: var(--page); color: var(--body);
-  font-family: var(--font-sans); font-size: 13px; font-weight: 500;
+  border: 1px solid var(--dim); background: var(--page); color: var(--ink);
+  font-family: var(--font-sans); font-size: 13px; font-weight: 600;
   white-space: nowrap; border-radius: var(--r-md); cursor: pointer;
   transition: background 0.12s, border-color 0.12s; text-decoration: none;
 }
-.btn:hover { background: var(--surface); border-color: var(--rule-hard); }
+/* the quiet look (dark outline, bold, page background) tells a button from an input, which sits on
+   the surface tint at regular weight; the accent fill is kept for actions that write to HWDB */
+.btn:hover { border-color: var(--accent); color: var(--accent-ink); }
 .btn svg { width: 14px; height: 14px; }
-.btn-primary { background: var(--ink); color: #fff; border-color: var(--ink); }
-.btn-primary:hover { background: #000; border-color: #000; }
+.btn-primary { background: var(--accent-soft); color: var(--accent-ink);
+  border-color: color-mix(in oklch, var(--accent) 35%, var(--rule)); }
+.btn-primary:hover { border-color: var(--accent); background: var(--accent-soft); }
 .btn-ghost { border-color: transparent; background: transparent; color: var(--dim); }
 .btn-ghost:hover { background: var(--surface); color: var(--body); }
 .btn-sm { height: 28px; padding: 0 10px; font-size: 12px; }
+/* a segmented group: related buttons share their inner borders (the type page's three syncs) */
+.btn-group { display: inline-flex; }
+.btn-group .btn { border-radius: 0; margin-left: -1px; }
+.btn-group .btn:first-child { border-radius: var(--r-md) 0 0 var(--r-md); margin-left: 0; }
+.btn-group .btn:last-child { border-radius: 0 var(--r-md) var(--r-md) 0; }
+.btn-group .btn:hover { position: relative; z-index: 1; }
 .btn:disabled { opacity: 0.55; cursor: default; }
 
 /* ---- Panels / cells / banners ----------------------------------------- */

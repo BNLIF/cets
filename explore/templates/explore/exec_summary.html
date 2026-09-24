@@ -34,7 +34,9 @@
     border-radius: var(--r-sm); padding: 6px 15px; cursor: pointer; }
   .es-btn:hover { border-color: var(--accent); }
   .es-btn:disabled { opacity: .45; cursor: default; }
-  .es-btn.quiet { color: var(--dim); background: var(--surface); border-color: var(--rule); }
+  .es-btn.quiet { color: var(--ink); background: var(--page); border-color: var(--dim); }   /* a secondary action still reads as a button: dark outline, bold — inputs sit on the surface tint, regular weight */
+  .es-btn.quiet:hover { border-color: var(--accent); color: var(--accent-ink); }
+  .es-btn.quiet:disabled { color: var(--faint); border-color: var(--rule); cursor: default; }
   .es-toggle { display: flex; gap: 6px; margin-top: 6px; }
   .es-toggle .es-btn { font-size: 12px; padding: 2px 8px; }
   .es-toggle .es-btn.is-on { color: var(--accent-ink); border-color: var(--accent-ink); }
@@ -281,7 +283,7 @@
       {% endfor %}
       {% if notify %}
       <div class="es-row" style="margin-top:12px; align-items:center;">
-        <a class="es-btn" style="text-decoration:none;" href="{{ notify.url }}">&#9993; Email next signee{{ notify.names|pluralize }}</a>
+        <a class="es-btn quiet" style="text-decoration:none;" href="{{ notify.url }}">&#9993; Email next signee{{ notify.names|pluralize }}</a>
         {% if notify.emails %}
         <span class="es-hint" style="margin:0;">opens a draft in your mail client to {{ notify.emails|join:", " }}</span>
         {% else %}

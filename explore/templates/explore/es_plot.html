@@ -30,7 +30,9 @@
     background: var(--accent-soft); border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--rule));
     border-radius: var(--r-sm); padding: 6px 15px; cursor: pointer; }
   .es-btn:hover { border-color: var(--accent); }
-  .es-btn.quiet { color: var(--dim); background: var(--surface); border-color: var(--rule); }
+  .es-btn.quiet { color: var(--ink); background: var(--page); border-color: var(--dim); }   /* a secondary action still reads as a button: dark outline, bold — inputs sit on the surface tint, regular weight */
+  .es-btn.quiet:hover { border-color: var(--accent); color: var(--accent-ink); }
+  .es-btn.quiet:disabled { color: var(--faint); border-color: var(--rule); cursor: default; }
   .es-plot-img { max-width: 100%; max-height: 420px; width: auto; height: auto; margin-top: 6px;
     border: 1px solid var(--rule); border-radius: var(--r-sm); }
   .es-fields { width: 100%; border-collapse: collapse; font-size: 13px; color: var(--ink); }

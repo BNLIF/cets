@@ -73,8 +73,8 @@
       <form method="get" class="clp-form">
         <input id="clp-pid" name="pid" placeholder="{{ part_type_id }}-00001" data-type-id="{{ part_type_id }}"
                autocomplete="off" autocapitalize="characters" spellcheck="false">
-        <button type="button" class="es-btn cl-scan" data-target="clp-pid">&#9635; Scan</button>
-        <button class="es-btn">Open checklist</button>
+        <button type="button" class="es-btn quiet cl-scan" data-target="clp-pid">&#9635; Scan</button>
+        <button class="es-btn quiet">Open checklist</button>
         <a class="es-btn quiet cl-need-net" style="text-decoration:none;"
            href="{% url 'explore:item_create' part_type_id=part_type_id %}?checklist={{ cl_name|urlencode }}"
            title="Mint a new item of this type in HWDB (a new PID is assigned there), then continue straight into this checklist">+ New item</a>
