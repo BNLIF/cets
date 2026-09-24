@@ -2,7 +2,7 @@
 row per item, streamed as NDJSON so the browser can show progress on big
 types and cache the result (IndexedDB) for client-side plotting.
 
-Why live, not mirrored: ``GET components?part_type_id=`` rows carry the full
+Why live, not mirrored: ``GET component-types/{id}/components`` rows carry the full
 nested ``specifications`` (identical to the detail record — 2026-09-10 dev
 probe), so a whole type is one paginated sweep, not a per-item fan-out. The
 mirror-light rule targets the latter. Test data has no such endpoint and
@@ -53,12 +53,15 @@ def flat_row(row: dict) -> dict:
 
 
 def _pages(api, part_type_id: str) -> Iterator[tuple[int, int, list]]:
-    """``(page, pages, rows)`` per page of ``components?part_type_id=``."""
+    """``(page, pages, rows)`` per page of the type-scoped listing
+    ``component-types/{id}/components`` — the route every other sweep uses;
+    the generic ``components?part_type_id=`` answered 502 for every query on
+    the dev API on 2026-09-24 while this one served the same rows."""
     page = 1
     while True:
         body = api._make_request(
-            "GET", "components",
-            params={"part_type_id": part_type_id, "page": page, "size": PAGE_SIZE},
+            "GET", f"component-types/{part_type_id}/components",
+            params={"page": page, "size": PAGE_SIZE},
         )
         rows = body.get("data") or []
         pages = (body.get("pagination") or {}).get("pages") or 1

@@ -77,8 +77,9 @@ class StreamSpecsTest(TestCase):
         self.assertEqual([l["page"] for l in lines if "page" in l], [1, 2])
         self.assertEqual(lines[-1], {"done": 3})
         self.assertEqual(api._make_request.call_count, 2)
+        self.assertEqual(api._make_request.call_args.args[1], f"component-types/{PTID}/components")
         self.assertEqual(api._make_request.call_args.kwargs["params"],
-                         {"part_type_id": PTID, "page": 2, "size": plotting.PAGE_SIZE})
+                         {"page": 2, "size": plotting.PAGE_SIZE})
 
     def test_error_mid_sweep_ends_the_stream_with_an_error_line(self):
         api = mock.MagicMock()
