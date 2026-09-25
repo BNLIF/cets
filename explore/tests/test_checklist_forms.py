@@ -2025,6 +2025,38 @@ class ImageMapTest(TestCase):
                          {"Board 2": "D00300100002-00014"})
         self.assertEqual(checklistforms.parse(schema, {}), {})  # empty omitted
 
+    def test_a_slot_may_guard_its_own_type(self):
+        """Hajime 2026-09-25: the CRU's 12 adapter-board slots are 7 types."""
+        f = self._schema(type_id="D00300100002", slots=[
+            {"label": "Board 1", "x": 1, "y": 1, "type_id": "d00300100009"},   # its own, uppercased
+            {"label": "Board 2", "x": 2, "y": 2, "type_id": "bad"},            # malformed — the map's
+            {"label": "Board 3", "x": 3, "y": 3}])["sections"][0]["fields"][0]
+        self.assertEqual([s.get("type_id") for s in f["slots"]], ["D00300100009", None, None])
+        schema = {"name": "t", "test_type_name": "T", "sections": [{"title": "S", "fields": [f]}]}
+        key = f["key"]
+        data = checklistforms.parse(schema, {
+            f"{key}-m0": "D00300100002-00014",   # the map's type — wrong for this slot
+            f"{key}-m1": "D00300100002-00015",
+            f"{key}-m2": "D00300100009-00016"})  # wrong for a slot without its own
+        self.assertEqual(data["S"]["Boards"], {"Board 2": "D00300100002-00015"})
+        bound = checklistforms.bind(schema, {"DATA": {}})
+        self.assertEqual([i["type_id"] for i in bound["sections"][0]["fields"][0]["items"]],
+                         ["D00300100009", "D00300100002", "D00300100002"])
+        # the form guards each input with its slot's type, and names a slot's own
+        user = get_user_model().objects.create_user("n2", "n2@n.io", "pw")
+        self.client.force_login(user)
+        page = dict(SCHEMA)
+        page["sections"] = [{"title": "S", "fields": [{"type": "imagemap", "label": "Boards", "image_id": "img-1",
+                             "slots": [{"label": "Board 1", "x": 1, "y": 1, "type_id": "D00300100009"},
+                                       {"label": "Board 2", "x": 2, "y": 2}]}]}]
+        m1, m2 = _mocked(_api(schema=page))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('data-type-id="D00300100009"', html)
+        self.assertIn('data-serial-url="/hw/dev/serial/D00300100009/"', html)
+        self.assertIn('Board 1 <span class="cl-hint">D00300100009</span>', html)
+        self.assertEqual(html.count("data-type-id="), 1)   # Board 2 has no guard at all
+
     def test_form_renders_dots_and_slot_inputs(self):
         user = get_user_model().objects.create_user("n", "n@n.io", "pw")
         self.client.force_login(user)

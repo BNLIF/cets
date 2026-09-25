@@ -87,12 +87,13 @@
   <div class="cl-map-list">
     {% for s in f.items %}
     <span class="cl-map-slot"><span class="cl-map-n">{{ forloop.counter }}</span>
-      <label for="{{ s.name }}">{{ s.label }}</label>
+      <label for="{{ s.name }}">{{ s.label }}{% if s.type_id and s.type_id != f.type_id %} <span class="cl-hint">{{ s.type_id }}</span>{% endif %}</label>
+      {# s.type_id = the slot's own type or the map's (a slot may guard its own type) #}
       <input id="{{ s.name }}" name="{{ s.name }}" value="{{ s.value }}" autocomplete="off"
-        autocapitalize="characters" spellcheck="false"{% if f.type_id %} data-type-id="{{ f.type_id }}"{% if f.sn %} data-sn="{{ f.sn }}"{% endif %} data-serial-url="{% url 'explore:serial' part_type_id=f.type_id %}"{% endif %}>
-      <button type="button" class="es-btn quiet cl-scan" data-target="{{ s.name }}" title="Scan">&#9635;</button>{% if f.type_id or f.link and part_id %}
-      {# no type on the map: the live state supplies it per slot (cl-pick[data-slot]) — a slot named like a position takes that position's type, any other every type the free positions accept #}
-      <button type="button" class="es-btn quiet cl-pick" data-target="{{ s.name }}"{% if f.link %} data-free="1"{% endif %}{% if not f.type_id %} data-slot="{{ s.label }}" hidden{% endif %} title="Pick from the type’s items">&#9776;</button>{% endif %}{% if f.link and part_id %}
+        autocapitalize="characters" spellcheck="false"{% if s.type_id %} data-type-id="{{ s.type_id }}"{% if f.sn %} data-sn="{{ f.sn }}"{% endif %} data-serial-url="{% url 'explore:serial' part_type_id=s.type_id %}"{% endif %}>
+      <button type="button" class="es-btn quiet cl-scan" data-target="{{ s.name }}" title="Scan">&#9635;</button>{% if s.type_id or f.link and part_id %}
+      {# no type on the slot: the live state supplies it per slot (cl-pick[data-slot]) — a slot named like a position takes that position's type, any other every type the free positions accept #}
+      <button type="button" class="es-btn quiet cl-pick" data-target="{{ s.name }}"{% if f.link %} data-free="1"{% endif %}{% if not s.type_id %} data-slot="{{ s.label }}" hidden{% endif %} title="Pick from the type’s items">&#9776;</button>{% endif %}{% if f.link and part_id %}
       <button type="button" class="es-btn quiet cl-map-lnk" data-slot="{{ s.label }}" data-for="{{ s.name }}" hidden></button>{% endif %}</span>
     {% endfor %}
   </div>

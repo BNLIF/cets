@@ -361,7 +361,9 @@ def _norm_field(f: dict) -> dict | None:
         # slot to scan the board mounted there. Slots are percent coordinates
         # on the image; values store ``{slot label: PID}``. The image is a
         # reference picture on the TYPE's HWDB images (as ``static``'s
-        # image_id); slots outside the image or unnamed are dropped.
+        # image_id); slots outside the image or unnamed are dropped. A slot
+        # may carry its own ``type_id`` (Hajime 2026-09-25: the CRU's 12
+        # adapter boards are 7 types) — it overrides the map's for that slot.
         out["image_id"] = str(f.get("image_id") or "").strip()
         slots, seen = [], set()
         for s in f.get("slots") or []:
@@ -373,7 +375,11 @@ def _norm_field(f: dict) -> dict | None:
                     or not (0 <= x <= 100 and 0 <= y <= 100):
                 continue
             seen.add(lab)
-            slots.append({"label": lab, "x": round(x, 2), "y": round(y, 2)})
+            slot = {"label": lab, "x": round(x, 2), "y": round(y, 2)}
+            stid = str(s.get("type_id") or "").strip().upper()
+            if re.fullmatch(r"[A-Z]\d{11}", stid):
+                slot["type_id"] = stid
+            slots.append(slot)
         out["slots"] = slots
         if not out["image_id"] or not slots:
             return None
@@ -824,6 +830,7 @@ def _bind_leaf(f: dict, v) -> None:
         vals = v if isinstance(v, dict) else {}
         f["items"] = [{"label": s["label"], "x": s["x"], "y": s["y"],
                        "name": f"{f['key']}-m{i}",
+                       "type_id": s.get("type_id") or f.get("type_id"),
                        "value": _fmt(vals.get(s["label"]))}
                       for i, s in enumerate(f["slots"])]
     elif t == "photo":
@@ -943,10 +950,11 @@ def parse(schema: dict, post, resolve=None) -> dict:
                      for i, s in enumerate(f["steps"])}
         elif t == "imagemap":
             # #113: one PID per filled slot; the #112 type guard applies to
-            # every slot. Empty maps are omitted like any blank field.
-            tid = f.get("type_id")
+            # every slot — a slot's own type_id first. Empty maps are omitted
+            # like any blank field.
             vals = {}
             for i, s in enumerate(f["slots"]):
+                tid = s.get("type_id") or f.get("type_id")
                 raw = (post.get(f"{key}-m{i}") or "").strip()
                 raw = _guarded(tid, raw, resolve, f.get("sn")) if raw else None
                 if raw:
