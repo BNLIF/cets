@@ -2075,6 +2075,44 @@ class ImageMapTest(TestCase):
         self.assertIn("cl-mapzoom", html)          # tap-to-zoom view with dots
 
 
+class ImageMapLinkedListTest(TestCase):
+    """Hajime 2026-09-25: the linked-positions list beside a linking map is
+    shown (default), collapsed, or hidden — schema ``linked``."""
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("m", "m@m.io", "pw"))
+
+    def _html(self, **extra):
+        schema = dict(SCHEMA)
+        schema["sections"] = [{"title": "S", "fields": [{"type": "imagemap", "label": "Boards", "image_id": "img-1",
+                               "slots": [{"label": "Board 1", "x": 1, "y": 1}], "link": True, **extra}]}]
+        m1, m2 = _mocked(_api(schema=schema))
+        with m1, m2:
+            return self.client.get(PAGE).content.decode()
+
+    def test_normalize_keeps_only_the_three_values_with_link(self):
+        def f(**extra):
+            return checklistforms.normalize({"name": "t", "test_type_name": "T", "sections": [{"title": "S", "fields": [
+                {"type": "imagemap", "label": "B", "image_id": "i", "slots": [{"label": "a", "x": 1, "y": 1}], **extra}]}]},
+                "t")["sections"][0]["fields"][0]
+        self.assertEqual(f(link=True)["linked"], "open")
+        self.assertEqual(f(link=True, linked="Collapsed")["linked"], "collapsed")
+        self.assertEqual(f(link=True, linked="off")["linked"], "off")
+        self.assertEqual(f(link=True, linked="sideways")["linked"], "open")
+        self.assertNotIn("linked", f(linked="off"))   # meaningless without link
+
+    def test_open_collapsed_and_off(self):
+        html = self._html()
+        self.assertIn('<details class="cl-map-pos" open><summary><h3>Linked', html)
+        self.assertIn('class="cl-map-cols"', html)
+        html = self._html(linked="collapsed")
+        self.assertIn('<details class="cl-map-pos"><summary><h3>Linked', html)
+        html = self._html(linked="off")
+        self.assertNotIn('<details class="cl-map-pos"', html)
+        self.assertNotIn('class="cl-map-cols"', html)
+        self.assertIn(f'data-link-url="/hw/dev/checklist-map/{PART}/"', html)   # the slots still link live
+
+
 class ImageMapLinkTest(TestCase):
     """#133: an imagemap flagged ``link`` places its boards as subcomponents."""
     SCHEMA = {"name": "CRU", "test_type_name": "CRU", "sections": [{"title": "S", "fields": [

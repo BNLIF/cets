@@ -385,6 +385,10 @@ def _norm_field(f: dict) -> dict | None:
             return None
         if f.get("link"):        # #133: scanned boards become subcomponents
             out["link"] = True
+            # Hajime 2026-09-25: the linked-positions list beside the map
+            # takes room on a tablet — "open" (default), "collapsed", "off"
+            linked = str(f.get("linked") or "").strip().lower()
+            out["linked"] = linked if linked in ("collapsed", "off") else "open"
     if t in ("number", "table"):
         out["min"], out["max"], out["range"] = _tol_range(f)
     if t == "table":

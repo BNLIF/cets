@@ -365,6 +365,7 @@
       <span class="ec-hint" style="flex:1 1 100%;">Click the image to add a slot &mdash; one per line: label @ x, y (% of image size), then its own Type ID if it differs.</span>
       <textarea class="ff-slots" rows="3" placeholder="Board 1 @ 4.5, 8, Z00100300008" style="flex:1 1 100%;"></textarea>
       <label class="ec-check" title="at submit each scanned item is linked into this item's sub-components: a slot named like one of the type's positions goes there, any other slot takes the first free position for the scanned item's type"><input type="checkbox" class="ff-maplink"> link scanned items as sub-components</label>
+      <label class="ff-maplinked-wrap" style="display:none;">Linked list beside the map <select class="ff-maplinked"><option value="open">shown</option><option value="collapsed">collapsed</option><option value="off">hidden</option></select></label>
       <div class="ec-hint ff-mappos" style="flex:1 1 100%; display:none;"></div>
       <button type="button" class="es-btn quiet ff-mapzoom" style="display:none; align-self:flex-start;" title="place slots on the full-size drawing">&#x26F6; Zoom</button>
       <div class="clc-mapwrap" style="position:relative; display:none; max-width:100%;">
@@ -514,6 +515,7 @@
       return s.label + " @ " + s.x + ", " + s.y + (s.type_id ? ", " + s.type_id : "");
     }).join("\n");
     $(".ff-maplink", r).checked = !!f.link;                            // #133
+    $(".ff-maplinked", r).value = f.linked || "open";                  // Hajime 2026-09-25
     $(".ff-tbllink", r).checked = f.type === "table" && !!f.link;      // #153
     $(".ff-into", r).value = f.into || "";
     syncMapPos(r);
@@ -548,6 +550,7 @@
   function syncMapPos(r) {
     var box = $(".ff-mappos", r);
     if (!box) return;
+    $(".ff-maplinked-wrap", r).style.display = $(".ff-maplink", r).checked ? "" : "none";
     if (!$(".ff-maplink", r).checked) { box.style.display = "none"; return; }
     box.style.display = "";
     positions().then(function (ps) {
@@ -1161,7 +1164,10 @@
       var mid = $(".ff-imageid", r).value.trim();
       if (mid) f.image_id = mid;
       f.slots = readSlots(r);
-      if ($(".ff-maplink", r).checked) f.link = true;                  // #133
+      if ($(".ff-maplink", r).checked) {                               // #133
+        f.link = true;
+        if ($(".ff-maplinked", r).value !== "open") f.linked = $(".ff-maplinked", r).value;
+      }
     }
     if (t === "table" && $(".ff-tbllink", r).checked) {                // #153
       f.link = true;

@@ -162,6 +162,9 @@
   .cl-map-pos { border: 2px solid var(--good); border-radius: var(--r-lg); padding: 10px 12px; }
   .cl-asm-pack { float: right; font-weight: 400; font-size: calc(12.5px * var(--cl-scale, 1)); }
   .cl-map-pos h3 { font-size: calc(13px * var(--cl-scale, 1)); margin: 0 0 6px; color: var(--ink); }
+  details.cl-map-pos > summary { cursor: pointer; }
+  details.cl-map-pos > summary h3 { display: inline; }
+  details.cl-map-pos:not([open]) > summary h3 { margin: 0; }
   .cl-map-pos h3 .cl-map-count { font-family: var(--font-mono); font-weight: 400; color: var(--faint); font-size: calc(12px * var(--cl-scale, 1)); }
   .cl-map-tbl { width: 100%; border-collapse: collapse; font-size: calc(13px * var(--cl-scale, 1)); }
   .cl-map-tbl th { text-align: left; font-weight: 500; color: var(--faint); font-size: calc(11px * var(--cl-scale, 1)); padding: 4px 8px; }
