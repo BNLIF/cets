@@ -112,6 +112,7 @@
     <h2>Step {{ scene }} of {{ n_scenes }} — {{ scene_title }}</h2>
 
     {% if scene == 1 %}
+      {% if cl.is_surf %}{# the QC / ES gate is SURF-only; other routes confirm the shipping checklists here #}
       <div class="ps-gate">Status: <b>{{ gate.status_name|default:"unknown" }}</b>
         {% if gate.status_id == 120 or gate.status_id == 140 %}<span class="ps-ok">✓</span>{% else %}<span class="ps-bad">✗ needs “Passed All” or “Use As Is”</span>{% endif %}</div>
       <div class="ps-gate">Certified QA/QC: {% if gate.certified %}<span class="ps-ok">✓</span>{% else %}<span class="ps-bad">✗</span>{% endif %}
@@ -119,6 +120,7 @@
       <div class="ps-gate">Executive summary:
         {% if gate.summary_name %}<span class="ps-ok">✓</span> <span class="mono" style="font-size:11.5px;">{{ gate.summary_name }}</span>{% if gate.summary_uploader %} (by {{ gate.summary_uploader }}){% endif %}
         {% else %}<span class="ps-bad">✗ none</span> — <a href="{% url 'explore:exec_summary' part_id=part_id %}">create one</a>{% endif %}</div>
+      {% elif not ship_checklists %}<p class="ps-hint">No shipping checklists on this type.</p>{% endif %}
       {% for c in ship_checklists %}{# #150: shipping-flagged checklists — each must be confirmed complete #}
       <div class="ps-gate"><a href="{{ c.url }}" target="_blank" rel="noopener">&#9745; {{ c.name }}</a>:
         {% if c.filled_on %}<span class="ps-ok">✓</span> submitted {{ c.filled_on }}{% else %}<span class="ps-bad">✗ not submitted yet</span>{% endif %}

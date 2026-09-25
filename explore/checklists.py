@@ -72,7 +72,10 @@ N_RECEIVING_SCENES = len(RECEIVING_SCENES)
 # procedure requires, the QA representative and the FD Logistics
 # correspondence. Transshipping also skips receiving's contents check: the
 # box travels on sealed (a CRU container inside a larger one to SURF).
-_SURF_ONLY = {"preshipping": {1, 2, 6, 7}, "shipping": {3, 4}}
+# Step 1 stays on every route (Hajime 2026-09-25): off SURF it drops the
+# status / QC-flag / executive-summary checks and keeps the shipping-
+# flagged checklist confirmations.
+_SURF_ONLY = {"preshipping": {2, 6, 7}, "shipping": {3, 4}}
 _TRANSSHIPPING_SKIPS = {"receiving": {1}}
 _N_SCENES = {"preshipping": N_SCENES, "shipping": N_SHIPPING_SCENES,
              "receiving": N_RECEIVING_SCENES}

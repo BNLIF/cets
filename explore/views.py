@@ -5833,13 +5833,14 @@ def explore_preship_view(request, part_id):
                                + " complete.")
                 return redirect(page_url)
             cleaned["checklists_done"] = [c["name"] for c in ship]
-            gate = _preship_gate(api, part_id)
-            if not (gate["qaqc_ready"] and gate["summary_name"]):
-                messages.error(request,
-                               "Gate not passed: the box needs QC flags + passing "
-                               "status and an executive summary.")
-                return redirect(page_url)
-            cleaned.update(gate)
+            if cl.is_surf:   # the QC / ES gate is SURF-only (Hajime 2026-09-25)
+                gate = _preship_gate(api, part_id)
+                if not (gate["qaqc_ready"] and gate["summary_name"]):
+                    messages.error(request,
+                                   "Gate not passed: the box needs QC flags + passing "
+                                   "status and an executive summary.")
+                    return redirect(page_url)
+                cleaned.update(gate)
         cl.state[checklists.scene_key(scene)] = {
             **cl.state.get(checklists.scene_key(scene), {}), **cleaned}
 
@@ -5921,7 +5922,8 @@ def explore_preship_view(request, part_id):
         ctx.update({"scene": scene, "scene_title": checklists.scene_title(scene),
                     "saved": _form_saved(cl.state.get(checklists.scene_key(scene), {}))})
         if scene == 1:
-            ctx["gate"] = _preship_gate(api, part_id)
+            if cl.is_surf:
+                ctx["gate"] = _preship_gate(api, part_id)
             ctx["ship_checklists"] = _shipping_checklists(request, api, inst, part_id, ptid)   # #150
         if scene == 4:
             # The procedure's stated default destination for the SURF route.

@@ -109,6 +109,27 @@ class PreshipStepOneTest(TestCase):
             html = self.client.get(PRESHIP).content.decode()
         self.assertIn('value="PDS_module_packing" required checked>', html)
 
+    def test_non_surf_step_1_is_the_checklists_alone(self):
+        """Hajime 2026-09-25: a shipping-flagged checklist is confirmed on
+        every route; off SURF there is no executive-summary / QC gate."""
+        api = _with_checklists(_preship_api())
+        api.get_images.return_value = {"data": []}   # no executive summary
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PRESHIP, {"action": "start", "route": "confirm_non_surf"})
+            html = self.client.get(PRESHIP).content.decode()
+            self.assertIn("Step 1 of 8", html)
+            self.assertIn('name="checklist_done" value="PDS_module_packing" required>', html)
+            self.assertIn("submitted 2026-09-13", html)
+            self.assertNotIn("Executive summary", html)
+            r = self.client.post(PRESHIP, {"action": "advance", "confirm_list": "on"}, follow=True)
+            self.assertIn("Confirm that the “PDS_module_packing” checklist is complete.", r.content.decode())
+            self.client.post(PRESHIP, {"action": "advance", "confirm_list": "on",
+                                       "checklist_done": "PDS_module_packing"})
+        cl = BoxChecklist.for_instance("dev").get(part_id=BOX)
+        self.assertEqual(cl.current_scene, 3)   # QA rep skipped; no ES needed
+        self.assertEqual(cl.state["PreShipping1"]["checklists_done"], ["PDS_module_packing"])
+
     def test_editor_offers_the_flag(self):
         api = _api()
         m1, m2 = _mocked(api)

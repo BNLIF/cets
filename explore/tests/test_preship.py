@@ -139,8 +139,10 @@ class SceneValidationTest(TestCase):
 
 class RouteSkipsTest(TestCase):
     """Hajime 2026-09-22: the non-SURF and transshipping routes leave out the
-    gate, the QA representative and the FD Logistics correspondence (steps
-    1, 2, 6, 7); the logistics CSV stays downloadable."""
+    QA representative and the FD Logistics correspondence (steps 2, 6, 7);
+    the logistics CSV stays downloadable. Step 1 stays on every route
+    (Hajime 2026-09-25) but off SURF it is only the shipping-checklist
+    confirmations — no status / QC-flag / executive-summary gate."""
 
     def setUp(self):
         self.user = get_user_model().objects.create_user("u", "u@u.io", "pw")
@@ -149,30 +151,40 @@ class RouteSkipsTest(TestCase):
 
     def test_skip_table_and_stepping(self):
         self.assertEqual(checklists.skipped_scenes("preshipping", "confirm_surf"), set())
-        self.assertEqual(checklists.skipped_scenes("preshipping", "confirm_non_surf"), {1, 2, 6, 7})
-        self.assertEqual(checklists.skipped_scenes("preshipping", "confirm_transshipping"), {1, 2, 6, 7})
+        self.assertEqual(checklists.skipped_scenes("preshipping", "confirm_non_surf"), {2, 6, 7})
+        self.assertEqual(checklists.skipped_scenes("preshipping", "confirm_transshipping"), {2, 6, 7})
         self.assertEqual(checklists.skipped_scenes("shipping", "confirm_non_surf"), {3, 4})
         self.assertEqual(checklists.skipped_scenes("shipping", "confirm_transshipping"), {3, 4})
         self.assertEqual(checklists.skipped_scenes("receiving", "confirm_non_surf"), set())
         self.assertEqual(checklists.skipped_scenes("receiving", "confirm_transshipping"), {1})
-        self.assertEqual(checklists.first_scene("preshipping", "confirm_non_surf"), 3)
+        self.assertEqual(checklists.first_scene("preshipping", "confirm_non_surf"), 1)
         self.assertEqual(checklists.first_scene("preshipping", "confirm_surf"), 1)
         self.assertEqual(checklists.step_from("preshipping", "confirm_non_surf", 5), 8)
         self.assertEqual(checklists.step_from("preshipping", "confirm_surf", 5), 6)
-        self.assertEqual(checklists.step_from("preshipping", "confirm_non_surf", 3, back=True), 0)
+        self.assertEqual(checklists.step_from("preshipping", "confirm_non_surf", 3, back=True), 1)
+        self.assertEqual(checklists.step_from("preshipping", "confirm_non_surf", 1, back=True), 0)
         self.assertEqual(checklists.step_from("preshipping", "confirm_non_surf", 8, back=True), 5)
 
     def test_non_surf_run_skips_gate_qa_rep_and_logistics(self):
         api = _api()
+        api.get_images.return_value = {"data": []}                      # no executive summary
+        api.get_component.return_value["data"]["certified_qaqc"] = False
         m1, m2 = _mocked(api)
         with m1, m2:
             self.client.post(PAGE, {"action": "start", "route": "confirm_non_surf"})
             cl = BoxChecklist.for_instance("dev").get(part_id=BOX)
-            self.assertEqual(cl.current_scene, 3)                       # no gate, no QA rep
+            self.assertEqual(cl.current_scene, 1)                       # step 1 stays, without the gate
             html = self.client.get(PAGE).content.decode()
-            self.assertIn('<span class="skip" title="not on this route">Step 1</span>', html)
+            self.assertIn("Change route", html)                         # step 1 is this route's first
+            self.assertNotIn("Executive summary", html)
+            self.assertNotIn("Certified QA/QC", html)
+            self.assertIn("No shipping checklists on this type.", html)
+            self.assertIn('<span class="skip" title="not on this route">Step 2</span>', html)
             self.assertIn('<span class="skip" title="not on this route">Step 6</span>', html)
-            self.assertIn("Change route", html)                         # step 3 is this route's first
+            self.client.post(PAGE, {"action": "advance", "confirm_list": "on"})
+            cl.refresh_from_db()
+            self.assertEqual(cl.current_scene, 3)                       # no ES needed; QA rep skipped
+            self.assertNotIn("summary_name", cl.state["PreShipping1"])
             for n in (3, 4, 5):
                 self.client.post(PAGE, {"action": "advance", **SCENE_DATA[n]})
             cl.refresh_from_db()
@@ -185,7 +197,7 @@ class RouteSkipsTest(TestCase):
             self.client.post(PAGE, {"action": "back"})
             cl.refresh_from_db()
             self.assertEqual(cl.current_scene, 5)
-        api.get_tests.assert_not_called()                               # the #150 gate never ran
+        api.get_tests.assert_not_called()                               # no shipping-flagged checklist
 
     def test_a_run_parked_on_a_skipped_step_moves_on(self):
         _cl(route="confirm_non_surf", scene=2)                          # started before the skips existed
@@ -272,7 +284,7 @@ class FormUxTest(TestCase):
                                     "route": "confirm_non_surf"})
         cl = BoxChecklist.for_instance("dev").get(part_id=BOX)
         self.assertEqual(cl.route, "confirm_non_surf")
-        self.assertEqual(cl.current_scene, 3)      # the non-SURF route's first step (Hajime 2026-09-22)
+        self.assertEqual(cl.current_scene, 1)      # step 1 stays on every route (Hajime 2026-09-25)
         self.assertEqual(cl.state[checklists.scene_key(2)], SCENE_DATA[2])  # kept
 
     def test_failed_advance_keeps_submitted_values(self):
