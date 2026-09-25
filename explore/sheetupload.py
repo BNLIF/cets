@@ -1,0 +1,504 @@
+"""#177: a spreadsheet of items → HWDB, the utility's ``hwdb-upload`` Item
+record type in the Explorer (Hajime 2026-09-24). A CSV / Excel tab in the
+utility's layout — an optional key/value block in columns A–B, a blank
+row, then the column headers; plain names for the standard fields, ``S:``
+for spec keys, ``C:`` for sub-component positions — is read into cells,
+mapped column by column, planned against the type's live listing (create /
+patch / nothing / error per row, nothing written) and applied one item at
+a time: create or patch, location, positions. Pure helpers plus
+``apply_row``, which takes the client; the view (``explore_sheet_upload_view``)
+owns the job record and the HTTP side."""
+
+from __future__ import annotations
+
+import copy
+import csv
+import io
+import re
+from datetime import date, datetime
+
+from .checklistforms import STATUS_OPTIONS
+
+UPLOAD_MAX = 5 * 1024 * 1024
+RETENTION_DAYS = 3      # a job goes this long after its last change; users rarely delete (Chao 2026-09-24)
+ROWS_MAX = 5000
+APPLY_SECONDS = 12      # one apply request works this long, then hands back (gunicorn's 30 s)
+NEW_ITEM_STATUS = 110   # Waiting on QA/QC Tests — what New item mints with
+NULL = "<null>"         # the utility's "clear this" cell value
+
+_PID = re.compile(r"^[A-Za-z]\d{11}-\d{5}$")
+_NUM = re.compile(r"^-?(0|[1-9]\d*)(\.\d+)?([eE][-+]?\d+)?$")   # no leading zeros: 00123 is a serial
+_REF = re.compile(r"^\((\d+)\)\s*(.*)$")
+
+# sheet column header (lower-cased) → standard field; the utility's names
+STANDARD = {
+    "external id": "part_id", "part id": "part_id", "pid": "part_id",
+    "serial number": "serial_number", "serial": "serial_number", "sn": "serial_number",
+    "status": "status",
+    "manufacturer": "manufacturer", "manufacturer id": "manufacturer", "manufacturer name": "manufacturer",
+    "institution": "institution", "institution id": "institution", "institution name": "institution",
+    "comments": "comments",
+    "location": "location", "location id": "location", "location name": "location",
+    "location comments": "location_comments",
+    "arrived": "arrived", "location timestamp": "arrived",
+    "part type id": "part_type_id",
+}
+FIELD_LABELS = [
+    ("part_id", "External ID / PID"), ("serial_number", "Serial number"), ("status", "Status"),
+    ("manufacturer", "Manufacturer"), ("institution", "Institution (owner of a new item)"),
+    ("comments", "Comments"), ("location", "Location"), ("location_comments", "Location comments"),
+    ("arrived", "Arrived"),
+]
+
+
+class SheetError(Exception):
+    """A row HWDB refused or the sheet could not use — the message is shown on the row."""
+
+
+# ---- reading ----------------------------------------------------------------
+
+def _cell(v):
+    """A cell as a JSON-safe typed value: Excel keeps its types (an integral
+    float becomes an int, a date its ISO text); CSV text becomes a number
+    when it reads as one without a leading zero (a serial like 00123 stays
+    text); blank is None."""
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, float):
+        return int(v) if v.is_integer() and abs(v) < 1e15 else v
+    if isinstance(v, int):
+        return v
+    if isinstance(v, (datetime, date)):
+        return v.isoformat()
+    s = str(v).strip()
+    if s == "":
+        return None
+    if _NUM.match(s):
+        return float(s) if "." in s or "e" in s.lower() else int(s)
+    return s
+
+
+def _raw_rows(name: str, blob: bytes) -> list[tuple[str, list[list]]]:
+    """Every tab as (name, rows of raw cells)."""
+    if (name or "").lower().endswith((".xlsx", ".xlsm")):
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(blob), read_only=True, data_only=True)
+        try:
+            return [(ws.title, [list(r) for r in ws.iter_rows(values_only=True)]) for ws in wb.worksheets]
+        finally:
+            wb.close()
+    text = blob.decode("utf-8-sig", errors="replace")
+    try:
+        dialect = csv.Sniffer().sniff(text[:4096], delimiters=",;\t")
+    except csv.Error:
+        dialect = csv.excel
+    return [(name.rsplit(".", 1)[0] if "." in name else name,
+             [list(r) for r in csv.reader(io.StringIO(text), dialect)])]
+
+
+def _blank(row) -> bool:
+    return all(c is None or str(c).strip() == "" for c in row)
+
+
+def _text(v) -> str:
+    return "" if v is None else str(v).strip()
+
+
+def read_sheets(name: str, blob: bytes) -> list[dict]:
+    """Every tab of the file as ``{name, values, columns, rows}``: ``values`` =
+    the utility's key/value block (the rows above the first blank row, when
+    that block is two columns wide and a header row follows), ``columns`` =
+    the header row's texts, ``rows`` = ``[sheet row number, cells]`` for
+    every non-blank data row. A tab with no header row is left out."""
+    out = []
+    for tab, raw in _raw_rows(name, blob):
+        raw = [r for r in raw]
+        values, start = {}, 0
+        for i, r in enumerate(raw):
+            if _blank(r):
+                block = raw[:i]
+                if block and all(_text(b[0]) and _blank(b[2:]) for b in block) and i + 1 < len(raw):
+                    values = {_text(b[0]): _cell(b[1] if len(b) > 1 else None) for b in block}
+                    start = i + 1
+                break
+        head = next((j for j in range(start, len(raw)) if not _blank(raw[j])), None)
+        if head is None:
+            continue
+        columns = [_text(c) for c in raw[head]]
+        while columns and not columns[-1]:
+            columns.pop()
+        if not columns:
+            continue
+        rows = []
+        for j in range(head + 1, len(raw)):
+            cells = [_cell(c) for c in raw[j][:len(columns)]]
+            cells += [None] * (len(columns) - len(cells))
+            if any(c is not None for c in cells):
+                rows.append([j + 1, cells])
+        out.append({"name": tab, "values": values, "columns": columns, "rows": rows[:ROWS_MAX],
+                    "over": max(0, len(rows) - ROWS_MAX)})
+    return out
+
+
+# ---- mapping ----------------------------------------------------------------
+
+def auto_map(columns: list[str], template: dict, connectors: dict) -> dict[str, str]:
+    """Column header → assignment: a standard name, ``S:key`` / ``C:position``
+    (the utility's prefixes), or a bare header that names a spec key or a
+    position; anything else stays unassigned ("")."""
+    specs = {k.lower(): k for k in template}
+    poss = {str(p).lower(): str(p) for p in connectors}
+    out = {}
+    for c in columns:
+        low = c.lower()
+        if low in STANDARD:
+            out[c] = STANDARD[low]
+        elif c[:2].upper() == "S:" and c[2:].strip():
+            out[c] = "spec:" + c[2:].strip()
+        elif c[:2].upper() == "C:" and c[2:].strip():
+            out[c] = "pos:" + c[2:].strip()
+        elif low in specs:
+            out[c] = "spec:" + specs[low]
+        elif low in poss:
+            out[c] = "pos:" + poss[low]
+        else:
+            out[c] = ""
+    return out
+
+
+def records(sheet: dict, mapping: dict) -> list[dict]:
+    """The sheet's rows as item records: the mapped cells of each row, with
+    the key/value block as per-sheet defaults (the utility's precedence: a
+    cell beats the block), rows naming the same item (by External ID, else
+    by serial) merged into one record (later non-blank cells win). ``specs`` / ``positions`` hold
+    the ``spec:`` / ``pos:`` assignments; the standard fields sit at the top."""
+    defaults = {}
+    for k, v in (sheet.get("values") or {}).items():
+        a = mapping.get(k) or auto_map([k], {}, {}).get(k) or ""
+        if a and v is not None:
+            defaults[a] = v
+    cols = [(i, mapping.get(c) or "") for i, c in enumerate(sheet["columns"])]
+    merged: dict[tuple, dict] = {}
+    for n, cells in sheet["rows"]:
+        vals = dict(defaults)
+        for i, a in cols:
+            if a and i < len(cells) and cells[i] is not None:
+                vals[a] = cells[i]
+        rec = {"n": n, "rows": [n], "specs": {}, "positions": {}}
+        for a, v in vals.items():
+            if a.startswith("spec:"):
+                rec["specs"][a[5:]] = v
+            elif a.startswith("pos:"):
+                rec["positions"][a[4:]] = v
+            else:
+                rec[a] = v
+        pid = _text(rec.get("part_id")).upper()
+        if pid in ("", "<UNASSIGNED>"):
+            pid = ""
+        rec["part_id"] = pid
+        rec["serial_number"] = _text(rec.get("serial_number"))
+        key = (pid, "") if pid else ("", rec["serial_number"]) if rec["serial_number"] else (None, n)
+        if key in merged:
+            m = merged[key]
+            m["rows"].append(n)
+            m["specs"].update(rec["specs"])
+            m["positions"].update(rec["positions"])
+            m.update({k: v for k, v in rec.items() if k not in ("n", "rows", "specs", "positions")})
+        else:
+            merged[key] = rec
+    return list(merged.values())
+
+
+# ---- planning ---------------------------------------------------------------
+
+def _ref(value, options: list[dict]) -> dict | None:
+    """``(id) Name``, an id or a name → the option ``{id, name, …}``; None when
+    nothing matches."""
+    if value is None:
+        return None
+    s = _text(value)
+    m = _REF.match(s)
+    if m:
+        s = m.group(1)
+    if isinstance(value, int) or s.isdigit():
+        i = int(s)
+        return next((o for o in options if o.get("id") == i), None)
+    return next((o for o in options if (o.get("name") or "").lower() == s.lower()), None)
+
+
+def _status(value) -> int | None:
+    if value is None:
+        return None
+    s = _text(value)
+    for o in STATUS_OPTIONS:
+        if s == str(o["value"]) or s.lower() == o["label"].lower():
+            return o["value"]
+    return None
+
+
+def _set_path(d: dict, path: str, value) -> None:
+    keys = path.split(".")
+    for k in keys[:-1]:
+        if not isinstance(d.get(k), dict):
+            d[k] = {}
+        d = d[k]
+    d[keys[-1]] = value
+
+
+def _get_path(d, path: str):
+    for k in path.split("."):
+        if not isinstance(d, dict) or k not in d:
+            return _MISSING
+        d = d[k]
+    return d
+
+
+_MISSING = object()
+
+
+def _spec_value(v):
+    return None if v == NULL else v
+
+
+def check_specs(specs: dict, template: dict) -> str | None:
+    """Every spec key must be one the type's datasheet defines (HWDB
+    validates against the template); a dotted key may reach into a nested
+    object such as DATA. The first offending key, or None."""
+    for k in specs:
+        top = k.split(".")[0]
+        if top not in template:
+            return f"“{k}” is not a key of the type’s Item Specs"
+        if "." in k and not isinstance(template.get(top), dict):
+            return f"“{k}”: “{top}” is not a nested object in the type’s Item Specs"
+    return None
+
+
+def plan(records_: list[dict], ptid: str, live: dict, makers: dict, template: dict,
+         connectors: dict, institutions: list[dict], manufacturers: list[dict]) -> list[dict]:
+    """The dry run: each record against the type's live listing (pid → row)
+    and the mirror's manufacturer names (pid → name) → a plan row ``{n, rows,
+    key, pid, action, changes, error, state, rec}``. ``action`` = create
+    (serial unknown to the type), patch (something differs), skip (nothing
+    to do) or error (the row cannot be applied as it stands); ``state`` =
+    pending for create / patch, done for skip, error. Positions and the
+    location are compared at apply time (the listing lacks them), so they
+    always count as a change here."""
+    by_serial: dict[str, list[str]] = {}
+    for pid, r in live.items():
+        sn = _text(r.get("serial_number"))
+        if sn:
+            by_serial.setdefault(sn.lower(), []).append(pid)
+    out = []
+    for rec in records_:
+        row = {"n": rec["n"], "rows": rec["rows"], "key": rec["part_id"] or rec["serial_number"],
+               "pid": rec["part_id"], "action": "patch", "changes": [], "error": "",
+               "state": "pending", "rec": {}}
+        out.append(row)
+        try:
+            row["rec"] = _resolve(rec, ptid, template, connectors, institutions, manufacturers)
+            cur = None
+            if rec["part_id"]:
+                if not rec["part_id"].startswith(ptid + "-"):
+                    raise SheetError(f"{rec['part_id']} is not a {ptid} item")
+                cur = live.get(rec["part_id"])
+                if cur is None:
+                    raise SheetError(f"{rec['part_id']} is not in HWDB")
+            elif rec["serial_number"]:
+                hits = by_serial.get(rec["serial_number"].lower()) or []
+                if len(hits) > 1:
+                    raise SheetError(f"serial number {rec['serial_number']} is on {len(hits)} items: "
+                                     f"{', '.join(hits)} — give the PID")
+                if hits:
+                    row["pid"] = hits[0]
+                    cur = live[hits[0]]
+                else:
+                    row["action"] = "create"
+            else:
+                raise SheetError("no External ID and no serial number")
+            r = row["rec"]
+            if row["action"] == "create":
+                if not r.get("institution"):
+                    raise SheetError("a new item needs an institution")
+                row["changes"] = ["new item"] + _extra_changes(r)
+                continue
+            row["changes"] = _diff(r, cur, makers.get(row["pid"]) or "") + _extra_changes(r)
+            if not row["changes"]:
+                row["action"], row["state"] = "skip", "done"
+        except SheetError as e:
+            row.update(action="error", state="error", error=str(e))
+    return out
+
+
+def _extra_changes(r: dict) -> list[str]:
+    ch = []
+    if r.get("location"):
+        ch.append(f"location → {r['location']['name']}")
+    for pos, v in r.get("positions", {}).items():
+        ch.append(f"{pos} → {'empty' if v == NULL else v}")
+    return ch
+
+
+def _resolve(rec: dict, ptid: str, template: dict, connectors: dict,
+             institutions: list[dict], manufacturers: list[dict]) -> dict:
+    """The record's cells as HWDB values: status id, manufacturer / institution /
+    location options, checked spec keys and positions. ``SheetError`` names
+    the first cell that cannot be used."""
+    r: dict = {"serial_number": rec["serial_number"], "specs": {}, "positions": {}}
+    if rec.get("part_type_id") is not None and _text(rec["part_type_id"]).upper() != ptid:
+        raise SheetError(f"Part Type ID {_text(rec['part_type_id'])} is not {ptid}")
+    if rec.get("status") is not None:
+        r["status_id"] = _status(rec["status"])
+        if r["status_id"] is None:
+            raise SheetError(f"unknown status “{_text(rec['status'])}”")
+    if rec.get("manufacturer") is not None:
+        m = _ref(rec["manufacturer"], manufacturers)
+        if m is None:
+            raise SheetError(f"“{_text(rec['manufacturer'])}” is not a manufacturer of this type")
+        r["manufacturer"] = {"id": m["id"], "name": m.get("name") or ""}
+    for f in ("institution", "location"):
+        if rec.get(f) is not None:
+            o = _ref(rec[f], institutions)
+            if o is None:
+                raise SheetError(f"unknown {f} “{_text(rec[f])}”")
+            r[f] = {"id": o["id"], "name": o.get("name") or "", "country_code": o.get("country_code") or ""}
+    if rec.get("comments") is not None:
+        r["comments"] = _text(rec["comments"])
+    for f in ("location_comments", "arrived"):
+        if rec.get(f) is not None:
+            r[f] = _text(rec[f])
+    err = check_specs(rec["specs"], template)
+    if err:
+        raise SheetError(err)
+    r["specs"] = {k: _spec_value(v) for k, v in rec["specs"].items()}
+    for pos, v in rec["positions"].items():
+        if pos not in connectors:
+            raise SheetError(f"this type has no “{pos}” position")
+        r["positions"][pos] = _text(v)
+    return r
+
+
+def _diff(r: dict, cur: dict, maker: str) -> list[str]:
+    ch = []
+    if r["serial_number"] and r["serial_number"].lower() != _text(cur.get("serial_number")).lower():
+        ch.append(f"serial → {r['serial_number']}")
+    if "status_id" in r:
+        st = cur.get("status") or {}
+        if r["status_id"] != (st.get("id") if isinstance(st, dict) else st):
+            ch.append("status → " + next(o["label"] for o in STATUS_OPTIONS if o["value"] == r["status_id"]))
+    if "comments" in r and r["comments"] != _text(cur.get("comments")):
+        ch.append(f"comments → “{r['comments']}”")
+    if "manufacturer" in r and r["manufacturer"]["name"].lower() != (maker or "").lower():
+        ch.append(f"manufacturer → {r['manufacturer']['name']}")
+    specs = cur.get("specifications") or [{}]
+    latest = specs[-1] if isinstance(specs[-1], dict) else {}
+    for k, v in r["specs"].items():
+        if _get_path(latest, k) is _MISSING or _get_path(latest, k) != v:
+            ch.append(f"{k} → {v}")
+    return ch
+
+
+# ---- applying ---------------------------------------------------------------
+
+def merged_specs(base: dict, specs: dict) -> dict:
+    out = copy.deepcopy(base)
+    for k, v in specs.items():
+        _set_path(out, k, v)
+    return out
+
+
+def apply_row(api, ptid: str, row: dict, template: dict, connectors: dict,
+              manufacturers: list[dict], serial_lookup, arrived_default: str) -> tuple[str, list[str]]:
+    """Write one plan row to HWDB: a create (after a live serial re-check —
+    a chunk that timed out after its POST landed must not create twice),
+    else a PATCH of the standard fields + specs when anything differs from
+    the current record; then the location when it differs and the
+    positions when they differ (one read + one PATCH). Returns (pid, what
+    changed); ``SheetError`` when HWDB refuses; request errors propagate.
+    ``serial_lookup(type_id, serial) -> [pids]`` resolves serials."""
+    r, pid, done = row["rec"], row.get("pid") or "", []
+    if row["action"] == "create":
+        hits = serial_lookup(ptid, r["serial_number"])
+        if len(hits) > 1:
+            raise SheetError(f"serial number {r['serial_number']} is now on {len(hits)} items: {', '.join(hits)}")
+        if hits:
+            pid = hits[0]                          # created by an earlier attempt — patch it instead
+        else:
+            payload = {
+                "component_type": {"part_type_id": ptid},
+                "country_code": r["institution"]["country_code"],
+                "institution": {"id": r["institution"]["id"]},
+                "serial_number": r["serial_number"],
+                "comments": r.get("comments") or "",
+                "specifications": merged_specs(template, r["specs"]),
+                "status": {"id": r.get("status_id", NEW_ITEM_STATUS)},
+            }
+            if "manufacturer" in r:
+                payload["manufacturer"] = {"id": r["manufacturer"]["id"]}
+            elif len(manufacturers) == 1 and manufacturers[0].get("id") is not None:
+                payload["manufacturer"] = {"id": manufacturers[0]["id"]}
+            body = api.create_component(ptid, payload)
+            pid = body.get("part_id") if body.get("status") == "OK" else None
+            if not pid:
+                raise SheetError(str(body.get("data") or body))
+            done.append("created")
+    item = None
+    if "created" not in done:
+        item = api.get_component(pid).get("data") or {}
+        specs = item.get("specifications") or [{}]
+        latest = specs[-1] if isinstance(specs[-1], dict) else {}
+        man = item.get("manufacturer") if isinstance(item.get("manufacturer"), dict) else None
+        st = item.get("status") if isinstance(item.get("status"), dict) else {}
+        same_serial = r["serial_number"].lower() == _text(item.get("serial_number")).lower()
+        payload = {
+            "part_id": pid,
+            "serial_number": item.get("serial_number") if same_serial else r["serial_number"] or item.get("serial_number"),
+            "manufacturer": {"id": r["manufacturer"]["id"]} if "manufacturer" in r
+                            else ({"id": man["id"]} if man else None),
+            "specifications": merged_specs(latest, r["specs"]),
+            "status": {"id": r["status_id"] if "status_id" in r else st.get("id")},
+            "comments": r["comments"] if "comments" in r else (item.get("comments") or ""),
+        }
+        current = {
+            "part_id": pid, "serial_number": item.get("serial_number"),
+            "manufacturer": {"id": man["id"]} if man else None, "specifications": latest,
+            "status": {"id": st.get("id")}, "comments": item.get("comments") or "",
+        }
+        if payload != current:
+            body = api.patch_component(pid, payload)
+            if body.get("status") != "OK":
+                raise SheetError(str(body.get("data") or body))
+            done.append("updated")
+    if r.get("location"):
+        loc = item.get("location") if item else None
+        cur_id = loc.get("id") if isinstance(loc, dict) else None
+        if cur_id != r["location"]["id"]:
+            body = api.post_location(pid, {
+                "location": {"id": r["location"]["id"]},
+                "arrived": r.get("arrived") or arrived_default,
+                "comments": r.get("location_comments") or "Sheet upload via HWDB Explorer"})
+            if body.get("status") != "OK":
+                raise SheetError(f"location — {body.get('data') or body}")
+            done.append("location")
+    if r.get("positions"):
+        occupants = {(m.get("functional_position") or ""): m.get("part_id")
+                     for m in (api.get_subcomponents(pid).get("data") or []) if isinstance(m, dict)}
+        current = {pos: occupants.get(pos) for pos in connectors}
+        wanted = dict(current)
+        for pos, v in r["positions"].items():
+            if v in ("", NULL):
+                wanted[pos] = None
+            elif _PID.match(v):
+                wanted[pos] = v.upper()
+            else:
+                hits = serial_lookup(connectors[pos], v)
+                if len(hits) != 1:
+                    raise SheetError(f"{pos}: serial number {v} matches {len(hits)} {connectors[pos]} items")
+                wanted[pos] = hits[0]
+        if wanted != current:
+            body = api.patch_subcomponents(pid, {"component": {"part_id": pid}, "subcomponents": wanted})
+            if body.get("status") != "OK":
+                raise SheetError(f"positions — {body.get('data') or body}")
+            done.append("positions")
+    return pid, done

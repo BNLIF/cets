@@ -1,0 +1,455 @@
+"""#177: a spreadsheet of items → HWDB. The sheet reader, mapping, plan and
+per-row apply are exercised on their own; the view with HWDB mocked.
+
+    python manage.py test explore.tests.test_sheet_upload
+"""
+
+from __future__ import annotations
+
+import io
+from unittest import mock
+
+import openpyxl
+import requests
+from django.contrib.auth import get_user_model
+from django.test import TestCase, override_settings
+
+from explore import sheetupload as su
+from explore.models import ActivityEvent, HwdbComponentEvent, SheetJob
+from hwdb.fnal.bearer import FnalLinkRequired
+
+T = "D00400300001"
+C = "D00400300002"
+URL = f"/hw/dev/upload/{T}/"
+TEMPLATE = {"Vbd": None, "Notes": None, "DATA": {}}
+CONNECTORS = {"A1": C, "A2": C}
+INSTITUTIONS = [{"id": 186, "name": "BNL", "country_code": "US"}, {"id": 7, "name": "CERN", "country_code": "CH"}]
+MAKERS = [{"id": 7, "name": "HPK"}, {"id": 8, "name": "SMB"}]
+
+CSV = (b"Record Type,Item\r\nPart Type ID,D00400300001\r\nInstitution,(186) BNL\r\n\r\n"
+       b"External ID,Serial Number,Status,S:Vbd,C:A1,Comments,Extra\r\n"
+       b",HPK-9,110,51.5,,new one,x\r\n"
+       b"D00400300001-00001,HPK-1,QA/QC Tests - Passed All,52,D00400300002-00001,,\r\n"
+       b",,,,,,\r\n"
+       b"D00400300001-00001,,,,, second row,\r\n")
+
+
+def _live(n, sn, status=0, vbd=51.4, comments=""):
+    return {"part_id": f"{T}-{n:05d}", "serial_number": sn, "status": {"id": status, "name": "x"},
+            "comments": comments, "specifications": [{"Vbd": vbd, "Notes": None, "DATA": {}}]}
+
+
+LIVE = {f"{T}-00001": _live(1, "HPK-1"), f"{T}-00002": _live(2, "HPK-2", 120),
+        f"{T}-00004": _live(4, "DUP"), f"{T}-00005": _live(5, "DUP")}
+
+
+class ReadTest(TestCase):
+    def test_csv_with_the_utilitys_header_block(self):
+        (s,) = su.read_sheets("items.csv", CSV)
+        self.assertEqual(s["values"], {"Record Type": "Item", "Part Type ID": T, "Institution": "(186) BNL"})
+        self.assertEqual(s["columns"], ["External ID", "Serial Number", "Status", "S:Vbd", "C:A1", "Comments", "Extra"])
+        self.assertEqual([r[0] for r in s["rows"]], [6, 7, 9])          # sheet row numbers, the blank row dropped
+        self.assertEqual(s["rows"][0][1], [None, "HPK-9", 110, 51.5, None, "new one", "x"])
+        self.assertEqual(s["rows"][1][1][3], 52)
+
+    def test_plain_table_and_typed_cells(self):
+        (s,) = su.read_sheets("a.csv", b"Serial Number;S:Vbd\n00123;1e3\nabc;0.5\n")
+        self.assertEqual(s["values"], {})
+        self.assertEqual(s["rows"], [[2, ["00123", 1000.0]], [3, ["abc", 0.5]]])   # a leading zero stays text
+        self.assertEqual(su._cell(" <null> "), "<null>")
+        self.assertEqual(su._cell("-7"), -7)
+        self.assertEqual(su._cell(3.0), 3)
+        self.assertIsNone(su._cell(""))
+
+    def test_workbook_tabs(self):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Items"
+        ws.append(["Serial Number", "Vbd"])
+        ws.append(["HPK-1", 51.0])
+        ws.append(["HPK-2", 52.25])
+        wb.create_sheet("Empty")
+        buf = io.BytesIO()
+        wb.save(buf)
+        sheets = su.read_sheets("book.xlsx", buf.getvalue())
+        self.assertEqual([s["name"] for s in sheets], ["Items"])
+        self.assertEqual(sheets[0]["rows"], [[2, ["HPK-1", 51]], [3, ["HPK-2", 52.25]]])
+
+    def test_a_block_is_two_columns_wide(self):
+        (s,) = su.read_sheets("a.csv", b"Serial Number,Vbd,Notes\nHPK-1,1,\n\nHPK-2,2,\n")
+        self.assertEqual(s["values"], {})                       # three columns: a table with a gap, not a block
+        self.assertEqual(len(s["rows"]), 2)
+        self.assertEqual(su.read_sheets("a.csv", b"\n\n"), [])
+
+
+class MapTest(TestCase):
+    def test_auto_map(self):
+        m = su.auto_map(["External ID", "serial number", "S:Vbd", "c:A1", "Vbd", "a2", "Extra", "Part Type ID"],
+                        TEMPLATE, CONNECTORS)
+        self.assertEqual(m, {"External ID": "part_id", "serial number": "serial_number", "S:Vbd": "spec:Vbd",
+                             "c:A1": "pos:A1", "Vbd": "spec:Vbd", "a2": "pos:A2", "Extra": "",
+                             "Part Type ID": "part_type_id"})
+
+    def test_records_merge_rows_and_take_the_sheet_defaults(self):
+        (s,) = su.read_sheets("items.csv", CSV)
+        recs = su.records(s, su.auto_map(s["columns"], TEMPLATE, CONNECTORS))
+        self.assertEqual(len(recs), 2)
+        new, old = recs
+        self.assertEqual((new["part_id"], new["serial_number"], new["institution"], new["part_type_id"]),
+                         ("", "HPK-9", "(186) BNL", T))
+        self.assertEqual((new["specs"], new["positions"], new["comments"]), ({"Vbd": 51.5}, {}, "new one"))
+        self.assertEqual(old["rows"], [7, 9])
+        self.assertEqual(old["comments"], "second row")                  # a later non-blank cell wins
+        self.assertEqual(old["positions"], {"A1": f"{C}-00001"})
+        self.assertNotIn("Extra", old)                                    # unassigned column ignored
+
+    def test_records_key_on_pid_and_serial(self):
+        s = {"values": {}, "columns": ["Part ID", "Serial Number"],
+             "rows": [[2, [f"{T}-00001", None]], [3, [f"{T}-00001", None]], [4, ["<unassigned>", "X"]], [5, [None, None]]]}
+        recs = su.records(s, su.auto_map(s["columns"], {}, {}))
+        self.assertEqual([(r["part_id"], r["serial_number"], r["rows"]) for r in recs],
+                         [(f"{T}-00001", "", [2, 3]), ("", "X", [4]), ("", "", [5])])
+
+
+def _plan(rows, **kw):
+    s = {"values": kw.pop("values", {}), "columns": kw.pop("columns"), "rows": [[i + 2, r] for i, r in enumerate(rows)]}
+    recs = su.records(s, su.auto_map(s["columns"], TEMPLATE, CONNECTORS))
+    return su.plan(recs, T, kw.pop("live", LIVE), kw.pop("makers", {f"{T}-00001": "HPK", f"{T}-00002": "HPK"}), TEMPLATE, CONNECTORS,
+                   INSTITUTIONS, MAKERS)
+
+
+class PlanTest(TestCase):
+    COLS = ["External ID", "Serial Number", "Status", "Manufacturer", "S:Vbd", "S:DATA.received", "C:A1",
+            "Institution", "Location", "Comments"]
+
+    def test_create_patch_skip(self):
+        rows = _plan([
+            [None, "HPK-9", 110, "HPK", 51.5, None, None, "(186) BNL", None, "new"],   # unknown serial → create
+            [f"{T}-00001", None, "QA/QC Tests - Passed All", "SMB", 52, 3, f"{C}-00001", None, "CERN", None],
+            [None, "hpk-2", 120, "hpk", 51.4, None, None, None, None, ""],             # everything as it is
+        ], columns=self.COLS)
+        self.assertEqual([(r["action"], r["state"]) for r in rows],
+                         [("create", "pending"), ("patch", "pending"), ("skip", "done")])
+        new, upd, same = rows
+        self.assertEqual(new["changes"], ["new item"])
+        self.assertEqual((new["rec"]["institution"]["id"], new["rec"]["status_id"], new["rec"]["manufacturer"]["id"]),
+                         (186, 110, 7))
+        self.assertEqual(upd["pid"], f"{T}-00001")
+        self.assertEqual(upd["changes"], ["status → QA/QC Tests - Passed All", "manufacturer → SMB", "Vbd → 52",
+                                          "DATA.received → 3", "location → CERN", f"A1 → {C}-00001"])
+        self.assertEqual(same["pid"], f"{T}-00002")
+
+    def test_errors(self):
+        rows = _plan([
+            [f"{T}-00099", None, None, None, None, None, None, None, None, None],
+            [f"{C}-00001", None, None, None, None, None, None, None, None, None],
+            [None, "DUP", None, None, None, None, None, None, None, None],
+            [None, "HPK-1", "Lost", None, None, None, None, None, None, None],
+            [f"{T}-00001", None, None, "Acme", None, None, None, None, None, None],
+            [f"{T}-00002", None, None, None, None, None, None, None, "Mars", None],
+            [None, "HPK-9", None, None, None, None, None, None, None, None],
+            [None, None, None, None, 1, None, None, None, None, None],
+        ], columns=self.COLS)
+        self.assertTrue(all(r["action"] == "error" for r in rows))
+        errs = [r["error"] for r in rows]
+        self.assertIn("not in HWDB", errs[0])
+        self.assertIn(f"is not a {T} item", errs[1])
+        self.assertIn("DUP is on 2 items", errs[2])
+        self.assertIn("unknown status", errs[3])
+        self.assertIn("not a manufacturer", errs[4])
+        self.assertIn("unknown location", errs[5])
+        self.assertIn("needs an institution", errs[6])
+        self.assertIn("no External ID and no serial", errs[7])
+
+    def test_spec_keys_positions_and_type_are_checked(self):
+        rows = _plan([[None, "HPK-1", 1]], columns=["External ID", "Serial Number", "S:Gain"])
+        self.assertIn("not a key of the type", rows[0]["error"])
+        rows = _plan([[None, "HPK-1", 1]], columns=["External ID", "Serial Number", "S:Vbd.x"])
+        self.assertIn("not a nested object", rows[0]["error"])
+        rows = _plan([[None, "HPK-1", 1]], columns=["External ID", "Serial Number", "C:B9"])
+        self.assertIn("no “B9” position", rows[0]["error"])
+        rows = _plan([[None, "HPK-1"]], columns=["External ID", "Serial Number"], values={"Part Type ID": C})
+        self.assertIn(f"is not {T}", rows[0]["error"])
+
+    def test_sheet_defaults_apply_to_every_row(self):
+        rows = _plan([[None, "HPK-9"], [None, "HPK-8"]], columns=["External ID", "Serial Number"],
+                     values={"Institution": "186", "Status": "In Fabrication"})
+        self.assertEqual([(r["action"], r["rec"]["institution"]["name"], r["rec"]["status_id"]) for r in rows],
+                         [("create", "BNL", 100)] * 2)
+
+
+def _detail(n, sn="HPK-1", status=0, vbd=51.4, maker=7, location=186):
+    return {"data": {"part_id": f"{T}-{n:05d}", "serial_number": sn, "status": {"id": status},
+                     "manufacturer": {"id": maker, "name": "HPK"} if maker else None, "comments": "",
+                     "specifications": [{"Vbd": vbd, "Notes": None, "DATA": {}}],
+                     "location": {"id": location, "name": "BNL"}}}
+
+
+def _ok(**kw):
+    return {"status": "OK", **kw}
+
+
+class ApplyTest(TestCase):
+    def setUp(self):
+        self.api = mock.MagicMock()
+        self.api.create_component.return_value = _ok(part_id=f"{T}-00009")
+        self.api.patch_component.return_value = _ok()
+        self.api.post_location.return_value = _ok()
+        self.api.patch_subcomponents.return_value = _ok()
+        self.api.get_component.return_value = _detail(1)
+        self.api.get_subcomponents.return_value = {"data": [{"functional_position": "A1", "part_id": f"{C}-00001"}]}
+        self.lookups = {}
+
+    def lookup(self, tid, sn):
+        return self.lookups.get((tid, sn), [])
+
+    def go(self, row):
+        return su.apply_row(self.api, T, row, TEMPLATE, CONNECTORS, MAKERS, self.lookup, "2026-09-25T10:00:00")
+
+    def test_create_then_positions(self):
+        row = {"action": "create", "pid": "", "rec": {
+            "serial_number": "HPK-9", "institution": {"id": 186, "country_code": "US"}, "comments": "new",
+            "specs": {"Vbd": 51.5, "DATA.received": 3}, "positions": {"A1": "S-1", "A2": "<null>"}, "status_id": 110}}
+        self.lookups[(C, "S-1")] = [f"{C}-00007"]
+        self.api.get_subcomponents.return_value = {"data": []}
+        pid, done = self.go(row)
+        self.assertEqual((pid, done), (f"{T}-00009", ["created", "positions"]))
+        payload = self.api.create_component.call_args.args[1]
+        self.assertEqual(payload["specifications"], {"Vbd": 51.5, "Notes": None, "DATA": {"received": 3}})
+        self.assertEqual((payload["status"], payload["institution"], payload["country_code"], payload["comments"]),
+                         ({"id": 110}, {"id": 186}, "US", "new"))
+        self.assertNotIn("manufacturer", payload)                  # two makers on the type, none in the row
+        self.api.get_component.assert_not_called()
+        self.api.patch_component.assert_not_called()
+        self.assertEqual(self.api.patch_subcomponents.call_args.args[1]["subcomponents"],
+                         {"A1": f"{C}-00007", "A2": None})
+
+    def test_create_finds_the_item_a_lost_reply_created(self):
+        row = {"action": "create", "pid": "", "rec": {"serial_number": "HPK-1", "institution": {"id": 186, "country_code": "US"},
+                                                      "specs": {}, "positions": {}, "comments": ""}}
+        self.lookups[(T, "HPK-1")] = [f"{T}-00001"]
+        pid, done = self.go(row)
+        self.assertEqual((pid, done), (f"{T}-00001", []))          # nothing differed, nothing written
+        self.api.create_component.assert_not_called()
+        self.api.patch_component.assert_not_called()
+        self.lookups[(T, "HPK-1")] = [f"{T}-00001", f"{T}-00004"]
+        with self.assertRaises(su.SheetError):
+            self.go(row)
+
+    def test_patch_only_what_differs(self):
+        row = {"action": "patch", "pid": f"{T}-00001", "rec": {"serial_number": "", "status_id": 120,
+                                                                "specs": {"Vbd": 52}, "positions": {}}}
+        pid, done = self.go(row)
+        self.assertEqual(done, ["updated"])
+        p = self.api.patch_component.call_args.args[1]
+        self.assertEqual(p, {"part_id": f"{T}-00001", "serial_number": "HPK-1", "manufacturer": {"id": 7},
+                             "specifications": {"Vbd": 52, "Notes": None, "DATA": {}}, "status": {"id": 120},
+                             "comments": ""})
+        self.api.patch_component.reset_mock()
+        row["rec"] = {"serial_number": "HPK-1", "status_id": 0, "specs": {"Vbd": 51.4}, "positions": {},
+                      "location": {"id": 186}}
+        self.assertEqual(self.go(row)[1], [])                       # the location matches too
+        self.api.patch_component.assert_not_called()
+        self.api.post_location.assert_not_called()
+
+    def test_location_and_positions_by_serial(self):
+        row = {"action": "patch", "pid": f"{T}-00001", "rec": {
+            "serial_number": "", "specs": {}, "positions": {"A2": "S-2"}, "location": {"id": 7},
+            "location_comments": "moved", "arrived": "2026-09-01T00:00:00"}}
+        self.lookups[(C, "S-2")] = [f"{C}-00002"]
+        self.assertEqual(self.go(row)[1], ["location", "positions"])
+        self.assertEqual(self.api.post_location.call_args.args[1],
+                         {"location": {"id": 7}, "arrived": "2026-09-01T00:00:00", "comments": "moved"})
+        self.assertEqual(self.api.patch_subcomponents.call_args.args[1]["subcomponents"],
+                         {"A1": f"{C}-00001", "A2": f"{C}-00002"})
+        self.lookups[(C, "S-2")] = []
+        with self.assertRaises(su.SheetError):
+            self.go(row)
+
+    def test_refusals_raise(self):
+        self.api.patch_component.return_value = {"status": "ERROR", "data": "nope"}
+        row = {"action": "patch", "pid": f"{T}-00001", "rec": {"serial_number": "", "status_id": 120, "specs": {}, "positions": {}}}
+        with self.assertRaises(su.SheetError) as cm:
+            self.go(row)
+        self.assertEqual(str(cm.exception), "nope")
+
+
+def _api():
+    api = mock.MagicMock()
+    api.get_component_type.return_value = {"data": {
+        "manufacturers": MAKERS, "connectors": CONNECTORS,
+        "properties": {"specifications": [{"datasheet": TEMPLATE}]}}}
+    api.get_institutions.return_value = {"data": [{"id": 186, "name": "BNL", "country": {"code": "US", "name": "USA"}}]}
+    api._make_request.return_value = {"pagination": {"pages": 1}, "data": list(LIVE.values())}
+    api.create_component.return_value = _ok(part_id=f"{T}-00009")
+    api.patch_component.return_value = _ok()
+    api.get_component.return_value = _detail(1)
+    return api
+
+
+def _mocked(api):
+    return (mock.patch("explore.views.mint_for", return_value="bearer"),
+            mock.patch("explore.views.FnalDbApiClient", return_value=api))
+
+
+class ViewTest(TestCase):
+    def setUp(self):
+        HwdbComponentEvent.objects.create(instance="dev", part_type_id=T, part_id=f"{T}-00001",
+                                          serial_number="HPK-1", status="Unknown", status_id=0, manufacturer="HPK")
+        self.client.force_login(get_user_model().objects.create_user("w", "w@w.io", "pw"))
+
+    def upload(self, api, name="items.csv", body=CSV, **extra):
+        p1, p2 = _mocked(api)
+        with p1, p2:
+            return self.client.post(URL, {"step": "file", "file": _file(name, body), **extra})
+
+    def test_page_and_unlinked(self):
+        p1, p2 = _mocked(_api())
+        with p1, p2:
+            r = self.client.get(URL)
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'id="su-file"')
+        with mock.patch("explore.views.mint_for", side_effect=FnalLinkRequired("x")):
+            self.assertEqual(self.client.get(URL).status_code, 302)
+            self.assertEqual(self.client.post(URL, {"step": "file"}).status_code, 401)
+        with override_settings(HWDB_WRITE_INSTANCES=[]):
+            self.assertEqual(self.client.get(URL).status_code, 403)
+
+    def test_file_makes_a_job_with_the_auto_mapping(self):
+        r = self.upload(_api())
+        self.assertEqual(r.status_code, 200, r.content)
+        job = SheetJob.objects.get()
+        self.assertEqual(r.json()["url"], f"{URL}{job.pk}/")
+        self.assertEqual((job.name, job.username, job.instance), ("items.csv", "w", "dev"))
+        self.assertEqual(job.mapping["S:Vbd"], "spec:Vbd")
+        self.assertEqual(job.mapping["Extra"], "")
+        p1, p2 = _mocked(_api())
+        with p1, p2:
+            r = self.client.get(f"{URL}{job.pk}/")
+        self.assertContains(r, 'name="col6"')
+        self.assertContains(r, "Sheet default: <b>Institution</b> = (186) BNL")
+        self.assertContains(r, 'value="pos:A2"')
+        self.assertNotContains(r, 'id="su-plan"')
+
+    def test_workbook_tabs_switch_on_the_job_page(self):
+        wb = openpyxl.Workbook()
+        wb.active.title = "Notes"
+        wb.active.append(["just a note"])
+        wb.create_sheet("Items").append(["Serial Number", "S:Vbd"])
+        wb["Items"].append(["HPK-1", 1])
+        wb.create_sheet("Tests").append(["Serial Number", "T:x"])
+        wb["Tests"].append(["HPK-1", 1])
+        buf = io.BytesIO()
+        wb.save(buf)
+        api = _api()
+        r = self.upload(api, "book.xlsx", buf.getvalue())
+        job = SheetJob.objects.get()
+        self.assertEqual((job.name, job.sheet["name"], [t["name"] for t in job.tabs]),
+                         ("book.xlsx", "Items", ["Notes", "Items", "Tests"]))   # the first tab with rows
+        self.assertEqual(job.mapping, {"Serial Number": "serial_number", "S:Vbd": "spec:Vbd"})
+        job.rows = [{"n": 2, "state": "done"}]
+        job.save()
+        url = f"{URL}{job.pk}/"
+        p1, p2 = _mocked(api)
+        with p1, p2:
+            r = self.client.get(url)
+            self.assertContains(r, 'id="su-tab"')
+            self.assertContains(r, "Tests (1 row)")
+            self.assertEqual(self.client.post(url, {"step": "tab", "tab": "Tests"}).status_code, 302)
+        job.refresh_from_db()
+        self.assertEqual((job.sheet["name"], job.mapping, job.rows),
+                         ("Tests", {"Serial Number": "serial_number", "T:x": ""}, []))
+
+    def test_bad_files(self):
+        self.assertEqual(self.upload(_api(), "a.csv", b"\n\n").status_code, 400)
+        p1, p2 = _mocked(_api())
+        with p1, p2:
+            self.assertEqual(self.client.post(URL, {"step": "file"}).status_code, 400)
+
+    def test_map_plans_apply_writes_and_delete(self):
+        api = _api()
+        self.upload(api)
+        job = SheetJob.objects.get()
+        url = f"{URL}{job.pk}/"
+        p1, p2 = _mocked(api)
+        with p1, p2:
+            r = self.client.post(url, {"step": "map", "col0": "part_id", "col1": "serial_number", "col2": "status",
+                                       "col3": "spec:Vbd", "col4": "pos:A1", "col5": "comments", "col6": ""})
+            self.assertEqual(r.status_code, 302)
+            job.refresh_from_db()
+            self.assertEqual([(x["action"], x["key"]) for x in job.rows], [("create", "HPK-9"), ("patch", f"{T}-00001")])
+            r = self.client.get(url)
+            self.assertContains(r, 'id="su-plan"')
+            self.assertContains(r, "new item")
+            self.assertContains(r, "status → QA/QC Tests - Passed All")
+            api.get_subcomponents.return_value = {"data": []}
+            api.patch_subcomponents.return_value = _ok()
+            api.find_components_by_serial.return_value = []
+            r = self.client.post(url, {"step": "apply"})
+        self.assertEqual(r.status_code, 200)
+        j = r.json()
+        self.assertEqual(j["left"], 0)
+        self.assertEqual([(x["pid"], x["state"], x["done"]) for x in j["rows"]],
+                         [(f"{T}-00009", "done", ["created"]), (f"{T}-00001", "done", ["updated", "positions"])])
+        self.assertEqual(api.create_component.call_args.args[1]["serial_number"], "HPK-9")
+        self.assertEqual(api.patch_component.call_args.args[1]["status"], {"id": 120})
+        job.refresh_from_db()
+        self.assertEqual(job.counts()["pending"], 0)
+        self.assertIn("1 D00400300001 items created, 1 updated, 0 failed", ActivityEvent.objects.get().summary)
+        p1, p2 = _mocked(api)
+        with p1, p2:
+            r = self.client.get(url)
+            self.assertContains(r, "Continue")
+            self.assertContains(r, "created")
+            self.assertEqual(self.client.post(url, {"step": "delete"}).status_code, 302)
+        self.assertFalse(SheetJob.objects.exists())
+
+    def test_apply_records_refusals_and_outages_per_row(self):
+        api = _api()
+        self.upload(api)
+        job = SheetJob.objects.get()
+        job.rows = [{"n": 6, "rows": [6], "key": "HPK-9", "pid": "", "action": "create", "changes": [], "error": "",
+                     "state": "pending", "rec": {"serial_number": "HPK-9", "institution": {"id": 186, "country_code": "US"},
+                                                 "specs": {}, "positions": {}}},
+                    {"n": 7, "rows": [7], "key": f"{T}-00001", "pid": f"{T}-00001", "action": "patch", "changes": [],
+                     "error": "", "state": "pending", "rec": {"serial_number": "", "status_id": 120, "specs": {}, "positions": {}}}]
+        job.save()
+        api.find_components_by_serial.return_value = []
+        api.create_component.return_value = {"status": "ERROR", "data": "roles"}
+        api.get_component.side_effect = requests.ConnectionError("down")
+        p1, p2 = _mocked(api)
+        with p1, p2:
+            j = self.client.post(f"{URL}{job.pk}/", {"step": "apply"}).json()
+        self.assertEqual([(x["state"], x["error"]) for x in j["rows"]], [("error", "roles"), ("error", "down")])
+        job.refresh_from_db()
+        self.assertEqual((job.counts()["error"], job.counts()["failed"]), (0, 2))   # plan problems vs apply failures
+        self.assertEqual([x["state"] for x in job.rows], ["error", "error"])
+
+    def test_old_jobs_expire(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        old = SheetJob.objects.create(instance="dev", part_type_id=T, username="w", name="old.csv",
+                                      sheet={"values": {}, "columns": ["a"], "rows": []})
+        SheetJob.objects.filter(pk=old.pk).update(updated_at=timezone.now() - timedelta(days=4))
+        fresh = SheetJob.objects.create(instance="dev", part_type_id=T, username="w", name="fresh.csv",
+                                        sheet={"values": {}, "columns": ["a"], "rows": []})
+        p1, p2 = _mocked(_api())
+        with p1, p2:
+            r = self.client.get(URL)
+        self.assertContains(r, "fresh.csv")
+        self.assertNotContains(r, "old.csv")
+        self.assertContains(r, "kept 3 days")
+        self.assertEqual(list(SheetJob.objects.values_list("pk", flat=True)), [fresh.pk])
+
+    def test_other_users_jobs_are_invisible(self):
+        SheetJob.objects.create(instance="dev", part_type_id=T, username="someone", name="x.csv",
+                                sheet={"values": {}, "columns": ["a"], "rows": []})
+        p1, p2 = _mocked(_api())
+        with p1, p2:
+            self.assertNotContains(self.client.get(URL), "x.csv")
+            self.assertEqual(self.client.get(f"{URL}{SheetJob.objects.get().pk}/").status_code, 302)
+
+
+def _file(name, body):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    return SimpleUploadedFile(name, body)

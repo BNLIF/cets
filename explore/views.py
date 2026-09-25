@@ -4,6 +4,7 @@ import itertools
 import json
 import logging
 import re
+import time
 from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 from urllib.parse import urlencode
@@ -34,14 +35,15 @@ from hwdb.fnal import session as fnal_session
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for, verify_link
 
 from . import (activity, charts, checklistforms, checklists, curation, events,
-               execsummary, itemsedit, labels, navigation, parts, plotting, scanning, watches)
+               execsummary, itemsedit, labels, navigation, parts, plotting, scanning, sheetupload,
+               watches)
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, refresh_component_row, sync_test_events
 from .hierarchy import sync_hierarchy, sync_system
 from .instances import instance_of, namespace_of
 from .models import (ChildMintSetting, 
     ActivityEvent, BoxChecklist, ChecklistBookmark, ChecklistDraft, HierarchyNode,
-    InstitutionPref, ShippingTypeOverride,
+    InstitutionPref, SheetJob, ShippingTypeOverride,
     HierarchySyncState, HwdbComponentEvent, HwdbTestEvent, PackScan, ShipmentItem, TestDateSetting,
 )
 from .queries import (
@@ -6529,3 +6531,178 @@ def explore_search_api_view(request):
         "types": types, "parts": parts, "direct_part": direct,
         "direct_part_url": _rev(request, "explore:part", args=[direct]) if direct else None,
     })
+
+
+def _sheet_jobs(request, inst, part_type_id):
+    return SheetJob.for_instance(inst).filter(part_type_id=part_type_id,
+                                              username=activity.actor_of(request))
+
+
+def _sheet_apply(request, api, inst, part_type_id, job) -> JsonResponse:
+    """One apply request: the pending plan rows in order, one item at a
+    time, for ``APPLY_SECONDS`` — then the page asks again. Each row's
+    outcome is saved as it lands, so a reload or a lost connection
+    continues rather than repeats (and a create re-checks the serial)."""
+    try:
+        type_record = api.get_component_type(part_type_id)
+    except requests.RequestException as e:
+        return JsonResponse({"error": _hwdb_error_detail(e)}, status=502)
+    template = _spec_template(type_record)
+    tdata = type_record.get("data") or {}
+    connectors = tdata.get("connectors") or {}
+    manufacturers = [m for m in tdata.get("manufacturers") or [] if isinstance(m, dict)]
+    started = time.monotonic()
+    out, rows = [], job.rows
+    for row in rows:
+        if row.get("state") != "pending":
+            continue
+        if time.monotonic() - started > sheetupload.APPLY_SECONDS:
+            break
+        try:
+            pid, done = sheetupload.apply_row(
+                api, part_type_id, row, template, connectors, manufacturers,
+                lambda tid, sn: _serial_pids(api, inst, tid, sn), timezone.localtime().isoformat())
+            row.update(pid=pid, state="done", error="", done=done)
+            refresh_component_row(api, inst, pid)
+        except sheetupload.SheetError as e:
+            row.update(state="error", error=str(e))
+        except requests.RequestException as e:
+            row.update(state="error", error=_hwdb_error_detail(e))
+        out.append({"n": row["n"], "pid": row.get("pid") or "", "state": row["state"],
+                    "error": row.get("error") or "", "done": row.get("done") or []})
+        job.rows = rows
+        job.save(update_fields=["rows", "updated_at"])
+    left = sum(1 for r in rows if r.get("state") == "pending")
+    if not left and out:
+        c = job.counts()
+        activity.log(inst, ActivityEvent.KIND_ITEM,
+                     f"Sheet “{job.name}”: {c['created']} {part_type_id} items created, "
+                     f"{c['updated']} updated, {c['failed']} failed",
+                     part_type_id=part_type_id, actor=activity.actor_of(request))
+    return JsonResponse({"rows": out, "left": left})
+
+
+@login_not_required
+@fnal_login_required
+def explore_sheet_upload_view(request, part_type_id, job_id=None):
+    """#177 (Hajime 2026-09-24): a spreadsheet of items → HWDB, the
+    utility's ``hwdb-upload`` Item records in the Explorer. Without a job:
+    the upload form and the user's jobs for this type (``step=file`` parses
+    every tab of the file into a job, the first tab with rows selected).
+    With a job: the tab (``step=tab`` switches), the columns mapped to fields (``step=map`` saves the mapping and plans
+    every row against the type's live listing, writing nothing), the plan,
+    and Upload (``step=apply``, short requests until nothing is pending;
+    ``step=delete`` removes the job). Jobs untouched for ``RETENTION_DAYS``
+    are pruned on every page load. Write instances only; the type's
+    roles are said up front (#173), HWDB enforces them."""
+    inst = instance_of(request)
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return HttpResponseForbidden("Sheet uploads are not enabled here.")
+    post = request.POST if request.method == "POST" else {}
+    step = post.get("step") or ""
+    page_url = _rev(request, "explore:sheet_upload", args=[part_type_id])
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        if step in ("file", "apply"):
+            return JsonResponse({"error": "FNAL link expired — reload the page."}, status=401)
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': request.path, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        if step in ("file", "apply"):
+            return JsonResponse({"error": FNAL_UNAVAILABLE}, status=503)
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(_rev(request, "explore:home"))
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    if step != "apply":
+        SheetJob.prune(sheetupload.RETENTION_DAYS)
+    node = (HierarchyNode.for_instance(inst)
+            .filter(level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first())
+    ctx = {"part_type_id": part_type_id, "type_name": node.name if node else "",
+           "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
+           "role_gate": _type_role_gate(request, inst, api, part_type_id),
+           "retention_days": sheetupload.RETENTION_DAYS}
+    if job_id is None:
+        if step == "file":
+            f = request.FILES.get("file")
+            if not f or f.size > sheetupload.UPLOAD_MAX:
+                return JsonResponse({"error": "Choose a CSV or Excel file under 5 MB."}, status=400)
+            try:
+                sheets = sheetupload.read_sheets(f.name, f.read())
+            except Exception as e:
+                logger.warning("sheet upload: parse failed: %s", e)
+                return JsonResponse({"error": f"Couldn’t read {f.name}."}, status=400)
+            if not sheets:
+                return JsonResponse({"error": "No header row found in the file."}, status=400)
+            sheet = next((s for s in sheets if s["rows"]), sheets[0])
+            try:
+                type_record = api.get_component_type(part_type_id)
+            except requests.RequestException as e:
+                return JsonResponse({"error": f"Couldn’t read the type from HWDB — {_hwdb_error_detail(e)}"},
+                                    status=502)
+            mapping = sheetupload.auto_map(sheet["columns"], _spec_template(type_record),
+                                           (type_record.get("data") or {}).get("connectors") or {})
+            job = SheetJob.objects.create(
+                instance=inst, part_type_id=part_type_id, username=activity.actor_of(request),
+                name=f.name, tabs=sheets, sheet=sheet, mapping=mapping)
+            return JsonResponse({"url": _rev(request, "explore:sheet_upload", args=[part_type_id, job.pk])})
+        ctx["jobs"] = [(j, j.counts()) for j in _sheet_jobs(request, inst, part_type_id)]
+        return render(request, "explore/sheet_upload.html", ctx)
+    job = _sheet_jobs(request, inst, part_type_id).filter(pk=job_id).first()
+    if job is None:
+        messages.error(request, "That upload is gone.")
+        return redirect(page_url)
+    if step == "delete":
+        job.delete()
+        return redirect(page_url)
+    if step == "apply":
+        return _sheet_apply(request, api, inst, part_type_id, job)
+    try:
+        type_record = api.get_component_type(part_type_id)
+    except requests.RequestException as e:
+        messages.error(request, f"Couldn’t read the type from HWDB — {_hwdb_error_detail(e)}")
+        type_record = {}
+    template = _spec_template(type_record)
+    tdata = type_record.get("data") or {}
+    connectors = tdata.get("connectors") or {}
+    manufacturers = [m for m in tdata.get("manufacturers") or [] if isinstance(m, dict)]
+    if step == "tab":   # another tab of the workbook: its own auto-mapping, the plan starts over
+        sheet = next((s for s in job.tabs if s["name"] == (post.get("tab") or "")), None)
+        if sheet is not None:
+            job.sheet, job.rows = sheet, []
+            job.mapping = sheetupload.auto_map(sheet["columns"], template, connectors)
+            job.save(update_fields=["sheet", "mapping", "rows", "updated_at"])
+        return redirect(request.path)
+    if step == "map":
+        job.mapping = {c: (post.get(f"col{i}") or "") for i, c in enumerate(job.sheet["columns"])}
+        try:
+            live = itemsedit.live_rows(
+                api, part_type_id,
+                make_api=lambda: FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer))
+            events.refresh_from_listing(inst, part_type_id, live)
+        except requests.RequestException as e:
+            messages.error(request, f"Couldn’t read the items from HWDB — {_hwdb_error_detail(e)}")
+            job.save(update_fields=["mapping", "updated_at"])
+            return redirect(request.path)
+        makers = dict(HwdbComponentEvent.for_instance(inst).filter(part_type_id=part_type_id)
+                      .exclude(manufacturer="").values_list("part_id", "manufacturer"))
+        job.rows = sheetupload.plan(sheetupload.records(job.sheet, job.mapping), part_type_id, live,
+                                    makers, template, connectors, _institution_options(api), manufacturers)
+        job.save(update_fields=["mapping", "rows", "updated_at"])
+        return redirect(request.path)
+    options = [("", "— not used —")] + list(sheetupload.FIELD_LABELS)
+    options += [(f"spec:{k}", f"Specs: {k}") for k in template]
+    options += [(f"pos:{p}", f"Position {p} ({t})" if t else f"Position {p}")
+                for p, t in sorted(connectors.items(), key=lambda kv: str(kv[0]))]
+    known = {o[0] for o in options}
+    for a in job.mapping.values():
+        if a and a not in known:
+            options.append((a, a.replace("spec:", "Specs: ").replace("pos:", "Position ")))
+            known.add(a)
+    ctx.update(job=job, counts=job.counts(), options=options,
+               columns=[(i, c, job.mapping.get(c) or "", job.sheet["rows"][0][1][i] if job.sheet["rows"] else None)
+                        for i, c in enumerate(job.sheet["columns"])],
+               tabs=[(t["name"], len(t["rows"])) for t in job.tabs] if len(job.tabs) > 1 else [],
+               values=[(k, v) for k, v in (job.sheet.get("values") or {}).items()],
+               n_rows=len(job.sheet["rows"]), over=job.sheet.get("over") or 0)
+    return render(request, "explore/sheet_upload.html", ctx)

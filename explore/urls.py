@@ -53,6 +53,8 @@ urlpatterns = [
          views.explore_checklist_asset_view, name="checklist_asset"),
     path("items-edit/<str:part_type_id>/", views.explore_items_edit_view, name="items_edit"),
     path("labels/<str:part_type_id>/", views.explore_labels_view, name="labels"),
+    path("upload/<str:part_type_id>/", views.explore_sheet_upload_view, name="sheet_upload"),
+    path("upload/<str:part_type_id>/<int:job_id>/", views.explore_sheet_upload_view, name="sheet_upload"),
     path("part-new/<str:part_type_id>/", views.explore_item_create_view,
          name="item_create"),
     path("checklist/<str:part_type_id>/<str:name>/",
