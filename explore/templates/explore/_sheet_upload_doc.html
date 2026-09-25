@@ -1,0 +1,81 @@
+{# #177–#179: the Upload sheet page's own reference — file types and the schema of each kind of upload. Included at the bottom of both the upload page and a job page. #}
+<details class="su-doc">
+  <summary>File formats and schemas</summary>
+
+  <h3>Files</h3>
+  <table>
+    <tr><th>File</th><th>What it holds</th></tr>
+    <tr><td><code>.csv</code>, <code>.tsv</code>, <code>.txt</code></td><td>One sheet. The separator (comma, semicolon or tab) is detected.</td></tr>
+    <tr><td><code>.xlsx</code></td><td>Every tab is read; pick the tab on the job page. Cell types are kept (numbers stay numbers, dates become ISO text).</td></tr>
+    <tr><td><code>.json</code></td><td>Records as JSON: a list of objects, an object keyed by External ID, or an object with the records under <code>data</code> and its other entries as the key/value block. Each object’s top-level keys are the columns; nested values stay nested.</td></tr>
+    <tr><td><code>.zip</code></td><td>One JSON file per item, each one test record (schema below). Files in folders are read; anything that is not <code>.json</code> is ignored.</td></tr>
+  </table>
+  <p>20 MB per file, 5000 rows per tab. In a sheet or a JSON record, a cell whose text is a JSON object or list becomes that nested value. A number written with a leading zero (a serial like <code>00123</code>) stays text.</p>
+
+  <h3>Sheet layout</h3>
+  <p>The HWDB Python upload tool’s layout: an optional key/value block in columns A–B, a blank row, then the header row and the data rows. Block entries are defaults for every row (a cell wins over the block). Recognised block keys: <code>Record Type</code> (Item, Test, Item Image, Test Image), <code>Part Type ID</code> (must be this type), <code>Test Name</code>, and any column name such as <code>Institution</code> or <code>Status</code>.</p>
+  <pre>Record Type,Item
+Part Type ID,{{ part_type_id }}
+Institution,(128) Brookhaven National Laboratory
+
+External ID,Serial Number,Status,S:Drawing Number,C:A1,Comments
+,BATCH-A,Waiting on QA/QC Tests,DFD-20-A101,,new item
+{{ part_type_id }}-00018,,120,,D00400300002-00007,existing item</pre>
+  <p>Every column is matched to a field on the job page (auto-filled from the names below; the last mapping used for a type is remembered in this browser). Rows are matched to items by <b>External ID</b> (the PID), else by <b>Serial Number</b>; a serial on several items is refused, give the PID.</p>
+
+  <h3>Items — create or update</h3>
+  <table>
+    <tr><th>Column</th><th>Value</th></tr>
+    <tr><td>External ID / Part ID</td><td>The PID. Blank = look the item up by serial; an unknown serial becomes a <b>new item</b>.</td></tr>
+    <tr><td>Serial Number</td><td>Required for a new item.</td></tr>
+    <tr><td>Status</td><td>The HWDB status id (<code>110</code>) or its label (<code>Waiting on QA/QC Tests</code>). A new item without one is born <i>Waiting on QA/QC Tests</i>.</td></tr>
+    <tr><td>Manufacturer</td><td>One of the type’s manufacturers: <code>(7) Hajime Inc</code>, <code>7</code> or <code>Hajime Inc</code>. A new item on a type with exactly one manufacturer gets it.</td></tr>
+    <tr><td>Institution</td><td>The owner of a <b>new</b> item, same forms as above (<code>(128) Brookhaven National Laboratory</code>). Required for a new item, usually in the block.</td></tr>
+    <tr><td>Comments</td><td>The item’s comments.</td></tr>
+    <tr><td>Location, Location Comments, Arrived</td><td>Posts a location entry when it differs from the item’s current one. Arrived is an ISO timestamp, default now.</td></tr>
+    <tr><td><code>S:</code>&lt;key&gt;</td><td>An Item Specs key of the type’s datasheet; dots reach into a nested object (<code>S:DATA.received</code>). <code>&lt;null&gt;</code> clears it. A bare column named exactly like a spec key maps too.</td></tr>
+    <tr><td><code>C:</code>&lt;position&gt;</td><td>The item to put in that sub-component position: a PID, or a serial number of the position’s type. <code>&lt;null&gt;</code> empties the position.</td></tr>
+  </table>
+  <p>Rows naming the same item merge into one record (later cells win). Check plans every row against the type’s live listing: <i>create</i>, <i>update</i> with the fields that differ, <i>nothing to do</i>, or a problem. Upload writes one item at a time: a create re-checks the serial first, so a retry never creates twice; an update is one PATCH of the standard fields and specs only when something differs; then the location and the positions.</p>
+
+  <h3>Test records — one per row</h3>
+  <p>A sheet is a Test sheet when the block says <code>Record Type,Test</code> or any column starts with <code>T:</code>; switch it by hand on the job page. Every row posts one record of the <b>Test name</b> on the page (the block’s <code>Test Name</code> fills it in). The test type is created on the component type on first use.</p>
+  <table>
+    <tr><th>Column</th><th>Value</th></tr>
+    <tr><td>External ID / Serial Number</td><td>The item, which must exist.</td></tr>
+    <tr><td>Comments</td><td>The record’s comments.</td></tr>
+    <tr><td><code>T:</code>&lt;key&gt;</td><td>A value in the record’s DATA; dots nest (<code>T:Damage.count</code>). On a Test sheet every other column is a <code>T:</code> key too.</td></tr>
+    <tr><td><code>T:</code>&lt;list&gt;<code>[]</code>…</td><td>A list: <code>T:Boxes[].Label</code>, <code>T:Boxes[].Checks[].Result</code>, <code>T:Notes[]</code>. Rows naming the same item with the same plain values become one record; inside it each <code>[]</code> level holds one element per distinct set of scalar members.</td></tr>
+    <tr><td>Test data</td><td>A cell holding the whole DATA object as JSON (what a <code>.zip</code> gives).</td></tr>
+  </table>
+  <pre>External ID,T:Date,T:Boxes[].Label,T:Boxes[].Checks[].Name,T:Boxes[].Checks[].Result
+{{ part_type_id }}-00018,2026-09-25,box 1,seal,ok
+{{ part_type_id }}-00018,2026-09-25,box 1,count,ok
+{{ part_type_id }}-00018,2026-09-25,box 2,seal,torn</pre>
+  <p>gives one record: <code>{"Date": "2026-09-25", "Boxes": [{"Label": "box 1", "Checks": [{"Name": "seal", "Result": "ok"}, {"Name": "count", "Result": "ok"}]}, {"Label": "box 2", "Checks": [{"Name": "seal", "Result": "torn"}]}]}</code>. A row whose item already holds a record of that test with exactly the same DATA is left alone, so re-uploading a sheet is harmless.</p>
+
+  <h4>A zip of JSON files</h4>
+  <p>One file per item, one record per file:</p>
+  <pre>{
+  "part_id": "{{ part_type_id }}-00018",      // or "serial_number": "BATCH-A"
+  "test_name": "Batch Check",             // optional — else the name on the page
+  "comments": "…",                        // optional
+  "data": { "Inspected By": "CZ", "Boxes": 4, "Damage": { "count": 0 } }
+}</pre>
+  <p>Keys are matched regardless of case, spaces or underscores (<code>External ID</code>, <code>Serial Number</code>, <code>Test Name</code>, <code>DATA</code> work too). Without <code>data</code>, every other key is the test data. A file that is not such an object shows as a problem row.</p>
+
+  <h3>Files to attach — one per row</h3>
+  <p>A sheet is an attachment sheet when the block says <code>Record Type,Item Image</code> or <code>Test Image</code>, or it has an <code>Image File</code> column. The files themselves are picked in the browser after Check and matched to rows by name; each goes straight from your computer to HWDB.</p>
+  <table>
+    <tr><th>Column</th><th>Value</th></tr>
+    <tr><td>External ID / Serial Number</td><td>The item, which must exist.</td></tr>
+    <tr><td>Image File</td><td>The file’s name (a path is reduced to its name).</td></tr>
+    <tr><td>Save As</td><td>The name it gets in HWDB; default the file’s name.</td></tr>
+    <tr><td>Comments</td><td>The attachment’s comments.</td></tr>
+    <tr><td>Test Name, History Order</td><td>Attach to that test’s record instead of the item: order 0 = the latest record, 1 = the one before. The test type and the record must exist.</td></tr>
+  </table>
+  <p>A file already attached under the same name is left alone.</p>
+
+  <h3>Jobs</h3>
+  <p>A read file becomes a job holding its rows, mapping and plan, so an upload continues after a reload or a lost connection. Jobs are yours only, per HWDB instance, and are removed {{ retention_days }} days after their last change. The Explorer never keeps the file.</p>
+</details>

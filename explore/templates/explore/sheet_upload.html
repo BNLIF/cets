@@ -36,6 +36,17 @@
   .su-jobs a.open { color: var(--accent-ink); }
   .su-del { color: var(--bad, #a33); }
   form.inline { display: inline; }
+  details.su-doc { margin-top: 22px; font-size: 13px; color: var(--ink); }
+  details.su-doc summary { color: var(--dim); cursor: pointer; font-weight: 600; }
+  details.su-doc h3 { font-size: 13px; margin: 16px 0 6px; color: var(--ink); }
+  details.su-doc h4 { font-size: 12.5px; margin: 12px 0 4px; color: var(--dim); }
+  details.su-doc p, details.su-doc li { margin: 4px 0; line-height: 1.45; }
+  details.su-doc code { font-family: var(--font-mono); font-size: 12px; background: var(--surface); padding: 0 3px; border-radius: 3px; }
+  details.su-doc pre { font-family: var(--font-mono); font-size: 12px; background: var(--surface); border: 1px solid var(--rule);
+    border-radius: var(--r-sm); padding: 8px 10px; overflow-x: auto; margin: 4px 0 8px; }
+  details.su-doc table { border-collapse: collapse; font-size: 12.5px; margin: 4px 0 8px; }
+  details.su-doc th, details.su-doc td { text-align: left; padding: 3px 10px 3px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  details.su-doc th { color: var(--faint); font-weight: 500; }
   #su-kind { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; font-size: 13px; }
   #su-kind .cl-lab { margin: 0; }
   .su-radio { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); }
@@ -63,31 +74,31 @@
     {% csrf_token %}
     <input type="hidden" name="step" value="file">
     <div class="cl-field">
-      <label class="cl-lab" for="su-f">Sheet <span class="cl-hint">(.csv, .xlsx or .json — under 5 MB; a JSON file is a list of records, or an object keyed by External ID)</span></label>
-      <input type="file" id="su-f" name="file" class="su-file" accept=".csv,.txt,.tsv,.xlsx,.xlsm,.json" required>
+      <label class="cl-lab" for="su-f">Sheet <span class="cl-hint">(.csv, .xlsx, .json or .zip — under 20 MB; read as soon as it is chosen)</span></label>
+      <input type="file" id="su-f" name="file" class="su-file" accept=".csv,.txt,.tsv,.xlsx,.xlsm,.json,.zip" required>
     </div>
-    <div class="su-actions">
-      <button type="submit" class="es-btn quiet" id="su-go">Read the sheet</button>
-      <span id="su-msg" class="su-more"></span>
-    </div>
+    <div class="su-actions"><span id="su-msg" class="su-more"></span></div>
   </form>
   <script>
   (function () {
-    var form = document.getElementById("su-file"), go = document.getElementById("su-go"), msg = document.getElementById("su-msg");
-    form.addEventListener("submit", function (ev) {
-      ev.preventDefault();
-      go.disabled = true; msg.textContent = "Reading…";
+    // choosing a file reads it at once — there is nothing to set first
+    var form = document.getElementById("su-file"), file = document.getElementById("su-f"), msg = document.getElementById("su-msg");
+    function read() {
+      if (!file.files.length) return;
+      file.disabled = true; msg.textContent = "Reading " + file.files[0].name + "…";
       var fd = new FormData(form);
+      fd.set("file", file.files[0]);
       fetch(location.href, { method: "POST", body: fd, credentials: "same-origin",
                              headers: { "X-CSRFToken": fd.get("csrfmiddlewaretoken") } })
         .then(function (r) { return r.json(); })
         .then(function (j) {
-          go.disabled = false;
           if (j.url) { location.href = j.url; return; }
-          msg.textContent = j.error || "Couldn’t read the file.";
+          file.disabled = false; file.value = ""; msg.textContent = j.error || "Couldn’t read the file.";
         })
-        .catch(function (e) { go.disabled = false; msg.textContent = "Request failed: " + e; });
-    });
+        .catch(function (e) { file.disabled = false; msg.textContent = "Request failed: " + e; });
+    }
+    file.addEventListener("change", read);
+    form.addEventListener("submit", function (ev) { ev.preventDefault(); read(); });
   })();
   </script>
 
@@ -110,6 +121,7 @@
     </table>
   </div>
   {% endif %}
+  {% include "explore/_sheet_upload_doc.html" %}
 
   {% else %}
   {% if tabs %}
@@ -284,6 +296,7 @@
     <form method="post" class="inline">{% csrf_token %}<input type="hidden" name="step" value="delete"><button type="submit" class="es-btn quiet su-del" onclick="return confirm('Remove this upload from the Explorer? Items already written stay in HWDB.')">Delete this upload</button></form>
     <span class="su-more">Kept {{ retention_days }} days after its last change, then removed. Items written stay in HWDB.</span>
   </div>
+  {% include "explore/_sheet_upload_doc.html" %}
 
   <script>
   (function () {

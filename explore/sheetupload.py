@@ -18,11 +18,12 @@ import csv
 import io
 import json
 import re
+import zipfile
 from datetime import date, datetime
 
 from .checklistforms import STATUS_OPTIONS
 
-UPLOAD_MAX = 5 * 1024 * 1024
+UPLOAD_MAX = 20 * 1024 * 1024
 RETENTION_DAYS = 3      # a job goes this long after its last change; users rarely delete (Chao 2026-09-24)
 ROWS_MAX = 5000
 APPLY_SECONDS = 12      # one apply request works this long, then hands back (gunicorn's 30 s)
@@ -47,8 +48,16 @@ STANDARD = {
     "part type id": "part_type_id",
     "record type": "record_type", "test name": "test_name",
     "image file": "image_file", "save as": "save_as", "history order": "hist_order",
+    "data": "test_data", "test data": "test_data", "problem": "problem", "file": "",
 }
-TEST_FIELD_LABELS = [("part_id", "External ID / PID"), ("serial_number", "Serial number"), ("comments", "Comments")]
+# the per-item JSON schema of a zip upload (#178, Chao 2026-09-25): keys are matched
+# case-insensitively, spaces and underscores alike; "data" holds the test DATA, else
+# every other key does
+ZIP_KEYS = {"part_id": "External ID", "external_id": "External ID", "pid": "External ID",
+            "serial_number": "Serial Number", "serial": "Serial Number", "sn": "Serial Number",
+            "test_name": "Test Name", "comments": "Comments", "data": "DATA"}
+TEST_FIELD_LABELS = [("part_id", "External ID / PID"), ("serial_number", "Serial number"), ("comments", "Comments"),
+                     ("test_data", "Test data (the whole DATA object)")]
 IMAGE_FIELD_LABELS = [("part_id", "External ID / PID"), ("serial_number", "Serial number"),
                       ("image_file", "Image file (name)"), ("save_as", "Save as (name in HWDB)"),
                       ("comments", "Comments"), ("test_name", "Test name (a test's attachment)"),
@@ -130,6 +139,45 @@ def _json_sheet(name: str, blob: bytes) -> dict:
             "rows": rows[:ROWS_MAX], "over": max(0, len(rows) - ROWS_MAX)}
 
 
+def _zip_sheet(name: str, blob: bytes) -> dict:
+    """A zip of one JSON file per item as one sheet (#178, Chao 2026-09-25):
+    each file is an object with ``part_id`` or ``serial_number``, an optional
+    ``test_name`` and ``comments``, and the test DATA under ``data`` — or,
+    without a ``data`` key, every remaining key. Columns: File, External ID,
+    Serial Number, Test Name, Comments, DATA (the nested object in one
+    cell), Problem (a file that is not such an object). Row numbers count
+    files from 1."""
+    columns = ["File", "External ID", "Serial Number", "Test Name", "Comments", "DATA", "Problem"]
+    rows = []
+    with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+        names = sorted(n for n in zf.namelist()
+                       if n.lower().endswith(".json") and not n.endswith("/") and "__MACOSX" not in n)
+        for i, n in enumerate(names):
+            cells: dict = {"File": n}
+            try:
+                doc = json.loads(zf.read(n).decode("utf-8-sig"))
+                if not isinstance(doc, dict):
+                    raise ValueError("not a JSON object")
+                rest = {}
+                for k, v in doc.items():
+                    col = ZIP_KEYS.get(str(k).strip().lower().replace(" ", "_"))
+                    if col:
+                        cells[col] = v
+                    else:
+                        rest[k] = v
+                if "DATA" not in cells:
+                    cells["DATA"] = rest
+                if not isinstance(cells["DATA"], dict):
+                    raise ValueError("“data” is not an object")
+                if not _text(cells.get("External ID")) and not _text(cells.get("Serial Number")):
+                    raise ValueError("no part_id and no serial_number")
+            except (ValueError, UnicodeDecodeError) as e:
+                cells["Problem"] = f"{n}: {e}"
+            rows.append([i + 1, [cells.get(c) if cells.get(c) not in ("", None) else None for c in columns]])
+    return {"name": name.rsplit(".", 1)[0], "values": {"Record Type": "Test"}, "columns": columns,
+            "rows": rows[:ROWS_MAX], "over": max(0, len(rows) - ROWS_MAX)}
+
+
 def _raw_rows(name: str, blob: bytes) -> list[tuple[str, list[list]]]:
     """Every tab as (name, rows of raw cells)."""
     if (name or "").lower().endswith((".xlsx", ".xlsm")):
@@ -166,6 +214,9 @@ def read_sheets(name: str, blob: bytes) -> list[dict]:
     if (name or "").lower().endswith(".json"):
         sheet = _json_sheet(name, blob)
         return [sheet] if sheet["columns"] else []
+    if (name or "").lower().endswith(".zip"):
+        sheet = _zip_sheet(name, blob)
+        return [sheet] if sheet["rows"] else []
     out = []
     for tab, raw in _raw_rows(name, blob):
         raw = [r for r in raw]
@@ -384,6 +435,8 @@ def plan(records_: list[dict], ptid: str, live: dict, makers: dict, template: di
                "state": "pending", "rec": {}}
         out.append(row)
         try:
+            if rec.get("problem"):
+                raise SheetError(_text(rec["problem"]))
             row["rec"] = _resolve(rec, ptid, template, connectors, institutions, manufacturers)
             cur = None
             if rec["part_id"]:
@@ -591,6 +644,8 @@ def plan_tests(records_: list[dict], ptid: str, live: dict, test_name: str) -> l
                "rec": {"test_name": name, "comments": _text(rec.get("comments")), "data": {}}}
         out.append(row)
         try:
+            if rec.get("problem"):
+                raise SheetError(_text(rec["problem"]))
             if rec.get("part_type_id") is not None and _text(rec["part_type_id"]).upper() != ptid:
                 raise SheetError(f"Part Type ID {_text(rec['part_type_id'])} is not {ptid}")
             if not name:
@@ -610,10 +665,13 @@ def plan_tests(records_: list[dict], ptid: str, live: dict, test_name: str) -> l
                 row["pid"] = hits[0]
             else:
                 raise SheetError("no External ID and no serial number")
-            if not rec["tests"]:
-                raise SheetError("no test values (T: columns) in this row")
-            row["rec"]["data"] = rec["data"]
-            row["changes"] = [f"{name}: " + (_show(rec["data"]) if any("[]" in k for k in rec["tests"]) else
+            whole = rec.get("test_data")
+            if whole is not None and not isinstance(whole, dict):
+                raise SheetError("the test data cell is not a JSON object")
+            if not rec["tests"] and not whole:
+                raise SheetError("no test values (T: columns or test data) in this row")
+            row["rec"]["data"] = {**(whole or {}), **rec["data"]}
+            row["changes"] = [f"{name}: " + (_show(row["rec"]["data"]) if whole or any("[]" in k for k in rec["tests"]) else
                                              ", ".join(f"{k} = {_show(v)}" for k, v in rec["tests"].items()))]
         except SheetError as e:
             row.update(action="error", state="error", error=str(e))
@@ -641,6 +699,8 @@ def plan_images(records_: list[dict], ptid: str, live: dict, test_name: str) -> 
                        "test_name": name, "hist_order": 0}}
         out.append(row)
         try:
+            if rec.get("problem"):
+                raise SheetError(_text(rec["problem"]))
             if rec.get("part_type_id") is not None and _text(rec["part_type_id"]).upper() != ptid:
                 raise SheetError(f"Part Type ID {_text(rec['part_type_id'])} is not {ptid}")
             if rec["part_id"]:

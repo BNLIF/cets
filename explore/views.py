@@ -6813,7 +6813,7 @@ def explore_sheet_upload_view(request, part_type_id, job_id=None):
         if step == "file":
             f = request.FILES.get("file")
             if not f or f.size > sheetupload.UPLOAD_MAX:
-                return JsonResponse({"error": "Choose a CSV, Excel or JSON file under 5 MB."}, status=400)
+                return JsonResponse({"error": "Choose a CSV, Excel, JSON or zip file under 20 MB."}, status=400)
             try:
                 sheets = sheetupload.read_sheets(f.name, f.read())
             except Exception as e:

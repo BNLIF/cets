@@ -89,6 +89,38 @@ class ReadTest(TestCase):
         self.assertEqual((s["values"], s["columns"], s["rows"]), ({"Record Type": "Test", "Test Name": "QC"}, ["External ID", "v"], [[1, ["X", 1]]]))
         self.assertEqual(su.read_sheets("e.json", b'[]'), [])
 
+    def test_zip_of_json_files(self):
+        import zipfile
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("b/00001.json", '{"part_id": "D00400300001-00001", "Test Name": "QC", "data": {"Gain": 12}}')
+            zf.writestr("a.json", '{"Serial Number": "HPK-2", "comments": "c", "Gain": 13, "Curve": [1]}')
+            zf.writestr("bad.json", "{oops")
+            zf.writestr("list.json", "[1]")
+            zf.writestr("nokey.json", '{"Gain": 1}')
+            zf.writestr("__MACOSX/._a.json", "x")
+            zf.writestr("readme.txt", "x")
+        (s,) = su.read_sheets("results.zip", buf.getvalue())
+        self.assertEqual(s["columns"], ["File", "External ID", "Serial Number", "Test Name", "Comments", "DATA", "Problem"])
+        self.assertEqual(s["values"], {"Record Type": "Test"})
+        self.assertEqual([r[1][0] for r in s["rows"]], ["a.json", "b/00001.json", "bad.json", "list.json", "nokey.json"])
+        self.assertEqual(s["rows"][0][1], ["a.json", None, "HPK-2", None, "c", {"Gain": 13, "Curve": [1]}, None])
+        self.assertEqual(s["rows"][1][1][1:6], [f"{T}-00001", None, "QC", None, {"Gain": 12}])
+        self.assertEqual([r[1][6] for r in s["rows"][2:]],
+                         ["bad.json: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)",
+                          "list.json: not a JSON object", "nokey.json: no part_id and no serial_number"])
+        m = su.auto_map(s["columns"], {}, {}, (), "test")
+        self.assertEqual(m, {"File": "", "External ID": "part_id", "Serial Number": "serial_number", "Test Name": "test_name",
+                             "Comments": "comments", "DATA": "test_data", "Problem": "problem"})
+        rows = su.plan_tests(su.records(s, m, merge=False), T, LIVE, "Batch")
+        self.assertEqual([(r["pid"], r["action"], r["rec"].get("test_name"), r["rec"]["data"]) for r in rows[:2]],
+                         [(f"{T}-00002", "test", "Batch", {"Gain": 13, "Curve": [1]}), (f"{T}-00001", "test", "Batch", {"Gain": 12})])
+        self.assertEqual(rows[0]["changes"], ['Batch: {"Gain": 13, "Curve": [1]}'])
+        self.assertEqual([r["error"][:8] for r in rows[2:]], ["bad.json", "list.jso", "nokey.js"])
+        rows = su.plan_tests(su.records(s, m, merge=False), T, LIVE, "")
+        self.assertEqual(rows[1]["rec"]["test_name"], "QC")                       # the file's name when the page has none
+        self.assertEqual(rows[0]["error"], "no test name")
+
     def test_a_block_is_two_columns_wide(self):
         (s,) = su.read_sheets("a.csv", b"Serial Number,Vbd,Notes\nHPK-1,1,\n\nHPK-2,2,\n")
         self.assertEqual(s["values"], {})                       # three columns: a table with a gap, not a block
@@ -484,6 +516,8 @@ class ViewTest(TestCase):
             r = self.client.get(URL)
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, 'id="su-file"')
+        self.assertContains(r, "File formats and schemas")      # the reference pane, on both pages
+        self.assertContains(r, f'"part_id": "{T}-00018"')
         with mock.patch("explore.views.mint_for", side_effect=FnalLinkRequired("x")):
             self.assertEqual(self.client.get(URL).status_code, 302)
             self.assertEqual(self.client.post(URL, {"step": "file"}).status_code, 401)
@@ -688,6 +722,28 @@ class ViewTest(TestCase):
         p1, p2 = _mocked(api)
         with p1, p2:
             self.assertEqual(self.client.post(url, {"step": "apply", "n": "2"}).status_code, 400)   # no file
+
+    def test_zip_upload_end_to_end(self):
+        import zipfile
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("1.json", '{"serial_number": "HPK-1", "data": {"Gain": 12}}')
+        api = _api()
+        api.get_test_types.return_value = {"data": [{"id": 9, "name": "QC"}]}
+        api.get_tests.return_value = {"data": []}
+        api.post_test.return_value = _ok()
+        self.upload(api, "results.zip", buf.getvalue())
+        job = SheetJob.objects.get()
+        self.assertEqual((job.kind, job.mapping["DATA"], job.mapping["File"]), ("test", "test_data", ""))
+        url = f"{URL}{job.pk}/"
+        p1, p2 = _mocked(api)
+        with p1, p2:
+            r = self.client.post(url, {"step": "map", "col0": "", "col1": "part_id", "col2": "serial_number", "col3": "test_name",
+                                       "col4": "comments", "col5": "test_data", "col6": "problem", "test_name": "QC"})
+            self.assertEqual(r.status_code, 302)
+            r = self.client.post(url, {"step": "apply"}).json()
+        self.assertEqual([(x["pid"], x["done"]) for x in r["rows"]], [(f"{T}-00001", ["test posted"])])
+        self.assertEqual(api.post_test.call_args.args[1]["test_data"], {"DATA": {"Gain": 12}})
 
     def test_other_users_jobs_are_invisible(self):
         SheetJob.objects.create(instance="dev", part_type_id=T, username="someone", name="x.csv",
