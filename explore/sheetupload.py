@@ -1,13 +1,15 @@
-"""#177: a spreadsheet of items → HWDB, the utility's ``hwdb-upload`` Item
-record type in the Explorer (Hajime 2026-09-24). A CSV / Excel tab in the
-utility's layout — an optional key/value block in columns A–B, a blank
-row, then the column headers; plain names for the standard fields, ``S:``
-for spec keys, ``C:`` for sub-component positions — is read into cells,
-mapped column by column, planned against the type's live listing (create /
-patch / nothing / error per row, nothing written) and applied one item at
-a time: create or patch, location, positions. Pure helpers plus
-``apply_row``, which takes the client; the view (``explore_sheet_upload_view``)
-owns the job record and the HTTP side."""
+"""#177 / #178: a spreadsheet → HWDB, the utility's ``hwdb-upload`` Item and
+Test record types in the Explorer (Hajime 2026-09-24). A CSV / Excel tab
+in the utility's layout — an optional key/value block in columns A–B, a
+blank row, then the column headers; plain names for the standard fields,
+``S:`` for spec keys, ``C:`` for sub-component positions, ``T:`` for
+test-result keys — is read into cells, mapped column by column, planned
+against the type's live listing (create / patch / nothing / error per
+item row, one test record per test row; nothing written) and applied one
+row at a time: create or patch, location, positions — or a test record,
+unless the item already holds one with the same data. Pure helpers plus
+``apply_row`` / ``apply_test_row``, which take the client; the view
+(``explore_sheet_upload_view``) owns the job record and the HTTP side."""
 
 from __future__ import annotations
 
@@ -42,7 +44,9 @@ STANDARD = {
     "location comments": "location_comments",
     "arrived": "arrived", "location timestamp": "arrived",
     "part type id": "part_type_id",
+    "record type": "record_type", "test name": "test_name",
 }
+TEST_FIELD_LABELS = [("part_id", "External ID / PID"), ("serial_number", "Serial number"), ("comments", "Comments")]
 FIELD_LABELS = [
     ("part_id", "External ID / PID"), ("serial_number", "Serial number"), ("status", "Status"),
     ("manufacturer", "Manufacturer"), ("institution", "Institution (owner of a new item)"),
@@ -144,12 +148,14 @@ def read_sheets(name: str, blob: bytes) -> list[dict]:
 
 # ---- mapping ----------------------------------------------------------------
 
-def auto_map(columns: list[str], template: dict, connectors: dict) -> dict[str, str]:
+def auto_map(columns: list[str], template: dict, connectors: dict, test_keys=()) -> dict[str, str]:
     """Column header → assignment: a standard name, ``S:key`` / ``C:position``
-    (the utility's prefixes), or a bare header that names a spec key or a
-    position; anything else stays unassigned ("")."""
+    / ``T:key`` (the utility's prefixes), or a bare header that names a spec
+    key, a position or (``test_keys``, a Test sheet) a test-result key;
+    anything else stays unassigned ("")."""
     specs = {k.lower(): k for k in template}
     poss = {str(p).lower(): str(p) for p in connectors}
+    tests = {str(k).lower(): str(k) for k in test_keys}
     out = {}
     for c in columns:
         low = c.lower()
@@ -159,6 +165,10 @@ def auto_map(columns: list[str], template: dict, connectors: dict) -> dict[str, 
             out[c] = "spec:" + c[2:].strip()
         elif c[:2].upper() == "C:" and c[2:].strip():
             out[c] = "pos:" + c[2:].strip()
+        elif c[:2].upper() == "T:" and c[2:].strip():
+            out[c] = "test:" + c[2:].strip()
+        elif low in tests:
+            out[c] = "test:" + tests[low]
         elif low in specs:
             out[c] = "spec:" + specs[low]
         elif low in poss:
@@ -168,12 +178,24 @@ def auto_map(columns: list[str], template: dict, connectors: dict) -> dict[str, 
     return out
 
 
-def records(sheet: dict, mapping: dict) -> list[dict]:
-    """The sheet's rows as item records: the mapped cells of each row, with
-    the key/value block as per-sheet defaults (the utility's precedence: a
-    cell beats the block), rows naming the same item (by External ID, else
-    by serial) merged into one record (later non-blank cells win). ``specs`` / ``positions`` hold
-    the ``spec:`` / ``pos:`` assignments; the standard fields sit at the top."""
+def detect_kind(sheet: dict) -> tuple[str, str]:
+    """(kind, test name) from the sheet: a ``Record Type`` of Test in the
+    key/value block, or any ``T:`` column, makes it a Test sheet; the
+    block's ``Test Name`` names the test."""
+    values = {k.lower(): v for k, v in (sheet.get("values") or {}).items()}
+    is_test = (_text(values.get("record type")).lower().startswith("test")
+               or any(c[:2].upper() == "T:" for c in sheet["columns"]))
+    return ("test" if is_test else "item"), _text(values.get("test name"))
+
+
+def records(sheet: dict, mapping: dict, merge: bool = True) -> list[dict]:
+    """The sheet's rows as records: the mapped cells of each row, with the
+    key/value block as per-sheet defaults (the utility's precedence: a cell
+    beats the block). With ``merge`` (an Item sheet) rows naming the same
+    item (by External ID, else by serial) become one record (later
+    non-blank cells win); a Test sheet keeps one record per row. ``specs`` /
+    ``positions`` / ``tests`` hold the ``spec:`` / ``pos:`` / ``test:``
+    assignments; the standard fields sit at the top."""
     defaults = {}
     for k, v in (sheet.get("values") or {}).items():
         a = mapping.get(k) or auto_map([k], {}, {}).get(k) or ""
@@ -186,12 +208,14 @@ def records(sheet: dict, mapping: dict) -> list[dict]:
         for i, a in cols:
             if a and i < len(cells) and cells[i] is not None:
                 vals[a] = cells[i]
-        rec = {"n": n, "rows": [n], "specs": {}, "positions": {}}
+        rec = {"n": n, "rows": [n], "specs": {}, "positions": {}, "tests": {}}
         for a, v in vals.items():
             if a.startswith("spec:"):
                 rec["specs"][a[5:]] = v
             elif a.startswith("pos:"):
                 rec["positions"][a[4:]] = v
+            elif a.startswith("test:"):
+                rec["tests"][a[5:]] = v
             else:
                 rec[a] = v
         pid = _text(rec.get("part_id")).upper()
@@ -199,13 +223,14 @@ def records(sheet: dict, mapping: dict) -> list[dict]:
             pid = ""
         rec["part_id"] = pid
         rec["serial_number"] = _text(rec.get("serial_number"))
-        key = (pid, "") if pid else ("", rec["serial_number"]) if rec["serial_number"] else (None, n)
+        key = ((pid, "") if pid else ("", rec["serial_number"]) if rec["serial_number"] else (None, n)) if merge else (None, n)
         if key in merged:
             m = merged[key]
             m["rows"].append(n)
             m["specs"].update(rec["specs"])
             m["positions"].update(rec["positions"])
-            m.update({k: v for k, v in rec.items() if k not in ("n", "rows", "specs", "positions")})
+            m["tests"].update(rec["tests"])
+            m.update({k: v for k, v in rec.items() if k not in ("n", "rows", "specs", "positions", "tests")})
         else:
             merged[key] = rec
     return list(merged.values())
@@ -399,6 +424,54 @@ def _diff(r: dict, cur: dict, maker: str) -> list[str]:
     return ch
 
 
+def plan_tests(records_: list[dict], ptid: str, live: dict, test_name: str) -> list[dict]:
+    """#178: the dry run of a Test sheet — each row names an existing item
+    (by External ID, else by serial) and carries ``T:`` values; the plan
+    row's ``rec`` = ``{test_name, comments, data}`` with dotted keys nested.
+    Whether the item already holds a test with the same data is checked at
+    apply time (the listing has no tests)."""
+    by_serial: dict[str, list[str]] = {}
+    for pid, r in live.items():
+        sn = _text(r.get("serial_number"))
+        if sn:
+            by_serial.setdefault(sn.lower(), []).append(pid)
+    out = []
+    for rec in records_:
+        name = test_name or _text(rec.get("test_name"))   # the page's name wins; the sheet's only fills a blank
+        row = {"n": rec["n"], "rows": rec["rows"], "key": rec["part_id"] or rec["serial_number"],
+               "pid": rec["part_id"], "action": "test", "changes": [], "error": "", "state": "pending",
+               "rec": {"test_name": name, "comments": _text(rec.get("comments")), "data": {}}}
+        out.append(row)
+        try:
+            if rec.get("part_type_id") is not None and _text(rec["part_type_id"]).upper() != ptid:
+                raise SheetError(f"Part Type ID {_text(rec['part_type_id'])} is not {ptid}")
+            if not name:
+                raise SheetError("no test name")
+            if rec["part_id"]:
+                if not rec["part_id"].startswith(ptid + "-"):
+                    raise SheetError(f"{rec['part_id']} is not a {ptid} item")
+                if rec["part_id"] not in live:
+                    raise SheetError(f"{rec['part_id']} is not in HWDB")
+            elif rec["serial_number"]:
+                hits = by_serial.get(rec["serial_number"].lower()) or []
+                if len(hits) > 1:
+                    raise SheetError(f"serial number {rec['serial_number']} is on {len(hits)} items: "
+                                     f"{', '.join(hits)} — give the PID")
+                if not hits:
+                    raise SheetError(f"no {ptid} item has serial number {rec['serial_number']}")
+                row["pid"] = hits[0]
+            else:
+                raise SheetError("no External ID and no serial number")
+            if not rec["tests"]:
+                raise SheetError("no test values (T: columns) in this row")
+            for k, v in rec["tests"].items():
+                _set_path(row["rec"]["data"], k, _spec_value(v))
+            row["changes"] = [f"{name}: " + ", ".join(f"{k} = {v}" for k, v in rec["tests"].items())]
+        except SheetError as e:
+            row.update(action="error", state="error", error=str(e))
+    return out
+
+
 # ---- applying ---------------------------------------------------------------
 
 def merged_specs(base: dict, specs: dict) -> dict:
@@ -502,3 +575,22 @@ def apply_row(api, ptid: str, row: dict, template: dict, connectors: dict,
                 raise SheetError(f"positions — {body.get('data') or body}")
             done.append("positions")
     return pid, done
+
+
+def apply_test_row(api, ptid: str, row: dict, test_type_id) -> tuple[str, list[str]]:
+    """#178: post the row's test record — unless the item already holds a
+    record of that test type with the same DATA (HWDB never dedups; a chunk
+    that timed out after its POST landed must not post twice, and re-running
+    a sheet is harmless). ``test_type_id(name) -> id`` resolves (and
+    creates) the test type. Returns (pid, what happened)."""
+    r, pid = row["rec"], row["pid"]
+    tid = test_type_id(r["test_name"])
+    if tid is not None:
+        for t in api.get_tests(pid, test_type_id=tid, history=True).get("data") or []:
+            if isinstance(t, dict) and (t.get("test_data") or {}).get("DATA") == r["data"]:
+                return pid, ["already recorded"]
+    body = api.post_test(pid, {"comments": r["comments"], "test_type": r["test_name"],
+                               "test_data": {"DATA": r["data"]}})
+    if body.get("status") != "OK":
+        raise SheetError(str(body.get("data") or body))
+    return pid, ["test posted"]

@@ -643,6 +643,9 @@ class SheetJob(InstanceScoped):
     part_type_id = models.CharField(max_length=20, db_index=True)
     username = models.CharField(max_length=150, db_index=True)
     name = models.CharField(max_length=200)
+    KIND_ITEM, KIND_TEST = "item", "test"
+    kind = models.CharField(max_length=8, default="item")   # #178: a Test sheet posts one test record per row
+    test_name = models.CharField(max_length=200, blank=True, default="")
     tabs = models.JSONField(default=list, blank=True)
     sheet = models.JSONField(default=dict, blank=True)
     mapping = models.JSONField(default=dict, blank=True)
@@ -668,15 +671,16 @@ class SheetJob(InstanceScoped):
         """Plan rows by action (create / patch / skip / error) and by outcome:
         ``pending`` still to apply, ``done`` applied, ``created`` / ``updated``
         what the applied rows did, ``failed`` refused or lost at apply time."""
-        c = {"create": 0, "patch": 0, "skip": 0, "error": 0, "pending": 0, "done": 0,
-             "created": 0, "updated": 0, "failed": 0}
+        c = {"create": 0, "patch": 0, "test": 0, "skip": 0, "error": 0, "pending": 0, "done": 0,
+             "created": 0, "updated": 0, "posted": 0, "failed": 0}
         for r in self.rows:
             c[r.get("action") or "error"] = c.get(r.get("action") or "error", 0) + 1
             if r.get("state") == "pending":
                 c["pending"] += 1
             elif r.get("state") == "done" and r.get("action") != "skip":
                 c["done"] += 1
-                c["created" if "created" in (r.get("done") or []) else "updated"] += 1
+                d = r.get("done") or []
+                c["created" if "created" in d else "posted" if "test posted" in d else "updated"] += 1
             elif r.get("state") == "error" and r.get("action") != "error":
                 c["failed"] += 1
         return c

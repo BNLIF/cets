@@ -6538,11 +6538,35 @@ def _sheet_jobs(request, inst, part_type_id):
                                               username=activity.actor_of(request))
 
 
+def _test_keys(api, part_type_id, name: str) -> list[str]:
+    """The keys of an existing test type's datasheet (best effort, any of
+    the shapes HWDB has used) — bare column headers naming one auto-map."""
+    if not name:
+        return []
+    try:
+        rows = api.get_test_types(part_type_id).get("data") or []
+    except Exception as e:
+        logger.warning("test types for %s failed: %s", part_type_id, e)
+        return []
+    for r in rows:
+        if isinstance(r, dict) and r.get("name") == name:
+            spec = r.get("specifications")
+            if isinstance(spec, dict) and "datasheet" not in spec:
+                spec = ((r.get("properties") or {}).get("specifications")) or spec
+            if isinstance(spec, list):
+                spec = spec[-1] if spec else {}
+            if isinstance(spec, dict) and isinstance(spec.get("datasheet"), dict):
+                spec = spec["datasheet"]
+            return [str(k) for k in spec] if isinstance(spec, dict) else []
+    return []
+
+
 def _sheet_apply(request, api, inst, part_type_id, job) -> JsonResponse:
-    """One apply request: the pending plan rows in order, one item at a
+    """One apply request: the pending plan rows in order, one row at a
     time, for ``APPLY_SECONDS`` — then the page asks again. Each row's
     outcome is saved as it lands, so a reload or a lost connection
-    continues rather than repeats (and a create re-checks the serial)."""
+    continues rather than repeats (a create re-checks the serial, a test
+    row checks for an identical record)."""
     try:
         type_record = api.get_component_type(part_type_id)
     except requests.RequestException as e:
@@ -6551,6 +6575,19 @@ def _sheet_apply(request, api, inst, part_type_id, job) -> JsonResponse:
     tdata = type_record.get("data") or {}
     connectors = tdata.get("connectors") or {}
     manufacturers = [m for m in tdata.get("manufacturers") or [] if isinstance(m, dict)]
+    ttypes: dict[str, int | None] = {}
+
+    def test_type_id(name):   # #178: the test type, created on first use like the checklists' (#95)
+        if name not in ttypes:
+            err = _ensure_test_type(api, part_type_id, name, "Created by a sheet upload via HWDB Explorer")
+            if err:
+                raise sheetupload.SheetError(f"couldn’t create the “{name}” test type — {err}")
+            try:
+                rows = api.get_test_types(part_type_id).get("data") or []
+            except requests.RequestException:
+                rows = []
+            ttypes[name] = next((r.get("id") for r in rows if isinstance(r, dict) and r.get("name") == name), None)
+        return ttypes[name]
     started = time.monotonic()
     out, rows = [], job.rows
     for row in rows:
@@ -6559,11 +6596,15 @@ def _sheet_apply(request, api, inst, part_type_id, job) -> JsonResponse:
         if time.monotonic() - started > sheetupload.APPLY_SECONDS:
             break
         try:
-            pid, done = sheetupload.apply_row(
-                api, part_type_id, row, template, connectors, manufacturers,
-                lambda tid, sn: _serial_pids(api, inst, tid, sn), timezone.localtime().isoformat())
-            row.update(pid=pid, state="done", error="", done=done)
-            refresh_component_row(api, inst, pid)
+            if job.kind == SheetJob.KIND_TEST:
+                pid, done = sheetupload.apply_test_row(api, part_type_id, row, test_type_id)
+                row.update(pid=pid, state="done", error="", done=done)
+            else:
+                pid, done = sheetupload.apply_row(
+                    api, part_type_id, row, template, connectors, manufacturers,
+                    lambda tid, sn: _serial_pids(api, inst, tid, sn), timezone.localtime().isoformat())
+                row.update(pid=pid, state="done", error="", done=done)
+                refresh_component_row(api, inst, pid)
         except sheetupload.SheetError as e:
             row.update(state="error", error=str(e))
         except requests.RequestException as e:
@@ -6575,9 +6616,10 @@ def _sheet_apply(request, api, inst, part_type_id, job) -> JsonResponse:
     left = sum(1 for r in rows if r.get("state") == "pending")
     if not left and out:
         c = job.counts()
-        activity.log(inst, ActivityEvent.KIND_ITEM,
-                     f"Sheet “{job.name}”: {c['created']} {part_type_id} items created, "
-                     f"{c['updated']} updated, {c['failed']} failed",
+        what = (f"{c['posted']} “{job.test_name}” test records posted on {part_type_id} items"
+                if job.kind == SheetJob.KIND_TEST else
+                f"{c['created']} {part_type_id} items created, {c['updated']} updated")
+        activity.log(inst, ActivityEvent.KIND_ITEM, f"Sheet “{job.name}”: {what}, {c['failed']} failed",
                      part_type_id=part_type_id, actor=activity.actor_of(request))
     return JsonResponse({"rows": out, "left": left})
 
@@ -6585,11 +6627,13 @@ def _sheet_apply(request, api, inst, part_type_id, job) -> JsonResponse:
 @login_not_required
 @fnal_login_required
 def explore_sheet_upload_view(request, part_type_id, job_id=None):
-    """#177 (Hajime 2026-09-24): a spreadsheet of items → HWDB, the
-    utility's ``hwdb-upload`` Item records in the Explorer. Without a job:
+    """#177 / #178 (Hajime 2026-09-24): a spreadsheet → HWDB, the utility's
+    ``hwdb-upload`` Item and Test records in the Explorer. Without a job:
     the upload form and the user's jobs for this type (``step=file`` parses
-    every tab of the file into a job, the first tab with rows selected).
-    With a job: the tab (``step=tab`` switches), the columns mapped to fields (``step=map`` saves the mapping and plans
+    every tab of the file into a job, the first tab with rows selected, its
+    kind read off the sheet). With a job: the tab (``step=tab`` switches),
+    the record kind (``step=kind``: items, or one test record per row), the
+    columns mapped to fields (``step=map`` saves the mapping and plans
     every row against the type's live listing, writing nothing), the plan,
     and Upload (``step=apply``, short requests until nothing is pending;
     ``step=delete`` removes the job). Jobs untouched for ``RETENTION_DAYS``
@@ -6640,11 +6684,13 @@ def explore_sheet_upload_view(request, part_type_id, job_id=None):
             except requests.RequestException as e:
                 return JsonResponse({"error": f"Couldn’t read the type from HWDB — {_hwdb_error_detail(e)}"},
                                     status=502)
+            kind, test_name = sheetupload.detect_kind(sheet)
             mapping = sheetupload.auto_map(sheet["columns"], _spec_template(type_record),
-                                           (type_record.get("data") or {}).get("connectors") or {})
+                                           (type_record.get("data") or {}).get("connectors") or {},
+                                           _test_keys(api, part_type_id, test_name))
             job = SheetJob.objects.create(
                 instance=inst, part_type_id=part_type_id, username=activity.actor_of(request),
-                name=f.name, tabs=sheets, sheet=sheet, mapping=mapping)
+                name=f.name, tabs=sheets, sheet=sheet, mapping=mapping, kind=kind, test_name=test_name)
             return JsonResponse({"url": _rev(request, "explore:sheet_upload", args=[part_type_id, job.pk])})
         ctx["jobs"] = [(j, j.counts()) for j in _sheet_jobs(request, inst, part_type_id)]
         return render(request, "explore/sheet_upload.html", ctx)
@@ -6666,15 +6712,25 @@ def explore_sheet_upload_view(request, part_type_id, job_id=None):
     tdata = type_record.get("data") or {}
     connectors = tdata.get("connectors") or {}
     manufacturers = [m for m in tdata.get("manufacturers") or [] if isinstance(m, dict)]
-    if step == "tab":   # another tab of the workbook: its own auto-mapping, the plan starts over
+    if step == "tab":   # another tab of the workbook: its own kind and auto-mapping, the plan starts over
         sheet = next((s for s in job.tabs if s["name"] == (post.get("tab") or "")), None)
         if sheet is not None:
             job.sheet, job.rows = sheet, []
-            job.mapping = sheetupload.auto_map(sheet["columns"], template, connectors)
-            job.save(update_fields=["sheet", "mapping", "rows", "updated_at"])
+            job.kind, job.test_name = sheetupload.detect_kind(sheet)
+            job.mapping = sheetupload.auto_map(sheet["columns"], template, connectors,
+                                               _test_keys(api, part_type_id, job.test_name))
+            job.save(update_fields=["sheet", "mapping", "rows", "kind", "test_name", "updated_at"])
+        return redirect(request.path)
+    if step == "kind":   # #178: items or tests — the assignments on offer differ, so re-map
+        job.kind = SheetJob.KIND_TEST if post.get("kind") == SheetJob.KIND_TEST else SheetJob.KIND_ITEM
+        job.rows = []
+        job.mapping = sheetupload.auto_map(job.sheet["columns"], template, connectors,
+                                           _test_keys(api, part_type_id, job.test_name))
+        job.save(update_fields=["kind", "mapping", "rows", "updated_at"])
         return redirect(request.path)
     if step == "map":
         job.mapping = {c: (post.get(f"col{i}") or "") for i, c in enumerate(job.sheet["columns"])}
+        job.test_name = (post.get("test_name") or "").strip()[:200]
         try:
             live = itemsedit.live_rows(
                 api, part_type_id,
@@ -6682,24 +6738,32 @@ def explore_sheet_upload_view(request, part_type_id, job_id=None):
             events.refresh_from_listing(inst, part_type_id, live)
         except requests.RequestException as e:
             messages.error(request, f"Couldn’t read the items from HWDB — {_hwdb_error_detail(e)}")
-            job.save(update_fields=["mapping", "updated_at"])
+            job.save(update_fields=["mapping", "test_name", "updated_at"])
             return redirect(request.path)
-        makers = dict(HwdbComponentEvent.for_instance(inst).filter(part_type_id=part_type_id)
-                      .exclude(manufacturer="").values_list("part_id", "manufacturer"))
-        job.rows = sheetupload.plan(sheetupload.records(job.sheet, job.mapping), part_type_id, live,
-                                    makers, template, connectors, _institution_options(api), manufacturers)
-        job.save(update_fields=["mapping", "rows", "updated_at"])
+        if job.kind == SheetJob.KIND_TEST:
+            job.rows = sheetupload.plan_tests(sheetupload.records(job.sheet, job.mapping, merge=False),
+                                              part_type_id, live, job.test_name)
+        else:
+            makers = dict(HwdbComponentEvent.for_instance(inst).filter(part_type_id=part_type_id)
+                          .exclude(manufacturer="").values_list("part_id", "manufacturer"))
+            job.rows = sheetupload.plan(sheetupload.records(job.sheet, job.mapping), part_type_id, live,
+                                        makers, template, connectors, _institution_options(api), manufacturers)
+        job.save(update_fields=["mapping", "test_name", "rows", "updated_at"])
         return redirect(request.path)
-    options = [("", "— not used —")] + list(sheetupload.FIELD_LABELS)
-    options += [(f"spec:{k}", f"Specs: {k}") for k in template]
-    options += [(f"pos:{p}", f"Position {p} ({t})" if t else f"Position {p}")
-                for p, t in sorted(connectors.items(), key=lambda kv: str(kv[0]))]
+    if job.kind == SheetJob.KIND_TEST:
+        options = [("", "— not used —")] + list(sheetupload.TEST_FIELD_LABELS)
+        options += [(f"test:{k}", f"Test: {k}") for k in _test_keys(api, part_type_id, job.test_name)]
+    else:
+        options = [("", "— not used —")] + list(sheetupload.FIELD_LABELS)
+        options += [(f"spec:{k}", f"Specs: {k}") for k in template]
+        options += [(f"pos:{p}", f"Position {p} ({t})" if t else f"Position {p}")
+                    for p, t in sorted(connectors.items(), key=lambda kv: str(kv[0]))]
     known = {o[0] for o in options}
     for a in job.mapping.values():
         if a and a not in known:
-            options.append((a, a.replace("spec:", "Specs: ").replace("pos:", "Position ")))
+            options.append((a, a.replace("spec:", "Specs: ").replace("pos:", "Position ").replace("test:", "Test: ")))
             known.add(a)
-    ctx.update(job=job, counts=job.counts(), options=options,
+    ctx.update(job=job, counts=job.counts(), options=options, is_test=job.kind == SheetJob.KIND_TEST,
                columns=[(i, c, job.mapping.get(c) or "", job.sheet["rows"][0][1][i] if job.sheet["rows"] else None)
                         for i, c in enumerate(job.sheet["columns"])],
                tabs=[(t["name"], len(t["rows"])) for t in job.tabs] if len(job.tabs) > 1 else [],

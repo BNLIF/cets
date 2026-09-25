@@ -36,6 +36,11 @@
   .su-jobs a.open { color: var(--accent-ink); }
   .su-del { color: var(--bad, #a33); }
   form.inline { display: inline; }
+  #su-kind { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+  #su-kind .cl-lab { margin: 0; }
+  .su-radio { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); }
+  #su-test-name { font: inherit; font-size: 13px; color: var(--ink); background: var(--cl-input-bg, var(--surface));
+    border: 1px solid var(--cl-input-rule, var(--rule)); border-radius: var(--r-sm); padding: 5px 8px; width: 320px; max-width: 100%; }
   .su-changes { color: var(--dim); }
   .su-file { font: inherit; font-size: 13px; }
 </style>
@@ -51,7 +56,7 @@
   {% include "explore/_role_gate.html" %}
 
   <h1>Upload a sheet of <span class="mono">{{ part_type_id }}</span> items</h1>
-  <p class="es-sub">{% if type_name %}{{ type_name }} · {% endif %}A CSV or Excel tab in the HWDB Python upload tool’s layout: the standard columns (External ID, Serial Number, Status, Manufacturer, Institution, Comments, Location), <span class="su-mono">S:</span>&lt;spec key&gt; and <span class="su-mono">C:</span>&lt;position&gt;. Rows are matched by External ID, else by serial number; an unknown serial becomes a new item. Nothing is written before Upload.</p>
+  <p class="es-sub">{% if type_name %}{{ type_name }} · {% endif %}A CSV or Excel tab in the HWDB Python upload tool’s layout: the standard columns (External ID, Serial Number, Status, Manufacturer, Institution, Comments, Location), <span class="su-mono">S:</span>&lt;spec key&gt; and <span class="su-mono">C:</span>&lt;position&gt; for items, or <span class="su-mono">T:</span>&lt;key&gt; for one test record per row. Rows are matched by External ID, else by serial number; an unknown serial becomes a new item. Nothing is written before Upload.</p>
 
   {% if not job %}
   <form method="post" class="es-card" id="su-file" enctype="multipart/form-data">
@@ -115,11 +120,24 @@
     <select id="su-tab-sel" name="tab" onchange="this.form.submit()">{% for name, n in tabs %}<option value="{{ name }}"{% if name == job.sheet.name %} selected{% endif %}>{{ name }} ({{ n }} row{{ n|pluralize }})</option>{% endfor %}</select>
   </form>
   {% endif %}
+  <form method="post" class="es-card" id="su-kind">
+    {% csrf_token %}
+    <input type="hidden" name="step" value="kind">
+    <span class="cl-lab">Rows are</span>
+    <label class="su-radio"><input type="radio" name="kind" value="item"{% if not is_test %} checked{% endif %} onchange="this.form.submit()"> items <span class="cl-hint">(create or update)</span></label>
+    <label class="su-radio"><input type="radio" name="kind" value="test"{% if is_test %} checked{% endif %} onchange="this.form.submit()"> test records <span class="cl-hint">(one per row, on an existing item)</span></label>
+  </form>
   <form method="post" class="es-card" id="su-map">
     {% csrf_token %}
     <input type="hidden" name="step" value="map">
     <h2>Columns of {{ job.name }}{% if tabs %} · {{ job.sheet.name }}{% endif %} <span class="cl-hint">— {{ n_rows }} row{{ n_rows|pluralize }}{% if over %}, the first {{ n_rows }} of {{ n_rows|add:over }} (the rest need another sheet){% endif %}</span></h2>
     {% if values %}<ul class="su-summ">{% for k, v in values %}<li>Sheet default: <b>{{ k }}</b> = {{ v }}</li>{% endfor %}</ul>{% endif %}
+    {% if is_test %}
+    <div class="cl-field">
+      <label class="cl-lab" for="su-test-name">Test name <span class="cl-hint">(the HWDB test type; created on the type if it does not exist yet)</span></label>
+      <input type="text" id="su-test-name" name="test_name" value="{{ job.test_name }}" required autocomplete="off">
+    </div>
+    {% endif %}
     <table class="su-table">
       <thead><tr><th>Column</th><th>First row</th><th>Field</th></tr></thead>
       <tbody>
@@ -144,8 +162,13 @@
     <input type="hidden" name="step" value="apply">
     <h2>Plan</h2>
     <ul class="su-summ">
+      {% if is_test %}
+      <li><b>{{ counts.test }}</b> “{{ job.test_name }}” test record{{ counts.test|pluralize }} to post{% if counts.error %}, <span class="su-warn">{{ counts.error }} with problems (skipped)</span>{% endif %}</li>
+      {% else %}
       <li><b>{{ counts.create }}</b> new item{{ counts.create|pluralize }}, <b>{{ counts.patch }}</b> to update, {{ counts.skip }} unchanged{% if counts.error %}, <span class="su-warn">{{ counts.error }} with problems (skipped)</span>{% endif %}</li>
+      {% endif %}
       {% if counts.done %}<li>{{ counts.done }} already uploaded{% if counts.pending %}, {{ counts.pending }} pending{% endif %}.</li>{% endif %}
+      {% if is_test %}<li class="su-more">A row whose item already holds a “{{ job.test_name }}” record with the same values is left alone.</li>{% endif %}
     </ul>
     <div class="su-scroll">
     <table class="su-table" id="su-rows">
@@ -156,8 +179,8 @@
           <td class="k">{{ r.rows|join:", " }}</td>
           <td class="k su-mono">{{ r.key }}</td>
           <td class="k su-mono pid">{% if r.pid %}<a href="{% url 'explore:part' part_id=r.pid %}" target="_blank" rel="noopener">{{ r.pid }}</a>{% endif %}</td>
-          <td class="k">{% if r.action == 'create' %}create{% elif r.action == 'patch' %}update{% elif r.action == 'skip' %}nothing to do{% else %}—{% endif %}</td>
-          <td class="su-changes">{{ r.changes|join:" · " }}</td>
+          <td class="k">{% if r.action == 'create' %}create{% elif r.action == 'patch' %}update{% elif r.action == 'test' %}post test{% elif r.action == 'skip' %}nothing to do{% else %}—{% endif %}</td>
+          <td class="su-changes">{{ r.changes|join:" · "|truncatechars:200 }}</td>
           <td class="st">{% if r.state == 'error' %}{{ r.error }}{% elif r.state == 'done' and r.action != 'skip' %}{{ r.done|join:", "|default:"done" }}{% endif %}</td>
         </tr>
       {% endfor %}

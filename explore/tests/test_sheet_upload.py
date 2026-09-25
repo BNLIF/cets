@@ -103,6 +103,16 @@ class MapTest(TestCase):
         self.assertEqual(old["positions"], {"A1": f"{C}-00001"})
         self.assertNotIn("Extra", old)                                    # unassigned column ignored
 
+    def test_test_columns_and_kind(self):
+        m = su.auto_map(["Serial Number", "T:Gain", "gain", "Noise", "Comments"], TEMPLATE, CONNECTORS, ["Gain", "Noise"])
+        self.assertEqual(m, {"Serial Number": "serial_number", "T:Gain": "test:Gain", "gain": "test:Gain",
+                             "Noise": "test:Noise", "Comments": "comments"})
+        self.assertEqual(su.detect_kind({"values": {"Record Type": "Test", "Test Name": "QC"}, "columns": ["Serial Number"]}),
+                         ("test", "QC"))
+        self.assertEqual(su.detect_kind({"values": {}, "columns": ["Serial Number", "T:x"]}), ("test", ""))
+        self.assertEqual(su.detect_kind({"values": {"Record Type": "Item"}, "columns": ["T:x"]}), ("test", ""))
+        self.assertEqual(su.detect_kind({"values": {}, "columns": ["Serial Number", "S:x"]}), ("item", ""))
+
     def test_records_key_on_pid_and_serial(self):
         s = {"values": {}, "columns": ["Part ID", "Serial Number"],
              "rows": [[2, [f"{T}-00001", None]], [3, [f"{T}-00001", None]], [4, ["<unassigned>", "X"]], [5, [None, None]]]}
@@ -176,6 +186,70 @@ class PlanTest(TestCase):
                      values={"Institution": "186", "Status": "In Fabrication"})
         self.assertEqual([(r["action"], r["rec"]["institution"]["name"], r["rec"]["status_id"]) for r in rows],
                          [("create", "BNL", 100)] * 2)
+
+
+class PlanTestsTest(TestCase):
+    COLS = ["External ID", "Serial Number", "T:Gain", "T:Noise.rms", "Comments"]
+
+    def rows(self, rows, name="QC", **kw):
+        s = {"values": kw.get("values", {}), "columns": self.COLS, "rows": [[i + 2, r] for i, r in enumerate(rows)]}
+        return su.plan_tests(su.records(s, su.auto_map(self.COLS, {}, {}), merge=False), T, LIVE, name)
+
+    def test_one_record_per_row(self):
+        rows = self.rows([
+            [None, "HPK-1", 12, 0.5, "first"],
+            [None, "HPK-1", 13, None, None],          # a second record on the same item, not merged
+            [f"{T}-00002", None, 1, None, None],
+        ])
+        self.assertEqual([(r["pid"], r["action"], r["state"]) for r in rows],
+                         [(f"{T}-00001", "test", "pending")] * 2 + [(f"{T}-00002", "test", "pending")])
+        self.assertEqual(rows[0]["rec"], {"test_name": "QC", "comments": "first", "data": {"Gain": 12, "Noise": {"rms": 0.5}}})
+        self.assertEqual(rows[1]["rec"]["data"], {"Gain": 13})
+        self.assertEqual(rows[0]["changes"], ["QC: Gain = 12, Noise.rms = 0.5"])
+
+    def test_errors(self):
+        rows = self.rows([
+            [None, "HPK-9", 1, None, None],
+            [None, "DUP", 1, None, None],
+            [f"{T}-00099", None, 1, None, None],
+            [None, "HPK-1", None, None, "no values"],
+            [None, None, 1, None, None],
+        ])
+        self.assertTrue(all(r["action"] == "error" for r in rows))
+        errs = [r["error"] for r in rows]
+        self.assertIn("no D00400300001 item has serial number HPK-9", errs[0])
+        self.assertIn("DUP is on 2 items", errs[1])
+        self.assertIn("not in HWDB", errs[2])
+        self.assertIn("no test values", errs[3])
+        self.assertIn("no External ID and no serial", errs[4])
+        self.assertIn("no test name", self.rows([[None, "HPK-1", 1, None, None]], name="")[0]["error"])
+        self.assertEqual(self.rows([[None, "HPK-1", 1, None, None]], name="", values={"Test Name": "From block"})[0]["rec"]["test_name"],
+                         "From block")
+
+
+class ApplyTestsTest(TestCase):
+    def setUp(self):
+        self.api = mock.MagicMock()
+        self.api.post_test.return_value = _ok()
+        self.api.get_tests.return_value = {"data": [{"test_data": {"DATA": {"Gain": 12}}}]}
+        self.row = {"pid": f"{T}-00001", "rec": {"test_name": "QC", "comments": "c", "data": {"Gain": 12}}}
+
+    def test_same_record_is_left_alone(self):
+        self.assertEqual(su.apply_test_row(self.api, T, self.row, lambda n: 5), (f"{T}-00001", ["already recorded"]))
+        self.api.get_tests.assert_called_once_with(f"{T}-00001", test_type_id=5, history=True)
+        self.api.post_test.assert_not_called()
+
+    def test_post(self):
+        self.row["rec"]["data"] = {"Gain": 13}
+        self.assertEqual(su.apply_test_row(self.api, T, self.row, lambda n: 5)[1], ["test posted"])
+        self.assertEqual(self.api.post_test.call_args.args,
+                         (f"{T}-00001", {"comments": "c", "test_type": "QC", "test_data": {"DATA": {"Gain": 13}}}))
+        self.api.get_tests.reset_mock()
+        self.assertEqual(su.apply_test_row(self.api, T, self.row, lambda n: None)[1], ["test posted"])   # no id known: no check
+        self.api.get_tests.assert_not_called()
+        self.api.post_test.return_value = {"status": "ERROR", "data": "roles"}
+        with self.assertRaises(su.SheetError):
+            su.apply_test_row(self.api, T, self.row, lambda n: 5)
 
 
 def _detail(n, sn="HPK-1", status=0, vbd=51.4, maker=7, location=186):
@@ -357,8 +431,8 @@ class ViewTest(TestCase):
             self.assertContains(r, "Tests (1 row)")
             self.assertEqual(self.client.post(url, {"step": "tab", "tab": "Tests"}).status_code, 302)
         job.refresh_from_db()
-        self.assertEqual((job.sheet["name"], job.mapping, job.rows),
-                         ("Tests", {"Serial Number": "serial_number", "T:x": ""}, []))
+        self.assertEqual((job.sheet["name"], job.kind, job.mapping, job.rows),
+                         ("Tests", "test", {"Serial Number": "serial_number", "T:x": "test:x"}, []))
 
     def test_bad_files(self):
         self.assertEqual(self.upload(_api(), "a.csv", b"\n\n").status_code, 400)
@@ -440,6 +514,51 @@ class ViewTest(TestCase):
         self.assertNotContains(r, "old.csv")
         self.assertContains(r, "kept 3 days")
         self.assertEqual(list(SheetJob.objects.values_list("pk", flat=True)), [fresh.pk])
+
+    def test_test_sheet_end_to_end(self):
+        api = _api()
+        api.get_test_types.return_value = {"data": []}
+        api.post_test_type.return_value = _ok()
+        api.get_tests.return_value = {"data": []}
+        api.post_test.return_value = _ok()
+        body = (b"Record Type,Test\r\nTest Name,QC\r\n\r\n"
+                b"Serial Number,T:Gain,Comments\r\nHPK-1,12,a\r\nHPK-1,13,b\r\nHPK-9,1,\r\n")
+        self.upload(api, "qc.csv", body)
+        job = SheetJob.objects.get()
+        self.assertEqual((job.kind, job.test_name, job.mapping["T:Gain"]), ("test", "QC", "test:Gain"))
+        url = f"{URL}{job.pk}/"
+        p1, p2 = _mocked(api)
+        with p1, p2:
+            r = self.client.get(url)
+            self.assertContains(r, 'id="su-kind"')
+            self.assertContains(r, 'value="QC"')
+            self.assertContains(r, "Test: Gain")
+            self.assertNotContains(r, "Specs: Vbd")
+            r = self.client.post(url, {"step": "map", "col0": "serial_number", "col1": "test:Gain", "col2": "comments",
+                                       "test_name": "QC2"})
+            self.assertEqual(r.status_code, 302)
+            job.refresh_from_db()
+            self.assertEqual([(x["action"], x["pid"], x["rec"].get("test_name")) for x in job.rows],
+                             [("test", f"{T}-00001", "QC2"), ("test", f"{T}-00001", "QC2"), ("error", "", "QC2")])
+            r = self.client.get(url)
+            self.assertContains(r, "test records to post")
+            self.assertContains(r, "QC2: Gain = 13")
+            # the second post already exists by the time the apply reaches it
+            api.get_tests.side_effect = [{"data": []}, {"data": [{"test_data": {"DATA": {"Gain": 13}}}]}]
+            api.get_test_types.side_effect = [{"data": []}, {"data": [{"id": 9, "name": "QC2"}]}]
+            r = self.client.post(url, {"step": "apply"})
+        j = r.json()
+        self.assertEqual([(x["state"], x["done"]) for x in j["rows"]], [("done", ["test posted"]), ("done", ["already recorded"])])
+        self.assertEqual(api.post_test_type.call_args.args[1]["name"], "QC2")   # created once
+        self.assertEqual(api.post_test.call_count, 1)
+        self.assertEqual(api.post_test.call_args.args[1]["test_data"], {"DATA": {"Gain": 12}})
+        self.assertIn("1 “QC2” test records posted", ActivityEvent.objects.get().summary)
+        api.get_test_types.side_effect = None
+        p1, p2 = _mocked(api)
+        with p1, p2:
+            self.assertEqual(self.client.post(url, {"step": "kind", "kind": "item"}).status_code, 302)
+        job.refresh_from_db()
+        self.assertEqual((job.kind, job.rows, job.mapping["T:Gain"]), ("item", [], "test:Gain"))
 
     def test_other_users_jobs_are_invisible(self):
         SheetJob.objects.create(instance="dev", part_type_id=T, username="someone", name="x.csv",
