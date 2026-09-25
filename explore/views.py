@@ -3,6 +3,7 @@ import io
 import itertools
 import json
 import logging
+import mimetypes
 import re
 import time
 from datetime import datetime, timedelta
@@ -6561,7 +6562,7 @@ def _test_keys(api, part_type_id, name: str) -> list[str]:
     return []
 
 
-def _sheet_apply(request, api, inst, part_type_id, job) -> JsonResponse:
+def _sheet_apply(request, api, inst, part_type_id, job, post) -> JsonResponse:
     """One apply request: the pending plan rows in order, one row at a
     time, for ``APPLY_SECONDS`` — then the page asks again. Each row's
     outcome is saved as it lands, so a reload or a lost connection
@@ -6596,7 +6597,17 @@ def _sheet_apply(request, api, inst, part_type_id, job) -> JsonResponse:
         if time.monotonic() - started > sheetupload.APPLY_SECONDS:
             break
         try:
-            if job.kind == SheetJob.KIND_TEST:
+            if job.kind == SheetJob.KIND_IMAGE:   # #179: one row per request, the file comes with it
+                if str(row["n"]) != post.get("n"):
+                    continue
+                f = request.FILES.get("file")
+                if not f:
+                    return JsonResponse({"error": "no file"}, status=400)
+                pid, done = sheetupload.apply_image_row(
+                    api, row, f, mimetypes.guess_type(f.name)[0] or f.content_type or "application/octet-stream",
+                    test_type_id)
+                row.update(pid=pid, state="done", error="", done=done)
+            elif job.kind == SheetJob.KIND_TEST:
                 pid, done = sheetupload.apply_test_row(api, part_type_id, row, test_type_id)
                 row.update(pid=pid, state="done", error="", done=done)
             else:
@@ -6613,11 +6624,14 @@ def _sheet_apply(request, api, inst, part_type_id, job) -> JsonResponse:
                     "error": row.get("error") or "", "done": row.get("done") or []})
         job.rows = rows
         job.save(update_fields=["rows", "updated_at"])
+        if job.kind == SheetJob.KIND_IMAGE:
+            break
     left = sum(1 for r in rows if r.get("state") == "pending")
-    if not left and out:
+    if (not left or post.get("last") == "1") and out:
         c = job.counts()
         what = (f"{c['posted']} “{job.test_name}” test records posted on {part_type_id} items"
                 if job.kind == SheetJob.KIND_TEST else
+                f"{c['attached']} files attached to {part_type_id} items" if job.kind == SheetJob.KIND_IMAGE else
                 f"{c['created']} {part_type_id} items created, {c['updated']} updated")
         activity.log(inst, ActivityEvent.KIND_ITEM, f"Sheet “{job.name}”: {what}, {c['failed']} failed",
                      part_type_id=part_type_id, actor=activity.actor_of(request))
@@ -6670,7 +6684,7 @@ def explore_sheet_upload_view(request, part_type_id, job_id=None):
         if step == "file":
             f = request.FILES.get("file")
             if not f or f.size > sheetupload.UPLOAD_MAX:
-                return JsonResponse({"error": "Choose a CSV or Excel file under 5 MB."}, status=400)
+                return JsonResponse({"error": "Choose a CSV, Excel or JSON file under 5 MB."}, status=400)
             try:
                 sheets = sheetupload.read_sheets(f.name, f.read())
             except Exception as e:
@@ -6687,7 +6701,7 @@ def explore_sheet_upload_view(request, part_type_id, job_id=None):
             kind, test_name = sheetupload.detect_kind(sheet)
             mapping = sheetupload.auto_map(sheet["columns"], _spec_template(type_record),
                                            (type_record.get("data") or {}).get("connectors") or {},
-                                           _test_keys(api, part_type_id, test_name))
+                                           _test_keys(api, part_type_id, test_name), kind)
             job = SheetJob.objects.create(
                 instance=inst, part_type_id=part_type_id, username=activity.actor_of(request),
                 name=f.name, tabs=sheets, sheet=sheet, mapping=mapping, kind=kind, test_name=test_name)
@@ -6702,7 +6716,7 @@ def explore_sheet_upload_view(request, part_type_id, job_id=None):
         job.delete()
         return redirect(page_url)
     if step == "apply":
-        return _sheet_apply(request, api, inst, part_type_id, job)
+        return _sheet_apply(request, api, inst, part_type_id, job, post)
     try:
         type_record = api.get_component_type(part_type_id)
     except requests.RequestException as e:
@@ -6718,14 +6732,14 @@ def explore_sheet_upload_view(request, part_type_id, job_id=None):
             job.sheet, job.rows = sheet, []
             job.kind, job.test_name = sheetupload.detect_kind(sheet)
             job.mapping = sheetupload.auto_map(sheet["columns"], template, connectors,
-                                               _test_keys(api, part_type_id, job.test_name))
+                                               _test_keys(api, part_type_id, job.test_name), job.kind)
             job.save(update_fields=["sheet", "mapping", "rows", "kind", "test_name", "updated_at"])
         return redirect(request.path)
-    if step == "kind":   # #178: items or tests — the assignments on offer differ, so re-map
-        job.kind = SheetJob.KIND_TEST if post.get("kind") == SheetJob.KIND_TEST else SheetJob.KIND_ITEM
+    if step == "kind":   # #178: items, tests or images — the assignments on offer differ, so re-map
+        job.kind = post.get("kind") if post.get("kind") in (SheetJob.KIND_TEST, SheetJob.KIND_IMAGE) else SheetJob.KIND_ITEM
         job.rows = []
         job.mapping = sheetupload.auto_map(job.sheet["columns"], template, connectors,
-                                           _test_keys(api, part_type_id, job.test_name))
+                                           _test_keys(api, part_type_id, job.test_name), job.kind)
         job.save(update_fields=["kind", "mapping", "rows", "updated_at"])
         return redirect(request.path)
     if step == "map":
@@ -6743,6 +6757,9 @@ def explore_sheet_upload_view(request, part_type_id, job_id=None):
         if job.kind == SheetJob.KIND_TEST:
             job.rows = sheetupload.plan_tests(sheetupload.records(job.sheet, job.mapping, merge=False),
                                               part_type_id, live, job.test_name)
+        elif job.kind == SheetJob.KIND_IMAGE:
+            job.rows = sheetupload.plan_images(sheetupload.records(job.sheet, job.mapping, merge=False),
+                                               part_type_id, live, job.test_name)
         else:
             makers = dict(HwdbComponentEvent.for_instance(inst).filter(part_type_id=part_type_id)
                           .exclude(manufacturer="").values_list("part_id", "manufacturer"))
@@ -6753,6 +6770,8 @@ def explore_sheet_upload_view(request, part_type_id, job_id=None):
     if job.kind == SheetJob.KIND_TEST:
         options = [("", "— not used —")] + list(sheetupload.TEST_FIELD_LABELS)
         options += [(f"test:{k}", f"Test: {k}") for k in _test_keys(api, part_type_id, job.test_name)]
+    elif job.kind == SheetJob.KIND_IMAGE:
+        options = [("", "— not used —")] + list(sheetupload.IMAGE_FIELD_LABELS)
     else:
         options = [("", "— not used —")] + list(sheetupload.FIELD_LABELS)
         options += [(f"spec:{k}", f"Specs: {k}") for k in template]
@@ -6764,7 +6783,11 @@ def explore_sheet_upload_view(request, part_type_id, job_id=None):
             options.append((a, a.replace("spec:", "Specs: ").replace("pos:", "Position ").replace("test:", "Test: ")))
             known.add(a)
     ctx.update(job=job, counts=job.counts(), options=options, is_test=job.kind == SheetJob.KIND_TEST,
-               columns=[(i, c, job.mapping.get(c) or "", job.sheet["rows"][0][1][i] if job.sheet["rows"] else None)
+               is_image=job.kind == SheetJob.KIND_IMAGE,
+               pending_json=[{"n": r["n"], "file": r["rec"].get("file") or ""} for r in job.rows
+                             if r.get("state") == "pending"] if job.kind == SheetJob.KIND_IMAGE else [],
+               columns=[(i, c, job.mapping.get(c) or "",
+                         sheetupload._show(job.sheet["rows"][0][1][i]) if job.sheet["rows"] else "")
                         for i, c in enumerate(job.sheet["columns"])],
                tabs=[(t["name"], len(t["rows"])) for t in job.tabs] if len(job.tabs) > 1 else [],
                values=[(k, v) for k, v in (job.sheet.get("values") or {}).items()],

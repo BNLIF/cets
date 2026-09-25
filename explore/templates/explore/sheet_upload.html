@@ -56,15 +56,15 @@
   {% include "explore/_role_gate.html" %}
 
   <h1>Upload a sheet of <span class="mono">{{ part_type_id }}</span> items</h1>
-  <p class="es-sub">{% if type_name %}{{ type_name }} · {% endif %}A CSV or Excel tab in the HWDB Python upload tool’s layout: the standard columns (External ID, Serial Number, Status, Manufacturer, Institution, Comments, Location), <span class="su-mono">S:</span>&lt;spec key&gt; and <span class="su-mono">C:</span>&lt;position&gt; for items, or <span class="su-mono">T:</span>&lt;key&gt; for one test record per row. Rows are matched by External ID, else by serial number; an unknown serial becomes a new item. Nothing is written before Upload.</p>
+  <p class="es-sub">{% if type_name %}{{ type_name }} · {% endif %}A CSV or Excel tab in the HWDB Python upload tool’s layout: the standard columns (External ID, Serial Number, Status, Manufacturer, Institution, Comments, Location), <span class="su-mono">S:</span>&lt;spec key&gt; and <span class="su-mono">C:</span>&lt;position&gt; for items, or <span class="su-mono">T:</span>&lt;key&gt; for one test record per row (a cell may hold JSON for a nested value). Rows are matched by External ID, else by serial number; an unknown serial becomes a new item. Nothing is written before Upload.</p>
 
   {% if not job %}
   <form method="post" class="es-card" id="su-file" enctype="multipart/form-data">
     {% csrf_token %}
     <input type="hidden" name="step" value="file">
     <div class="cl-field">
-      <label class="cl-lab" for="su-f">Sheet <span class="cl-hint">(.csv, .xlsx — under 5 MB)</span></label>
-      <input type="file" id="su-f" name="file" class="su-file" accept=".csv,.txt,.tsv,.xlsx,.xlsm" required>
+      <label class="cl-lab" for="su-f">Sheet <span class="cl-hint">(.csv, .xlsx or .json — under 5 MB; a JSON file is a list of records, or an object keyed by External ID)</span></label>
+      <input type="file" id="su-f" name="file" class="su-file" accept=".csv,.txt,.tsv,.xlsx,.xlsm,.json" required>
     </div>
     <div class="su-actions">
       <button type="submit" class="es-btn quiet" id="su-go">Read the sheet</button>
@@ -126,6 +126,7 @@
     <span class="cl-lab">Rows are</span>
     <label class="su-radio"><input type="radio" name="kind" value="item"{% if not is_test %} checked{% endif %} onchange="this.form.submit()"> items <span class="cl-hint">(create or update)</span></label>
     <label class="su-radio"><input type="radio" name="kind" value="test"{% if is_test %} checked{% endif %} onchange="this.form.submit()"> test records <span class="cl-hint">(one per row, on an existing item)</span></label>
+    <label class="su-radio"><input type="radio" name="kind" value="image"{% if is_image %} checked{% endif %} onchange="this.form.submit()"> files to attach <span class="cl-hint">(one per row, picked from your computer at upload time)</span></label>
   </form>
   <form method="post" class="es-card" id="su-map">
     {% csrf_token %}
@@ -137,6 +138,11 @@
       <label class="cl-lab" for="su-test-name">Test name <span class="cl-hint">(the HWDB test type; created on the type if it does not exist yet)</span></label>
       <input type="text" id="su-test-name" name="test_name" value="{{ job.test_name }}" required autocomplete="off">
     </div>
+    {% elif is_image %}
+    <div class="cl-field">
+      <label class="cl-lab" for="su-test-name">Test name <span class="cl-hint">(blank = attach to the item; a name = attach to that test’s record)</span></label>
+      <input type="text" id="su-test-name" name="test_name" value="{{ job.test_name }}" autocomplete="off">
+    </div>
     {% endif %}
     <table class="su-table">
       <thead><tr><th>Column</th><th>First row</th><th>Field</th></tr></thead>
@@ -144,7 +150,7 @@
       {% for i, c, a, sample in columns %}
         <tr>
           <td class="k">{{ c }}</td>
-          <td class="su-sample">{% if sample is not None %}{{ sample }}{% endif %}</td>
+          <td class="su-sample">{{ sample }}</td>
           <td><select name="col{{ i }}" data-col="{{ c }}">{% for v, label in options %}<option value="{{ v }}"{% if v == a %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></td>
         </tr>
       {% endfor %}
@@ -161,14 +167,18 @@
     {% csrf_token %}
     <input type="hidden" name="step" value="apply">
     <h2>Plan</h2>
+    {{ pending_json|json_script:"su-pending" }}
     <ul class="su-summ">
       {% if is_test %}
       <li><b>{{ counts.test }}</b> “{{ job.test_name }}” test record{{ counts.test|pluralize }} to post{% if counts.error %}, <span class="su-warn">{{ counts.error }} with problems (skipped)</span>{% endif %}</li>
+      {% elif is_image %}
+      <li><b>{{ counts.image }}</b> file{{ counts.image|pluralize }} to attach{% if counts.error %}, <span class="su-warn">{{ counts.error }} with problems (skipped)</span>{% endif %}</li>
       {% else %}
       <li><b>{{ counts.create }}</b> new item{{ counts.create|pluralize }}, <b>{{ counts.patch }}</b> to update, {{ counts.skip }} unchanged{% if counts.error %}, <span class="su-warn">{{ counts.error }} with problems (skipped)</span>{% endif %}</li>
       {% endif %}
       {% if counts.done %}<li>{{ counts.done }} already uploaded{% if counts.pending %}, {{ counts.pending }} pending{% endif %}.</li>{% endif %}
       {% if is_test %}<li class="su-more">A row whose item already holds a “{{ job.test_name }}” record with the same values is left alone.</li>{% endif %}
+      {% if is_image %}<li class="su-more">A file already attached under the same name is left alone. Each file goes straight from your computer to HWDB; the Explorer keeps no copy.</li>{% endif %}
     </ul>
     <div class="su-scroll">
     <table class="su-table" id="su-rows">
@@ -179,7 +189,7 @@
           <td class="k">{{ r.rows|join:", " }}</td>
           <td class="k su-mono">{{ r.key }}</td>
           <td class="k su-mono pid">{% if r.pid %}<a href="{% url 'explore:part' part_id=r.pid %}" target="_blank" rel="noopener">{{ r.pid }}</a>{% endif %}</td>
-          <td class="k">{% if r.action == 'create' %}create{% elif r.action == 'patch' %}update{% elif r.action == 'test' %}post test{% elif r.action == 'skip' %}nothing to do{% else %}—{% endif %}</td>
+          <td class="k">{% if r.action == 'create' %}create{% elif r.action == 'patch' %}update{% elif r.action == 'test' %}post test{% elif r.action == 'image' %}attach{% elif r.action == 'skip' %}nothing to do{% else %}—{% endif %}</td>
           <td class="su-changes">{{ r.changes|join:" · "|truncatechars:200 }}</td>
           <td class="st">{% if r.state == 'error' %}{{ r.error }}{% elif r.state == 'done' and r.action != 'skip' %}{{ r.done|join:", "|default:"done" }}{% endif %}</td>
         </tr>
@@ -187,6 +197,13 @@
       </tbody>
     </table>
     </div>
+    {% if is_image %}
+    <div class="cl-field">
+      <label class="cl-lab" for="su-files">Files <span class="cl-hint">(pick the files the sheet names — several at once, or a whole folder; matched by file name)</span></label>
+      <input type="file" id="su-files" class="su-file" multiple>
+      <span id="su-files-n" class="su-more"></span>
+    </div>
+    {% endif %}
     <div class="su-actions">
       <button type="submit" class="es-btn" id="su-apply"{% if not counts.pending %} disabled{% endif %}>{% if counts.done %}Continue — {% else %}Upload — {% endif %}<span id="su-n">{{ counts.pending }}</span> row{{ counts.pending|pluralize }} to HWDB</button>
       <span id="su-prog" class="su-more"></span>
@@ -196,6 +213,12 @@
   (function () {
     var form = document.getElementById("su-plan"), btn = document.getElementById("su-apply"), prog = document.getElementById("su-prog");
     var nEl = document.getElementById("su-n"), left = +nEl.textContent, done = 0;
+    var files = document.getElementById("su-files"), pending = JSON.parse(document.getElementById("su-pending").textContent || "[]");
+    if (files) files.addEventListener("change", function () {
+      var have = {}; [].forEach.call(files.files, function (f) { have[f.name.toLowerCase()] = 1; });
+      var n = pending.filter(function (p) { return have[p.file.toLowerCase()]; }).length;
+      document.getElementById("su-files-n").textContent = files.files.length + " picked, " + n + " of " + pending.length + " pending rows matched";
+    });
     function part(pid) { return "{% url 'explore:part' part_id='PID0' %}".replace("PID0", pid); }
     function show(r) {
       var tr = form.querySelector('tr[data-n="' + r.n + '"]'); if (!tr) return;
@@ -207,6 +230,7 @@
       ev.preventDefault();
       if (btn.disabled) return;
       btn.disabled = true;
+      if (files) return uploadFiles();
       function next() {
         prog.textContent = "Uploading… " + done + " done, " + left + " to go";
         var fd = new FormData(form);
@@ -223,6 +247,33 @@
           .catch(function (e) { prog.textContent = "Request failed: " + e + " — press Continue."; btn.textContent = "Continue"; btn.disabled = false; });
       }
       next();
+      // #179: one request per row, carrying that row's file from the picker; unmatched rows stay pending
+      function uploadFiles() {
+        var byName = {}; [].forEach.call(files.files, function (f) { byName[f.name.toLowerCase()] = f; });
+        var todo = pending.filter(function (p) { return byName[p.file.toLowerCase()]; });
+        pending.forEach(function (p) { if (!byName[p.file.toLowerCase()]) { var tr = form.querySelector('tr[data-n="' + p.n + '"]'); if (tr) tr.querySelector(".st").textContent = "file not picked"; } });
+        if (!todo.length) { prog.textContent = "None of the pending rows’ files are picked."; btn.disabled = false; return; }
+        var i = 0;
+        function one() {
+          if (i >= todo.length) {
+            prog.textContent = "Done — " + done + " file" + (done === 1 ? "" : "s") + " sent" + (left ? ", " + left + " row" + (left === 1 ? "" : "s") + " still pending" : "") + ".";
+            btn.textContent = left ? "Continue" : "Done"; btn.disabled = !left; return;
+          }
+          var p = todo[i++], fd = new FormData(form);
+          prog.textContent = "Sending " + p.file + "… " + done + " done, " + (todo.length - i + 1) + " to go";
+          fd.set("n", String(p.n)); fd.set("file", byName[p.file.toLowerCase()]); fd.set("last", i === todo.length ? "1" : "0");
+          fetch(location.href, { method: "POST", body: fd, credentials: "same-origin",
+                                 headers: { "X-CSRFToken": fd.get("csrfmiddlewaretoken") } })
+            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+            .then(function (res) {
+              if (!res.ok || res.j.error) { prog.textContent = res.j.error || "Request failed."; btn.disabled = false; return; }
+              res.j.rows.forEach(show); done += res.j.rows.length; left = res.j.left; nEl.textContent = left;
+              one();
+            })
+            .catch(function (e) { prog.textContent = "Request failed: " + e + " — press Continue."; btn.textContent = "Continue"; btn.disabled = false; });
+        }
+        one();
+      }
     });
   })();
   </script>

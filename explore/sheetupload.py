@@ -16,6 +16,7 @@ from __future__ import annotations
 import copy
 import csv
 import io
+import json
 import re
 from datetime import date, datetime
 
@@ -45,8 +46,13 @@ STANDARD = {
     "arrived": "arrived", "location timestamp": "arrived",
     "part type id": "part_type_id",
     "record type": "record_type", "test name": "test_name",
+    "image file": "image_file", "save as": "save_as", "history order": "hist_order",
 }
 TEST_FIELD_LABELS = [("part_id", "External ID / PID"), ("serial_number", "Serial number"), ("comments", "Comments")]
+IMAGE_FIELD_LABELS = [("part_id", "External ID / PID"), ("serial_number", "Serial number"),
+                      ("image_file", "Image file (name)"), ("save_as", "Save as (name in HWDB)"),
+                      ("comments", "Comments"), ("test_name", "Test name (a test's attachment)"),
+                      ("hist_order", "History order (0 = latest test record)")]
 FIELD_LABELS = [
     ("part_id", "External ID / PID"), ("serial_number", "Serial number"), ("status", "Status"),
     ("manufacturer", "Manufacturer"), ("institution", "Institution (owner of a new item)"),
@@ -81,7 +87,47 @@ def _cell(v):
         return None
     if _NUM.match(s):
         return float(s) if "." in s or "e" in s.lower() else int(s)
+    if s[:1] in "{[" and s[-1:] in "}]":   # a JSON object or list in one cell stays nested
+        try:
+            return json.loads(s)
+        except ValueError:
+            pass
     return s
+
+
+def _show(v) -> str:
+    """A cell for a message: JSON for a nested value, plain text otherwise."""
+    return json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else _text(v)
+
+
+def _json_sheet(name: str, blob: bytes) -> dict:
+    """A JSON file as one sheet: a list of records (objects), or an object
+    keyed by External ID, or an object with the records under ``data`` /
+    ``rows`` / ``records`` and its other scalar entries as the key/value
+    block (Record Type, Test Name, Part Type ID …). Each record's top-level
+    keys are the columns; nested values stay nested (never pass through a
+    cell). Row numbers count records from 1."""
+    doc = json.loads(blob.decode("utf-8-sig"))
+    values, recs = {}, None
+    if isinstance(doc, dict):
+        for k in ("data", "rows", "records"):
+            if isinstance(doc.get(k), list):
+                recs = doc[k]
+                values = {str(a): b for a, b in doc.items() if a != k and not isinstance(b, (dict, list))}
+                break
+        if recs is None:
+            recs = [{"External ID": k, **v} for k, v in doc.items() if isinstance(v, dict)]
+    elif isinstance(doc, list):
+        recs = doc
+    recs = [r for r in (recs or []) if isinstance(r, dict)]
+    columns: list[str] = []
+    for r in recs:
+        for k in r:
+            if str(k) not in columns:
+                columns.append(str(k))
+    rows = [[i + 1, [r.get(c) if r.get(c) not in ("", None) else None for c in columns]] for i, r in enumerate(recs)]
+    return {"name": name.rsplit(".", 1)[0], "values": values, "columns": columns,
+            "rows": rows[:ROWS_MAX], "over": max(0, len(rows) - ROWS_MAX)}
 
 
 def _raw_rows(name: str, blob: bytes) -> list[tuple[str, list[list]]]:
@@ -115,7 +161,11 @@ def read_sheets(name: str, blob: bytes) -> list[dict]:
     the utility's key/value block (the rows above the first blank row, when
     that block is two columns wide and a header row follows), ``columns`` =
     the header row's texts, ``rows`` = ``[sheet row number, cells]`` for
-    every non-blank data row. A tab with no header row is left out."""
+    every non-blank data row. A tab with no header row is left out. A
+    ``.json`` file is one sheet of records (``_json_sheet``)."""
+    if (name or "").lower().endswith(".json"):
+        sheet = _json_sheet(name, blob)
+        return [sheet] if sheet["columns"] else []
     out = []
     for tab, raw in _raw_rows(name, blob):
         raw = [r for r in raw]
@@ -148,11 +198,14 @@ def read_sheets(name: str, blob: bytes) -> list[dict]:
 
 # ---- mapping ----------------------------------------------------------------
 
-def auto_map(columns: list[str], template: dict, connectors: dict, test_keys=()) -> dict[str, str]:
+def auto_map(columns: list[str], template: dict, connectors: dict, test_keys=(),
+             kind: str = "item") -> dict[str, str]:
     """Column header → assignment: a standard name, ``S:key`` / ``C:position``
     / ``T:key`` (the utility's prefixes), or a bare header that names a spec
-    key, a position or (``test_keys``, a Test sheet) a test-result key;
-    anything else stays unassigned ("")."""
+    key, a position or (``test_keys``) a test-result key. On a Test sheet
+    every other header is a test-result key too (the utility's Test
+    Results datasheet takes any column); on an Item sheet it stays
+    unassigned ("")."""
     specs = {k.lower(): k for k in template}
     poss = {str(p).lower(): str(p) for p in connectors}
     tests = {str(k).lower(): str(k) for k in test_keys}
@@ -173,19 +226,28 @@ def auto_map(columns: list[str], template: dict, connectors: dict, test_keys=())
             out[c] = "spec:" + specs[low]
         elif low in poss:
             out[c] = "pos:" + poss[low]
+        elif kind == "test":
+            out[c] = "test:" + c
         else:
             out[c] = ""
     return out
 
 
 def detect_kind(sheet: dict) -> tuple[str, str]:
-    """(kind, test name) from the sheet: a ``Record Type`` of Test in the
-    key/value block, or any ``T:`` column, makes it a Test sheet; the
-    block's ``Test Name`` names the test."""
+    """(kind, test name) from the sheet: a ``Record Type`` of Item Image /
+    Test Image in the key/value block, or an ``Image File`` column, makes
+    it an Image sheet; a Record Type of Test, or any ``T:`` column, a Test
+    sheet; the block's ``Test Name`` names the test."""
     values = {k.lower(): v for k, v in (sheet.get("values") or {}).items()}
-    is_test = (_text(values.get("record type")).lower().startswith("test")
-               or any(c[:2].upper() == "T:" for c in sheet["columns"]))
-    return ("test" if is_test else "item"), _text(values.get("test name"))
+    rt = _text(values.get("record type")).lower()
+    cols = [c.lower() for c in sheet["columns"]]
+    if "image" in rt or "image file" in cols:
+        kind = "image"
+    elif rt.startswith("test") or any(c[:2] == "t:" for c in cols):
+        kind = "test"
+    else:
+        kind = "item"
+    return kind, _text(values.get("test name"))
 
 
 def records(sheet: dict, mapping: dict, merge: bool = True) -> list[dict]:
@@ -420,23 +482,109 @@ def _diff(r: dict, cur: dict, maker: str) -> list[str]:
     latest = specs[-1] if isinstance(specs[-1], dict) else {}
     for k, v in r["specs"].items():
         if _get_path(latest, k) is _MISSING or _get_path(latest, k) != v:
-            ch.append(f"{k} → {v}")
+            ch.append(f"{k} → {_show(v)}")
     return ch
+
+
+def _segs(key: str) -> list[tuple[str, bool]]:
+    """``a.b[].c`` → [(a, False), (b, True), (c, False)]: a ``[]`` segment is a list."""
+    return [(seg[:-2], True) if seg.endswith("[]") else (seg, False) for seg in key.split(".")]
+
+
+def _row_scalars(tests: dict) -> dict[tuple, dict]:
+    """The row's plain values grouped by the list path they sit under —
+    what identifies a list element (the utility's group keys: an element's
+    scalar members)."""
+    out: dict[tuple, dict] = {}
+    for k, v in tests.items():
+        segs = _segs(k)
+        if segs[-1][1]:
+            continue                       # a trailing [] appends a value, it names nothing
+        lists = tuple(n for n, is_list in segs if is_list)
+        last = max((i for i, (_, is_list) in enumerate(segs) if is_list), default=-1)
+        out.setdefault(lists, {})[".".join(n for n, _ in segs[last + 1:])] = _spec_value(v)
+    return out
+
+
+def _insert(data: dict, key: str, value, scalars: dict[tuple, dict]) -> None:
+    """Set ``key`` in ``data``, walking ``[]`` segments into lists: the
+    element for this row is the one whose scalar members equal the row's
+    (``scalars``), else a new one seeded with them; a trailing ``[]``
+    appends the value."""
+    node, prefix = data, ()
+    segs = _segs(key)
+    for name, is_list in segs[:-1]:
+        if is_list:
+            lst = node.setdefault(name, [])
+            if not isinstance(lst, list):
+                lst = node[name] = []
+            prefix += (name,)
+            ident = scalars.get(prefix, {})
+            elem = next((e for e in lst if isinstance(e, dict) and all(_get_path(e, k) == v for k, v in ident.items())), None)
+            if elem is None:
+                elem = {}
+                for k, v in ident.items():
+                    _set_path(elem, k, v)
+                lst.append(elem)
+            node = elem
+        else:
+            if not isinstance(node.get(name), dict):
+                node[name] = {}
+            node = node[name]
+    name, is_list = segs[-1]
+    if is_list:
+        node.setdefault(name, []).append(_spec_value(value))
+    else:
+        node[name] = _spec_value(value)
+
+
+def group_tests(records_: list[dict]) -> list[dict]:
+    """#179: rows whose test keys use ``[]`` (``Subtests[].Name``,
+    ``Subtests[].Trials[].Value``) build lists: rows naming the same item
+    with the same plain (non-list) values are one test record, and inside
+    it each ``[]`` level holds one element per distinct set of scalar
+    members — the utility's nested encoder groups, spelled in the header.
+    Without any ``[]`` key every row is its own record (as #178)."""
+    if not any("[]" in k for r in records_ for k in r["tests"]):
+        for r in records_:
+            r["data"] = {}
+            for k, v in r["tests"].items():
+                _set_path(r["data"], k, _spec_value(v))
+        return records_
+    out: list[dict] = []
+    index: dict[tuple, dict] = {}
+    for r in records_:
+        scalars = _row_scalars(r["tests"])
+        ident = (r["part_id"], r["serial_number"].lower(), _text(r.get("test_name")),
+                 json.dumps(scalars.get((), {}), sort_keys=True, default=str))
+        rec = index.get(ident)
+        if rec is None:
+            rec = index[ident] = {**r, "rows": list(r["rows"]), "tests": dict(r["tests"]), "data": {}}
+            out.append(rec)
+        else:
+            rec["rows"] += r["rows"]
+            rec["tests"].update(r["tests"])
+            if r.get("comments") is not None:
+                rec["comments"] = r["comments"]
+        for k, v in r["tests"].items():
+            _insert(rec["data"], k, v, scalars)
+    return out
 
 
 def plan_tests(records_: list[dict], ptid: str, live: dict, test_name: str) -> list[dict]:
     """#178: the dry run of a Test sheet — each row names an existing item
     (by External ID, else by serial) and carries ``T:`` values; the plan
-    row's ``rec`` = ``{test_name, comments, data}`` with dotted keys nested.
-    Whether the item already holds a test with the same data is checked at
-    apply time (the listing has no tests)."""
+    row's ``rec`` = ``{test_name, comments, data}`` with dotted keys nested
+    and ``[]`` keys grouped into lists (``group_tests``). Whether the item
+    already holds a test with the same data is checked at apply time (the
+    listing has no tests)."""
     by_serial: dict[str, list[str]] = {}
     for pid, r in live.items():
         sn = _text(r.get("serial_number"))
         if sn:
             by_serial.setdefault(sn.lower(), []).append(pid)
     out = []
-    for rec in records_:
+    for rec in group_tests(records_):
         name = test_name or _text(rec.get("test_name"))   # the page's name wins; the sheet's only fills a blank
         row = {"n": rec["n"], "rows": rec["rows"], "key": rec["part_id"] or rec["serial_number"],
                "pid": rec["part_id"], "action": "test", "changes": [], "error": "", "state": "pending",
@@ -464,9 +612,62 @@ def plan_tests(records_: list[dict], ptid: str, live: dict, test_name: str) -> l
                 raise SheetError("no External ID and no serial number")
             if not rec["tests"]:
                 raise SheetError("no test values (T: columns) in this row")
-            for k, v in rec["tests"].items():
-                _set_path(row["rec"]["data"], k, _spec_value(v))
-            row["changes"] = [f"{name}: " + ", ".join(f"{k} = {v}" for k, v in rec["tests"].items())]
+            row["rec"]["data"] = rec["data"]
+            row["changes"] = [f"{name}: " + (_show(rec["data"]) if any("[]" in k for k in rec["tests"]) else
+                                             ", ".join(f"{k} = {_show(v)}" for k, v in rec["tests"].items()))]
+        except SheetError as e:
+            row.update(action="error", state="error", error=str(e))
+    return out
+
+
+def plan_images(records_: list[dict], ptid: str, live: dict, test_name: str) -> list[dict]:
+    """#179: the dry run of an Image sheet — each row names an existing
+    item and a file (``Image File``; ``Save As`` renames it in HWDB); with
+    a test name the file goes onto that test's record (``History Order``
+    0 = the latest). The files themselves are picked in the browser at
+    upload time and matched by name; nothing is stored here."""
+    by_serial: dict[str, list[str]] = {}
+    for pid, r in live.items():
+        sn = _text(r.get("serial_number"))
+        if sn:
+            by_serial.setdefault(sn.lower(), []).append(pid)
+    out = []
+    for rec in records_:
+        name = _text(rec.get("test_name")) or test_name
+        file = _text(rec.get("image_file")).replace("\\", "/").rsplit("/", 1)[-1]
+        row = {"n": rec["n"], "rows": rec["rows"], "key": rec["part_id"] or rec["serial_number"],
+               "pid": rec["part_id"], "action": "image", "changes": [], "error": "", "state": "pending",
+               "rec": {"file": file, "save_as": _text(rec.get("save_as")) or file, "comments": _text(rec.get("comments")),
+                       "test_name": name, "hist_order": 0}}
+        out.append(row)
+        try:
+            if rec.get("part_type_id") is not None and _text(rec["part_type_id"]).upper() != ptid:
+                raise SheetError(f"Part Type ID {_text(rec['part_type_id'])} is not {ptid}")
+            if rec["part_id"]:
+                if not rec["part_id"].startswith(ptid + "-"):
+                    raise SheetError(f"{rec['part_id']} is not a {ptid} item")
+                if rec["part_id"] not in live:
+                    raise SheetError(f"{rec['part_id']} is not in HWDB")
+            elif rec["serial_number"]:
+                hits = by_serial.get(rec["serial_number"].lower()) or []
+                if len(hits) > 1:
+                    raise SheetError(f"serial number {rec['serial_number']} is on {len(hits)} items: "
+                                     f"{', '.join(hits)} — give the PID")
+                if not hits:
+                    raise SheetError(f"no {ptid} item has serial number {rec['serial_number']}")
+                row["pid"] = hits[0]
+            else:
+                raise SheetError("no External ID and no serial number")
+            if not file:
+                raise SheetError("no image file")
+            if rec.get("hist_order") is not None:
+                try:
+                    row["rec"]["hist_order"] = max(0, int(rec["hist_order"]))
+                except (TypeError, ValueError):
+                    raise SheetError(f"history order “{_text(rec['hist_order'])}” is not a number")
+            row["changes"] = [f"{file}" + (f" as {row['rec']['save_as']}" if row["rec"]["save_as"] != file else "")
+                              + (f" → test “{name}”" + (f" #{row['rec']['hist_order']}" if row["rec"]["hist_order"] else "")
+                                 if name else " → item")]
         except SheetError as e:
             row.update(action="error", state="error", error=str(e))
     return out
@@ -594,3 +795,35 @@ def apply_test_row(api, ptid: str, row: dict, test_type_id) -> tuple[str, list[s
     if body.get("status") != "OK":
         raise SheetError(str(body.get("data") or body))
     return pid, ["test posted"]
+
+
+def apply_image_row(api, row: dict, fileobj, content_type: str, test_type_id) -> tuple[str, list[str]]:
+    """#179: attach the picked file to the row's item, or to one of its
+    test records (``test_name`` + ``hist_order``, 0 = latest), unless an
+    attachment of that name is already there. Returns (pid, what happened)."""
+    r, pid = row["rec"], row["pid"]
+    name = r["save_as"] or r["file"]
+    comments = r["comments"] or "Sheet upload via HWDB Explorer"
+    if r["test_name"]:
+        tid = test_type_id(r["test_name"])
+        if tid is None:
+            raise SheetError(f"this type has no “{r['test_name']}” test type")
+        tests = [t for t in (api.get_tests(pid, test_type_id=tid, history=True).get("data") or []) if isinstance(t, dict)]
+        if r["hist_order"] >= len(tests):
+            raise SheetError(f"{pid} has {len(tests)} “{r['test_name']}” record{'s' if len(tests) != 1 else ''}, "
+                             f"no #{r['hist_order']}")
+        try:
+            have = {i.get("image_name") for i in (api.get_test_images(pid, tid).get("data") or []) if isinstance(i, dict)}
+        except Exception:
+            have = set()
+        if name in have:
+            return pid, ["already attached"]
+        body = api.post_test_image(tests[r["hist_order"]].get("id"), fileobj, name, comments, content_type)
+    else:
+        have = {i.get("image_name") for i in (api.get_images(pid).get("data") or []) if isinstance(i, dict)}
+        if name in have:
+            return pid, ["already attached"]
+        body = api.post_component_image(pid, fileobj, name, comments, content_type)
+    if body.get("status", "OK") != "OK":
+        raise SheetError(str(body.get("data") or body))
+    return pid, ["attached"]

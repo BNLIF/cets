@@ -75,6 +75,20 @@ class ReadTest(TestCase):
         self.assertEqual([s["name"] for s in sheets], ["Items"])
         self.assertEqual(sheets[0]["rows"], [[2, ["HPK-1", 51]], [3, ["HPK-2", 52.25]]])
 
+    def test_json_in_a_cell_and_json_files(self):
+        (s,) = su.read_sheets("a.csv", b'Serial Number,T:Curve,T:Meta\nHPK-1,"[1, 2, 3]","{""a"": {""b"": 1}}"\nHPK-2,{oops,x\n')
+        self.assertEqual(s["rows"][0][1], ["HPK-1", [1, 2, 3], {"a": {"b": 1}}])
+        self.assertEqual(s["rows"][1][1][1], "{oops")                  # not JSON: stays text
+        (s,) = su.read_sheets("r.json", b'[{"Serial Number": "HPK-1", "Gain": 12, "Curve": [1, 2]}, {"Serial Number": "HPK-2", "Noise": {"rms": 0.5}}]')
+        self.assertEqual((s["name"], s["values"], s["columns"]), ("r", {}, ["Serial Number", "Gain", "Curve", "Noise"]))
+        self.assertEqual(s["rows"], [[1, ["HPK-1", 12, [1, 2], None]], [2, ["HPK-2", None, None, {"rms": 0.5}]]])
+        (s,) = su.read_sheets("k.json", b'{"D00400300001-00001": {"Gain": 1}, "D00400300001-00002": {"Gain": 2}, "note": "x"}')
+        self.assertEqual(s["columns"], ["External ID", "Gain"])
+        self.assertEqual(s["rows"][1][1], [f"{T}-00002", 2])
+        (s,) = su.read_sheets("w.json", b'{"Record Type": "Test", "Test Name": "QC", "data": [{"External ID": "X", "v": 1}]}')
+        self.assertEqual((s["values"], s["columns"], s["rows"]), ({"Record Type": "Test", "Test Name": "QC"}, ["External ID", "v"], [[1, ["X", 1]]]))
+        self.assertEqual(su.read_sheets("e.json", b'[]'), [])
+
     def test_a_block_is_two_columns_wide(self):
         (s,) = su.read_sheets("a.csv", b"Serial Number,Vbd,Notes\nHPK-1,1,\n\nHPK-2,2,\n")
         self.assertEqual(s["values"], {})                       # three columns: a table with a gap, not a block
@@ -104,14 +118,18 @@ class MapTest(TestCase):
         self.assertNotIn("Extra", old)                                    # unassigned column ignored
 
     def test_test_columns_and_kind(self):
-        m = su.auto_map(["Serial Number", "T:Gain", "gain", "Noise", "Comments"], TEMPLATE, CONNECTORS, ["Gain", "Noise"])
+        m = su.auto_map(["Serial Number", "T:Gain", "gain", "Noise", "Comments", "Other"], TEMPLATE, CONNECTORS, ["Gain", "Noise"])
         self.assertEqual(m, {"Serial Number": "serial_number", "T:Gain": "test:Gain", "gain": "test:Gain",
-                             "Noise": "test:Noise", "Comments": "comments"})
+                             "Noise": "test:Noise", "Comments": "comments", "Other": ""})
+        self.assertEqual(su.auto_map(["Other", "Vbd"], TEMPLATE, CONNECTORS, (), "test"), {"Other": "test:Other", "Vbd": "spec:Vbd"})
         self.assertEqual(su.detect_kind({"values": {"Record Type": "Test", "Test Name": "QC"}, "columns": ["Serial Number"]}),
                          ("test", "QC"))
         self.assertEqual(su.detect_kind({"values": {}, "columns": ["Serial Number", "T:x"]}), ("test", ""))
         self.assertEqual(su.detect_kind({"values": {"Record Type": "Item"}, "columns": ["T:x"]}), ("test", ""))
         self.assertEqual(su.detect_kind({"values": {}, "columns": ["Serial Number", "S:x"]}), ("item", ""))
+        self.assertEqual(su.detect_kind({"values": {"Record Type": "Item Image"}, "columns": ["Serial Number"]}), ("image", ""))
+        self.assertEqual(su.detect_kind({"values": {"Record Type": "Test Image", "Test Name": "QC"}, "columns": ["x"]}), ("image", "QC"))
+        self.assertEqual(su.detect_kind({"values": {}, "columns": ["External ID", "Image File", "Comments"]}), ("image", ""))
 
     def test_records_key_on_pid_and_serial(self):
         s = {"values": {}, "columns": ["Part ID", "Serial Number"],
@@ -206,6 +224,9 @@ class PlanTestsTest(TestCase):
         self.assertEqual(rows[0]["rec"], {"test_name": "QC", "comments": "first", "data": {"Gain": 12, "Noise": {"rms": 0.5}}})
         self.assertEqual(rows[1]["rec"]["data"], {"Gain": 13})
         self.assertEqual(rows[0]["changes"], ["QC: Gain = 12, Noise.rms = 0.5"])
+        rows = self.rows([[None, "HPK-1", {"a": [1, 2]}, None, None]])
+        self.assertEqual(rows[0]["rec"]["data"], {"Gain": {"a": [1, 2]}})
+        self.assertEqual(rows[0]["changes"], ['QC: Gain = {"a": [1, 2]}'])
 
     def test_errors(self):
         rows = self.rows([
@@ -225,6 +246,86 @@ class PlanTestsTest(TestCase):
         self.assertIn("no test name", self.rows([[None, "HPK-1", 1, None, None]], name="")[0]["error"])
         self.assertEqual(self.rows([[None, "HPK-1", 1, None, None]], name="", values={"Test Name": "From block"})[0]["rec"]["test_name"],
                          "From block")
+
+
+class GroupTest(TestCase):
+    """#179: [] keys build lists — the utility's nested groups."""
+    COLS = ["Serial Number", "T:Test Date", "T:Operator", "T:Subtests[].Name", "T:Subtests[].Trials[].Number",
+            "T:Subtests[].Trials[].Value", "T:Tags[]"]
+
+    def plan(self, rows):
+        s = {"values": {}, "columns": self.COLS, "rows": [[i + 2, r] for i, r in enumerate(rows)]}
+        return su.plan_tests(su.records(s, su.auto_map(self.COLS, {}, {}), merge=False), T, LIVE, "QC")
+
+    def test_rows_nest_by_their_scalar_members(self):
+        rows = self.plan([
+            ["HPK-1", "2026-09-01", "cz", "A", 1, 0.1, "x"],
+            ["HPK-1", "2026-09-01", "cz", "A", 2, 0.2, "y"],
+            ["HPK-1", "2026-09-01", "cz", "B", 1, 0.3, None],
+            ["HPK-1", "2026-09-02", "cz", "A", 1, 0.4, None],     # another date: another record
+            ["HPK-2", "2026-09-01", "cz", "A", 1, 0.5, None],     # another item
+        ])
+        self.assertEqual([(r["pid"], r["rows"]) for r in rows],
+                         [(f"{T}-00001", [2, 3, 4]), (f"{T}-00001", [5]), (f"{T}-00002", [6])])
+        self.assertEqual(rows[0]["rec"]["data"], {
+            "Test Date": "2026-09-01", "Operator": "cz",
+            "Subtests": [{"Name": "A", "Trials": [{"Number": 1, "Value": 0.1}, {"Number": 2, "Value": 0.2}]},
+                         {"Name": "B", "Trials": [{"Number": 1, "Value": 0.3}]}],
+            "Tags": ["x", "y"]})
+        self.assertEqual(rows[1]["rec"]["data"]["Subtests"], [{"Name": "A", "Trials": [{"Number": 1, "Value": 0.4}]}])
+        self.assertIn('"Subtests": [{"Name": "A"', rows[0]["changes"][0])
+
+    def test_without_list_keys_every_row_is_a_record(self):
+        cols = ["Serial Number", "T:a.b"]
+        s = {"values": {}, "columns": cols, "rows": [[2, ["HPK-1", 1]], [3, ["HPK-1", 2]]]}
+        rows = su.plan_tests(su.records(s, su.auto_map(cols, {}, {}), merge=False), T, LIVE, "QC")
+        self.assertEqual([r["rec"]["data"] for r in rows], [{"a": {"b": 1}}, {"a": {"b": 2}}])
+
+
+class ImageTest(TestCase):
+    COLS = ["External ID", "Serial Number", "Image File", "Save As", "Comments", "History Order"]
+
+    def plan(self, rows, name=""):
+        s = {"values": {}, "columns": self.COLS, "rows": [[i + 2, r] for i, r in enumerate(rows)]}
+        return su.plan_images(su.records(s, su.auto_map(self.COLS, {}, {}), merge=False), T, LIVE, name)
+
+    def test_plan(self):
+        rows = self.plan([
+            [None, "HPK-1", "photos/front.png", None, "front", None],
+            [f"{T}-00002", None, "C:\\scans\\sheet.pdf", "datasheet.pdf", None, 1],
+            [None, "HPK-1", None, None, None, None],
+            [None, "HPK-9", "x.png", None, None, None],
+            [None, "HPK-1", "x.png", None, None, "two"],
+        ], name="QC")
+        self.assertEqual([(r["pid"], r["action"]) for r in rows[:2]], [(f"{T}-00001", "image"), (f"{T}-00002", "image")])
+        self.assertEqual(rows[0]["rec"], {"file": "front.png", "save_as": "front.png", "comments": "front", "test_name": "QC", "hist_order": 0})
+        self.assertEqual(rows[0]["changes"], ["front.png → test “QC”"])
+        self.assertEqual((rows[1]["rec"]["file"], rows[1]["rec"]["save_as"], rows[1]["rec"]["hist_order"]), ("sheet.pdf", "datasheet.pdf", 1))
+        self.assertEqual(rows[1]["changes"], ["sheet.pdf as datasheet.pdf → test “QC” #1"])
+        self.assertEqual([r["error"] for r in rows[2:]], ["no image file", f"no {T} item has serial number HPK-9",
+                                                          "history order “two” is not a number"])
+        self.assertEqual(self.plan([[None, "HPK-1", "a.png", None, None, None]])[0]["changes"], ["a.png → item"])
+
+    def test_apply_item_and_test_attachments(self):
+        api = mock.MagicMock()
+        api.get_images.return_value = {"data": [{"image_name": "old.png"}]}
+        api.post_component_image.return_value = _ok()
+        row = {"pid": f"{T}-00001", "rec": {"file": "a.png", "save_as": "a.png", "comments": "", "test_name": "", "hist_order": 0}}
+        self.assertEqual(su.apply_image_row(api, row, b"x", "image/png", lambda n: None), (f"{T}-00001", ["attached"]))
+        self.assertEqual(api.post_component_image.call_args.args, (f"{T}-00001", b"x", "a.png", "Sheet upload via HWDB Explorer", "image/png"))
+        row["rec"]["save_as"] = "old.png"
+        self.assertEqual(su.apply_image_row(api, row, b"x", "image/png", lambda n: None)[1], ["already attached"])
+        api.get_tests.return_value = {"data": [{"id": 71}, {"id": 70}]}
+        api.get_test_images.return_value = {"data": []}
+        api.post_test_image.return_value = _ok()
+        row["rec"].update(test_name="QC", hist_order=1, save_as="a.png", comments="c")
+        self.assertEqual(su.apply_image_row(api, row, b"x", "image/png", lambda n: 5)[1], ["attached"])
+        self.assertEqual(api.post_test_image.call_args.args, (70, b"x", "a.png", "c", "image/png"))
+        row["rec"]["hist_order"] = 2
+        with self.assertRaises(su.SheetError):
+            su.apply_image_row(api, row, b"x", "image/png", lambda n: 5)
+        with self.assertRaises(su.SheetError):
+            su.apply_image_row(api, row, b"x", "image/png", lambda n: None)
 
 
 class ApplyTestsTest(TestCase):
@@ -559,6 +660,34 @@ class ViewTest(TestCase):
             self.assertEqual(self.client.post(url, {"step": "kind", "kind": "item"}).status_code, 302)
         job.refresh_from_db()
         self.assertEqual((job.kind, job.rows, job.mapping["T:Gain"]), ("item", [], "test:Gain"))
+
+    def test_image_sheet_end_to_end(self):
+        api = _api()
+        api.get_images.return_value = {"data": []}
+        api.post_component_image.return_value = _ok()
+        body = b"External ID,Image File,Comments\r\nD00400300001-00001,front.png,front\r\nD00400300001-00002,back.png,\r\n"
+        self.upload(api, "photos.csv", body)
+        job = SheetJob.objects.get()
+        self.assertEqual((job.kind, job.mapping), ("image", {"External ID": "part_id", "Image File": "image_file", "Comments": "comments"}))
+        url = f"{URL}{job.pk}/"
+        p1, p2 = _mocked(api)
+        with p1, p2:
+            self.assertContains(self.client.get(url), 'value="image" checked')
+            self.assertEqual(self.client.post(url, {"step": "map", "col0": "part_id", "col1": "image_file", "col2": "comments"}).status_code, 302)
+            r = self.client.get(url)
+            self.assertContains(r, 'id="su-files"')
+            self.assertContains(r, "<b>2</b> files to attach")
+            self.assertContains(r, '"file": "front.png"')
+            r = self.client.post(url, {"step": "apply", "n": "3", "last": "1", "file": _file("back.png", b"\x89PNG")})
+        j = r.json()
+        self.assertEqual([(x["n"], x["state"], x["done"]) for x in j["rows"]], [(3, "done", ["attached"])])
+        self.assertEqual(j["left"], 1)
+        a = api.post_component_image.call_args
+        self.assertEqual((a.args[0], a.args[2], a.args[3], a.args[4]), (f"{T}-00002", "back.png", "Sheet upload via HWDB Explorer", "image/png"))
+        self.assertIn("1 files attached", ActivityEvent.objects.get().summary)
+        p1, p2 = _mocked(api)
+        with p1, p2:
+            self.assertEqual(self.client.post(url, {"step": "apply", "n": "2"}).status_code, 400)   # no file
 
     def test_other_users_jobs_are_invisible(self):
         SheetJob.objects.create(instance="dev", part_type_id=T, username="someone", name="x.csv",

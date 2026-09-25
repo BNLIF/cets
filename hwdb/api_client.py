@@ -397,6 +397,35 @@ class FnalDbApiClient:
             )
         return response.json()
 
+    def get_test_images(self, part_id, test_type_id):
+        """Attachments on an item's tests of one type
+        (``GET components/{pid}/tests/{ttid}/images``, the utility's
+        ``get_test_image_list``): ``{image_id, image_name, …}`` rows."""
+        return self._make_request("GET", f"components/{part_id}/tests/{test_type_id}/images")
+
+    def post_test_image(self, test_id, fileobj, filename, comments="",
+                        content_type="application/octet-stream"):
+        """Multipart upload of an attachment onto one test record
+        (``POST component-tests/{id}/images``) — the utility's
+        ``post_test_image`` shape: ``comments`` as a form part, the file
+        under ``image``. #179: the sheet uploader's Test Image rows."""
+        url = f"{self.base_url}/component-tests/{test_id}/images"
+        files = {"comments": (None, comments),
+                 "image": (filename, fileobj, content_type)}
+        try:
+            response = self.session.post(url, files=files)
+        except requests.exceptions.RequestException:
+            logger.exception("post_test_image to %s failed", url)
+            raise
+        if not response.ok:
+            body = (response.text or "")[:600]
+            logger.warning("HWDB POST %s -> %d: %s", url, response.status_code, body)
+            raise requests.exceptions.HTTPError(
+                f"{response.status_code} {response.reason} for {url}: {body}",
+                response=response,
+            )
+        return response.json()
+
     def attach_test_image(self, test_id, file_path):
         """Multipart POST. ``file_path`` is a filesystem path; the filename
         becomes the HWDB image_name. Routes through ``self.session`` so the
