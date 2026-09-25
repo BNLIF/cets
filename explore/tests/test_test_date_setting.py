@@ -14,7 +14,15 @@ from django.utils import timezone
 
 from explore import events, navigation
 from explore.models import HierarchyNode as H
-from explore.models import HwdbTestData, TestDateSetting
+from explore.models import HwdbTestData, HwdbTestValue, TestDateSetting
+
+
+def _td(inst, ptid, pid, ttid, name, data, created=None):
+    """A mirrored record: metadata row + its flattened value rows (#180)."""
+    from explore import plotting
+    HwdbTestData.objects.create(instance=inst, part_type_id=ptid, part_id=pid, test_type_id=ttid,
+                                test_type_name=name, created=created)
+    HwdbTestValue.objects.bulk_create(plotting.value_rows(inst, ptid, pid, ttid, data))
 
 PTID = "D05700200001"   # TDE AMC — not in the code registry
 SIPM = "D00400100003"   # in the code registry (Test Results → Date)
@@ -58,15 +66,11 @@ class SpecOverrideTest(TestCase):
 
     def test_candidates_list_date_looking_fields_with_a_sample(self):
         for i, (when, d) in enumerate([("2026-01-05", "2026/01/05"), ("2026-01-06", "2026/01/06")]):
-            HwdbTestData.objects.create(
-                instance="dev", part_type_id=PTID, part_id=f"{PTID}-0000{i}", test_type_id=7,
-                test_type_name="QC", created=f"{when}T00:00:00+00:00",
-                test_data={"Test Date": d, "Operator": "Ann", "Ch": [{"V": 1.5, "Stamp": "05-17-2024-09:23"}],
-                           "Comment": "ran on 2026"})
-        HwdbTestData.objects.create(instance="dev", part_type_id=PTID, part_id="X", test_type_id=8,
-                                    test_type_name="Burn-in", test_data={"Nothing": "here"})
-        HwdbTestData.objects.create(instance="prod", part_type_id=PTID, part_id="Y", test_type_id=7,
-                                    test_type_name="QC", test_data={"Prod only": "2020-01-01"})
+            _td("dev", PTID, f"{PTID}-0000{i}", 7, "QC", created=f"{when}T00:00:00+00:00",
+                data={"Test Date": d, "Operator": "Ann", "Ch": [{"V": 1.5, "Stamp": "05-17-2024-09:23"}],
+                      "Comment": "ran on 2026"})
+        _td("dev", PTID, "X", 8, "Burn-in", {"Nothing": "here"})
+        _td("prod", PTID, "Y", 7, "QC", {"Prod only": "2020-01-01"})
         c = events.test_date_candidates("dev", PTID)
         self.assertEqual([x["test_type"] for x in c], ["Burn-in", "QC"])
         self.assertEqual(c[0]["keys"], [])
@@ -122,8 +126,7 @@ class TypeViewTest(TestCase):
 
     def test_card_is_read_only_without_the_role_and_offers_the_picker_with_it(self):
         _leaf()
-        HwdbTestData.objects.create(instance="dev", part_type_id=PTID, part_id="P", test_type_id=7,
-                                    test_type_name="QC", test_data={"Test Date": "2026/01/05"})
+        _td("dev", PTID, "P", 7, "QC", {"Test Date": "2026/01/05"})
         page = navigation.leaf_path_for("dev", PTID)
         with mock.patch("explore.views._is_architect", return_value=False):
             html = self.client.get(page).content.decode()

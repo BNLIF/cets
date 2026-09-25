@@ -13,6 +13,7 @@ lines for a ``StreamingHttpResponse`` to wrap.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -151,36 +152,35 @@ def extract_test_date(test_data: dict, spec: dict) -> datetime | None:
 _DATEISH = re.compile(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4}")
 
 
-def _date_keys(node, prefix: tuple, acc: dict) -> None:
-    """Collect key paths (dict keys, list levels implicit) whose leaf is a
-    date-looking string: ``{path: (count, sample)}``."""
-    if isinstance(node, dict):
-        for k, v in node.items():
-            _date_keys(v, prefix + (str(k),), acc)
-    elif isinstance(node, list):
-        for e in node:
-            _date_keys(e, prefix, acc)
-    elif isinstance(node, str) and _DATEISH.search(node):
-        n, sample = acc.get(prefix, (0, node))
-        acc[prefix] = (n + 1, sample)
-
-
 def test_date_candidates(instance: str, part_type_id: str, sample: int = 25) -> list[dict]:
     """#146: the date-looking ``test_data`` fields the mirror has seen for
     each of the type's test types — what the Type View's picker offers.
     ``[{test_type, keys: [{path, n, sample}]}]`` from the newest ``sample``
-    mirrored records per test type (#143's rows; the Plot page's "Fetch
-    test data" fills them for types outside the registry)."""
+    mirrored records per test type — their flattened ``HwdbTestValue`` rows
+    (#180: the record itself isn't kept), the string leaves that look like
+    dates; the Plot page's "Fetch test data" fills them for types outside
+    the registry."""
+    from .plotting import leaves    # plotting imports this module
     out = []
     types = (HwdbTestData.for_instance(instance).filter(part_type_id=part_type_id)
              .values_list("test_type_id", "test_type_name").distinct().order_by("test_type_name"))
     for ttid, name in types:
         acc: dict = {}
-        rows = (HwdbTestData.for_instance(instance)
-                .filter(part_type_id=part_type_id, test_type_id=ttid)
-                .order_by("-created").values_list("test_data", flat=True)[:sample])
-        for td in rows:
-            _date_keys(td or {}, (), acc)
+        newest = list(HwdbTestData.for_instance(instance)
+                      .filter(part_type_id=part_type_id, test_type_id=ttid)
+                      .order_by("-created").values_list("part_id", flat=True)[:sample])
+        rows = {}   # path → the leaves of every sampled record, newest record first
+        for pid, pth, vals in (HwdbTestValue.for_instance(instance)
+                               .filter(part_type_id=part_type_id, test_type_id=ttid, part_id__in=newest)
+                               .values_list("part_id", "path", "values")):
+            rows.setdefault(pth, []).append((newest.index(pid), vals))
+        for pth, per_record in rows.items():
+            for _, vals in sorted(per_record, key=lambda x: x[0]):
+                for leaf in leaves(vals):
+                    if isinstance(leaf, str) and _DATEISH.search(leaf):
+                        key = tuple(json.loads(pth))
+                        n, smp = acc.get(key, (0, leaf))
+                        acc[key] = (n + 1, smp)
         keys = [{"path": list(pth), "n": n, "sample": smp}
                 for pth, (n, smp) in sorted(acc.items(), key=lambda kv: (-kv[1][0], kv[0]))]
         out.append({"test_type": name, "keys": keys})
@@ -459,8 +459,9 @@ def store_test_data(instance: str, part_type_id: str, rows: list[dict]) -> int:
         ttids = [t for p, t in pairs if p == pid]
         HwdbTestData.for_instance(instance).filter(part_id=pid, test_type_id__in=ttids).delete()
         HwdbTestValue.for_instance(instance).filter(part_id=pid, test_type_id__in=ttids).delete()
-    HwdbTestData.objects.bulk_create(
-        [HwdbTestData(instance=instance, part_type_id=part_type_id, **r) for r in rows],
+    HwdbTestData.objects.bulk_create(   # metadata only — the record lives in the value rows (#180)
+        [HwdbTestData(instance=instance, part_type_id=part_type_id,
+                      **{k: v for k, v in r.items() if k != "test_data"}) for r in rows],
         batch_size=1000)
     # The per-key serving rows (#143 — one indexed query per plotted key).
     HwdbTestValue.objects.bulk_create(

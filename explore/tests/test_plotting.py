@@ -206,7 +206,7 @@ def _td(inst, ptid, pid, ttid, name, data, created="2026-02-03T10:00:00+00:00"):
     from explore.models import HwdbTestValue
     row = HwdbTestData.objects.create(
         instance=inst, part_type_id=ptid, part_id=pid, test_type_id=ttid, test_type_name=name,
-        test_id=1, created=created, test_data=data)
+        test_id=1, created=created)
     HwdbTestValue.objects.bulk_create(plotting.value_rows(inst, ptid, pid, ttid, data))
     return row
 
@@ -327,17 +327,37 @@ class TestDataMirrorTest(TestCase):
             log = "".join(events.sync_test_events("https://x", "b", ptid))
         self.assertIn("1 latest test record(s) mirrored", log)
         row = HwdbTestData.objects.get(instance="prod", part_id=f"{ptid}-00001", test_type_id=38)
-        self.assertEqual((row.test_id, row.test_data["Noise"]), (9, 1.7))   # the newer record wins
+        from explore.models import HwdbTestValue
+        noise = HwdbTestValue.objects.get(instance="prod", part_id=f"{ptid}-00001", test_type_id=38,
+                                          path=json.dumps(["Noise"])).values
+        self.assertEqual((row.test_id, noise), (9, [1.7]))   # the newer record wins
 
     def test_store_replaces_only_the_pairs_given(self):
         _td("dev", "T", "T-1", 5, "A", {"v": 1}); _td("dev", "T", "T-1", 6, "B", {"v": 2}); _td("prod", "T", "T-1", 5, "A", {"v": 3})
         events.store_test_data("dev", "T", [{"part_id": "T-1", "test_type_id": 5, "test_type_name": "A",
                                              "test_id": 2, "created": None, "test_data": {"v": 10}}])
-        vals = {(r.instance, r.test_type_id): r.test_data["v"] for r in HwdbTestData.objects.all()}
-        self.assertEqual(vals, {("dev", 5): 10, ("dev", 6): 2, ("prod", 5): 3})
+        self.assertEqual({(r.instance, r.test_type_id, r.test_id) for r in HwdbTestData.objects.all()},
+                         {("dev", 5, 2), ("dev", 6, 1), ("prod", 5, 1)})
         from explore.models import HwdbTestValue
         self.assertEqual({(r.instance, r.test_type_id, r.values[0]) for r in HwdbTestValue.objects.all()},
                          {("dev", 5, 10), ("dev", 6, 2), ("prod", 5, 3)})
+
+    def test_value_rows_carry_the_shape_and_skip_meta(self):
+        """#180: the record isn't kept, so each row names its list levels; HWDB's _meta key lists aren't stored."""
+        rows = {r.path: r for r in plotting.value_rows("dev", "T", "T-1", 5, {
+            "TR": [{"Loc": [{"I": [1, 2]}, {"I": [3]}]}], "R": 7, "_meta": {"keys": ["a", "b"]}})}
+        self.assertEqual(set(rows), {json.dumps(["TR", "Loc", "I"]), json.dumps(["R"])})
+        self.assertEqual(rows[json.dumps(["TR", "Loc", "I"])].shape, ["TR", "Loc", "I"])
+        self.assertEqual(rows[json.dumps(["R"])].shape, [])
+
+    def test_keys_label_dims_blank_on_rows_without_a_shape(self):
+        """Rows written before #180 have shape None until a Full re-sync — the sizes still come through."""
+        from explore.models import HwdbTestValue
+        self.client.force_login(get_user_model().objects.create_user("n", "n@n.io", "pw"))
+        _td("dev", "T", "T-00001", 5, "A", {"TR": [{"Loc": [{"I": list(range(40))}, {"I": [1]}]}, {"Loc": [{"I": [2]}]}]})
+        HwdbTestValue.objects.update(shape=None)
+        by = {tuple(x["path"]): x for x in self.client.get("/hw/dev/plot/T/tests/5/keys/").json()["keys"]}
+        self.assertEqual(by[("TR", "Loc", "I")]["dims"], [{"seg": "", "n": 2}, {"seg": "", "n": 2}, {"seg": "", "n": 40}])
 
     def test_sync_test_data_incremental_skips_items_already_mirrored(self):
         _td("dev", "T", "T-00001", 5, "A", {"v": 1})

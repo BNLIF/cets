@@ -253,17 +253,22 @@ def value_rows(instance: str, part_type_id: str, part_id: str, test_type_id: int
                test_data: dict) -> list:
     """``HwdbTestValue`` instances (unsaved) for one record. ``values`` keeps
     the list structure (#154) — a flat list for one-level data, so rows
-    written before look the same."""
+    written before look the same. ``shape`` = the record's ``dim_labels``
+    for the path (#180: the record is not kept, so its structure is read
+    here). ``_meta`` (HWDB's key lists) is skipped — nothing plots it."""
     rows = []
     for p in flatten(test_data):
+        if p[0] == "_meta":
+            continue
         v = nested(test_data, list(p))
         if v is None or v == []:
             continue
+        shape = dim_labels(test_data, list(p)) if isinstance(v, list) else []
         if not isinstance(v, list):
             v = [v]
         rows.append(HwdbTestValue(instance=instance, part_type_id=part_type_id, part_id=part_id,
                                   test_type_id=test_type_id, path=path_key(p), values=v,
-                                  nv=len(leaves(v))))
+                                  nv=len(leaves(v)), shape=shape))
     return rows
 
 
@@ -314,7 +319,8 @@ def test_keys(instance: str, part_type_id: str, test_type_id: int) -> dict:
     # one per key. One item alone misled (#160 follow-up): a record with a
     # single run but the longest sweep made "Test Results" look like 1 wide
     # for the whole type. Keys every sample lacks (rare keys) take their own
-    # largest row.
+    # largest row. The level labels come from the rows' ``shape`` (#180;
+    # blank on rows written before a Full re-sync).
     vals = _values(instance, part_type_id, test_type_id)
     pids: list = []
     for p in vals.order_by("-nv").values_list("part_id", flat=True)[:40]:
@@ -324,35 +330,27 @@ def test_keys(instance: str, part_type_id: str, test_type_id: int) -> dict:
             break
     if pids:
         samples: dict = {p: {} for p in pids}
-        for p, pk, v in vals.filter(part_id__in=pids).values_list("part_id", "path", "values"):
-            samples[p][pk] = v
-        records: dict = {}
-
-        def record(p):
-            if p not in records:
-                records[p] = (_records(instance, part_type_id, test_type_id).filter(part_id=p)
-                              .values_list("test_data", flat=True).first()) or {}
-            return records[p]
-
+        for p, pk, v, sh in vals.filter(part_id__in=pids).values_list("part_id", "path", "values", "shape"):
+            samples[p][pk] = (v, sh)
         for k in keys:
             pk = path_key(k["path"])
             have = [p for p in pids if pk in samples[p]]
             if not have:                    # a key the samples lack: its own largest row
-                row = vals.filter(path=pk).order_by("-nv").values_list("part_id", "values").first()
+                row = vals.filter(path=pk).order_by("-nv").values_list("part_id", "values", "shape").first()
                 if not row:
                     continue
                 have = [row[0]]
-                samples.setdefault(row[0], {})[pk] = row[1]
+                samples.setdefault(row[0], {})[pk] = (row[1], row[2])
             d: list = []
             for p in have:
-                for j, n in enumerate(dims(samples[p][pk])):
+                for j, n in enumerate(dims(samples[p][pk][0])):
                     if j < len(d):
                         d[j] = max(d[j], n)
                     else:
                         d.append(n)
             if max(d, default=0) <= 1:
                 continue
-            labels = dim_labels(record(have[0]), k["path"])
+            labels = next((samples[p][pk][1] for p in have if samples[p][pk][1]), None) or []
             k["dims"] = [{"seg": labels[j] if j < len(labels) else "", "n": n} for j, n in enumerate(d)]
     return {"keys": keys, "n_items": _records(instance, part_type_id, test_type_id).count(),
             "max_values": MAX_VALUES}

@@ -124,17 +124,17 @@ class HwdbTestEvent(InstanceScoped):
 
 
 class HwdbTestData(InstanceScoped):
-    """The LATEST test record per (item, test type), with its whole
-    ``test_data`` payload — the type-wide plotting source (#143, the FNAL
-    Dashboard's downloader in mirror form: ``get_hwitem_test(pid, type,
-    history=False)`` → first record).
+    """The LATEST test record per (item, test type) — its metadata only
+    (#143, the FNAL Dashboard's downloader in mirror form:
+    ``get_hwitem_test(pid, type, history=False)`` → first record). The
+    record's ``test_data`` itself is not kept (#180: it doubled the mirror,
+    2.5 GB of SiPM curves nothing read); ``HwdbTestValue`` holds it
+    flattened per key, and HWDB serves the raw record on demand.
 
     Written by the per-type sync from the detailed ``components/{pid}/tests/
     {type_id}`` records it already fetches for registry types (and for
     types opted in via curation); ``full`` rewrites the type, ``incremental``
-    fills new items. Whole blobs, not pruned: per-channel arrays are exactly
-    what people plot. Served per key by the Plot view (``plotting``), never
-    as a whole-type download.
+    fills new items.
     """
 
     part_type_id = models.CharField(max_length=20, db_index=True)
@@ -143,7 +143,6 @@ class HwdbTestData(InstanceScoped):
     test_type_name = models.CharField(max_length=100)
     test_id = models.IntegerField(null=True, blank=True)     # HWDB test record id
     created = models.DateTimeField(null=True, blank=True)    # HWDB record stamp
-    test_data = models.JSONField(default=dict, blank=True)
     synced_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -165,8 +164,13 @@ class HwdbTestValue(InstanceScoped):
     rows. ``path`` is the JSON list of segments in the ``plotting.walk_keys``
     convention (lists of dicts add no segment); ``values`` is the flattened
     leaf list (an array key holds the whole array); ``nv`` = len(values) so
-    the key inventory and the size cap are SUM/COUNT queries. Rewritten with
-    its record by ``events.store_test_data``.
+    the key inventory and the size cap are SUM/COUNT queries. ``shape``
+    (#180) names the path segment each list level of ``values`` sits at
+    (``plotting.dim_labels`` of the record, e.g. ``["Test Results", "SiPM",
+    "V"]``) — what the Plot page labels an array key's dimensions with, read
+    off the record at store time now that the record isn't kept; None on
+    rows written before it existed (a Full re-sync fills it). ``_meta`` paths
+    are not stored. Rewritten with its record by ``events.store_test_data``.
     """
 
     part_type_id = models.CharField(max_length=20)
@@ -175,6 +179,7 @@ class HwdbTestValue(InstanceScoped):
     path = models.TextField()
     values = models.JSONField(default=list, blank=True)
     nv = models.IntegerField(default=0)
+    shape = models.JSONField(null=True, blank=True)   # nullable: ADD COLUMN, no table rebuild (#180)
 
     class Meta:
         indexes = [
