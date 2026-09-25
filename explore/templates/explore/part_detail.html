@@ -128,6 +128,9 @@
   .sd-editform button { font: inherit; font-size: 13px; font-weight: 600; color: var(--accent-ink); background: var(--accent-soft);
     border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--rule)); border-radius: var(--r-sm); padding: 7px 16px; cursor: pointer; }
   .sd-locform { margin-top: 12px; border-top: 1px solid var(--rule); padding-top: 10px; }
+  .sd-addform { margin-bottom: 14px; }
+  .sd-addform textarea { font-family: var(--font-mono); font-size: 12px; }
+  .sd-addform input[type=file] { font: inherit; font-size: 13px; }
   .sd-locform summary { font-size: 12.5px; font-weight: 600; color: var(--accent-ink); cursor: pointer; }
   .sd-locform form { display: flex; flex-direction: column; gap: 9px; margin-top: 10px; }
   .sd-locform label { font-size: 12px; color: var(--faint); display: flex; flex-direction: column; gap: 3px; }
@@ -259,7 +262,22 @@
       {% endif %}
 
       <div class="sd-card">
-        <h2>Tests</h2>
+        <h2>Tests{% if can_edit_item and not adding_test %} <a class="sd-edit" href="?test=1" title="Post a test record on this item from a JSON file or pasted JSON">&#xFF0B; Add</a>{% endif %}</h2>
+        {% if adding_test %}
+        {% include "explore/_role_gate.html" %}
+        <form method="post" action="{% url 'explore:part_test' part_id=part_id %}" class="sd-editform sd-addform" enctype="multipart/form-data">
+          {% csrf_token %}
+          <label>Test name <span class="hint">(an existing test type of this component type, or a new one)</span>
+            <input name="test_name" list="sd-test-names" required autocomplete="off"></label>
+          <datalist id="sd-test-names">{% for n in test_names %}<option value="{{ n }}">{% endfor %}</datalist>
+          <label>Data as a JSON file <input type="file" name="file" accept=".json,application/json"></label>
+          <label>…or pasted JSON <span class="hint">(stored under DATA, unless the document is only a DATA object)</span>
+            <textarea name="json" rows="5" spellcheck="false" placeholder='{"Gain": 12, "Notes": "…"}'></textarea></label>
+          <label>Comments <input name="comments" autocomplete="off"></label>
+          <div class="row"><button type="submit">Post to HWDB</button> <a class="sd-edit" href="{% url 'explore:part' part_id=part_id %}">Cancel</a>
+            <span class="hint">A record of this test with exactly the same data is left alone.</span></div>
+        </form>
+        {% endif %}
         <div class="tbl-scroll">
         <table class="sd-table">
           <thead><tr><th>Test type</th><th>Status</th><th>Latest</th><th>Data</th><th>Comments</th></tr></thead>
@@ -482,9 +500,21 @@
       </div>
       {% endfor %}
 
-      {% if other_attachments %}
+      {% if other_attachments or can_edit_item %}
       <div class="sd-card">
-        <h2>Attachments</h2>
+        <h2>Attachments{% if can_edit_item and not attaching %} <a class="sd-edit" href="?attach=1" title="Attach files to this item, or to its latest record of a test">&#xFF0B; Attach</a>{% endif %}</h2>
+        {% if attaching %}
+        {% include "explore/_role_gate.html" %}
+        <form method="post" action="{% url 'explore:part_attach' part_id=part_id %}" class="sd-editform sd-addform" enctype="multipart/form-data">
+          {% csrf_token %}
+          <label>Files <input type="file" name="files" multiple required></label>
+          <label>Attach to <select name="test_name"><option value="">the item</option>{% for n in test_names %}<option value="{{ n }}">the latest “{{ n }}” test record</option>{% endfor %}</select></label>
+          <label>Comments <input name="comments" autocomplete="off"></label>
+          <div class="row"><button type="submit">Attach to HWDB</button> <a class="sd-edit" href="{% url 'explore:part' part_id=part_id %}">Cancel</a>
+            <span class="hint">A file already attached under the same name is skipped.</span></div>
+        </form>
+        {% endif %}
+        {% if not other_attachments and not attaching %}<div class="sd-empty">Nothing attached.</div>{% endif %}
         <div class="sd-atts">
           {% for a in other_attachments %}
             {% if a.is_image %}
@@ -499,7 +529,7 @@
       </div>
       {% endif %}
 
-      {% if not detail.sections and not other_attachments %}
+      {% if not detail.sections and not other_attachments and not can_edit_item %}
       <div class="sd-card"><div class="sd-empty">No specifications or attachments.</div></div>
       {% endif %}
     </div>

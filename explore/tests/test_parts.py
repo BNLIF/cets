@@ -643,6 +643,71 @@ class PartViewTest(TestCase):
                           "certified_qaqc": True})
         self.assertEqual(ActivityEvent.objects.filter(kind="item").count(), 1)
 
+    def test_post_a_test_record_from_json(self):
+        # Chao 2026-09-25: the sheet uploader's single-item twin — ?test=1 form, a
+        # .json file or pasted JSON under DATA, an identical record left alone
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        api = self._api()
+        api.get_component_type.return_value = {"data": {}}
+        api.post_test.return_value = {"status": "OK"}
+        api.post_test_type.return_value = {"status": "OK"}
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            plain = self.client.get(self.url).content.decode()
+            html = self.client.get(self.url + "?test=1").content.decode()
+            r1 = self.client.post(self.url + "test/", {"test_name": "RoomT", "json": '{"Gain": 12}', "comments": "c"})
+            r2 = self.client.post(self.url + "test/", {"test_name": "New QC", "file": SimpleUploadedFile("d.json", b'{"DATA": {"a": [1, 2]}}')})
+            api.get_tests.side_effect = lambda pid, test_type_id=None, history=False: {"data": [{"test_data": {"DATA": {"Gain": 12}}}]}
+            r3 = self.client.post(self.url + "test/", {"test_name": "RoomT", "json": '{"Gain": 12}'}, follow=True)
+            r4 = self.client.post(self.url + "test/", {"test_name": "RoomT", "json": "{oops"})
+            r5 = self.client.post(self.url + "test/", {"test_name": "", "json": "{}"})
+        self.assertIn('href="?test=1"', plain)
+        self.assertNotIn('action="/hw/part/D05700200099-00007/test/"', plain)
+        self.assertIn('action="/hw/part/D05700200099-00007/test/"', html)
+        self.assertIn('<option value="RoomT">', html)
+        self.assertEqual((r1["Location"], r2["Location"]), (self.url, self.url))
+        self.assertEqual([c.args for c in api.post_test.call_args_list], [
+            ("D05700200099-00007", {"comments": "c", "test_type": "RoomT", "test_data": {"DATA": {"Gain": 12}}}),
+            ("D05700200099-00007", {"comments": "", "test_type": "New QC", "test_data": {"DATA": {"a": [1, 2]}}})])
+        self.assertEqual(api.post_test_type.call_args.args[1]["name"], "New QC")   # created on first use
+        self.assertEqual(api.post_test.call_count, 2)                              # r3: already recorded
+        self.assertIn("already on", r3.content.decode())
+        self.assertIn("?test=1", r4["Location"])
+        self.assertIn("?test=1", r5["Location"])
+        self.assertEqual(ActivityEvent.objects.filter(kind="item").count(), 2)
+
+    def test_attach_files_from_the_part_page(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        api = self._api()
+        api.get_component_type.return_value = {"data": {}}
+        api.post_component_image.return_value = {"status": "OK"}
+        api.post_test_image.return_value = {"status": "OK"}
+        api.get_test_images.return_value = {"data": []}
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            plain = self.client.get(self.url).content.decode()
+            html = self.client.get(self.url + "?attach=1").content.decode()
+            r1 = self.client.post(self.url + "attach/", {
+                "files": [SimpleUploadedFile("a.png", b"\x89PNG"), SimpleUploadedFile("photo.jpg", b"x")], "comments": "c"}, follow=True)
+            r2 = self.client.post(self.url + "attach/", {
+                "files": [SimpleUploadedFile("t.csv", b"1,2")], "test_name": "RoomT"}, follow=True)
+            r3 = self.client.post(self.url + "attach/", {"files": [SimpleUploadedFile("x.bin", b"1")], "test_name": "Nope"}, follow=True)
+            r4 = self.client.post(self.url + "attach/", {})
+        self.assertIn('href="?attach=1"', plain)
+        self.assertIn('action="/hw/part/D05700200099-00007/attach/"', html)
+        self.assertIn("the latest “RoomT” test record", html)
+        a = api.post_component_image.call_args
+        self.assertEqual((a.args[0], a.args[2], a.args[3], a.args[4]), ("D05700200099-00007", "a.png", "c", "image/png"))
+        self.assertEqual(api.post_component_image.call_count, 1)                 # photo.jpg is already there
+        self.assertIn("photo.jpg is already attached", r1.content.decode())
+        self.assertIn("Attached a.png to D05700200099-00007", r1.content.decode())
+        t = api.post_test_image.call_args
+        self.assertEqual((t.args[0], t.args[2], t.args[4]), (15023, "t.csv", "text/csv"))
+        self.assertIn("latest “RoomT” record", r2.content.decode())
+        self.assertIn("no “Nope” test type", r3.content.decode())
+        self.assertIn("?attach=1", r4["Location"])
+        self.assertEqual(ActivityEvent.objects.filter(kind="item").count(), 2)
+
     def test_item_edit_mode_names_the_type_roles_the_account_lacks(self):
         # Chao 2026-09-23: ?edit=1 showed no warning although the save would be refused — the
         # type's roles (any one) gate the write; read only in edit mode

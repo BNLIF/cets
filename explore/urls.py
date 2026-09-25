@@ -92,6 +92,8 @@ urlpatterns = [
          name="part_location"),
     path("part/<str:part_id>/pack/", views.explore_box_pack_view, name="box_pack"),
     path("part/<str:part_id>/edit/", views.explore_part_edit_view, name="part_edit"),
+    path("part/<str:part_id>/test/", views.explore_part_test_view, name="part_test"),
+    path("part/<str:part_id>/attach/", views.explore_part_attach_view, name="part_attach"),
     path("part/<str:part_id>/spec-delete/", views.explore_spec_delete_view,
          name="spec_delete"),
     path("part/<str:part_id>/refresh-shipment/", views.explore_shipment_refresh_view,

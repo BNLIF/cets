@@ -1182,6 +1182,10 @@ def explore_part_view(request, part_id):
     # renders in ?edit=1 mode so the default render costs nothing extra.
     can_edit_item = inst in settings.HWDB_WRITE_INSTANCES
     editing = can_edit_item and request.GET.get("edit") == "1"
+    # single-item twins of the sheet uploader (Chao 2026-09-25): ?test=1 posts one
+    # test record from a JSON file or pasted JSON, ?attach=1 attaches files
+    adding_test = can_edit_item and request.GET.get("test") == "1"
+    attaching = can_edit_item and request.GET.get("attach") == "1"
     item_edit = None
     if editing:
         item_edit = checklistforms.item_card(
@@ -1309,8 +1313,11 @@ def explore_part_view(request, part_id):
         "can_edit_item": can_edit_item,
         "editing": editing,
         "item_edit": item_edit,
+        "adding_test": adding_test,
+        "attaching": attaching,
+        "test_names": [t["test_type"] for t in detail["tests"]],
         # the type's roles gate the save (Chao 2026-09-23: no warning on ?edit=1) — read only in edit mode
-        "role_gate": _type_role_gate(request, inst, api, ptid) if editing else None,
+        "role_gate": _type_role_gate(request, inst, api, ptid) if editing or adding_test or attaching else None,
         "institutions": _institution_options(api) if show_location_form else [],
         "inst_pick": _inst_pick(insts, "location_id", req=True,
                                 sel=_default_institution(request, api, inst, insts))
@@ -4667,6 +4674,138 @@ def explore_part_edit_view(request, part_id):
     return redirect(part_url)
 
 
+def _part_write_api(request, part_id):
+    """The client for a single-item write from the part page, or a response
+    to return instead (writes off here, link expired, FNAL down)."""
+    inst = instance_of(request)
+    part_url = _rev(request, "explore:part", args=[part_id])
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return None, HttpResponseForbidden("Item edits are not enabled here.")
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return None, redirect(f"{link}?{urlencode({'next': part_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return None, redirect(part_url)
+    return FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer), None
+
+
+def _test_type_lookup(api, ptid, create_comment=None):
+    """``name -> test type id`` for the sheet helpers: the type's test types,
+    created on first use when ``create_comment`` is given."""
+    cache: dict[str, int | None] = {}
+
+    def lookup(name):
+        if name not in cache:
+            if create_comment:
+                err = _ensure_test_type(api, ptid, name, create_comment)
+                if err:
+                    raise sheetupload.SheetError(f"couldn’t create the “{name}” test type — {err}")
+            try:
+                rows = api.get_test_types(ptid).get("data") or []
+            except requests.RequestException:
+                rows = []
+            cache[name] = next((r.get("id") for r in rows if isinstance(r, dict) and r.get("name") == name), None)
+        return cache[name]
+    return lookup
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_part_test_view(request, part_id):
+    """Post one test record on this item from the part page: a test name,
+    comments, and the data as an uploaded .json file or pasted JSON. The
+    data goes under ``test_data.DATA`` (a document that is only ``{"DATA":
+    …}`` is unwrapped first); a record of that type with the same DATA is
+    left alone, and the test type is created on first use — the sheet
+    uploader's rules (#178)."""
+    inst = instance_of(request)
+    part_url = _rev(request, "explore:part", args=[part_id])
+    ptid = part_id.rsplit("-", 1)[0]
+    api, resp = _part_write_api(request, part_id)
+    if resp is not None:
+        return resp
+    name = (request.POST.get("test_name") or "").strip()[:200]
+    f = request.FILES.get("file")
+    raw = f.read().decode("utf-8-sig", errors="replace") if f else (request.POST.get("json") or "")
+    if not name or not raw.strip():
+        messages.error(request, "A test name and the JSON data are both needed.")
+        return redirect(f"{part_url}?test=1")
+    try:
+        data = json.loads(raw)
+    except ValueError as e:
+        messages.error(request, f"That is not valid JSON — {e}.")
+        return redirect(f"{part_url}?test=1")
+    if isinstance(data, dict) and set(data) == {"DATA"}:
+        data = data["DATA"]
+    row = {"pid": part_id, "rec": {"test_name": name, "comments": (request.POST.get("comments") or "").strip(),
+                                   "data": data}}
+    try:
+        _, done = sheetupload.apply_test_row(
+            api, ptid, row, _test_type_lookup(api, ptid, "Created from the part page via HWDB Explorer"))
+    except sheetupload.SheetError as e:
+        messages.error(request, f"HWDB rejected the test record — {e}")
+        return redirect(f"{part_url}?test=1")
+    except requests.RequestException as e:
+        messages.error(request, f"HWDB rejected the test record — {_hwdb_error_detail(e)}")
+        return redirect(f"{part_url}?test=1")
+    if done == ["already recorded"]:
+        messages.info(request, f"A “{name}” record with exactly this data is already on {part_id}; nothing posted.")
+    else:
+        activity.log(inst, ActivityEvent.KIND_ITEM, f"{part_id}: “{name}” test record posted",
+                     part_id=part_id, part_type_id=ptid, actor=activity.actor_of(request))
+        messages.success(request, f"“{name}” test record posted on {part_id}.")
+    return redirect(part_url)
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_part_attach_view(request, part_id):
+    """Attach files to this item from the part page — or, with a test name,
+    to its latest record of that test type — skipping a file whose name is
+    already there (the sheet uploader's rules, #179). One line per file."""
+    inst = instance_of(request)
+    part_url = _rev(request, "explore:part", args=[part_id])
+    ptid = part_id.rsplit("-", 1)[0]
+    api, resp = _part_write_api(request, part_id)
+    if resp is not None:
+        return resp
+    files = request.FILES.getlist("files")
+    if not files:
+        messages.error(request, "Pick at least one file.")
+        return redirect(f"{part_url}?attach=1")
+    name = (request.POST.get("test_name") or "").strip()
+    comments = (request.POST.get("comments") or "").strip()
+    lookup = _test_type_lookup(api, ptid)
+    attached = []
+    for f in files:
+        row = {"pid": part_id, "rec": {"file": f.name, "save_as": f.name, "comments": comments,
+                                       "test_name": name, "hist_order": 0}}
+        ctype = mimetypes.guess_type(f.name)[0] or f.content_type or "application/octet-stream"
+        try:
+            _, done = sheetupload.apply_image_row(api, row, f, ctype, lookup)
+        except sheetupload.SheetError as e:
+            messages.error(request, f"{f.name}: {e}")
+            continue
+        except requests.RequestException as e:
+            messages.error(request, f"{f.name}: {_hwdb_error_detail(e)}")
+            continue
+        if done == ["already attached"]:
+            messages.info(request, f"{f.name} is already attached; skipped.")
+        else:
+            attached.append(f.name)
+    if attached:
+        where = f"the latest “{name}” record of {part_id}" if name else part_id
+        activity.log(inst, ActivityEvent.KIND_ITEM, f"{part_id}: {len(attached)} file{'s' if len(attached) != 1 else ''} attached",
+                     part_id=part_id, part_type_id=ptid, actor=activity.actor_of(request))
+        messages.success(request, f"Attached {', '.join(attached)} to {where}.")
+    return redirect(part_url)
+
+
 @login_not_required
 @fnal_login_required
 def explore_items_edit_view(request, part_type_id):
@@ -6576,19 +6715,9 @@ def _sheet_apply(request, api, inst, part_type_id, job, post) -> JsonResponse:
     tdata = type_record.get("data") or {}
     connectors = tdata.get("connectors") or {}
     manufacturers = [m for m in tdata.get("manufacturers") or [] if isinstance(m, dict)]
-    ttypes: dict[str, int | None] = {}
-
-    def test_type_id(name):   # #178: the test type, created on first use like the checklists' (#95)
-        if name not in ttypes:
-            err = _ensure_test_type(api, part_type_id, name, "Created by a sheet upload via HWDB Explorer")
-            if err:
-                raise sheetupload.SheetError(f"couldn’t create the “{name}” test type — {err}")
-            try:
-                rows = api.get_test_types(part_type_id).get("data") or []
-            except requests.RequestException:
-                rows = []
-            ttypes[name] = next((r.get("id") for r in rows if isinstance(r, dict) and r.get("name") == name), None)
-        return ttypes[name]
+    # #178: the test type, created on first use like the checklists' (#95); attachments only look one up
+    test_type_id = _test_type_lookup(api, part_type_id, None if job.kind == SheetJob.KIND_IMAGE
+                                     else "Created by a sheet upload via HWDB Explorer")
     started = time.monotonic()
     out, rows = [], job.rows
     for row in rows:
