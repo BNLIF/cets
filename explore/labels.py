@@ -145,6 +145,16 @@ LAYOUTS = {
             {"element type": "part name", "alignment": "top-center", "anchor": ["70%", "53%"],
              "font size": "10%", "fit width": True}]},
     "QR-Letter-3x5-Avery": _qr_layout("Letter-3x5-Avery", "landscape", ["50%", "4%"], ["100%", "73%"], "82%", "90%", "5%"),
+    # Not in the utility — Avery 5260 (Karla 2026-09-25): QR on the left,
+    # part id and name beside it.
+    "QR-Letter-3x10-Avery": {
+        "label template": "Letter-3x10-Avery", "orientation": "portrait", "elements": [
+            {"element type": "qr", "alignment": "top-left", "anchor": ["3%", "6%"],
+             "size": ["34%", "88%"], "preserve aspect ratio": True},
+            {"element type": "part id", "alignment": "top-center", "anchor": ["68%", "22%"],
+             "size": ["58%", "30%"], "font size": "22%", "fit width": True},
+            {"element type": "part name", "alignment": "top-center", "anchor": ["68%", "58%"],
+             "size": ["58%", "30%"], "font size": "16%", "fit width": True}]},
     "Bar-Letter-2x7-Avery": {
         "label template": "Letter-2x7-Avery", "orientation": "portrait", "elements": [
             {"element type": "bar", "alignment": "top-center", "anchor": ["50%", "10%"],

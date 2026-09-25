@@ -4981,7 +4981,8 @@ def explore_labels_view(request, part_type_id):
                          for k, v in labels.TEMPLATES.items()},
            "presets": labels.LAYOUTS,
            "element_types": labels.ELEMENT_TYPES, "alignments": labels.ALIGNMENTS,
-           "fonts": labels.FONTS, "limit": labels.ITEMS_MAX}
+           "fonts": labels.FONTS, "limit": labels.ITEMS_MAX,
+           "standard_fields": labels.STANDARD_FIELDS}
     if step not in ("preview", "pdf"):
         return render(request, "explore/labels.html", ctx)
     try:

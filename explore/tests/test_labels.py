@@ -180,6 +180,10 @@ class ViewTest(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, 'href="/hw/dev/x/y/"')
         self.assertContains(r, "QR-A4-3x4-Generic")
+        self.assertContains(r, "QR-Letter-3x10-Avery")            # Avery 5260 (Karla 2026-09-25)
+        self.assertContains(r, "var FIELDS = ['part_id', 'external_id'")   # the rows' field menus
+        self.assertContains(r, 'id="lb-json-dl"')                 # Save as file (Jean-François)
+        self.assertContains(r, 'id="lb-json-file"')
         self.assertContains(r, "Letter-2x7-Avery")
         self.assertContains(r, 'id="lb-form"')
         self.assertContains(r, '"h": [16.1, 46.58')   # a preset's geometry, for the sheet row to show

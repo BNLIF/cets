@@ -52,6 +52,8 @@
   .lb-el input, .lb-el select { font: inherit; font-size: 12px; box-sizing: border-box; }
   .lb-el input.n { width: 4.4em; }
   .lb-el input.t { width: 100%; min-width: 110px; font-family: var(--font-mono); }
+  .lb-el .tx { display: flex; gap: 3px; align-items: center; }
+  .lb-el select.f { width: 5.5em; flex: none; color: var(--dim); }
   .lb-el select { max-width: 7.5em; }
   .lb-el td:last-child { white-space: nowrap; }
   .lb-el tr.cur td { background: var(--accent-soft); }
@@ -181,12 +183,14 @@
           </table></div>
           <div class="lb-row">
             <button type="button" class="es-btn quiet" id="lb-add">Add element</button>
-            <label>Insert field <select id="lb-field"><option value="">—</option></select></label>
-            <span class="cl-hint">into the highlighted row’s text (a matched item adds its specifications) · positions and sizes are % of the label or points</span>
+            <span class="cl-hint">a text element’s field menu inserts ${field} — serial number, manufacturer, and a matched item’s specifications · positions and sizes are % of the label or points</span>
           </div>
           <details class="lb-json"><summary>Layout JSON</summary>
             <textarea id="lb-json" spellcheck="false"></textarea>
-            <div class="lb-row"><button type="button" class="es-btn quiet" id="lb-json-apply">Apply JSON</button><span class="cl-hint">the utility’s layout format — paste one from custom_labels.py, or copy this one to share it</span></div>
+            <div class="lb-row"><button type="button" class="es-btn quiet" id="lb-json-apply">Apply JSON</button>
+              <button type="button" class="es-btn quiet" id="lb-json-dl" title="Download the layout as a .json file to share">Save as file</button>
+              <label class="es-btn quiet" title="Load a layout from a .json file">Open file… <input type="file" id="lb-json-file" accept=".json,application/json" hidden></label>
+              <span class="cl-hint">the utility’s layout format — paste one from custom_labels.py, or share a file</span></div>
           </details>
         </div>
       </div>
@@ -220,6 +224,7 @@
   var TEMPLATES = JSON.parse(document.getElementById("lb-templates").textContent);
   var PRESETS = JSON.parse(document.getElementById("lb-presets").textContent);
   var TYPES = {{ element_types|safe }}, ALIGNS = {{ alignments|safe }}, FONTS = {{ fonts|safe }};
+  var FIELDS = {{ standard_fields|safe }};   // the record's fields; a matched item's own (with its specifications) replace them
   var LIMIT = {{ limit }};
   var KEY = "labels:" + location.pathname;
   var $ = function (id) { return document.getElementById(id); };
@@ -357,7 +362,18 @@
       var t = document.createElement("input"); t.type = "text"; t.className = "t"; t.value = el.text || "";
       t.disabled = el["element type"] !== "text"; t.placeholder = t.disabled ? "" : "SN ${serial_number}";
       t.addEventListener("input", function () { el.text = this.value; change(); });
-      cell(tr, t);
+      var tx = document.createElement("div"); tx.className = "tx"; tx.appendChild(t); cell(tr, tx);
+      if (!t.disabled) {   // a field menu beside the text: the pick lands as ${field} at the cursor
+        var fm = document.createElement("select"); fm.className = "f"; fm.title = "insert a field of the item";
+        opt(fm, "", "field…"); FIELDS.forEach(function (f) { opt(fm, f); });
+        fm.addEventListener("change", function () {
+          var fld = this.value; this.value = ""; if (!fld) return;
+          var ins = "${" + fld + "}", s = t.selectionStart == null ? t.value.length : t.selectionStart;
+          t.value = t.value.slice(0, s) + ins + t.value.slice(t.selectionEnd == null ? s : t.selectionEnd);
+          el.text = t.value; t.focus(); t.selectionStart = t.selectionEnd = s + ins.length; change();
+        });
+        tx.appendChild(fm);
+      }
       var anchor = el.anchor || [0, 0], size = el.size || ["100%", "100%"];
       cell(tr, num(anchor[0], function () { el.anchor = [this.value, (el.anchor || [0, 0])[1]]; change(); }));
       cell(tr, num(anchor[1], function () { el.anchor = [(el.anchor || [0, 0])[0], this.value]; change(); }));
@@ -387,18 +403,16 @@
     layout.elements.push({"element type": "text", "text": "", "alignment": "top-center", "anchor": ["50%", "50%"], "font size": "6%", "fit width": true});
     curRow = layout.elements.length - 1; render();
   });
-  $("lb-field").addEventListener("change", function () {
-    var fld = this.value; this.value = "";
-    if (!fld) return;
-    var el = layout.elements[curRow];
-    if (!el) return;
-    if (el["element type"] !== "text") { el["element type"] = "text"; }
-    var ins = "${" + fld + "}";
-    var t = $("lb-els").querySelectorAll("tr")[curRow].querySelector("input.t");
-    var s = t.selectionStart == null ? t.value.length : t.selectionStart;
-    el.text = (t.value || "").slice(0, s) + ins + (t.value || "").slice(t.selectionEnd == null ? s : t.selectionEnd);
-    render();
-    var t2 = $("lb-els").querySelectorAll("tr")[curRow].querySelector("input.t"); t2.focus(); t2.selectionStart = t2.selectionEnd = s + ins.length;
+  $("lb-json-dl").addEventListener("click", function () {
+    var v = $("lb-pick").value, n = ($("lb-name").value.trim() || v.slice(2) || "layout").replace(/[^\w.-]+/g, "_");
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(layout, null, 2)], {type: "application/json"}));
+    a.download = n + ".json"; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  });
+  $("lb-json-file").addEventListener("change", function () {
+    var f = this.files[0]; this.value = ""; if (!f) return;
+    f.text().then(function (txt) { $("lb-json").value = txt; $("lb-json-apply").click(); $("lb-name").value = $("lb-name").value || f.name.replace(/\.json$/i, ""); });
   });
   $("lb-json-apply").addEventListener("click", function () {
     try {
@@ -435,9 +449,10 @@
         if (res.j.shared.length) parts.push("serial on several items, paste the PID: " + res.j.shared.join(", "));
         st.textContent = parts.join(" · "); st.className = "lb-status" + (res.j.unmatched.length || res.j.shared.length ? " lb-warn" : "");
         $("lb-pdf").disabled = !res.j.n;
-        var fs = $("lb-field"), keep = fs.value; fs.innerHTML = ""; opt(fs, "", "—");
-        (res.j.fields || []).forEach(function (f) { opt(fs, f); });
-        fs.value = keep;
+        if (res.j.fields && res.j.fields.join() !== FIELDS.join()) {
+          FIELDS = res.j.fields;
+          document.querySelectorAll("#lb-els select.f").forEach(function (fm) { fm.innerHTML = ""; opt(fm, "", "field…"); FIELDS.forEach(function (f) { opt(fm, f); }); });
+        }
       })
       .catch(function (e) { $("lb-cap").textContent = "Preview failed: " + e; $("lb-cap").className = "lb-cap lb-warn"; });
   }
