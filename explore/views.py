@@ -16,7 +16,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_not_required
 from django.core.cache import cache
 from django.core.paginator import Paginator
-from django.db.models import F, Max, Q
+from django.db.models import Count, F, Max, Q
 from django.http import (
     Http404, HttpResponse, HttpResponseBadRequest, HttpResponseForbidden,
     JsonResponse,
@@ -4162,26 +4162,32 @@ def _shared_serial_error(shared: dict) -> str | None:
                       for sn, p in shared.items()) or None
 
 
-def explore_type_count_view(request, part_type_id):
-    """#186 round 2 (Anselmo): ``?status=a|b`` → ``{"n": <items of the type
-    in the mirror, in those statuses when given>, "synced": <when the type
-    was last synced, null = never>}`` — a checklist table's ``count``
-    column. The mirror only (no HWDB call): honest as of the last sync,
-    which the cell's tooltip says."""
+def explore_type_count_view(request):
+    """#186 round 2 (Anselmo): ``?types=T1|T2&status=a|b`` → ``{"counts":
+    {T1: {"n", "synced", "name"}, …}}`` — how many items each type has in
+    the mirror (in those statuses when given; a status name or part of
+    one), and when the type was last synced (null = never). One query
+    for every type of a checklist table's ``count`` column, the mirror
+    only (no HWDB call), so a long Stock table costs one request."""
     inst = instance_of(request)
+    types = sorted({t.strip().upper() for t in (request.GET.get("types") or "").split("|") if t.strip()})[:500]
     want = [x.strip().lower() for x in (request.GET.get("status") or "").split("|") if x.strip()]
-    rows = HwdbComponentEvent.for_instance(inst).filter(part_type_id=part_type_id.upper())
-    if want:   # a status name, or part of one ("Passed All" = "QA/QC Tests - Passed All")
-        rows = [r for r in rows.values_list("status", flat=True)
-                if any(w in (r or "").lower() for w in want)]
-        n = len(rows)
-    else:
-        n = rows.count()
-    node = HierarchyNode.for_instance(inst).filter(
-        level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id.upper()).first()
-    synced = node.tests_synced_at if node else None
-    return JsonResponse({"n": n, "synced": synced.isoformat(timespec="minutes") if synced else None,
-                         "name": node.name if node else ""})
+    rows = HwdbComponentEvent.for_instance(inst).filter(part_type_id__in=types)
+    if want:
+        q = Q()
+        for w in want:
+            q |= Q(status__icontains=w)
+        rows = rows.filter(q)
+    n_of = {r["part_type_id"]: r["n"] for r in rows.values("part_type_id").annotate(n=Count("id"))}
+    nodes = {n.part_type_id: n for n in HierarchyNode.for_instance(inst).filter(
+        level=HierarchyNode.LEVEL_TYPE, part_type_id__in=types)}
+    out = {}
+    for t in types:
+        node = nodes.get(t)
+        synced = node.tests_synced_at if node else None
+        out[t] = {"n": n_of.get(t, 0), "synced": synced.isoformat(timespec="minutes") if synced else None,
+                  "name": node.name if node else ""}
+    return JsonResponse({"counts": out})
 
 
 @login_not_required

@@ -4230,21 +4230,20 @@ class CountColumnTest(TestCase):
         m1, m2 = _mocked(api)
         with m1, m2:
             html = self.client.get(PAGE).content.decode()
-        self.assertIn('data-count-url="/hw/dev/count/T0000000000T/"', html)
+        self.assertIn('data-count-url="/hw/dev/count/"', html)
         self.assertIn('class="cl-countcell" data-count-col="Type" data-count-ci="0" data-count-status="Received|Unknown"', html)
         self.assertEqual(html.count('class="cl-countcell"'), 2)
         self.assertIn('data-const><a href="/hw/dev/?node=Z00100300042" target="_blank" rel="noopener" title="the type’s page">Z00100300042</a></span>', html)   # the fixed Type ID links to its page
 
-    def test_count_endpoint_reads_the_mirror(self):
-        from explore.models import HierarchyNode
-        from django.utils import timezone
-        for i, st in enumerate(("Received", "Unknown", "Scrapped", "received")):
+    def test_count_endpoint_reads_the_mirror_for_every_type_at_once(self):
+        for i, st in enumerate(("Received", "Unknown", "Scrapped", "received", "QA/QC Tests - Passed All")):
             HwdbComponentEvent.objects.create(instance="dev", part_type_id="Z00100300042", part_id=f"Z00100300042-0000{i}", status=st)
         HwdbComponentEvent.objects.create(instance="dev", part_type_id="Z00100300043", part_id="Z00100300043-00001", status="Received")
-        d = self.client.get("/hw/dev/count/Z00100300042/").json()
-        self.assertEqual((d["n"], d["synced"], d["name"]), (4, None, ""))
-        d = self.client.get("/hw/dev/count/Z00100300042/?status=Received%7CUnknown").json()
-        self.assertEqual(d["n"], 3)   # case-insensitive, Scrapped out
-        HwdbComponentEvent.objects.create(instance="dev", part_type_id="Z00100300042", part_id="Z00100300042-00009", status="QA/QC Tests - Passed All")
-        self.assertEqual(self.client.get("/hw/dev/count/Z00100300042/?status=passed%20all").json()["n"], 1)   # part of a name
-        self.assertEqual(self.client.get("/hw/dev/count/Z00100300099/").json()["n"], 0)
+        d = self.client.get("/hw/dev/count/", {"types": "Z00100300042|Z00100300043|Z00100300099"}).json()["counts"]
+        self.assertEqual({t: c["n"] for t, c in d.items()}, {"Z00100300042": 5, "Z00100300043": 1, "Z00100300099": 0})
+        self.assertEqual((d["Z00100300042"]["synced"], d["Z00100300042"]["name"]), (None, ""))
+        d = self.client.get("/hw/dev/count/", {"types": "Z00100300042", "status": "Received|Unknown"}).json()["counts"]
+        self.assertEqual(d["Z00100300042"]["n"], 3)   # case-insensitive, Scrapped out
+        d = self.client.get("/hw/dev/count/", {"types": "z00100300042", "status": "passed all"}).json()["counts"]
+        self.assertEqual(d["Z00100300042"]["n"], 1)   # part of a name
+        self.assertEqual(self.client.get("/hw/dev/count/").json(), {"counts": {}})
