@@ -4158,3 +4158,49 @@ class PreassignedTest(TestCase):
             d = self.client.post(url, {"action": "plan", "into": "SC1", "pid": ["HPK123"]}).json()
             self.assertEqual(d["error"], "HPK123 is not a PID.")
         api.patch_component.assert_not_called()
+
+
+class SumColumnTest(TestCase):
+    """#186 (Anselmo / Dave Warner): a table column ``sum`` totals another
+    column's value in its row over every item of the type — the inventory
+    of a type whose items are receiving batches. Display only: the page
+    sweeps the type's specs; the record never holds it."""
+    COLS = ["Part", {"label": "Per module", "text": "16"}, "Received",
+            {"label": "Total", "sum": "C3", "status": "Received | Unknown"},
+            {"label": "Buildable", "formula": "C4 / C2"}]
+    ROWS = [{"label": "Filter glass"}, {"label": "WLS standoff", "texts": {"Per module": "64"}}]
+    SCHEMA = {"name": "Receiving", "test_type_name": "Receiving", "sections": [{"title": "Parts", "fields": [
+        {"type": "table", "label": "Inventory", "to_spec": True, "columns": COLS, "rows": ROWS}]}]}
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("t", "t@t.io", "pw"))
+
+    def test_normalize_resolves_the_reference_and_keeps_the_statuses(self):
+        f = checklistforms.normalize(self.SCHEMA, "R")["sections"][0]["fields"][0]
+        self.assertEqual(f["columns"], ["Part", "Per module", "Received", "Total", "Buildable"])
+        self.assertEqual(f["sums"], {"Total": "Received"})
+        self.assertEqual(f["sum_status"], {"Total": ["Received", "Unknown"]})
+        self.assertEqual(f["formulas"], {"Buildable": "C4 / C2"})
+        by_label = {**self.SCHEMA, "sections": [{"title": "Parts", "fields": [{"type": "table", "label": "I", "columns": [
+            "Received", {"label": "Total", "sum": "Received"}, {"label": "Self", "sum": "C3"}, {"label": "Nowhere", "sum": "C9"},
+            {"label": "Fixed", "sum": "C1", "text": "x"}]}]}]}
+        f = checklistforms.normalize(by_label, "R")["sections"][0]["fields"][0]
+        self.assertEqual(f["sums"], {"Total": "Received"})   # a label works; self / out-of-range references become inputs; text beats sum
+        self.assertEqual(f["texts"], {"Fixed": "x"})
+        self.assertNotIn("sum_status", f)
+
+    def test_parse_never_stores_a_sum_cell_and_a_formula_over_it_is_left_out(self):
+        schema = checklistforms.normalize(self.SCHEMA, "R")
+        key = schema["sections"][0]["fields"][0]["key"]
+        data = checklistforms.parse(schema, {f"{key}-r0-c0": "SPPD-FD-02-019", f"{key}-r0-c2": "48", f"{key}-r0-c3": "999"})
+        self.assertEqual(data["Parts"]["Inventory"], {"Filter glass": {"Part": "SPPD-FD-02-019", "Per module": 16, "Received": 48}})
+
+    def test_fill_page_renders_sum_cells_and_the_type_sweep_on_the_table(self):
+        api = _api(schema=self.SCHEMA, test_types=("ES", "Receiving"))
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn(f'data-sum-url="/hw/dev/plot/{PTID}/data/" data-sum-label="Inventory"', html)
+        self.assertIn('class="cl-sumcell" data-sum-col="Received" data-sum-status="Received|Unknown"', html)
+        self.assertEqual(html.count('class="cl-sumcell"'), 2)   # one per row
+        self.assertIn("&Sigma;", html)

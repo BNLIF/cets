@@ -117,6 +117,7 @@
     var tbl = e.target.closest("table");
     if (tbl) recomputeTable(tbl);
   });
+  window.clRecomputeTable = recomputeTable;   // #186: a sum column's arrival recomputes its table's formulas
   window.clRecompute = function () {   // initial pass + editor preview refresh
     document.querySelectorAll(".cl-table input[data-formula]").forEach(function (inp) {
       var tbl = inp.closest("table");
@@ -502,6 +503,56 @@
         tot.textContent = Number.isInteger(sum) ? sum.toLocaleString() : sum.toLocaleString(undefined, { maximumFractionDigits: 3 });
         note.textContent = "over " + n + " of " + seen + " item" + (seen === 1 ? "" : "s") + (want.length ? " in " + (box.dataset.sumStatus || "").split("|").join(" / ") : "") + (latest ? " · latest " + latest : "");
         box.classList.remove("err");
+      })
+      .catch(function (e) { fail("couldn’t read the type’s items — " + e.message); });
+  });
+  // #186: sum columns — one sweep of the type per table; each sum cell is
+  // the total of its column's value in ITS row over the latest specifications
+  // DATA of every item (the table under any section, its Specs key, or the
+  // top level), in the cell's statuses when given. Filled once when the form
+  // opens; the table's formulas then recompute over the totals.
+  Array.prototype.forEach.call(document.querySelectorAll("table[data-sum-url], table[data-sum-label]"), function (tbl) {
+    var cells = Array.prototype.slice.call(tbl.querySelectorAll(".cl-sumcell"));
+    if (!cells.length) return;
+    function fail(msg) { cells.forEach(function (c) { c.textContent = "\u2014"; c.title = msg; }); }
+    if (!tbl.dataset.sumUrl) return fail("the total shows on the form");   // the editor's preview
+    if (!navigator.onLine) return fail("offline — the total needs the connection");
+    var label = tbl.dataset.sumLabel, spec = (tbl.dataset.sumSpec || "").split(".").filter(Boolean);
+    function tableOf(d) {   // this table's value in an item's DATA: the Specs key, else under any section, else top level
+      var o = d, i;
+      if (spec.length) { for (i = 0; i < spec.length && o && typeof o === "object"; i++) o = o[spec[i]]; if (o && typeof o === "object" && i === spec.length) return o; }
+      var secs = Object.keys(d);
+      for (i = 0; i < secs.length; i++) { var sv = d[secs[i]]; if (sv && typeof sv === "object" && sv[label] && typeof sv[label] === "object") return sv[label]; }
+      return d[label] && typeof d[label] === "object" ? d[label] : null;
+    }
+    var tokenInput = document.querySelector('input[name="csrfmiddlewaretoken"]');
+    fetch(tbl.dataset.sumUrl, { method: "POST", credentials: "same-origin", headers: { "X-CSRFToken": tokenInput ? tokenInput.value : "" } })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
+      .then(function (text) {
+        var items = [], err = "";
+        text.split("\n").forEach(function (line) {
+          if (!line.trim()) return;
+          var row; try { row = JSON.parse(line); } catch (e) { return; }
+          if (row.error) { err = row.error; return; }
+          if (row.pid) items.push({ status: String(row.status || "").toLowerCase(), tbl: tableOf(row.data || {}) });
+        });
+        if (err) return fail(err);
+        cells.forEach(function (c) {
+          var tr = c.closest("tr"), lab = tr.querySelector(".cl-rowlab"), rowLab = lab ? lab.firstChild.textContent.trim() : null;
+          var col = c.dataset.sumCol, want = (c.dataset.sumStatus || "").split("|").filter(Boolean).map(function (x) { return x.toLowerCase(); });
+          var sum = 0, n = 0;
+          items.forEach(function (it) {
+            if (want.length && want.indexOf(it.status) < 0) return;
+            var rv = rowLab === null ? it.tbl : (it.tbl && it.tbl[rowLab]);   // no named rows: the table IS the row
+            var v = rv && typeof rv === "object" ? rv[col] : undefined;
+            var num = typeof v === "number" ? v : parseFloat(String(v === null || v === undefined ? "" : v).replace(/,/g, ""));
+            if (isNaN(num)) return;
+            sum += num; n++;
+          });
+          c.textContent = Number.isInteger(sum) ? sum.toLocaleString() : sum.toLocaleString(undefined, { maximumFractionDigits: 3 });
+          c.title = "over " + n + " of " + items.length + " item" + (items.length === 1 ? "" : "s") + (want.length ? " in " + (c.dataset.sumStatus || "").split("|").join(" / ") : "");
+        });
+        if (window.clRecomputeTable) window.clRecomputeTable(tbl);
       })
       .catch(function (e) { fail("couldn’t read the type’s items — " + e.message); });
   });

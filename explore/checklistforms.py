@@ -408,9 +408,27 @@ def _norm_field(f: dict) -> dict | None:
         # and may carry its OWN tolerance (nominal/tol or min/max), overriding
         # the table-wide one (a computed Total has a different range).
         cols, formulas, texts, col_tol, checks, col_color = [], {}, {}, {}, [], {}
+        sums, sum_status = {}, {}
         for c in f.get("columns") or []:
             if isinstance(c, dict):
                 label = str(c.get("label") or "").strip()
+                # #186 (Anselmo / Dave Warner, PDS inventory): ``sum`` = a
+                # column (C<n> or its label) whose value in THIS row is added
+                # up over every item of the type — a receiving batch per
+                # item, the table → Specs — read live when the form opens,
+                # display only; ``status`` narrows the items counted. Text
+                # beats it; it beats a formula.
+                sm = str(c.get("sum") or "").strip()
+                if label and sm and not str(c.get("text") or "").strip() and c.get("check") is not True:
+                    sums[label] = sm
+                    st = c.get("status")
+                    if isinstance(st, str):
+                        st = st.split("|")
+                    st = [str(x).strip() for x in st if str(x).strip()] if isinstance(st, list) else []
+                    if st:
+                        sum_status[label] = st
+                    cols.append(label)
+                    continue
                 # #139: a column tint (the "fill this in" column of a parts
                 # list) — its cells, header excluded, beating a row tint
                 if label and _tint(c.get("color")):
@@ -438,6 +456,21 @@ def _norm_field(f: dict) -> dict | None:
             if label:
                 cols.append(label)
         out["columns"] = cols
+        if sums:
+            # a C<n> reference becomes the column's label; one that points
+            # nowhere (or at itself) drops the sum column back to an input
+            for label, sm in list(sums.items()):
+                m = re.fullmatch(r"[Cc](\d+)", sm)
+                target = cols[int(m.group(1)) - 1] if m and 0 < int(m.group(1)) <= len(cols) else sm
+                if target in cols and target != label:
+                    sums[label] = target
+                else:
+                    sums.pop(label)
+                    sum_status.pop(label, None)
+            if sums:
+                out["sums"] = sums
+            if sum_status:
+                out["sum_status"] = {k: v for k, v in sum_status.items() if k in sums}
         # #115 (HVS): a table-wide background tint keyed to the reference
         # drawing (one iPad row = one Dashboard table). Named colors map to
         # light hexes; anything else must be #rrggbb or it's dropped.
@@ -768,9 +801,16 @@ def _table_cells(f: dict, cells: dict, tx: dict, prefix: str, rr: dict | None = 
     fx = f.get("formulas") or {}
     checks = f.get("checks") or []
     cc = f.get("col_color") or {}
+    sums = f.get("sums") or {}
     out = []
     for i, c in enumerate(f["columns"]):
         v = cells.get(c)
+        if c in sums:   # #186: a total over the type's items — filled by the page
+            out.append({"column": c, "name": f"{prefix}-c{i}", "sum": sums[c],
+                        "sum_status": (f.get("sum_status") or {}).get(c, []),
+                        "value": "", "formula": "", "text": "", "min": None, "max": None, "range": "",
+                        "color": cc.get(c, "")})
+            continue
         if c in checks:   # #116: tri-state cell
             out.append({"column": c, "name": f"{prefix}-c{i}", "check": True,
                         "value": _tri(v),
@@ -899,14 +939,15 @@ def _parse_table_row(f: dict, post, prefix: str, texts: dict, resolve=None):
     else is dropped like a type-guarded box's mismatch."""
     formulas = f.get("formulas") or {}
     checks = f.get("checks") or []
+    sums = f.get("sums") or {}
     link = bool(f.get("link"))
     # #114: constant cells first, so formulas can reference a numeric one;
     # posted overrides for them are ignored like formulas'.
     cells = {c: _num_or_str(tx) for c, tx in texts.items()}
     typed = False
     for i, c in enumerate(f["columns"]):
-        if c in formulas or c in texts:
-            continue   # computed/fixed below, whatever was posted
+        if c in formulas or c in texts or c in sums:
+            continue   # computed/fixed below, whatever was posted (#186: a sum cell is the page's, never the record's)
         raw = (post.get(f"{prefix}-c{i}") or "").strip()
         if c in checks:   # #116: pass/fail → bool; blank = not inspected
             if raw in ("pass", "fail"):
@@ -1230,7 +1271,7 @@ def table_link_requests(schema: dict, data: dict) -> list[dict]:
         if not isinstance(vals, dict):
             continue
         rows = list(vals.values()) if f.get("rows") else [vals]
-        skip = set(f.get("checks") or []) | set(f.get("texts") or {}) | set(f.get("formulas") or {})
+        skip = set(f.get("checks") or []) | set(f.get("texts") or {}) | set(f.get("formulas") or {}) | set(f.get("sums") or {})
         pids = []
         for row in rows:
             for c in f["columns"]:
