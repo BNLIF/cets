@@ -182,6 +182,35 @@ class SyncTestEventsTest(TestCase):
         self.assertEqual(HwdbTestEvent.objects.count(), 2)
         self.assertFalse(HwdbTestEvent.objects.filter(test_type_name="x").exists())
 
+    def test_full_resync_keeps_the_rows_of_items_whose_fetch_failed(self):
+        # Chao 2026-09-28: a Full re-sync while HWDB refused the per-item calls
+        # emptied a type's mirror — the rewrite must only replace what was re-read
+        self._run(["P1", "P2", "P3"], {
+            "P1": [{"created": "2025-03-10T10:00:00+00:00", "test_type": {"name": "x"}}],
+            "P2": [{"created": "2025-03-11T10:00:00+00:00", "test_type": {"name": "x"}}]})
+        self.assertEqual(HwdbComponentEvent.objects.count(), 3)
+        client = _fake_client(["P1", "P3"], {"P3": [{"created": "2025-06-01T10:00:00+00:00", "test_type": {"name": "y"}}]})
+        real = client._make_request.side_effect
+
+        def flaky(method, endpoint, data=None, params=None):
+            if endpoint == "components/P1":
+                raise RuntimeError("502 Proxy Error")
+            return real(method, endpoint, data, params)
+        client._make_request.side_effect = flaky
+        with mock.patch("explore.events.FnalDbApiClient", return_value=client):
+            log = list(events.sync_test_events("https://x", "bearer", "D05700200001", mode="full"))
+        self.assertIn("1 of 2 item(s) could not be fetched — their mirrored rows are kept as they were (e.g. P1: 502 Proxy Error)",
+                      "".join(log))
+        pids = set(HwdbComponentEvent.objects.values_list("part_id", flat=True))
+        self.assertEqual(pids, {"P1", "P3"})   # P1 kept, P3 re-read, P2 gone from HWDB dropped
+        self.assertEqual(set(HwdbTestEvent.objects.values_list("part_id", "test_type_name")),
+                         {("P1", "x"), ("P3", "y")})   # P1's tests kept, P2's dropped
+        node = H.objects.get(part_type_id="D05700200001")
+        self.assertIn("1 of 2 item(s) could not be fetched", node.tests_sync_error)
+        # a clean run afterwards clears the note and rewrites wholesale
+        self._run(["P1", "P3"], {}, mode="full")
+        self.assertEqual(H.objects.get(part_type_id="D05700200001").tests_sync_error, "")
+
     def test_incremental_skips_known_components(self):
         self._run(["P1"], {"P1": [{"created": "2025-03-10T10:00:00+00:00", "test_type": {"name": "x"}}]})
         self.assertEqual(HwdbComponentEvent.objects.count(), 1)

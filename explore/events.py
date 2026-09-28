@@ -612,6 +612,7 @@ def sync_test_events(
         )
 
         results: list[dict] = []
+        failed: dict[str, str] = {}   # part_id → why its fetch raised
         if process:
             tls = _thread_local_cls()
 
@@ -632,23 +633,37 @@ def sync_test_events(
                     try:
                         results.append(fut.result())
                     except Exception as e:
+                        failed[futs[fut]] = str(e)
                         logger.warning("sync tests: %s failed: %s", futs[fut], e)
                     done += 1
                     if done % 200 == 0 or done == len(process):
                         yield f"sync tests ({mode}): fetched {done}/{len(process)}\n"
+        if failed:
+            # Chao 2026-09-28 (Z00100100065 emptied by a Full re-sync while
+            # HWDB dev refused the per-item calls): an item whose fetch
+            # raised keeps the rows it had — the wholesale rewrite below
+            # only replaces what was actually re-read — and the log says so.
+            pid, why = next(iter(failed.items()))
+            yield (f"sync tests ({mode}): {len(failed)} of {len(process)} item(s) could not be "
+                   f"fetched — their mirrored rows are kept as they were (e.g. {pid}: {why})\n")
+        gone = sorted(known - listing_set)   # mirrored, but no longer listed by HWDB
+
+        def _delete_in(qs, pids):
+            for i in range(0, len(pids), 500):
+                qs.filter(part_id__in=pids[i:i + 500]).delete()
 
         # --- Test events ---
         n_tests_before = (HwdbTestEvent.for_instance(instance)
                           .filter(part_type_id=part_type_id).count())
-        if mode == "full":
+        if mode == "full" and not failed:
             HwdbTestEvent.for_instance(instance).filter(part_type_id=part_type_id).delete()
         else:
-            # append for the (new) components we fetched tests for; clear any
-            # stale rows for exactly those first so a retry can't double-insert.
+            # append for the components we fetched tests for; clear any
+            # stale rows for exactly those first so a retry can't double-insert
+            # (a full run with failures: the re-read items and the gone ones)
             fetched_test_pids = [r["part_id"] for r in results if r["has_tests"]]
-            HwdbTestEvent.for_instance(instance).filter(
-                part_type_id=part_type_id, part_id__in=fetched_test_pids
-            ).delete()
+            _delete_in(HwdbTestEvent.for_instance(instance).filter(part_type_id=part_type_id),
+                       fetched_test_pids + (gone if mode == "full" else []))
         new_test_rows = [
             HwdbTestEvent(instance=instance, part_type_id=part_type_id,
                           part_id=r["part_id"], test_type_name=name, created=dt)
@@ -672,7 +687,11 @@ def sync_test_events(
         # full/components fetch detail for ALL → rewrite wholesale; incremental
         # keeps existing rows and appends only the new components.
         if mode in ("full", "components"):
-            HwdbComponentEvent.for_instance(instance).filter(part_type_id=part_type_id).delete()
+            comp_qs = HwdbComponentEvent.for_instance(instance).filter(part_type_id=part_type_id)
+            if failed:
+                _delete_in(comp_qs, [r["part_id"] for r in results if r["has_detail"]] + gone)
+            else:
+                comp_qs.delete()
         HwdbComponentEvent.objects.bulk_create(
             [
                 HwdbComponentEvent(
@@ -708,7 +727,11 @@ def sync_test_events(
         node.tests_synced_at = timezone.now()
         node.n_tests = n_tests
         node.n_components = len(part_ids) or node.n_components
-        node.save(update_fields=["tests_synced_at", "n_tests", "n_components"])
+        if failed:   # shown on the Type View until a clean run
+            pid, why = next(iter(failed.items()))
+            node.tests_sync_error = (f"{len(failed)} of {len(process)} item(s) could not be fetched "
+                                     f"(e.g. {pid}: {why}) — their mirrored rows were kept as they were")
+        node.save(update_fields=["tests_synced_at", "n_tests", "n_components", "tests_sync_error"])
 
         # Activities feed (#88): one summary row per run, only when the run
         # mirrored something new. ``new_test_rows`` counts ALL rewritten rows
