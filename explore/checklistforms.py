@@ -762,7 +762,7 @@ def _table_cells(f: dict, cells: dict, tx: dict, prefix: str, rr: dict | None = 
         v = cells.get(c)
         if c in checks:   # #116: tri-state cell
             out.append({"column": c, "name": f"{prefix}-c{i}", "check": True,
-                        "value": "pass" if v is True else ("fail" if v is False else ""),
+                        "value": _tri(v),
                         "formula": "", "text": "", "min": None, "max": None, "range": "",
                         "color": cc.get(c, "")})
             continue
@@ -774,6 +774,33 @@ def _table_cells(f: dict, cells: dict, tx: dict, prefix: str, rr: dict | None = 
                     "max": None if c in tx else (ct[c]["max"] if c in ct else f["max"]),
                     "range": ct[c]["range"] if c in ct and c not in tx else ""})
     return out
+
+
+_PASS = {"pass", "passed", "true"}
+_FAIL = {"fail", "failed", "false"}
+
+
+def _tri(v) -> str:
+    """A stored checker value as the tri-state's ``pass`` / ``fail`` / ``""``.
+    The Explorer writes JSON booleans; the iPad app and hand-rolled upload
+    scripts wrote words (#183: ``Passed``, ``Failed``, any case). Anything
+    else — blank, the iPad's ``Tap here`` placeholder — is not inspected."""
+    if v is True:
+        return "pass"
+    if v is False:
+        return "fail"
+    w = v.strip().lower() if isinstance(v, str) else ""
+    return "pass" if w in _PASS else ("fail" if w in _FAIL else "")
+
+
+def _dt(v) -> str:
+    """A stored datetime as the ``YYYY-MM-DDTHH:MM`` a datetime-local input
+    accepts: the Explorer's own form, the Dashboard's space form, and the
+    iPad app's all-dashes ``2024-02-14-14-16`` (#183). Anything else passes
+    through (the input then shows blank, as before)."""
+    s = _fmt(v).strip()
+    m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})[-T ](\d{2})[-:](\d{2})", s)
+    return f"{m[1]}T{m[2]}:{m[3]}" if m else s
 
 
 def _fmt(v) -> str:
@@ -795,7 +822,10 @@ def bind(schema: dict, test_data: dict | None) -> dict:
     data = data if isinstance(data, dict) else {}
     for sec in bound["sections"]:
         sdata = data.get(sec["title"])
-        sdata = sdata if isinstance(sdata, dict) else {}
+        # #183: a record another tool wrote (the iPad app) is flat,
+        # {label: value} with no sections — a missing section falls back
+        # to the top level.
+        sdata = sdata if isinstance(sdata, dict) else data
         for f in sec["fields"]:
             for leaf in _row_leaves(f):
                 _bind_leaf(leaf, sdata.get(leaf["label"]))
@@ -805,7 +835,7 @@ def bind(schema: dict, test_data: dict | None) -> dict:
 def _bind_leaf(f: dict, v) -> None:
     t = f["type"]
     if t == "check":
-        f["value"] = "pass" if v is True else ("fail" if v is False else "")
+        f["value"] = _tri(v)
     elif t == "table":
         vals = v if isinstance(v, dict) else {}
         tx = f.get("texts") or {}
@@ -839,7 +869,9 @@ def _bind_leaf(f: dict, v) -> None:
                       for i, s in enumerate(f["slots"])]
     elif t == "photo":
         f["existing"] = v if isinstance(v, dict) and v.get("image_id") else None
-    elif t not in ("static", "plot", "assembly", "sum"):   # number, text, textarea, datetime, select, qr
+    elif t == "datetime":
+        f["value"] = _dt(v)
+    elif t not in ("static", "plot", "assembly", "sum"):   # number, text, textarea, select, qr
         f["value"] = _fmt(v)
 
 

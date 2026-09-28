@@ -307,6 +307,37 @@ class ChecklistPageTest(TestCase):
         self.assertIn('class="cl-fold" aria-expanded="true">Identification', html)
         self.assertIn("clApplyWhen", html)                             # behavior script
 
+    def test_bind_revives_a_record_another_tool_wrote(self):
+        # #183: the iPad app's records (dev D05500200001-00003, type 561)
+        # are flat, date their fields 2024-02-14-14-16, and write checkers
+        # as words — with a placeholder where nothing was tapped.
+        s = checklistforms.normalize({**SCHEMA, "sections": SCHEMA["sections"] + [
+            {"title": "Grid", "fields": [
+                {"type": "table", "label": "Boards", "columns": [
+                    {"label": "Flat", "check": True}, {"label": "Visual", "check": True}]}]}]}, NAME)
+        b = checklistforms.bind(s, {"DATA": {
+            "Reception date": "2024-02-14-14-16",
+            "Segment type": "C",
+            "Planarity": "Failed",
+            "Boards": {"Flat": "PASSED", "Visual": "Tap here"},
+        }})
+        ident = b["sections"][0]["fields"]
+        self.assertEqual(ident[1]["value"], "2024-02-14T14:16")
+        self.assertEqual(ident[2]["value"], "C")
+        self.assertEqual(b["sections"][2]["fields"][0]["value"], "fail")
+        self.assertEqual([c["value"] for c in b["sections"][3]["fields"][0]["cells"]],
+                         ["pass", ""])
+        # the Dashboard's space form and the Explorer's own T form bind too;
+        # a nested section still wins over a same-named flat key
+        b = checklistforms.bind(s, {"DATA": {
+            "Identification": {"Reception date": "2026-09-24 15:20"},
+            "Reception date": "2024-02-14-14-16",
+            "Visual Inspection": {"Planarity": True}, "Planarity": "Failed"}})
+        self.assertEqual(b["sections"][0]["fields"][1]["value"], "2026-09-24T15:20")
+        self.assertEqual(b["sections"][2]["fields"][0]["value"], "pass")
+        self.assertEqual(checklistforms._dt("2026-09-24T15:20"), "2026-09-24T15:20")
+        self.assertEqual(checklistforms._dt("Feb 14"), "Feb 14")
+
     def test_item_card_renders_prefilled_from_the_record(self):
         api = _api()
         m1, m2 = _mocked(api)
@@ -360,6 +391,33 @@ class ChecklistPageTest(TestCase):
         api.patch_component.assert_not_called()
         api.post_location.assert_not_called()
         api.post_test.assert_called_once()
+
+    def test_rev_revives_an_older_submission(self):
+        # #184: ?rev=N picks the N-th newest record; a picker lists them all
+        api = _api()
+        api.get_tests.return_value = {"data": [
+            {"created": "2026-09-20T10:00:00", "creator": {"username": "chao"},
+             "test_data": {"DATA": {"Identification": {"Segment type": "C"}}}},
+            {"created": "2024-02-05T12:28:44", "creator": {"username": "muraz"},
+             "test_data": {"DATA": {"Identification": {"Segment type": "G"}}}}]}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            latest = self.client.get(PAGE).content.decode()
+            older = self.client.get(PAGE + "?rev=1").content.decode()
+            out_of_range = self.client.get(PAGE + "?rev=7").content.decode()
+        self.assertIn('<option value="0" selected>2026-09-20 10:00 · chao (latest)</option>', latest)
+        self.assertIn('<option value="1">2024-02-05 12:28 · muraz</option>', latest)
+        self.assertIn('<option selected>C</option>', latest)
+        self.assertNotIn("An older submission is loaded", latest)
+        self.assertIn('<option value="1" selected>', older)
+        self.assertIn('<option selected>G</option>', older)
+        self.assertIn("An older submission is loaded", older)
+        self.assertIn('<option selected>C</option>', out_of_range)   # falls back to the latest
+        # a single record: no picker
+        api.get_tests.return_value = {"data": [{"test_data": {"DATA": {}}}]}
+        with m1, m2:
+            one = self.client.get(PAGE).content.decode()
+        self.assertNotIn('id="cl-rev"', one)
 
     def test_prefills_from_the_latest_submission(self):
         api = _api(prev={"DATA": {

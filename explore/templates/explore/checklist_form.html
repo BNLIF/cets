@@ -50,6 +50,12 @@
   <h1>{{ schema.name }}{% if cl_name != schema.name %} <span class="mono" style="font-size:.7em; font-weight:400; color:var(--dim);">· {{ cl_name }}</span>{% endif %}</h1>
   <p class="es-sub" id="cl-sub">Checklist on <span class="mono" data-cl-pid>{{ part_id }}</span> — submitted to HWDB as
     <span class="mono">{{ schema.test_type_name }}</span> test records.</p>
+  {% if revs|length > 1 %}{# #184: any earlier submission revives in place of the latest #}
+  <p class="es-sub"><label>Submission <select id="cl-rev" onchange="location.search='?rev='+this.value">
+    {% for r in revs %}<option value="{{ r.i }}"{% if r.i == rev %} selected{% endif %}>{{ r.when }}{% if r.who %} · {{ r.who }}{% endif %}{% if r.i == 0 %} (latest){% endif %}</option>{% endfor %}
+  </select></label></p>
+  {% endif %}
+  {% if rev %}<div class="banner banner-warn" style="margin: 0 0 14px;">An older submission is loaded below. Submit writes it, with your edits, as the new latest version.</div>{% endif %}
   {% if schema.instructions %}<p class="es-sub">{{ schema.instructions|clmd }}</p>{% endif %}
   {% if schema_roles %}{% if schema_roles.ok == False %}<div class="banner banner-warn" style="margin: 0 0 14px;">&#9888; Submitting this checklist needs one of the HWDB roles <b>{{ schema_roles.required|join:", " }}</b>. Your account holds {% if schema_roles.mine %}<b>{{ schema_roles.mine|join:", " }}</b>{% else %}no roles{% endif %}, so the submit will be refused.</div>
   {% else %}<p class="es-sub">Submitting needs one of the HWDB roles <b>{{ schema_roles.required|join:", " }}</b>{% if schema_roles.ok %} — your account holds one{% endif %}.</p>{% endif %}{% endif %}

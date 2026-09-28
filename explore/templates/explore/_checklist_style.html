@@ -44,10 +44,11 @@
     .cl-grid > .cl-field, .cl-grid > .cl-col { grid-area: auto !important; }
   }
   .cl-field input:not([type=radio]):not([type=checkbox]):not([type=file]),
-  .cl-field select, .cl-field textarea { font: inherit; font-size: calc(13px * var(--cl-scale, 1)); color: var(--ink);
+  .cl-field select, .cl-field textarea, #cl-rev { font: inherit; font-size: calc(13px * var(--cl-scale, 1)); color: var(--ink);
     background: var(--cl-input-bg, var(--surface));
     border: 1px solid var(--cl-input-rule, var(--rule));
     border-radius: var(--r-sm); padding: 7px 9px; width: 100%; max-width: 360px; }
+  #cl-rev { width: auto; padding: 4px 8px; margin-left: 4px; }   /* #184: the submission picker, sized to its dates */
   .cl-field textarea { max-width: 100%; }
   .cl-qr input, .cl-link input { font-family: var(--font-mono); max-width: 260px; }
   .cl-ok { border-color: var(--good) !important; background: var(--good-bg) !important; }
@@ -217,7 +218,7 @@
     .es-card { border-color: #bbb; }
     .cl-field { break-inside: avoid; }
     .cl-field input:not([type=radio]):not([type=checkbox]):not([type=file]),
-    .cl-field select, .cl-field textarea, .cl-tri { background: none; border-color: #bbb; }
+    .cl-field select, .cl-field textarea, .cl-tri, #cl-rev { background: none; border-color: #bbb; }
     .cl-static-img { max-height: none; border: none; }
     .cl-plot { display: none; }
   }

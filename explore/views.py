@@ -3574,6 +3574,19 @@ def _checklist_state_at(rec, draft) -> int:
     return int(max(times).timestamp() * 1000) if times else 0
 
 
+def _checklist_history(api, pid: str, test_type_name: str) -> list[dict]:
+    """The item's records of one test type, newest first as HWDB serves
+    them (#184) — empty when the schema names no type or the fetch fails."""
+    if not test_type_name:
+        return []
+    try:
+        data = api.get_tests(pid, test_type_id=test_type_name, history=True).get("data") or []
+    except Exception as e:
+        logger.warning("test history for %s / %s failed: %s", pid, test_type_name, e)
+        return []
+    return [r for r in data if isinstance(r, dict)]
+
+
 # #159: a PID a device made up for a checklist filled before its item
 # exists — <type>-blank, <type>-blank2, … Never sent to HWDB.
 _PLACEHOLDER = re.compile(r"([A-Za-z]\d{11})-blank\d*", re.I)
@@ -3614,10 +3627,16 @@ def explore_checklist_view(request, part_id, name):
         raise Http404(msg)
     _default_table_types(api, ptid, schema)   # #153
     # This checklist's latest submission on the item pre-fills the form and
-    # keeps photo references alive across re-submissions.
-    rec, _err = (execsummary._test_record_at(
-        api, part_id, schema["test_type_name"], 0)
-        if schema["test_type_name"] else (None, None))
+    # keeps photo references alive across re-submissions — or, with ?rev=N
+    # (#184), the N-th newest: the history is newest first, as HWDB serves it.
+    history = _checklist_history(api, part_id, schema["test_type_name"])
+    try:
+        rev = int(request.GET.get("rev") or 0)
+    except ValueError:
+        rev = 0
+    if not 0 <= rev < len(history):
+        rev = 0
+    rec = history[rev] if history else None
     prev_td = (rec or {}).get("test_data") or {}
 
     actor = activity.actor_of(request)
@@ -3749,7 +3768,14 @@ def explore_checklist_view(request, part_id, name):
         "draft": draft,
         "no_test_type": not schema["test_type_name"],
         "clear_local": request.GET.get("clear") == "1",   # #151
-        "state_at": _checklist_state_at(rec, draft),
+        # an older version revived (#184): the browser autosave copy is
+        # only offered, never applied over it
+        "state_at": (int(timezone.now().timestamp() * 1000) if rev
+                     else _checklist_state_at(rec, draft)),
+        "rev": rev,
+        "revs": [{"i": i, "when": str(r.get("created") or "")[:16].replace("T", " "),
+                  "who": (r.get("creator") or {}).get("username") or ""}
+                 for i, r in enumerate(history)],
         "role_gate": _type_role_gate(request, inst, api, ptid),
         "schema_roles": _schema_role_gate(request, inst, api, schema),
     })
