@@ -236,6 +236,96 @@
   }
   document.querySelectorAll("input[data-type-id]").forEach(paintPid);
 
+  // #185: pre-assigned items — a linking table's bar / an image map carries
+  // the plan (data-plan = {position: PID}); a cell's PID must be one of
+  // them, a slot named like a planned position that position's item; the
+  // planned PIDs show as grey placeholders until scanned
+  function planOf(el) {
+    var fld = el.closest(".cl-field"), host = fld && fld.querySelector("[data-plan]");
+    if (!host) return null;
+    if (!host._plan) { try { host._plan = JSON.parse(host.getAttribute("data-plan")) || {}; } catch (e) { host._plan = {}; } }
+    return host._plan;
+  }
+  function planSlot(el) {   // an image-map slot's label
+    var s = el.closest(".cl-map-slot"), l = s && s.querySelector("label");
+    return l ? l.firstChild.textContent.trim() : "";
+  }
+  function linkedOf(el) {   // {PID: position} of the planned items already in place
+    var fld = el.closest(".cl-field"), host = fld && fld.querySelector("[data-plan]");
+    if (!host) return {};
+    if (!host._linked) { try { host._linked = JSON.parse(host.getAttribute("data-plan-linked") || "{}") || {}; } catch (e) { host._linked = {}; } }
+    return host._linked;
+  }
+  function paintPlan(el) {
+    var plan = planOf(el);
+    if (!plan) return;
+    var v = el.value.trim().toUpperCase();
+    el.classList.remove("cl-linked");
+    if (!/^[A-Z]\d{11}-\d{5}$/.test(v)) return;   // a serial number resolves to a PID first, then paints again
+    var slot = planSlot(el), linked = linkedOf(el);
+    var ok = slot && plan[slot] ? plan[slot] === v
+                                : Object.keys(plan).some(function (p) { return plan[p] === v; });
+    var tbl = el.closest("table");   // the same item twice in one table is a mismatch too
+    var dup = !!tbl && Array.prototype.some.call(tbl.querySelectorAll("input.cl-pidcell"), function (o) { return o !== el && o.value.trim().toUpperCase() === v; });
+    el.classList.toggle("cl-bad", !ok || dup); el.classList.toggle("cl-ok", ok && !dup);
+    el.classList.toggle("cl-linked", ok && !dup && !!linked[v]);
+    el.title = dup ? v + " is already in this table"
+             : !ok ? (slot && plan[slot] ? "pre-assigned here: " + plan[slot] : v + " is not pre-assigned")
+             : linked[v] ? "already linked in " + linked[v] : "";
+  }
+  document.addEventListener("input", function (e) {
+    if (e.target.matches && e.target.matches("input.cl-pidcell, .cl-map-list input")) paintPlan(e.target);
+  });
+  function applyPlan(host) {   // the planned PIDs as placeholders, in position order; cells re-painted;
+    var plan = planOf(host), k = 0, linked = {};   // a planned item already in place fills its cell as linked
+    if (!plan) return;
+    try { linked = JSON.parse(host.getAttribute("data-plan-linked") || "{}") || {}; } catch (e) {}
+    var pids = Object.keys(plan).sort().map(function (p) { return plan[p]; });
+    var inputs = host.closest(".cl-field").querySelectorAll("input.cl-pidcell, .cl-map-list input");
+    var have = Array.prototype.map.call(inputs, function (i) { return i.value.trim().toUpperCase(); });   // revived / typed already
+    inputs.forEach(function (inp) {
+      var slot = planSlot(inp), pid = slot && plan[slot] ? plan[slot] : (pids[k++] || "");
+      inp.placeholder = pid;
+      if (pid && linked[pid] && !inp.value.trim() && have.indexOf(pid) < 0) {   // in place and not in another cell: filled as linked
+        inp.value = pid; have.push(pid);
+        inp.dispatchEvent(new Event("input", { bubbles: true }));   // paints, when-rules and the autosave follow
+      }
+      paintPlan(inp);
+    });
+  }
+  document.querySelectorAll("[data-plan]").forEach(applyPlan);
+  // "save plan" on a linking table's bar or under a linking map: its cells
+  // go to the target's specifications as the plan — nothing linked, no
+  // record; the cells then empty into the plan's placeholders
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest(".cl-plan");
+    if (!b) return;
+    var bar = b.closest(".cl-tbl-link"), fld = bar.closest(".cl-field"), st = bar.querySelector(".cl-tbl-status");
+    var map = fld.querySelector(".cl-map-list"), fd = new FormData();
+    var cells = Array.prototype.slice.call(map ? map.querySelectorAll("input") : bar.previousElementSibling.querySelectorAll("input.cl-pidcell"))
+                     .filter(function (i) { return i.value.trim(); });
+    if (!cells.length) { st.textContent = "nothing to plan — the cells are empty"; return; }
+    fd.append("action", "plan"); fd.append("into", bar.dataset.into || ""); fd.append("key", bar.dataset.planKey || "");
+    cells.forEach(function (i) { fd.append("pid", i.value.trim()); fd.append("slot", map ? planSlot(i) : ""); });
+    b.disabled = true; st.textContent = "saving the plan…";
+    var tok = document.querySelector('input[name="csrfmiddlewaretoken"]');   // csrf() belongs to other script blocks' closures
+    fetch(bar.dataset.linkUrl, { method: "POST", body: fd, credentials: "same-origin", headers: { "X-CSRFToken": tok ? tok.value : "" } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        st.classList.toggle("cl-bad-text", !!d.error);
+        if (d.error) { st.textContent = d.error; return; }
+        var n = Object.keys(d.plan || {}).length;
+        st.textContent = "plan saved: " + n + " on " + d.target + " — nothing is linked until the assembly is submitted";
+        bar.setAttribute("data-plan", JSON.stringify(d.plan || {})); bar._plan = d.plan || {};
+        var cnt = fld.querySelector(".cl-plan-n");
+        if (cnt) cnt.textContent = "pre-assigned: " + n;
+        cells.forEach(function (i) { i.value = ""; i.dispatchEvent(new Event("input", { bubbles: true })); });
+        applyPlan(bar);
+      })
+      .catch(function () { st.textContent = "couldn’t reach the server"; })
+      .then(function () { b.disabled = false; });
+  });
+
   // Enter in a field never submits (Chao 2026-09-20: a scanner's or a
   // finger's Enter went to "Submit to HWDB" as the form's first button) —
   // only the buttons do; a textarea keeps its newline

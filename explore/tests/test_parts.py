@@ -609,6 +609,19 @@ class PartViewTest(TestCase):
         self.assertEqual(d["tests"], [])
         self.assertEqual(d["facts"][0]["label"], "Serial number")  # rest still built
 
+    def test_pre_assigned_items_show_in_the_assembly_table_until_linked(self):   # #185
+        api = self._api()
+        api.get_component.return_value["data"]["specifications"] = [{"DATA": {
+            "preassigned": {"P1": "D00400300001-00011", "P2": "D00400300001-00012"}}}]
+        api.get_subcomponents.return_value = {"data": [
+            {"part_id": "D00400300001-00012", "functional_position": "P2", "component_type": {"name": "SiPM board"}}]}
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            html = self.client.get(self.url).content.decode()
+        self.assertIn("pre-assigned in “preassigned”", html)
+        self.assertIn('href="/hw/part/D00400300001-00011/"', html)
+        self.assertEqual(html.count("<td>pre-assigned</td>"), 1)   # the linked one is a real row, not a planned one
+
     def test_item_edit_mode_renders_the_form_and_saves_changed_fields(self):
         # #104: ✎ Edit → ?edit=1 form pre-filled from the record (manufacturers
         # from the type); Save PATCHes only what changed
@@ -1257,3 +1270,17 @@ class PartPlotLinkTest(PartViewTest):
              mock.patch("explore.views.FnalDbApiClient", return_value=self._api()):
             html = self.client.get(self.url).content.decode()
         self.assertNotIn("/hw/plot/", html)
+
+
+class PlannedRowsTest(TestCase):
+    """#185: pre-assigned sub-components — a DATA key holding {position: PID}
+    — show on the part page until linked."""
+
+    def test_planned_rows_skip_linked_items_and_non_plan_keys(self):
+        data = {"preassigned": {"P2": "d00400300001-00012", "P1": "D00400300001-00011"},
+                "batch": {"received": 3}, "notes": "x", "empty": {}}
+        manifest = [{"part_id": "D00400300001-00012", "functional_position": "P2"}]
+        self.assertEqual(parts.planned_rows(data, manifest),
+                         [{"part_id": "D00400300001-00011", "functional_position": "P1", "key": "preassigned"}])
+        self.assertEqual(parts.planned_rows(None, []), [])
+        self.assertEqual(parts.planned_rows({"preassigned": {"P1": "not a pid"}}, []), [])

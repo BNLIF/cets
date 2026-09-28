@@ -3140,6 +3140,104 @@ def _default_table_types(api, ptid: str, schema: dict) -> None:
         logger.info("linking-table default type for %s failed: %s", ptid, e)
 
 
+def _stamp_plans(api, part_id: str, schema: dict) -> None:
+    """#185 (Anselmo): a linking table / image map with ``expect`` takes
+    the pre-assigned items ``{position: PID}`` from the link target's
+    specifications DATA under that key — the item itself, or the
+    sub-assembly in ``into`` — stamped as ``planned`` on the loaded schema
+    (parse, rendering and the page's paint all read it). No plan there, an
+    empty position, a read failure: nothing stamped, the field links as
+    it always did."""
+    for _t, f in checklistforms.leaf_fields(schema):
+        if not f.get("expect"):
+            continue
+        target, err = _link_target(api, part_id, f.get("into") or "")
+        if err or not target:
+            continue
+        plan = _read_plan(api, target, f["expect"])
+        f["plan_target"] = target
+        if not plan:
+            continue
+        f["planned"] = plan
+        f["plan_json"] = json.dumps(plan, sort_keys=True)
+        # the planned items already sitting in the target: the page fills
+        # their cells as linked, so nobody scans what is in place
+        try:
+            occ = {str(m.get("part_id") or "").upper(): str(m.get("functional_position") or "")
+                   for m in (api.get_subcomponents(target).get("data") or []) if isinstance(m, dict)}
+        except Exception as e:
+            logger.info("occupants of %s failed: %s", target, e)
+            occ = {}
+        linked = {pid: occ[pid] for pid in plan.values() if pid in occ}
+        if linked:
+            f["plan_linked"] = linked
+            f["plan_linked_json"] = json.dumps(linked, sort_keys=True)
+
+
+def _read_plan(api, target: str, key: str) -> dict:
+    """#185: the pre-assigned items ``{position: PID}`` under ``key`` of
+    ``target``'s specifications DATA — {} when there are none, or the read
+    fails."""
+    try:
+        item = api.get_component(target).get("data") or {}
+    except Exception as e:
+        logger.info("plan for %s failed: %s", target, e)
+        return {}
+    specs = item.get("specifications") or [{}]
+    specs = specs[-1] if isinstance(specs[-1], dict) else {}
+    data = specs.get("DATA") if isinstance(specs.get("DATA"), dict) else {}
+    plan = data.get(key)
+    if not isinstance(plan, dict):
+        return {}
+    return {str(k): str(v).strip().upper() for k, v in plan.items()
+            if isinstance(v, str) and checklistforms._PID_SHAPE.fullmatch(v.strip())}
+
+
+def _plan_slots(label: str, pids: list[str], plan: dict | None) -> dict:
+    """#185: a linking table's PIDs as link-map slots — a pre-assigned item
+    is keyed by its planned position (so it links THERE, whatever the scan
+    order), any other by its cell number (first free position)."""
+    where = {pid: pos for pos, pid in (plan or {}).items()}
+    return {where.get(pid, f"{label} #{i + 1}"): pid for i, pid in enumerate(pids)}
+
+
+def _plan_positions(api, target: str, slots: dict) -> tuple[dict | None, str | None]:
+    """#185: where each pre-assigned item ``{slot label: PID}`` would go on
+    ``target`` — the link rule (a slot named like a position goes there,
+    any other takes the first free position for its type), nothing
+    written. ``({position: PID}, error)``: an occupied position, a type
+    the position won't take, no room, or a PID planned twice is an error."""
+    try:
+        connectors = _box_connectors(api, target.rsplit("-", 1)[0])
+        occupants = {(m.get("functional_position") or ""): m.get("part_id")
+                     for m in (api.get_subcomponents(target).get("data") or [])
+                     if isinstance(m, dict)}
+    except requests.RequestException as e:
+        return None, _hwdb_error_detail(e)
+    except Exception as e:
+        return None, f"couldn’t read the item’s positions — {e}"
+    current = {pos: occupants.get(pos) for pos in connectors}
+    plan = {}
+    for label, pid in slots.items():
+        ctid = pid.rsplit("-", 1)[0]
+        if pid in plan.values():
+            return None, f"{pid} is listed twice."
+        if label in current:
+            if connectors.get(label) and connectors[label] != ctid:
+                return None, f"slot “{label}”: expects {connectors[label]} items, not {ctid}."
+            if current[label] and current[label] != pid:
+                return None, f"slot “{label}”: position already holds {current[label]}."
+            pos = label
+        else:
+            free = [p for p in sorted(current, key=str)
+                    if current[p] is None and p not in plan and connectors.get(p) == ctid]
+            if not free:
+                return None, f"no free position for {ctid} items."
+            pos = free[0]
+        plan[pos] = pid
+    return plan, None
+
+
 def _link_block(api, inst, pid: str) -> str:
     """#153: why HWDB would refuse to link ``pid`` — unknown to HWDB, or a
     status outside the four linkable ones — or "" when nothing stands in
@@ -3161,7 +3259,8 @@ def _link_block(api, inst, pid: str) -> str:
     return ""
 
 
-def _table_link_check(api, inst, target: str, values: list[str], type_id: str = "") -> list[dict]:
+def _table_link_check(api, inst, target: str, values: list[str], type_id: str = "",
+                      plan: dict | None = None) -> list[dict]:
     """#153: what "link now" would do with each filled cell of a linking
     table, nothing written — ``[{value, ok, note}]`` in cell order: the
     position the item would take, "already linked", or why not (not a PID
@@ -3187,11 +3286,18 @@ def _table_link_check(api, inst, target: str, values: list[str], type_id: str = 
             ok, note = True, "already linked"
         else:
             ctid = pid.rsplit("-", 1)[0]
-            free = [p for p in sorted(current, key=str)
-                    if current[p] is None and connectors.get(p) == ctid]
-            if not free:
-                note = f"no free position for {ctid} items"
+            where = {p: pos for pos, p in (plan or {}).items()}   # #185: planned → its position
+            if pid in where:
+                free = [where[pid]] if current.get(where[pid]) is None else []
+                if not free:
+                    note = (f"position {where[pid]} already holds {current.get(where[pid])}" if where[pid] in current
+                            else f"planned for “{where[pid]}”, which this type has no position of")
             else:
+                free = [p for p in sorted(current, key=str)
+                        if current[p] is None and connectors.get(p) == ctid]
+                if not free:
+                    note = f"no free position for {ctid} items"
+            if free:
                 note = _link_block(api, inst, pid)
                 if not note:
                     current[free[0]] = pid
@@ -3271,13 +3377,40 @@ def explore_checklist_map_view(request, part_id):
             results = []
             if target:
                 try:
+                    key = (request.POST.get("key") or "").strip()   # #185: a pre-assigned item goes to its planned position
                     results = _table_link_check(api, inst, target, values,
-                                                (request.POST.get("type_id") or "").strip().upper())
+                                                (request.POST.get("type_id") or "").strip().upper(),
+                                                _read_plan(api, target, key) if key else None)
                 except requests.RequestException as e:
                     err = _hwdb_error_detail(e)
                 except Exception as e:
                     err = f"couldn’t read the item’s positions — {e}"
             return JsonResponse({"target": target, "results": results, "error": err})
+        if action == "plan":
+            # #185: a linking table's / image map's "save plan" — the cells
+            # (``pid``, with a map's ``slot`` labels alongside) go into the
+            # target's specifications under ``key`` as ``{position: PID}``,
+            # replacing the plan there; nothing is linked, no record is made.
+            pids = [p.strip().upper() for p in request.POST.getlist("pid")]
+            labels = [x.strip() for x in request.POST.getlist("slot")]
+            key = (request.POST.get("key") or "").strip() or checklistforms.PLAN_KEY
+            slots = {}
+            for i, p in enumerate(pids):
+                if not p:
+                    continue
+                if not checklistforms._PID_SHAPE.fullmatch(p):
+                    return JsonResponse({"target": None, "plan": None, "error": f"{p} is not a PID."})
+                slots[labels[i] if i < len(labels) and labels[i] else f"#{i + 1}"] = p
+            target, err = _link_target(api, part_id, (request.POST.get("into") or "").strip())
+            plan = None
+            if not err and not slots:
+                err = "nothing to plan — the cells are empty."
+            if not err:
+                plan, err = _plan_positions(api, target, slots)
+            if not err:
+                err = (_ensure_spec_data(request, api, target.rsplit("-", 1)[0])
+                       or _patch_spec_data(api, target, {key: plan}, owned={key}))
+            return JsonResponse({"target": target, "plan": plan if not err else None, "error": err})
         if action == "link_table":
             # #153: a linking table's "link now" — every PID at once into the
             # item or the sub-assembly in ``into``; answers with what is
@@ -3285,8 +3418,9 @@ def explore_checklist_map_view(request, part_id):
             pids = [p.strip().upper() for p in request.POST.getlist("pid") if p.strip()]
             target, err = _link_target(api, part_id, (request.POST.get("into") or "").strip())
             if not err and pids:
+                key = (request.POST.get("key") or "").strip()   # #185
                 err = _checklist_link_map(api, inst, target,
-                                          {f"#{i + 1}": p for i, p in enumerate(pids)})
+                                          _plan_slots("", pids, _read_plan(api, target, key) if key else None))
             linked = []
             if target:
                 try:
@@ -3477,11 +3611,12 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
         lerr = _checklist_link_map(api, instance_of(request), part_id, req["slots"])
         if lerr:
             return _mark(f"“{req['label']}”: not linked — {lerr}", lerr)
+    plans = {f["label"]: f.get("planned") for _t, f in checklistforms.leaf_fields(schema) if f.get("expect")}
     for req in checklistforms.table_link_requests(schema, data):      # #153
         target, lerr = _link_target(api, part_id, req["into"])
         if not lerr:
             lerr = _checklist_link_map(api, instance_of(request), target,
-                                       {f"{req['label']} #{i + 1}": pid for i, pid in enumerate(req["pids"])})
+                                       _plan_slots(req["label"], req["pids"], plans.get(req["label"])))   # #185
         if lerr:
             return _mark(f"“{req['label']}”: not linked — {lerr}", lerr)
     # an assembly field's value is what sits in the item's positions after
@@ -3626,6 +3761,7 @@ def explore_checklist_view(request, part_id, name):
             return _checklist_pending(request, inst, part_id, name, page_url, msg)   # #151
         raise Http404(msg)
     _default_table_types(api, ptid, schema)   # #153
+    _stamp_plans(api, part_id, schema)        # #185
     # This checklist's latest submission on the item pre-fills the form and
     # keeps photo references alive across re-submissions — or, with ?rev=N
     # (#184), the N-th newest: the history is newest first, as HWDB serves it.

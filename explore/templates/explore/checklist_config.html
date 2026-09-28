@@ -351,6 +351,8 @@
         title="e.g. D00300100002 — a scan of any other type won&#8217;t fill this box">
       <input class="ff-sn" placeholder="serial-number pattern (regex, blank = any value that isn’t a PID)"
         title="e.g. HPK\d{5} — a scanned or typed value that isn’t a PID is looked up as the serial number of an item of the Type ID and swapped for its PID; a pattern narrows that to full matches">
+      <label class="ec-check ff-expect-w" style="display:none;" title="the target item&#8217;s specifications hold the items planned per position, {position: PID}, under the key preassigned — a scan must match them; Save plan on the form writes them"><input type="checkbox" class="ff-expectc"> pre-assigned items</label>
+      <input class="ff-expect" placeholder="key: preassigned" style="flex:0 0 200px; display:none;" title="another specifications key for the plan (blank = preassigned)">
     </div>
     <div class="ec-row g-grid" style="display:none;">
       <label class="ec-inline" title="start column (auto = next free slot)">col
@@ -462,6 +464,9 @@
     $(".ff-into", r).placeholder = t === "assembly" ? "the item in position… (blank = this item)" : "into the item in position… (blank = this item)";
     $(".g-pid", r).style.display = (t === "qr" || t === "link" || t === "imagemap" || (t === "table" && $(".ff-tbllink", r).checked)) ? "" : "none";
     $(".g-map", r).style.display = t === "imagemap" ? "" : "none";
+    var linking = (t === "imagemap" && $(".ff-maplink", r).checked) || (t === "table" && $(".ff-tbllink", r).checked);   // #185
+    $(".ff-expect-w", r).style.display = linking ? "" : "none";
+    $(".ff-expect", r).style.display = linking && $(".ff-expectc", r).checked ? "" : "none";
     $(".ff-tospec-w", r).style.display = SPEC_OK.indexOf(t) !== -1 ? "" : "none";
     $(".ff-spec", r).style.display = (SPEC_OK.indexOf(t) !== -1 && $(".ff-tospec", r).checked) ? "" : "none";
     $(".ff-label", r).placeholder = (t === "static" || t === "plot" || t === "assembly") ? "label (optional)" : "label";
@@ -517,6 +522,8 @@
     $(".ff-maplink", r).checked = !!f.link;                            // #133
     $(".ff-maplinked", r).value = f.linked || "open";                  // Hajime 2026-09-25
     $(".ff-tbllink", r).checked = f.type === "table" && !!f.link;      // #153
+    $(".ff-expectc", r).checked = !!f.expect;                          // #185
+    $(".ff-expect", r).value = typeof f.expect === "string" && f.expect !== "preassigned" ? f.expect : "";
     $(".ff-into", r).value = f.into || "";
     syncMapPos(r);
     syncImgStatus(r);
@@ -1167,11 +1174,13 @@
       if ($(".ff-maplink", r).checked) {                               // #133
         f.link = true;
         if ($(".ff-maplinked", r).value !== "open") f.linked = $(".ff-maplinked", r).value;
+        if ($(".ff-expectc", r).checked) f.expect = $(".ff-expect", r).value.trim() || true;   // #185
       }
     }
     if (t === "table" && $(".ff-tbllink", r).checked) {                // #153
       f.link = true;
       if ($(".ff-into", r).value.trim()) f.into = $(".ff-into", r).value.trim();
+      if ($(".ff-expectc", r).checked) f.expect = $(".ff-expect", r).value.trim() || true;   // #185
     }
     if (t === "assembly" && $(".ff-into", r).value.trim()) f.into = $(".ff-into", r).value.trim();   // the sub-assembly's list
     if ($(".ff-tospec", r).checked && SPEC_OK.indexOf(t) !== -1) {
@@ -1462,9 +1471,11 @@
       syncMap(e.target.closest(".clc-fld"));
       syncMapPos(e.target.closest(".clc-fld"));
     }
-    if (e.target.classList && e.target.classList.contains("ff-tbllink")) syncType(e.target.closest(".clc-fld"));
-    if (e.target.classList && e.target.classList.contains("ff-maplink"))
+    if (e.target.classList && (e.target.classList.contains("ff-tbllink") || e.target.classList.contains("ff-expectc"))) syncType(e.target.closest(".clc-fld"));
+    if (e.target.classList && e.target.classList.contains("ff-maplink")) {
       syncMapPos(e.target.closest(".clc-fld"));
+      syncType(e.target.closest(".clc-fld"));   // #185: the pre-assignment key follows the link box
+    }
     if (e.target.id !== "clc-json") refresh();
   });
 

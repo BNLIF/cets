@@ -3996,3 +3996,165 @@ class SumFieldTest(TestCase):
                          {"batch": {"received": 100, "ordered": 250},
                           "Batch": {"Batch.who": "me"}})   # first segment = a section title → stays under it
 
+
+
+class PreassignedTest(TestCase):
+    """#185 (Anselmo): a linking table / image map with ``expect`` verifies
+    scans against the pre-assigned items in the link target's specifications
+    (``{position: PID}``), and "Save plan" writes them there instead of
+    linking — nothing is linked until the assembly is submitted."""
+    SIPM, SC = "D00400300001", "D00800100003"
+    SCHEMA = {"name": "SC", "test_type_name": "SC", "sections": [{"title": "S", "fields": [
+        {"type": "table", "label": "Boards", "link": True, "type_id": SIPM, "into": "SC1",
+         "expect": "preassigned", "columns": ["B1", "B2", "B3"]}]}]}
+    PLAN = {"P1": f"{SIPM}-00011", "P2": f"{SIPM}-00012"}
+
+    def _api(self, plan=PLAN):
+        api = _api(schema=self.SCHEMA, test_types=("ES", "SC"))
+        api.get_component_type.side_effect = lambda t: {"data": {
+            "connectors": ({"P1": self.SIPM, "P2": self.SIPM, "P3": self.SIPM} if t == self.SC
+                           else {"SC1": self.SC, "SC2": self.SC}),
+            "properties": {"specifications": [{"datasheet": {"DATA": {}}}]}}}
+        api.get_subcomponents.side_effect = lambda pid: {"data": (
+            [{"functional_position": "SC1", "part_id": f"{self.SC}-00001"}] if pid == PART else [])}
+        api.get_component.side_effect = lambda pid: {"data": {
+            "specifications": [{"DATA": ({"preassigned": plan, "other": 1} if pid == f"{self.SC}-00001" and plan else {})}],
+            "manufacturer": None, "serial_number": "s", "comments": ""}}
+        api.patch_subcomponents.return_value = {"status": "OK"}
+        api.patch_component.return_value = {"status": "OK"}
+        return api
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("t", "t@t.io", "pw"))
+
+    def test_normalize_keeps_expect_on_linking_tables_and_maps_only(self):
+        f = checklistforms.normalize(self.SCHEMA, "SC")["sections"][0]["fields"][0]
+        self.assertEqual(f["expect"], "preassigned")
+        plain = {k: v for k, v in self.SCHEMA["sections"][0]["fields"][0].items() if k not in ("link", "into")}
+        f = checklistforms.normalize({**self.SCHEMA, "sections": [{"title": "S", "fields": [plain]}]}, "SC")["sections"][0]["fields"][0]
+        self.assertNotIn("expect", f)
+        m = checklistforms.normalize({**self.SCHEMA, "sections": [{"title": "S", "fields": [
+            {"type": "imagemap", "label": "M", "image_id": "i", "link": True, "expect": "preassigned",
+             "slots": [{"label": "P1", "x": 1, "y": 1}]}]}]}, "SC")["sections"][0]["fields"][0]
+        self.assertEqual(m["expect"], "preassigned")
+        m = checklistforms.normalize({**self.SCHEMA, "sections": [{"title": "S", "fields": [
+            {"type": "imagemap", "label": "M", "image_id": "i", "expect": "a.b",
+             "slots": [{"label": "P1", "x": 1, "y": 1}]}]}]}, "SC")["sections"][0]["fields"][0]
+        self.assertNotIn("expect", m)   # no link, and a dotted key
+        f = checklistforms.normalize({**self.SCHEMA, "sections": [{"title": "S", "fields": [
+            {**self.SCHEMA["sections"][0]["fields"][0], "expect": True}]}]}, "SC")["sections"][0]["fields"][0]
+        self.assertEqual(f["expect"], "preassigned")   # the editor's checkbox = the default key
+
+    def test_parse_keeps_only_planned_pids_in_a_table_and_per_slot_on_a_map(self):
+        schema = checklistforms.normalize(self.SCHEMA, "SC")
+        f = schema["sections"][0]["fields"][0]
+        post = {"f0-0-c0": f"{self.SIPM}-00012", "f0-0-c1": f"{self.SIPM}-00077", "f0-0-c2": f"{self.SIPM}-00011"}
+        self.assertEqual(checklistforms.parse(schema, post)["S"]["Boards"],
+                         {"B1": f"{self.SIPM}-00012", "B2": f"{self.SIPM}-00077", "B3": f"{self.SIPM}-00011"})   # no plan stamped
+        f["planned"] = dict(self.PLAN)
+        self.assertEqual(checklistforms.parse(schema, post)["S"]["Boards"],
+                         {"B1": f"{self.SIPM}-00012", "B3": f"{self.SIPM}-00011"})   # order doesn't matter, membership does
+        self.assertEqual(checklistforms.parse(schema, {"f0-0-c1": f"{self.SIPM}-00077"}), {})
+        m = checklistforms.normalize({**self.SCHEMA, "sections": [{"title": "S", "fields": [
+            {"type": "imagemap", "label": "M", "image_id": "i", "link": True, "expect": "preassigned",
+             "slots": [{"label": "P1", "x": 1, "y": 1}, {"label": "P2", "x": 2, "y": 2}, {"label": "X", "x": 3, "y": 3}]}]}]}, "SC")
+        m["sections"][0]["fields"][0]["planned"] = dict(self.PLAN)
+        data = checklistforms.parse(m, {"f0-0-m0": f"{self.SIPM}-00012",    # P1 wants -00011
+                                        "f0-0-m1": f"{self.SIPM}-00012",    # P2: right
+                                        "f0-0-m2": f"{self.SIPM}-00011"})   # X isn't a planned position: any planned item
+        self.assertEqual(data["S"]["M"], {"P2": f"{self.SIPM}-00012", "X": f"{self.SIPM}-00011"})
+
+    def test_fill_page_carries_the_target_plan_and_the_save_plan_button(self):
+        api = self._api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('data-plan-key="preassigned" data-plan="{&quot;P1&quot;: &quot;' + self.SIPM + '-00011&quot;, &quot;P2&quot;: &quot;' + self.SIPM + '-00012&quot;}"', html)
+        self.assertIn("pre-assigned: 2", html)
+        self.assertNotIn('data-plan-linked="', html)   # the script names the attribute; only the bar carries it
+        self.assertIn('class="es-btn quiet cl-plan"', html)
+        api = self._api()   # one planned item already sits in the supercell: the page fills its cell as linked
+        api.get_subcomponents.side_effect = lambda pid: {"data": (
+            [{"functional_position": "SC1", "part_id": f"{self.SC}-00001"}] if pid == PART
+            else [{"functional_position": "P2", "part_id": f"{self.SIPM}-00012"}])}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('data-plan-linked="{&quot;' + self.SIPM + '-00012&quot;: &quot;P2&quot;}"', html)
+        self.assertIn("pre-assigned: 2 &middot; 1 linked", html)
+        api = self._api(plan=None)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertNotIn("data-plan=", html)
+        self.assertIn("no pre-assignment yet", html)
+        self.assertIn('class="es-btn quiet cl-plan"', html)
+
+    def test_submit_links_planned_scans_to_their_planned_positions_and_drops_the_other(self):
+        api = self._api()
+        m1, m2 = _mocked(api)
+        with m1, m2:   # scanned in the other order: -00012 first — it still goes to P2, its planned position
+            self.client.post(PAGE, {"f0-0-c0": f"{self.SIPM}-00012", "f0-0-c1": f"{self.SIPM}-00077", "f0-0-c2": f"{self.SIPM}-00011"})
+        api.patch_subcomponents.assert_called_once_with(f"{self.SC}-00001", {
+            "component": {"part_id": f"{self.SC}-00001"},
+            "subcomponents": {"P1": f"{self.SIPM}-00011", "P2": f"{self.SIPM}-00012", "P3": None}})
+        self.assertEqual(api.post_test.call_args.args[1]["test_data"]["DATA"]["S"]["Boards"],
+                         {"B1": f"{self.SIPM}-00012", "B3": f"{self.SIPM}-00011"})
+
+    def test_link_now_and_check_follow_the_plan_when_the_bar_names_its_key(self):
+        api = self._api()
+        m1, m2 = _mocked(api)
+        url = f"/hw/dev/checklist-map/{PART}/"
+        with m1, m2:
+            self.client.post(url, {"action": "link_table", "into": "SC1", "key": "preassigned", "pid": [f"{self.SIPM}-00012"]})
+        self.assertEqual(api.patch_subcomponents.call_args.args[1]["subcomponents"], {"P1": None, "P2": f"{self.SIPM}-00012", "P3": None})
+        with m1, m2:   # without the key (a table with no plan) the first free position, as before
+            self.client.post(url, {"action": "link_table", "into": "SC1", "pid": [f"{self.SIPM}-00012"]})
+        self.assertEqual(api.patch_subcomponents.call_args.args[1]["subcomponents"]["P1"], f"{self.SIPM}-00012")
+        api.get_subcomponents.side_effect = lambda pid: {"data": (
+            [{"functional_position": "SC1", "part_id": f"{self.SC}-00001"}] if pid == PART
+            else [{"functional_position": "P2", "part_id": f"{self.SIPM}-00099"}])}
+        with m1, m2:
+            d = self.client.post(url, {"action": "check_table", "into": "SC1", "type_id": self.SIPM, "key": "preassigned",
+                                       "cell": [f"{self.SIPM}-00012", f"{self.SIPM}-00011", f"{self.SIPM}-00077"]}).json()
+        self.assertEqual([(r["ok"], r["note"]) for r in d["results"]],
+                         [(False, f"position P2 already holds {self.SIPM}-00099"), (True, "→ P1"), (True, "→ P3")])
+
+    def test_save_plan_writes_the_specs_of_the_target_and_links_nothing(self):
+        api = self._api(plan=None)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            d = self.client.post(f"/hw/dev/checklist-map/{PART}/", {"action": "plan", "into": "SC1", "key": "preassigned",
+                                                                    "pid": [f"{self.SIPM}-00031", f"{self.SIPM}-00032"], "slot": ["", ""]}).json()
+        api.patch_subcomponents.assert_not_called()
+        api.post_test.assert_not_called()
+        api.patch_component.assert_called_once()
+        pid, body = api.patch_component.call_args.args
+        self.assertEqual(pid, f"{self.SC}-00001")
+        self.assertEqual(body["specifications"]["DATA"], {"preassigned": {"P1": f"{self.SIPM}-00031", "P2": f"{self.SIPM}-00032"}})
+        self.assertEqual(d, {"target": f"{self.SC}-00001", "plan": {"P1": f"{self.SIPM}-00031", "P2": f"{self.SIPM}-00032"}, "error": None})
+        # with a plan already there, the new cells REPLACE it; a map's slot named like a position goes there
+        api = self._api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            d = self.client.post(f"/hw/dev/checklist-map/{PART}/", {"action": "plan", "into": "SC1",
+                                                                    "pid": [f"{self.SIPM}-00031"], "slot": ["P3"]}).json()
+        self.assertEqual(api.patch_component.call_args.args[1]["specifications"]["DATA"],
+                         {"preassigned": {"P3": f"{self.SIPM}-00031"}, "other": 1})   # blank key = the default
+        self.assertEqual(d["plan"], {"P3": f"{self.SIPM}-00031"})
+
+    def test_save_plan_refuses_an_occupied_position_empty_cells_and_non_pids(self):
+        api = self._api(plan=None)
+        api.get_subcomponents.side_effect = lambda pid: {"data": (
+            [{"functional_position": "SC1", "part_id": f"{self.SC}-00001"}] if pid == PART
+            else [{"functional_position": p, "part_id": f"{self.SIPM}-0009{i}"} for i, p in enumerate(("P1", "P2", "P3"))])}
+        m1, m2 = _mocked(api)
+        url = f"/hw/dev/checklist-map/{PART}/"
+        with m1, m2:
+            d = self.client.post(url, {"action": "plan", "into": "SC1", "pid": [f"{self.SIPM}-00031"]}).json()
+            self.assertIn("no free position for", d["error"])
+            d = self.client.post(url, {"action": "plan", "into": "SC1"}).json()
+            self.assertIn("nothing to plan", d["error"])
+            d = self.client.post(url, {"action": "plan", "into": "SC1", "pid": ["HPK123"]}).json()
+            self.assertEqual(d["error"], "HPK123 is not a PID.")
+        api.patch_component.assert_not_called()

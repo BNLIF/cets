@@ -210,6 +210,9 @@ def _tint(v) -> str:
 _PLOT_URL = re.compile(r"/plot/([A-Za-z]\d{11})/[^#\s]*(?:#(\S*))?$")
 
 
+PLAN_KEY = "preassigned"   # #185: the specs key ``expect: true`` stands for
+
+
 def _norm_field(f: dict) -> dict | None:
     """One field off the schema, or None to drop it (unknown type, blank
     label, or a widget missing what defines it)."""
@@ -389,6 +392,14 @@ def _norm_field(f: dict) -> dict | None:
             # takes room on a tablet — "open" (default), "collapsed", "off"
             linked = str(f.get("linked") or "").strip().lower()
             out["linked"] = linked if linked in ("collapsed", "off") else "open"
+    if out.get("link") and t in ("table", "imagemap"):
+        # #185 (Anselmo): ``expect`` names a key in the link target's
+        # specifications DATA holding the pre-assigned items ``{position:
+        # PID}`` — the view stamps it as ``planned``; a scan must then match
+        # the plan, and "Save plan" writes the cells there instead of linking.
+        expect = PLAN_KEY if f.get("expect") is True else str(f.get("expect") or "").strip()
+        if expect and "." not in expect:
+            out["expect"] = expect
     if t in ("number", "table"):
         out["min"], out["max"], out["range"] = _tol_range(f)
     if t == "table":
@@ -904,6 +915,8 @@ def _parse_table_row(f: dict, post, prefix: str, texts: dict, resolve=None):
             continue
         if raw and link:
             pid = _guarded(f.get("type_id"), raw, resolve, f.get("sn"))
+            if pid and not _planned_ok(f.get("planned"), None, pid):
+                pid = None   # #185: not one of the pre-assigned items — dropped like a mismatch
             if pid:
                 cells[c] = pid.upper()
                 typed = True
@@ -924,6 +937,18 @@ def _parse_table_row(f: dict, post, prefix: str, texts: dict, resolve=None):
 
 
 _PID_SHAPE = re.compile(r"[A-Za-z]\d{11}-\d{5}")
+
+
+def _planned_ok(planned: dict | None, position: str | None, pid: str) -> bool:
+    """#185: whether ``pid`` may stand where a plan exists — a slot named
+    like a planned position wants exactly that position's item, anywhere
+    else any pre-assigned item will do. No plan: anything goes."""
+    if not planned:
+        return True
+    pid = pid.upper()
+    if position and position in planned:
+        return planned[position] == pid
+    return pid in planned.values()
 
 
 def _guarded(tid: str | None, raw: str, resolve, sn: str | None = None):
@@ -993,7 +1018,7 @@ def parse(schema: dict, post, resolve=None) -> dict:
                 tid = s.get("type_id") or f.get("type_id")
                 raw = (post.get(f"{key}-m{i}") or "").strip()
                 raw = _guarded(tid, raw, resolve, f.get("sn")) if raw else None
-                if raw:
+                if raw and _planned_ok(f.get("planned"), s["label"], raw):   # #185
                     vals[s["label"]] = raw
             if not vals:
                 continue

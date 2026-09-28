@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -175,6 +176,28 @@ def normalize_status(value):
 # render stays fast; the children still list, just without a status until
 # expanded (ADR-0015).
 _STATUS_FETCH_CAP = 40
+
+
+_PLAN_PID = re.compile(r"[A-Za-z]\d{11}-\d{5}")
+
+
+def planned_rows(data_blob, manifest: list[dict]) -> list[dict]:
+    """#185: the item's pre-assigned sub-components not linked yet — any
+    key of its specifications DATA holding ``{position: PID}`` (a
+    checklist's plan) — ``[{part_id, functional_position, key}]``, position
+    order. A planned item that IS linked is a real one and stays out."""
+    if not isinstance(data_blob, dict):
+        return []
+    linked = {str(m.get("part_id") or "").upper() for m in manifest}
+    out = []
+    for key, v in data_blob.items():
+        if not (isinstance(v, dict) and v
+                and all(isinstance(p, str) and _PLAN_PID.fullmatch(p.strip()) for p in v.values())):
+            continue
+        for pos, pid in sorted(v.items(), key=lambda kv: str(kv[0])):
+            if pid.strip().upper() not in linked:
+                out.append({"part_id": pid.strip().upper(), "functional_position": str(pos), "key": key})
+    return out
 
 
 def assembly_children(api, parent_pid: str) -> list[dict]:
@@ -505,6 +528,7 @@ def part_detail(api, part_id: str, is_shipping: bool) -> dict:
                                          "serial_number", "comments", "location")},
         "tests": tests,
         "manifest": manifest,
+        "planned": planned_rows(data_blob, manifest) if not is_cable else [],   # #185
         "timeline": timeline,
         "sections": sections,
         "attachments": attachments,

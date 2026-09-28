@@ -556,7 +556,15 @@
           <td>{{ m.status|default:"—" }}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="4" class="sd-empty">None.</td></tr>
+        {% if not detail.planned %}<tr><td colspan="4" class="sd-empty">None.</td></tr>{% endif %}
+      {% endfor %}
+      {% for m in detail.planned %}{# #185: pre-assigned in the specs, not linked yet #}
+        <tr class="asm-row" data-depth="0" style="color:var(--faint);" title="pre-assigned in “{{ m.key }}” of the specifications — not linked yet">
+          <td class="mono asm-lead"><span class="asm-caret-spacer"></span><a href="{% url 'explore:part' part_id=m.part_id %}">{{ m.part_id }}</a></td>
+          <td>—</td>
+          <td>{{ m.functional_position }}</td>
+          <td>pre-assigned</td>
+        </tr>
       {% endfor %}
       </tbody>
     </table>

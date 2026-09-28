@@ -145,6 +145,17 @@ OK = check</pre>
     <span class="dd-ui">check</span> is the dry run naming what each cell would get. <span class="dd-ui">into the item in position…</span> links them into
     the sub-assembly sitting in that position of this item instead — the PDS module's supercell in <code>SC1</code> holding eight SiPM boards, one table per supercell.
     Type ID and serial pattern work as on a <a href="#pid">PID field</a>. Each row gets a 📱 that takes scans from a phone straight into its next empty cell.</p>
+  <h3 id="plan">Pre-assigned items</h3>
+  <p><span class="dd-ui">pre-assigned items</span> on a linking table or a linking image map: the target item's specifications
+    (the item's, or the sub-assembly's in <span class="dd-ui">into…</span>) hold the items planned for its positions as <code>{position: PID}</code>
+    under the key <code>preassigned</code> (<code>"expect": true</code> in the JSON; the box beside it, or a string, names another key)
+    — SiPM boards grouped by breakdown voltage into supercells before any module is built. With a plan there, the planned PIDs show grey in the
+    cells, a scan of one of them turns green, anything else red and is not submitted; a slot named like a planned position wants exactly that
+    position's item. Positions without a plan take any item of the right type, as before. <span class="dd-ui">save plan</span> beside <span class="dd-ui">link now</span>
+    (under a map, below its slots) writes that field's cells to the key instead of linking — each item gets the position
+    <span class="dd-ui">link now</span> would give it — with no record and no link, and the cells empty into the plan's grey hints. At linking (<span class="dd-ui">link now</span>, <span class="dd-ui">check</span>, submit)
+    a pre-assigned item goes to its planned position whatever the scan order; the item's page lists them as <i>pre-assigned</i> until the assembly is submitted. A sheet upload that patches the same
+    key does the same for many items at once.</p>
 
   <h2 id="steps">Steps</h2>
   <p>One step per line. Leading spaces indent — Tab / Shift+Tab in the box, two spaces per level. <a href="#text">Formatting</a> applies to each line.
@@ -169,7 +180,7 @@ Verify the serial against the shipping sheet</pre>
     <tr><td>required Type ID</td><td>a scan or a typed PID of any other type does not register: the scanner keeps scanning, typed input paints red, a mismatch is dropped at submit. Blank = any type.</td></tr>
     <tr><td>serial-number pattern</td><td>a regular expression such as <code>HPK\d{5}</code>: a value matching it in full is taken as a serial number and swapped for the PID of the item of the Type ID carrying it. Blank = every value that is not a PID is tried as a serial. Needs a Type ID. A serial that several items carry is never resolved — the box names them and asks for the PID.</td></tr>
     <tr><td>functional position (link child)</td><td>the position to link into; blank = the first free position accepting the child's type. On the item's page the field links live with a link / unlink button, and a named position pre-fills its occupant.</td></tr>
-    <tr><td>slots (image map)</td><td>one per line, <code>label @ x, y</code> in percent of the image — or click the image to drop them; <code>label @ x, y, Z00100300008</code> guards that slot with its own Type ID (over the field's); <span class="dd-ui">Zoom</span> places them on the full-size drawing. <span class="dd-ui">link scanned item</span> links each scanned item at submit: a slot named like one of the type's positions goes there, any other takes the first free position for its type. <span class="dd-ui">Linked list beside the map</span>: shown, collapsed or hidden — it takes room on a tablet.</td></tr>
+    <tr><td>slots (image map)</td><td>one per line, <code>label @ x, y</code> in percent of the image — or click the image to drop them; <code>label @ x, y, Z00100300008</code> guards that slot with its own Type ID (over the field's); <span class="dd-ui">Zoom</span> places them on the full-size drawing. <span class="dd-ui">link scanned item</span> links each scanned item at submit: a slot named like one of the type's positions goes there, any other takes the first free position for its type. <span class="dd-ui">Linked list beside the map</span>: shown, collapsed or hidden — it takes room on a tablet. <span class="dd-ui">pre-assigned items</span>: see <a href="#plan">the linking table's</a>.</td></tr>
   </table>
 <pre>Board 1 @ 4.5, 8
 Board 2 @ 4.5, 20
