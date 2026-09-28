@@ -409,9 +409,26 @@ def _norm_field(f: dict) -> dict | None:
         # the table-wide one (a computed Total has a different range).
         cols, formulas, texts, col_tol, checks, col_color = [], {}, {}, {}, [], {}
         sums, sum_status = {}, {}
+        counts, count_status = {}, {}   # #186 round 2: label → column holding a type ID
         for c in f.get("columns") or []:
             if isinstance(c, dict):
                 label = str(c.get("label") or "").strip()
+                # Anselmo 2026-09-28 ("the received column should be filled
+                # by the HWDB"): ``count`` = a column (C<n> or its label)
+                # holding a component type ID — the cell shows how many items
+                # that type has in the mirror, ``status`` narrowing them.
+                # Display only, like ``sum``; text beats it.
+                cn = str(c.get("count") or "").strip()
+                if label and cn and not str(c.get("text") or "").strip() and c.get("check") is not True:
+                    counts[label] = cn
+                    st = c.get("status")
+                    if isinstance(st, str):
+                        st = st.split("|")
+                    st = [str(x).strip() for x in st if str(x).strip()] if isinstance(st, list) else []
+                    if st:
+                        count_status[label] = st
+                    cols.append(label)
+                    continue
                 # #186 (Anselmo / Dave Warner, PDS inventory): ``sum`` = a
                 # column (C<n> or its label) whose value in THIS row is added
                 # up over every item of the type — a receiving batch per
@@ -456,21 +473,22 @@ def _norm_field(f: dict) -> dict | None:
             if label:
                 cols.append(label)
         out["columns"] = cols
-        if sums:
+        for refs, statuses, key, skey in ((sums, sum_status, "sums", "sum_status"),
+                                          (counts, count_status, "counts", "count_status")):
             # a C<n> reference becomes the column's label; one that points
-            # nowhere (or at itself) drops the sum column back to an input
-            for label, sm in list(sums.items()):
-                m = re.fullmatch(r"[Cc](\d+)", sm)
-                target = cols[int(m.group(1)) - 1] if m and 0 < int(m.group(1)) <= len(cols) else sm
+            # nowhere (or at itself) drops the column back to an input
+            for label, ref in list(refs.items()):
+                m = re.fullmatch(r"[Cc](\d+)", ref)
+                target = cols[int(m.group(1)) - 1] if m and 0 < int(m.group(1)) <= len(cols) else ref
                 if target in cols and target != label:
-                    sums[label] = target
+                    refs[label] = target
                 else:
-                    sums.pop(label)
-                    sum_status.pop(label, None)
-            if sums:
-                out["sums"] = sums
-            if sum_status:
-                out["sum_status"] = {k: v for k, v in sum_status.items() if k in sums}
+                    refs.pop(label)
+                    statuses.pop(label, None)
+            if refs:
+                out[key] = refs
+            if statuses and refs:
+                out[skey] = {k: v for k, v in statuses.items() if k in refs}
         # #115 (HVS): a table-wide background tint keyed to the reference
         # drawing (one iPad row = one Dashboard table). Named colors map to
         # light hexes; anything else must be #rrggbb or it's dropped.
@@ -802,9 +820,17 @@ def _table_cells(f: dict, cells: dict, tx: dict, prefix: str, rr: dict | None = 
     checks = f.get("checks") or []
     cc = f.get("col_color") or {}
     sums = f.get("sums") or {}
+    counts = f.get("counts") or {}
     out = []
     for i, c in enumerate(f["columns"]):
         v = cells.get(c)
+        if c in counts:   # #186: how many items the row's type has — filled by the page
+            out.append({"column": c, "name": f"{prefix}-c{i}", "count": counts[c],
+                        "count_ci": f["columns"].index(counts[c]),   # the row's cell holding the Type ID
+                        "count_status": (f.get("count_status") or {}).get(c, []),
+                        "value": "", "formula": "", "text": "", "min": None, "max": None, "range": "",
+                        "color": cc.get(c, "")})
+            continue
         if c in sums:   # #186: a total over the type's items — filled by the page
             out.append({"column": c, "name": f"{prefix}-c{i}", "sum": sums[c],
                         "sum_status": (f.get("sum_status") or {}).get(c, []),
@@ -824,6 +850,9 @@ def _table_cells(f: dict, cells: dict, tx: dict, prefix: str, rr: dict | None = 
                     "min": None if c in tx else (ct[c]["min"] if c in ct else f["min"]),
                     "max": None if c in tx else (ct[c]["max"] if c in ct else f["max"]),
                     "range": ct[c]["range"] if c in ct and c not in tx else ""})
+        # Chao 2026-09-28: a fixed Type ID a count column reads links to the type's page
+        if c in counts.values() and re.fullmatch(r"[A-Za-z]\d{11}", tx.get(c, "").strip()):
+            out[-1]["type_link"] = True
     return out
 
 
@@ -939,7 +968,7 @@ def _parse_table_row(f: dict, post, prefix: str, texts: dict, resolve=None):
     else is dropped like a type-guarded box's mismatch."""
     formulas = f.get("formulas") or {}
     checks = f.get("checks") or []
-    sums = f.get("sums") or {}
+    sums = {**(f.get("sums") or {}), **(f.get("counts") or {})}
     link = bool(f.get("link"))
     # #114: constant cells first, so formulas can reference a numeric one;
     # posted overrides for them are ignored like formulas'.
@@ -1271,7 +1300,8 @@ def table_link_requests(schema: dict, data: dict) -> list[dict]:
         if not isinstance(vals, dict):
             continue
         rows = list(vals.values()) if f.get("rows") else [vals]
-        skip = set(f.get("checks") or []) | set(f.get("texts") or {}) | set(f.get("formulas") or {}) | set(f.get("sums") or {})
+        skip = (set(f.get("checks") or []) | set(f.get("texts") or {}) | set(f.get("formulas") or {})
+                | set(f.get("sums") or {}) | set(f.get("counts") or {}))
         pids = []
         for row in rows:
             for c in f["columns"]:

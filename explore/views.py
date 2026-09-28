@@ -4162,6 +4162,28 @@ def _shared_serial_error(shared: dict) -> str | None:
                       for sn, p in shared.items()) or None
 
 
+def explore_type_count_view(request, part_type_id):
+    """#186 round 2 (Anselmo): ``?status=a|b`` → ``{"n": <items of the type
+    in the mirror, in those statuses when given>, "synced": <when the type
+    was last synced, null = never>}`` — a checklist table's ``count``
+    column. The mirror only (no HWDB call): honest as of the last sync,
+    which the cell's tooltip says."""
+    inst = instance_of(request)
+    want = [x.strip().lower() for x in (request.GET.get("status") or "").split("|") if x.strip()]
+    rows = HwdbComponentEvent.for_instance(inst).filter(part_type_id=part_type_id.upper())
+    if want:   # a status name, or part of one ("Passed All" = "QA/QC Tests - Passed All")
+        rows = [r for r in rows.values_list("status", flat=True)
+                if any(w in (r or "").lower() for w in want)]
+        n = len(rows)
+    else:
+        n = rows.count()
+    node = HierarchyNode.for_instance(inst).filter(
+        level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id.upper()).first()
+    synced = node.tests_synced_at if node else None
+    return JsonResponse({"n": n, "synced": synced.isoformat(timespec="minutes") if synced else None,
+                         "name": node.name if node else ""})
+
+
 @login_not_required
 def explore_serial_view(request, part_type_id):
     """#149: ``?serial=`` → ``{"pid": "<PID>", "pids": [...]}`` for the item

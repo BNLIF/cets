@@ -461,6 +461,12 @@
   }
   window.clPlots = function () { Array.prototype.forEach.call(document.querySelectorAll(".cl-plot-box"), update); };
 
+  // a status filter names a status, or part of one: "Passed All" takes
+  // "QA/QC Tests - Passed All" (Chao 2026-09-28) — case-insensitive
+  function statusIn(status, want) {
+    var s = String(status || "").toLowerCase();
+    return want.some(function (w) { return s.indexOf(w) >= 0; });
+  }
   // #176: sum fields — one sweep of the type's specifications per field (the
   // Plots page's NDJSON stream), adding the key's value from the latest
   // specifications DATA of every item (any section holding the key), in the
@@ -482,7 +488,7 @@
           if (row.error) { err = row.error; return; }
           if (!row.pid) return;
           seen++;
-          if (want.length && want.indexOf(String(row.status || "").toLowerCase()) < 0) return;
+          if (want.length && !statusIn(row.status, want)) return;
           var d = row.data || {}, v = null, path = key.split(".").filter(Boolean);
           function at(o) {   // the value at the dotted path, or the literal key, in o
             if (o && typeof o === "object" && key in o) return o[key];
@@ -542,7 +548,7 @@
           var col = c.dataset.sumCol, want = (c.dataset.sumStatus || "").split("|").filter(Boolean).map(function (x) { return x.toLowerCase(); });
           var sum = 0, n = 0;
           items.forEach(function (it) {
-            if (want.length && want.indexOf(it.status) < 0) return;
+            if (want.length && !statusIn(it.status, want)) return;
             var rv = rowLab === null ? it.tbl : (it.tbl && it.tbl[rowLab]);   // no named rows: the table IS the row
             var v = rv && typeof rv === "object" ? rv[col] : undefined;
             var num = typeof v === "number" ? v : parseFloat(String(v === null || v === undefined ? "" : v).replace(/,/g, ""));
@@ -556,6 +562,45 @@
       })
       .catch(function (e) { fail("couldn’t read the type’s items — " + e.message); });
   });
+  // #186 round 2: count columns — each cell asks the mirror how many items
+  // the type named in its row's column has (in the cell's statuses when
+  // given); one request per type + statuses. Filled when the form opens
+  // and again when the type cell changes; formulas recompute over it.
+  (function () {
+    var cache = {};
+    function typeIn(cell) {   // the Type ID in this row's referenced column (an input, or a constant's span)
+      var el = cell.closest("tr").querySelector('[data-ci="' + cell.dataset.countCi + '"]');
+      var v = el ? (el.value !== undefined ? el.value : el.textContent) : "";
+      v = v.trim().toUpperCase();
+      return /^[A-Z]\d{11}$/.test(v) ? v : "";
+    }
+    function fill(cell) {
+      var tbl = cell.closest("table"), tid = typeIn(cell), want = cell.dataset.countStatus || "";
+      if (!tbl.dataset.countUrl) { cell.textContent = "\u2014"; cell.title = "the count shows on the form"; return; }
+      if (!tid) { cell.textContent = "\u2014"; cell.title = "no Type ID in this row"; return; }
+      var key = tid + "|" + want;
+      if (!cache[key]) {
+        cache[key] = fetch(tbl.dataset.countUrl.replace("T0000000000T", tid) + (want ? "?status=" + encodeURIComponent(want) : ""), { credentials: "same-origin" })
+          .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
+      }
+      cache[key].then(function (d) {
+        var text = Number(d.n).toLocaleString(), changed = cell.textContent !== text;
+        cell.textContent = text;
+        cell.title = (d.name ? d.name + ": " : "") + d.n + " item" + (d.n === 1 ? "" : "s") + (want ? " in " + want.split("|").join(" / ") : "")
+                   + (d.synced ? " · as of the last sync " + d.synced.replace("T", " ") : " · type never synced — run a sync on its Type View");
+        if (changed && window.clRecomputeTable) window.clRecomputeTable(tbl);   // only a new number moves the formulas
+      }).catch(function (e) { cell.textContent = "\u2014"; cell.title = "couldn’t read the count — " + e.message; });
+    }
+    var cells = Array.prototype.slice.call(document.querySelectorAll(".cl-countcell"));
+    if (!cells.length) return;
+    if (!navigator.onLine) { cells.forEach(function (c) { c.title = "offline — the count needs the connection"; }); return; }
+    cells.forEach(fill);
+    document.addEventListener("input", function (e) {   // a typed Type ID refreshes its row's counts
+      if (!e.target.matches || !e.target.matches("input[data-ci]") || e.target.hasAttribute("data-formula")) return;   // a recompute's own event is not a typed cell
+      var row = e.target.closest("tr");
+      if (row) row.querySelectorAll(".cl-countcell").forEach(fill);
+    });
+  })();
   var timer = null;
   function schedule() { clearTimeout(timer); timer = setTimeout(window.clPlots, 800); }
   document.addEventListener("input", schedule);

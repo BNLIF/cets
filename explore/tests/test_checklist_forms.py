@@ -4204,3 +4204,47 @@ class SumColumnTest(TestCase):
         self.assertIn('class="cl-sumcell" data-sum-col="Received" data-sum-status="Received|Unknown"', html)
         self.assertEqual(html.count('class="cl-sumcell"'), 2)   # one per row
         self.assertIn("&Sigma;", html)
+
+
+class CountColumnTest(TestCase):
+    """#186 round 2 (Anselmo): a table column ``count`` shows how many items
+    the component type named in the row has — from the mirror, as of its
+    last sync. Display only; never in the record."""
+    SCHEMA = {"name": "Inv", "test_type_name": "Inv", "sections": [{"title": "Parts", "fields": [
+        {"type": "table", "label": "Stock", "columns": [
+            "Type", {"label": "In HWDB", "count": "C1", "status": ["Received", "Unknown"]},
+            {"label": "Per module", "text": "4"}, {"label": "Buildable", "formula": "C2 / C3"}],
+         "rows": [{"label": "Sensor", "texts": {"Type": "Z00100300042"}}, {"label": "Other"}]}]}]}
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("t", "t@t.io", "pw"))
+
+    def test_normalize_parse_and_render(self):
+        f = checklistforms.normalize(self.SCHEMA, "I")["sections"][0]["fields"][0]
+        self.assertEqual((f["counts"], f["count_status"]), ({"In HWDB": "Type"}, {"In HWDB": ["Received", "Unknown"]}))
+        schema = checklistforms.normalize(self.SCHEMA, "I")
+        key = f["key"]
+        data = checklistforms.parse(schema, {f"{key}-r1-c0": "Z00100300043", f"{key}-r1-c1": "999"})
+        self.assertEqual(data["Parts"]["Stock"], {"Other": {"Type": "Z00100300043", "Per module": 4}})   # the count never lands
+        api = _api(schema=self.SCHEMA, test_types=("ES", "Inv"))
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('data-count-url="/hw/dev/count/T0000000000T/"', html)
+        self.assertIn('class="cl-countcell" data-count-col="Type" data-count-ci="0" data-count-status="Received|Unknown"', html)
+        self.assertEqual(html.count('class="cl-countcell"'), 2)
+        self.assertIn('data-const><a href="/hw/dev/?node=Z00100300042" target="_blank" rel="noopener" title="the type’s page">Z00100300042</a></span>', html)   # the fixed Type ID links to its page
+
+    def test_count_endpoint_reads_the_mirror(self):
+        from explore.models import HierarchyNode
+        from django.utils import timezone
+        for i, st in enumerate(("Received", "Unknown", "Scrapped", "received")):
+            HwdbComponentEvent.objects.create(instance="dev", part_type_id="Z00100300042", part_id=f"Z00100300042-0000{i}", status=st)
+        HwdbComponentEvent.objects.create(instance="dev", part_type_id="Z00100300043", part_id="Z00100300043-00001", status="Received")
+        d = self.client.get("/hw/dev/count/Z00100300042/").json()
+        self.assertEqual((d["n"], d["synced"], d["name"]), (4, None, ""))
+        d = self.client.get("/hw/dev/count/Z00100300042/?status=Received%7CUnknown").json()
+        self.assertEqual(d["n"], 3)   # case-insensitive, Scrapped out
+        HwdbComponentEvent.objects.create(instance="dev", part_type_id="Z00100300042", part_id="Z00100300042-00009", status="QA/QC Tests - Passed All")
+        self.assertEqual(self.client.get("/hw/dev/count/Z00100300042/?status=passed%20all").json()["n"], 1)   # part of a name
+        self.assertEqual(self.client.get("/hw/dev/count/Z00100300099/").json()["n"], 0)

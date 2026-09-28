@@ -294,7 +294,7 @@
       <label class="ec-inline ff-grid-w" title="draw cell borders like a real table"><input type="checkbox" class="ff-grid" checked> borders</label>
       <button type="button" class="ec-del ff-tbl" title="named rows, each with its own fixed cells and tint">&#9636; rows&hellip;</button>
       <input type="hidden" class="ff-rows">
-      <textarea class="ff-columns" rows="2" style="flex:1 1 100%;" placeholder="columns — comma- or line-separated; computed: Total = C1 + C2*(C3/C4) [11 ± 1]; fixed: Expected = &quot;3.1+-0.1&quot;; pass/fail: OK = check; over the type's items: Received = sum(C4)" title="label = formula makes a computed column (C1 = first column's value, formula/fixed cells count too); label = &quot;text&quot; makes a fixed non-editable cell (no commas in the text); label = sum(C4) totals that column's value in the row over every item of the type (sum(C4 in Received | Unknown) counts only those statuses); [nominal ± tol] or [min..max] gives that column its own accepted range"></textarea>
+      <textarea class="ff-columns" rows="2" style="flex:1 1 100%;" placeholder="columns — comma- or line-separated; computed: Total = C1 + C2*(C3/C4) [11 ± 1]; fixed: Expected = &quot;3.1+-0.1&quot;; pass/fail: OK = check; over the type's items: Received = sum(C4)" title="label = formula makes a computed column (C1 = first column's value, formula/fixed cells count too); label = &quot;text&quot; makes a fixed non-editable cell (no commas in the text); label = sum(C4) totals that column's value in the row over every item of the type (sum(C4 in Received | Unknown) counts only those statuses); label = count(C1) shows how many items the type whose ID is in column 1 has; [nominal ± tol] or [min..max] gives that column its own accepted range"></textarea>
     </div>
     <div class="ec-row g-select" style="display:none;">
       <input class="ff-options" placeholder="options, comma-separated">
@@ -816,8 +816,8 @@
         var rg = (rw.ranges || {})[c.label], v = (rw.texts || {})[c.label] || "";
         if (rg) v += (v ? " " : "") + "[" + specText(rg) + "]";
         h += '<td><input class="tc-cell" data-i="' + i + '" data-j="' + j + '" value="' + esc(v) +
-             '" placeholder="' + esc(c.check ? "✓ ✗" : c.sum ? "Σ" : c.formula ? "ƒ [range]" : c.text || "") + '"' +
-             (c.check || c.sum ? " disabled" : "") + ' title="fixed text and/or an accepted range in brackets, e.g. 3.1 [3.0..3.2] or [0 ± 0.01]"></td>';
+             '" placeholder="' + esc(c.check ? "✓ ✗" : c.sum ? "Σ" : c.count ? "#" : c.formula ? "ƒ [range]" : c.text || "") + '"' +
+             (c.check || c.sum || c.count ? " disabled" : "") + ' title="fixed text and/or an accepted range in brackets, e.g. 3.1 [3.0..3.2] or [0 ± 0.01]"></td>';
       });
       h += '<td class="tc-ops"><button type="button" class="ec-del tc-up" data-i="' + i + '" title="Move up">&#8593;</button>' +
            '<button type="button" class="ec-del tc-down" data-i="' + i + '" title="Move down">&#8595;</button>' +
@@ -862,7 +862,7 @@
     else if (t.classList.contains("tc-cell")) {
       var rw = tblM.rows[i], lab = tblM.cols[j].label, pc = parseCell(t.value);
       rw.texts = rw.texts || {}; rw.ranges = rw.ranges || {};
-      rw.texts[lab] = tblM.cols[j].formula || tblM.cols[j].sum ? "" : pc.text;   // a formula / sum column takes only a range
+      rw.texts[lab] = tblM.cols[j].formula || tblM.cols[j].sum || tblM.cols[j].count ? "" : pc.text;   // a formula / sum / count column takes only a range
       if (pc.range) rw.ranges[lab] = pc.range; else delete rw.ranges[lab];
     } else if (t.classList.contains("tc-color")) {
       tblM.rows[i].color = t.value;
@@ -1070,10 +1070,10 @@
     var i = c.indexOf("=");
     if (i !== -1) {
       var rhs = c.slice(i + 1).trim(), q = /^"(.*)"$/.exec(rhs);
-      var sm = /^sum\(\s*(.+?)\s*(?:\bin\b\s*(.+?))?\s*\)$/i.exec(rhs);   // #186: sum(C4) / sum(C4 in Received | Unknown)
+      var sm = /^(sum|count)\(\s*(.+?)\s*(?:\bin\b\s*(.+?))?\s*\)$/i.exec(rhs);   // #186: sum(C4) / count(C1 in Received | Unknown)
       if (q) out.text = q[1];
       else if (rhs.toLowerCase() === "check") out.check = true;   // #116: pass/fail column
-      else if (sm) { out.sum = sm[1]; if (sm[2]) out.status = sm[2].split("|").map(function (x) { return x.trim(); }).filter(Boolean); }
+      else if (sm) { out[sm[1].toLowerCase()] = sm[2]; if (sm[3]) out.status = sm[3].split("|").map(function (x) { return x.trim(); }).filter(Boolean); }
       else out.formula = rhs;
       c = c.slice(0, i);
     }
@@ -1086,7 +1086,7 @@
     var tol = specText(c);
     return c.label + (c.text ? ' = "' + c.text + '"'
                       : c.check ? " = check"
-                      : c.sum ? " = sum(" + c.sum + (c.status && c.status.length ? " in " + c.status.join(" | ") : "") + ")"
+                      : c.sum || c.count ? " = " + (c.sum ? "sum(" + c.sum : "count(" + c.count) + (c.status && c.status.length ? " in " + c.status.join(" | ") : "") + ")"
                       : (c.formula ? " = " + c.formula : ""))
                    + (tol ? " [" + tol + "]" : "")
                    + (c.color ? " {" + c.color + "}" : "");
