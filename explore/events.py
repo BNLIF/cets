@@ -16,11 +16,13 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from threading import local as _thread_local_cls
 from typing import Iterator
 
+import requests
 from django.conf import settings
 from django.utils import timezone
 
@@ -623,12 +625,20 @@ def sync_test_events(
             with ThreadPoolExecutor(max_workers=workers, initializer=_init) as pool:
                 # Each worker uses its own thread-local client (requests.Session
                 # is not thread-safe — same rule as sync_family).
-                futs = {pool.submit(
-                            lambda p=pid: _fetch_component(
+                def _fetch(p):
+                    # the dev API drops connections under 20 parallel readers
+                    # (SSL EOF, 2026-09-28: 10 of 25 on one run) — a dropped
+                    # connection is retried, an HTTP refusal is not
+                    for attempt in range(3):
+                        try:
+                            return _fetch_component(
                                 tls.client, p, date_spec, test_type_ids,
-                                need_detail=p in detail_set,
-                                need_tests=p in tests_set)): pid
-                        for pid in process}
+                                need_detail=p in detail_set, need_tests=p in tests_set)
+                        except requests.exceptions.ConnectionError:
+                            if attempt == 2:
+                                raise
+                            time.sleep(1 + attempt)
+                futs = {pool.submit(_fetch, pid): pid for pid in process}
                 for fut in as_completed(futs):
                     try:
                         results.append(fut.result())

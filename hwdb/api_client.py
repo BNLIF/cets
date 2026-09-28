@@ -11,11 +11,39 @@ Pattern: every method returns the parsed JSON body. Callers check the body's
 
 import copy
 import logging
+import re
 from pathlib import Path
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+
+# HWDB dev, 2026-09-28: the type listing and the serial search started
+# answering ``part_id`` in the barcode-label form — PID plus country code
+# and 3-digit institution id (``Z00100100065-00010-US001``) — while the
+# item detail keeps the plain PID and the tests route refuses the long
+# form ("Wrong component ID provided"). Every id HWDB hands back is
+# reduced to the plain PID here, at the one place all reads pass through,
+# so the mirror, the sync and every page keep one key per item.
+_LABEL_ID = re.compile(r"^([A-Za-z]\d{11}-\d{5})-[A-Za-z]{2}\d{3}$")
+
+
+def _plain_ids(body) -> None:
+    """Strip the label suffix off ``part_id`` / ``parent_part_id`` on a
+    response and at the top level of its ``data`` (a row, or a list of
+    rows), in place."""
+    data = body.get("data") if isinstance(body, dict) else None
+    rows = data if isinstance(data, list) else [data] if isinstance(data, dict) else []
+    for row in [body] + rows:   # a create answers its part_id at the top level
+        if not isinstance(row, dict):
+            continue
+        for k in ("part_id", "parent_part_id"):
+            v = row.get(k)
+            if isinstance(v, str):
+                m = _LABEL_ID.match(v.strip())
+                if m:
+                    row[k] = m.group(1)
 
 
 class FnalDbApiClient:
@@ -73,6 +101,7 @@ class FnalDbApiClient:
                 response=response,
             )
         out = response.json()
+        _plain_ids(out)
         if key is not None:
             self._memo[key] = copy.deepcopy(out)
         return out

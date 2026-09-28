@@ -147,3 +147,29 @@ class FnalDbApiClientMemoTest(TestCase):
         api = self._api(memo=False)
         api.get_component_type("Z104"); api.get_component_type("Z104")
         self.assertEqual(len(self.calls), 2)
+
+
+class PlainIdsTest(TestCase):
+    """HWDB dev 2026-09-28: listings answer ``part_id`` in the label form
+    (PID-CC###) while the detail and the tests routes want the plain PID —
+    every response is reduced to plain ids at the client."""
+
+    def test_listing_rows_and_detail_lose_the_label_suffix(self):
+        api = FnalDbApiClient("https://example/api", "fake-bearer")
+        fake_resp = mock.Mock(ok=True)
+        fake_resp.json.return_value = {"data": [
+            {"part_id": "Z00100100065-00010-US001", "parent_part_id": "Z00100100065-00001-US186"},
+            {"part_id": "Z00100100065-00011", "parent_part_id": None},
+            {"part_id": "Z00100300080-00001.END1:3"},            # a cable-end ref is not a label
+            "not a row"]}
+        with mock.patch.object(api.session, "request", return_value=fake_resp):
+            rows = api.get_component_types("Z00100100065")["data"]
+        self.assertEqual([r.get("part_id") for r in rows if isinstance(r, dict)],
+                         ["Z00100100065-00010", "Z00100100065-00011", "Z00100300080-00001.END1:3"])
+        self.assertEqual(rows[0]["parent_part_id"], "Z00100100065-00001")
+        fake_resp.json.return_value = {"data": {"part_id": "Z00100100065-00010-US001", "serial_number": "s"}}
+        with mock.patch.object(api.session, "request", return_value=fake_resp):
+            self.assertEqual(api.get_component("Z00100100065-00010")["data"]["part_id"], "Z00100100065-00010")
+        fake_resp.json.return_value = {"status": "OK", "part_id": "Z00100100065-00026-US128"}   # a create's answer is top-level
+        with mock.patch.object(api.session, "request", return_value=fake_resp):
+            self.assertEqual(api.create_component("Z00100100065", {})["part_id"], "Z00100100065-00026")

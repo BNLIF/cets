@@ -10,6 +10,8 @@ import re
 from datetime import datetime, timezone as dt_timezone
 from unittest import mock
 
+import requests
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
@@ -210,6 +212,28 @@ class SyncTestEventsTest(TestCase):
         # a clean run afterwards clears the note and rewrites wholesale
         self._run(["P1", "P3"], {}, mode="full")
         self.assertEqual(H.objects.get(part_type_id="D05700200001").tests_sync_error, "")
+
+    def test_a_dropped_connection_is_retried_an_http_refusal_is_not(self):
+        client = _fake_client(["P1", "P2"], {})
+        real = client._make_request.side_effect
+        calls = {"P1": 0}
+
+        def flaky(method, endpoint, data=None, params=None):
+            if endpoint == "components/P1":
+                calls["P1"] += 1
+                if calls["P1"] < 3:
+                    raise requests.exceptions.SSLError("EOF occurred in violation of protocol")
+            if endpoint == "components/P2":
+                raise requests.exceptions.HTTPError("404 NOT FOUND")
+            return real(method, endpoint, data, params)
+        client._make_request.side_effect = flaky
+        with mock.patch("explore.events.FnalDbApiClient", return_value=client), \
+             mock.patch("explore.events.time.sleep"):
+            log = "".join(events.sync_test_events("https://x", "bearer", "D05700200001", mode="full"))
+        self.assertEqual(calls["P1"], 3)   # two dropped connections, then the answer
+        self.assertIn("1 of 2 item(s) could not be fetched", log)
+        self.assertIn("P2: 404 NOT FOUND", log)
+        self.assertEqual(set(HwdbComponentEvent.objects.values_list("part_id", flat=True)), {"P1"})
 
     def test_incremental_skips_known_components(self):
         self._run(["P1"], {"P1": [{"created": "2025-03-10T10:00:00+00:00", "test_type": {"name": "x"}}]})
