@@ -536,10 +536,12 @@
       Array.prototype.forEach.call(form.elements, function (el) { if (el.name && n.indexOf(el.name) < 0) n.push(el.name); });
       return n;
     }
+    var derived = {};   // formula cells are computed from the others — never part of what was "filled"
+    Array.prototype.forEach.call(form.querySelectorAll("input[data-formula]"), function (i) { if (i.name) derived[i.name] = 1; });
     function snapshot() {
       var v = {};
       new FormData(form).forEach(function (val, k) {
-        if (typeof val === "string" && k !== "csrfmiddlewaretoken" && k !== "action") v[k] = val;
+        if (typeof val === "string" && k !== "csrfmiddlewaretoken" && k !== "action" && !derived[k]) v[k] = val;
       });
       return v;
     }
@@ -610,7 +612,12 @@
       if (muted) return;
       clearTimeout(t);
       t = setTimeout(function () {
-        try { ls.setItem(KEY, JSON.stringify({ t: Date.now(), v: snapshot(), n: names() })); } catch (e) {}
+        // Chao 2026-09-28: only a CHANGED form is remembered — a form that
+        // still shows what the page loaded (a count-only table, a formula
+        // recompute's events, a value typed and reverted) leaves no copy,
+        // so the chooser's unsent list holds real work only
+        var v = snapshot();
+        try { if (same(v, rendered)) ls.removeItem(KEY); else ls.setItem(KEY, JSON.stringify({ t: Date.now(), v: v, n: names() })); } catch (e) {}
       }, 800);
     }
     form.addEventListener("input", save);
