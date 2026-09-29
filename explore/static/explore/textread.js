@@ -1,8 +1,8 @@
 // #188: reading printed text with the camera — Tesseract.js over the strip
 // inside a html5-qrcode box. Shared by the phone scan page and the fill
 // page's Scan modal. Candidates are the tokens matching a pattern (or every
-// line without one); `agree()` hands a candidate over only when it is the
-// sole one on two frames in a row.
+// line without one); `tally()` votes over the frames and names a winner
+// once it is read twice and two reads ahead of the runner-up.
 var TextRead = (function () {
   var worker = null, loading = null;
 
@@ -83,14 +83,25 @@ var TextRead = (function () {
 
   var PID = /^[A-Z]\d{11}-\d{5}$/i;
 
-  // two frames in a row with the same sole candidate → that value, else ""
-  function agree() {
-    var prev = "";
-    return function (cands) {
-      var v = cands.length === 1 ? cands[0] : "";
-      if (v && v === prev) { prev = ""; return v; }
-      prev = v;
-      return "";
+  // votes over the frames: a string read once is noise (a digit misread
+  // still passes a pattern), so `seen()` lists what was read at least
+  // twice, most often first, and `winner()` names the leader once it is
+  // read twice and is two reads ahead of the runner-up
+  function tally() {
+    var n = {}, order = [];
+    return {
+      add: function (cands) { cands.forEach(function (v) { if (!n[v]) { n[v] = 0; order.push(v); } n[v]++; }); },
+      seen: function () {
+        return order.filter(function (v) { return n[v] >= 2; })
+          .sort(function (a, b) { return n[b] - n[a] || order.indexOf(a) - order.indexOf(b); })
+          .map(function (v) { return { v: v, n: n[v] }; });
+      },
+      winner: function (vouch) {
+        var top = order.filter(vouch).sort(function (a, b) { return n[b] - n[a]; });
+        if (!top.length || n[top[0]] < 2) return "";
+        return (top.length === 1 || n[top[0]] >= n[top[1]] + 2) ? top[0] : "";
+      },
+      reset: function () { n = {}; order = []; }
     };
   }
 
@@ -102,10 +113,10 @@ var TextRead = (function () {
   // html5-qrcode wants the resolution in config.videoConstraints; small print needs 1080p
   var HD = { width: { ideal: 1920 }, height: { ideal: 1080 } };
 
-  // the candidates that may fill a box by themselves (through agree()):
-  // with a pattern every candidate is vouched for; without one only a
-  // PID-shaped read is — the other lines stay chips to tap
-  function vouched(c, re) { return re ? c : c.filter(function (v) { return PID.test(v); }); }
+  // what may fill a box by itself (the winner): with a pattern every
+  // candidate; without one only a PID-shaped read — the other lines stay
+  // chips to tap
+  function voucher(re) { return re ? function () { return true; } : function (v) { return PID.test(v); }; }
 
-  return { load: load, candidates: candidates, grab: grab, loop: loop, agree: agree, vouched: vouched, fullMatch: fullMatch, PID: PID, HD: HD };
+  return { load: load, candidates: candidates, grab: grab, loop: loop, tally: tally, voucher: voucher, fullMatch: fullMatch, PID: PID, HD: HD };
 })();

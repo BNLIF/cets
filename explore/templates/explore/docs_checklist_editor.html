@@ -197,7 +197,7 @@ Board 3 @ 4.5, 32</pre>
   <h3 id="read">Reading printed text</h3>
   <p>A text field with a <span class="dd-ui">pattern</span> — a regex the value must match in full, <code>011-\d{5}</code> for a LArASIC serial — gets <span class="dd-ui">Scan</span> and phone buttons too.
     <span class="dd-ui">Read text</span> (on from the start for such a field, a toggle in the Scan window and on the phone page otherwise) turns the camera box into a strip that reads the printed text inside it: a read matching the pattern,
-    seen on two frames in a row, fills the field like a scanned code. Several matches, or a PID field without a serial pattern, show what was read as buttons to tap.
+    fills the field like a scanned code once the frames agree on it. What was read at least twice shows as buttons with a count, most often first, to tap when the reader cannot decide.
     The pattern is what keeps wrong reads out (a dash misread as a digit fails it) — make it as tight as the numbering allows. A <em>read:</em> line under the box shows what the reader saw, so a near miss is visible. Dark laser-etched chips read about two times in three per frame; hold still, fill the strip, use the zoom.</p>
 
   <h2 id="plot">Plot</h2>

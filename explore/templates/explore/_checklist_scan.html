@@ -26,7 +26,7 @@
   </div>
   <div style="margin-top:10px; display:flex; justify-content:space-between; gap:8px;">
     {# #188: printed text instead of a code — on from the start for a text field with a pattern #}
-    <button type="button" class="es-btn quiet" id="cl-qr-text" title="Read printed text inside the box instead of a code">Read text</button>
+    <button type="button" class="es-btn quiet" id="cl-qr-text" title="Read printed text inside the box; codes are ignored while this is on">Read text</button>
     <button type="button" class="es-btn quiet" id="cl-qr-close">Close</button>
   </div>
 </dialog>
@@ -73,17 +73,17 @@
     }
     closeQr();
   }
-  // candidates accumulate (newest first, eight kept) instead of changing
-  // with every frame, so a chip stays where it was long enough to tap
-  var chipSeen = {}, lastAt = 0;
-  function showChips(c) {
-    c.forEach(function (v) {
-      if (chipSeen[v]) return;
-      chipSeen[v] = 1;
-      var b = document.createElement("button"); b.type = "button"; b.className = "es-btn quiet"; b.textContent = v;
-      b.onclick = function () { accept(v); };
-      chips.insertBefore(b, chips.firstChild);
-      while (chips.children.length > 8) { delete chipSeen[chips.lastChild.textContent]; chips.removeChild(chips.lastChild); }
+  // the chips are the strings read at least twice, most often first, with
+  // their count — a single misread never shows
+  var lastAt = 0;
+  function showChips(seen) {
+    var key = seen.map(function (s) { return s.v + "×" + s.n; }).join("|");
+    if (key === chips.getAttribute("data-key")) return;
+    chips.setAttribute("data-key", key); chips.innerHTML = "";
+    seen.slice(0, 8).forEach(function (s) {
+      var b = document.createElement("button"); b.type = "button"; b.className = "es-btn quiet"; b.textContent = s.v + " ×" + s.n;
+      b.onclick = function () { accept(s.v); };
+      chips.appendChild(b);
     });
   }
   function showLast(text) {   // what the reader saw, at most every 2 s so it can be read
@@ -98,15 +98,15 @@
   function startReading() {
     var isText = !!(target && target.hasAttribute("pattern"));
     var re = TextRead.fullMatch(target && (target.getAttribute("pattern") || target.getAttribute("data-sn")));
-    var agree = TextRead.agree();
+    var votes = TextRead.tally(), vouch = TextRead.voucher(re);
     reader = TextRead.loop({
       video: function () { return document.querySelector("#cl-qr-reader video"); },
       box: function () { return lastBox || { width: 300, height: 100 }; },
       re: re, pid: !isText,
       onCands: function (c, text) {
         showLast(text);
-        if (c.length) showChips(c);
-        var v = agree(TextRead.vouched(c, re));
+        votes.add(c); showChips(votes.seen());
+        var v = votes.winner(vouch);
         if (v) accept(v);
       } });
   }
@@ -117,7 +117,7 @@
     return "Hold the text inside the box — " + (p ? "it must match " + p + (isText ? "." : ", or be a PID.") : (isText ? "tap what was read." : "a PID fills the box, anything else is tapped."));
   }
   async function setText(on) {
-    textOn = on; textBtn.classList.toggle("on", on); chips.innerHTML = ""; chipSeen = {}; last.textContent = "";
+    textOn = on; textBtn.classList.toggle("on", on); chips.innerHTML = ""; chips.removeAttribute("data-key"); last.textContent = "";
     if (qr) { await stopQr(); startCam(); }   // the box changes shape, the camera resolution with it
   }
   textBtn.addEventListener("click", function () { setText(!textOn); });
@@ -128,7 +128,7 @@
     target = document.getElementById(b.getAttribute("data-target"));
     textOn = !!(target && target.hasAttribute("pattern"));   // a text field with a pattern reads text from the start
     textBtn.classList.toggle("on", textOn);
-    chips.innerHTML = ""; chipSeen = {}; last.textContent = "";
+    chips.innerHTML = ""; chips.removeAttribute("data-key"); last.textContent = "";
     dlg.showModal();
     startCam();
   });
@@ -174,7 +174,8 @@
       // stays open and keeps scanning (the callback fires per frame).
       // #149: a code that isn't a PID is a serial number (a full match
       // when the box has a pattern) — the fill page resolves it within the type.
-      accept,
+      // #188: text mode reads printed text only — a code in the strip is ignored
+      reading ? function () {} : accept,
       function () {})
       .then(function () { setupFocusZoom(); if (reading) startReading(); })
       .catch(function (err) { status.textContent = "Camera start failed: " + err; });

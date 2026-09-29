@@ -63,7 +63,7 @@
     <div class="row" style="margin-top:0;">
       <button id="startBtn" class="btn primary">Start camera</button>
       <button id="stopBtn" class="btn">Stop</button>{% if target %}
-      <button id="ocrBtn" class="btn{% if ocr %} on{% endif %}" title="Read printed text inside the box instead of a code">Read text</button>{% endif %}
+      <button id="ocrBtn" class="btn{% if ocr %} on{% endif %}" title="Read printed text inside the box; codes are ignored while this is on">Read text</button>{% endif %}
     </div>
     <div id="status">{% if ocr %}Tap “Start camera” and hold the text inside the box{% if scan_sn %} — it must match {{ scan_sn }}{% endif %}.{% else %}Tap “Start camera” and point at a label’s QR code or barcode.{% endif %}</div>
     <div id="chips"></div>
@@ -188,7 +188,7 @@
       if (r.ok && j.scans) j.scans.forEach(function (s) { if (s.ok !== null) settle(s.id, s.ok, s.message); });
       var now = Date.now();
       Object.keys(pending).forEach(function (id) {
-        if (now - pending[id].at > 15000) settle(id, false, "no checklist page is listening — press the row’s scan button there");
+        if (now - pending[id].at > 15000) settle(id, false, ONE ? "no checklist page is listening — press the field’s Phone button there" : "no checklist page is listening — press the row’s scan button there");
       });
     }
 
@@ -207,17 +207,16 @@
       if (typeof TextRead === "undefined") return Promise.reject(new Error("the text reader did not load"));
       return TextRead.load(TESS);
     }
-    // candidates accumulate (newest first, eight kept) instead of changing
-    // with every frame, so a chip stays where it was long enough to tap
-    var chipSeen = {};
-    function showChips(c) {
-      c.forEach(function (v) {
-        if (chipSeen[v]) return;
-        chipSeen[v] = 1;
-        var b = document.createElement("button"); b.type = "button"; b.className = "chip"; b.textContent = v;
-        b.onclick = function () { send(v); };
-        chips.insertBefore(b, chips.firstChild);
-        while (chips.children.length > 8) { delete chipSeen[chips.lastChild.textContent]; chips.removeChild(chips.lastChild); }
+    // the chips are the strings read at least twice, most often first, with
+    // their count — a single misread never shows
+    function showChips(seen) {
+      var key = seen.map(function (s) { return s.v + "×" + s.n; }).join("|");
+      if (key === chips.getAttribute("data-key")) return;
+      chips.setAttribute("data-key", key); chips.innerHTML = "";
+      seen.slice(0, 8).forEach(function (s) {
+        var b = document.createElement("button"); b.type = "button"; b.className = "chip"; b.textContent = s.v + " ×" + s.n;
+        b.onclick = function () { send(s.v); };
+        chips.appendChild(b);
       });
     }
     var lastAt = 0;
@@ -226,20 +225,20 @@
       lastAt = Date.now(); last.textContent = "read: " + text.slice(0, 80);
     }
     function startReading() {
-      var agree = TextRead.agree();
+      var votes = TextRead.tally(), vouch = TextRead.voucher(SN_RE);
       reader = TextRead.loop({
         video: function () { return document.querySelector("#reader video"); },
         box: function () { return BOX_TXT; }, re: SN_RE, pid: !OCR,   // a PID field's page (not a text field's): a PID read counts
         onCands: function (c, text) {
           showLast(text);
-          if (c.length) showChips(c);
-          var v = agree(TextRead.vouched(c, SN_RE));   // sent by itself only with the pattern's or the PID shape's say-so; refused() guards the type
-          if (v && !sentBefore[v.toUpperCase()]) send(v);
+          votes.add(c); showChips(votes.seen());
+          var v = votes.winner(vouch);   // sent by itself only with the pattern's or the PID shape's say-so; refused() guards the type
+          if (v && !sentBefore[v.toUpperCase()]) { send(v); votes.reset(); }
         } });
     }
     function stopReading() { if (reader) reader.stop(); reader = null; last.textContent = ""; }
     async function setOcr(on) {
-      ocrOn = on; chips.innerHTML = ""; chipSeen = {}; last.textContent = "";
+      ocrOn = on; chips.innerHTML = ""; chips.removeAttribute("data-key"); last.textContent = "";
       if (ocrBtn) ocrBtn.classList.toggle("on", on);
       document.body.classList.toggle("reading", on);
       stopReading();
@@ -295,11 +294,14 @@
         var byLabel = cams.find(function (c) { return /back|rear|environment/i.test(c.label || ""); });
         best = (byLabel || cams[cams.length - 1]).id;
       }
-      try { await html5.start({ facingMode: "environment" }, config, send, function () {}); }
+      // text mode reads printed text only — a code in the strip is ignored
+      // (Chao 2026-09-29: the test sheet's barcode kept winning over the text)
+      var onCode = ocrOn ? function () {} : send;
+      try { await html5.start({ facingMode: "environment" }, config, onCode, function () {}); }
       catch (e1) {
         if (!best) { setStatus("✗ Camera start failed: " + e1, "bad"); return; }
         if (ocrOn) config.videoConstraints = Object.assign({ deviceId: { exact: best } }, TextRead.HD);
-        try { await html5.start(best, config, send, function () {}); }
+        try { await html5.start(best, config, onCode, function () {}); }
         catch (e2) { setStatus("✗ Camera start failed: " + e2, "bad"); return; }
       }
       started = true;
