@@ -281,6 +281,27 @@ class ScanEndpointsTest(TestCase):
         self.assertIn('var TARGET = "", FREE = false;', html)
         self.assertIn('var TYPE = "", SN = ""', html)
 
+    def test_scan_page_reads_text_for_a_checklist_target(self):
+        # #188: a checklist's scan page carries the text reader and its
+        # toggle; a text field's page (ocr=1) starts in that mode and names
+        # the pattern the reads are kept by
+        html = self.client.get(f"/hw/dev/scan/?target={PID}&free=1&sn=011-%5Cd%7B5%7D&ocr=1&one=1").content.decode()
+        self.assertIn("tess/tesseract.min.js", html)
+        self.assertIn("var ONE = true;", html)   # one field: the camera stops once the scan is placed
+        self.assertIn("hold the text inside the box — it must match 011-\\d{5}.", html)   # the hint names the pattern
+        self.assertIn('<button id="ocrBtn" class="btn on"', html)
+        self.assertIn('var OCR = true, TESS = "/static/explore/tess/"', html)
+        self.assertIn("Text matching <span", html)
+        self.assertIn('SN = "011\\u002D\\u005Cd{5}"', html)   # escapejs; JS reads 011-\d{5}
+        # a linking table's page has the toggle off; a packing page has neither
+        html = self.client.get(f"/hw/dev/scan/?target={PID}&free=1&type=D00400300001").content.decode()
+        self.assertIn('<button id="ocrBtn" class="btn"', html)
+        self.assertIn("var OCR = false", html)
+        self.assertIn("var ONE = false;", html)
+        html = self.client.get("/hw/dev/scan/?ocr=1").content.decode()
+        self.assertNotIn('id="ocrBtn"', html)
+        self.assertNotIn("tesseract.min.js", html)
+
 
 class PackPageHookupTest(TestCase):
     def setUp(self):

@@ -145,8 +145,12 @@
     {% endif %}
   </div>
 {% else %}
-  <label class="cl-lab" for="{{ f.key }}">{{ f.label|clmd }}</label>
-  <input id="{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}" autocomplete="off">
+  <label class="cl-lab" for="{{ f.key }}">{{ f.label|clmd }}{% if f.pattern %} <span class="cl-hint">pattern {{ f.pattern }}</span>{% endif %}</label>
+  {# #188: a text field with a pattern is checked by the browser and read off the board by the phone's camera #}
+  {% if f.pattern %}<span style="display:inline-flex; gap:8px; align-items:center; max-width:100%; flex-wrap:wrap;">{% endif %}<input id="{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}" autocomplete="off"{% if f.pattern %} pattern="{{ f.pattern }}" title="must match {{ f.pattern }}"{% endif %}>{% if f.pattern %}
+    <button type="button" class="es-btn quiet cl-scan" data-target="{{ f.key }}" title="Read it with this device’s camera">&#9635; Scan</button>{% if f.scan_url %}
+    <button type="button" class="es-btn quiet cl-phone" data-target="{{ f.key }}" title="Read it with your phone’s camera"><svg class="cl-phone-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2.5"/><line x1="10.5" y1="18.5" x2="13.5" y2="18.5"/></svg> Phone</button>{% endif %}</span>{% if f.scan_url %}
+  {% include "explore/_checklist_phone.html" %}{% endif %}{% endif %}
 {% endif %}
 {% if f.to_spec %}<div class="cl-hint">&#8594; also saved to the item&#8217;s Specifications{% if f.spec %} as &#8220;{{ f.spec }}&#8221;{% endif %}</div>{% endif %}
 </div>

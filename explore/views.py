@@ -2262,6 +2262,8 @@ def explore_scan_view(request):
         "outcome_url": _rev(request, "explore:scan_outcome"),
         "scan_type": scan_type,   # the table's type: a PID of another type is refused on the phone
         "scan_sn": (request.GET.get("sn") or "")[:200] if target else "",   # its serial pattern
+        "ocr": bool(target) and request.GET.get("ocr") == "1",   # #188: opened from a text field — read text from the start
+        "one": bool(target) and request.GET.get("one") == "1",   # a single field: the camera stops once its scan is placed
     })
 
 
@@ -3872,12 +3874,17 @@ def explore_checklist_view(request, part_id, name):
     # a code of another type (or off the pattern) before it is sent
     bound = checklistforms.bind(schema, display_td)
     for _t, f in checklistforms.leaf_fields(bound):
-        if (f["type"] == "table" and f.get("link")) or f["type"] in ("qr", "link"):   # #171: single fields too
+        if (f["type"] == "table" and f.get("link")) or f["type"] in ("qr", "link") \
+                or (f["type"] == "text" and f.get("pattern")):   # #171: single fields too; #188: a text field with a pattern
             q = {"target": part_id, "free": "1"}
             if f.get("type_id"):
                 q["type"] = f["type_id"]
             if f.get("sn"):
                 q["sn"] = f["sn"]
+            if f.get("pattern"):   # #188: the phone reads text by default, kept by the pattern
+                q["sn"], q["ocr"] = f["pattern"], "1"
+            if f["type"] != "table":   # one field takes one scan: the phone stops its camera once it is placed
+                q["one"] = "1"
             scan_path = _rev(request, "explore:scan") + "?" + urlencode(q)
             f["scan_url"] = (settings.PUBLIC_ORIGIN + scan_path if settings.PUBLIC_ORIGIN
                              else request.build_absolute_uri(scan_path))

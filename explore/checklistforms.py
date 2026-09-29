@@ -543,6 +543,17 @@ def _norm_field(f: dict) -> dict | None:
             out["rows"] = rows
         if not out["columns"]:
             return None
+    if t == "text":
+        # #188 (Anselmo/Hajime): ``pattern`` — a regex a value must match in
+        # full (the browser checks typed input) and the rule the phone's
+        # text reader keeps camera reads by. One that doesn't compile is dropped.
+        pat = str(f.get("pattern") or "").strip()
+        if pat:
+            try:
+                re.compile(pat)
+                out["pattern"] = pat
+            except re.error:
+                pass
     if t == "select":
         out["options"] = [str(o).strip() for o in f.get("options") or []
                           if str(o).strip()]

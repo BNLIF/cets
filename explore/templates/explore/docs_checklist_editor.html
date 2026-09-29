@@ -87,7 +87,7 @@
     <tr><td>check</td><td>a ✓ / ✗ toggle</td><td><code>true</code> / <code>false</code>; untouched = omitted</td></tr>
     <tr><td>number</td><td>a numeric box with units and an accepted range, red when out of it</td><td>the number</td></tr>
     <tr><td>table</td><td>a grid of cells — inputs, computed, fixed text, pass/fail; optional named rows</td><td><code>{column: value}</code>, or <code>{row: {column: value}}</code> with rows</td></tr>
-    <tr><td>text / textarea</td><td>one line / several</td><td>the text</td></tr>
+    <tr><td>text / textarea</td><td>one line / several; a text field may carry a <a href="#read">pattern</a> the value must match</td><td>the text</td></tr>
     <tr><td>date/time</td><td>a date-time picker</td><td><code>YYYY-MM-DDTHH:MM</code></td></tr>
     <tr><td>select</td><td>a dropdown of the options (comma-separated in the editor)</td><td>the chosen option</td></tr>
     <tr><td>photo</td><td>take or pick a picture, with an optional comment; uploaded to the item at submit</td><td>the HWDB image id and name</td></tr>
@@ -194,6 +194,11 @@ Board 2 @ 4.5, 20
 Board 3 @ 4.5, 32</pre>
   <p>On the fill page every PID field has <span class="dd-ui">Scan</span> (camera), <span class="dd-ui">Pick</span> (a list of the type's items, free ones for linking fields)
     and a phone button that shows a QR code: scanning it on a phone opens a scan page whose scans fill this field.</p>
+  <h3 id="read">Reading printed text</h3>
+  <p>A text field with a <span class="dd-ui">pattern</span> — a regex the value must match in full, <code>011-\d{5}</code> for a LArASIC serial — gets <span class="dd-ui">Scan</span> and phone buttons too.
+    <span class="dd-ui">Read text</span> (on from the start for such a field, a toggle in the Scan window and on the phone page otherwise) turns the camera box into a strip that reads the printed text inside it: a read matching the pattern,
+    seen on two frames in a row, fills the field like a scanned code. Several matches, or a PID field without a serial pattern, show what was read as buttons to tap.
+    The pattern is what keeps wrong reads out (a dash misread as a digit fails it) — make it as tight as the numbering allows. A <em>read:</em> line under the box shows what the reader saw, so a near miss is visible. Dark laser-etched chips read about two times in three per frame; hold still, fill the strip, use the zoom.</p>
 
   <h2 id="plot">Plot</h2>
   <p>Embeds a <a href="{% url 'explore:docs_plots' %}">Plots page</a> for the items the form names — a Vbd distribution of the 32 boards just linked into a module. Recipe:</p>

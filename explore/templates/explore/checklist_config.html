@@ -299,6 +299,10 @@
     <div class="ec-row g-select" style="display:none;">
       <input class="ff-options" placeholder="options, comma-separated">
     </div>
+    <div class="ec-row g-textpat" style="display:none;">
+      <input class="ff-pattern" placeholder="pattern (regex, e.g. 011-\d{5}) — adds a Phone button that reads the value off the item" style="flex:1 1 100%;"
+        title="a typed value must match it in full; the phone&#8217;s camera reads printed text and sends a read that matches">
+    </div>
     <div class="ec-row g-steps" style="display:none;">
       <span class="ec-hint" style="flex:1 1 100%;">One step per line. Tab / Shift+Tab indents the current line (2 spaces = 1 level). **bold**, *italic*.</span>
       <textarea class="ff-steps" rows="3" placeholder="one step per line" style="flex:1 1 100%;"></textarea>
@@ -453,6 +457,7 @@
     $(".ff-colorclear", r).style.display =
       (t === "table" && $(".ff-color", r).dataset.on) ? "" : "none";
     $(".g-select", r).style.display = t === "select" ? "" : "none";
+    $(".g-textpat", r).style.display = t === "text" ? "" : "none";     // #188
     $(".g-steps", r).style.display = t === "steps" ? "" : "none";
     $$(".g-static", r).forEach(function (g) { g.style.display = t === "static" ? "" : "none"; });
     $(".g-img", r).style.display = (t === "static" || t === "imagemap") ? "" : "none";
@@ -501,6 +506,7 @@
     $(".ff-grid", r).checked = f.grid !== false;                         // #139: on by default
     $(".ff-typeid", r).value = f.type_id || "";
     $(".ff-sn", r).value = f.sn || "";                                 // #149
+    $(".ff-pattern", r).value = f.type === "text" ? (f.pattern || "") : "";   // #188
     $(".ff-plot", r).value = f.plot || "";                             // #160
     $(".ff-plotsecs", r).value = (f.sections || []).join(", ");
     $(".ff-plotflds", r).value = (f.fields || []).join(", ");
@@ -1165,6 +1171,7 @@
       var pos = $(".ff-position", r).value.trim();
       if (pos) f.position = pos;
     }
+    if (t === "text" && $(".ff-pattern", r).value.trim()) f.pattern = $(".ff-pattern", r).value.trim();   // #188
     if (t === "qr" || t === "link" || t === "imagemap" || (t === "table" && $(".ff-tbllink", r).checked)) {
       var tid = $(".ff-typeid", r).value.trim().toUpperCase(), sn = $(".ff-sn", r).value.trim();
       if (tid) f.type_id = tid;

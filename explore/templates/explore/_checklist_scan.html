@@ -6,26 +6,40 @@
   #cl-qr-modal::backdrop { background: rgba(0, 0, 0, .45); }
   #cl-qr-reader { width: 100%; }
   #cl-qr-status { font-size: 12px; color: var(--faint); margin-top: 6px; }
+  #cl-qr-chips:empty { display: none; }
+  #cl-qr-chips { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+  #cl-qr-chips .es-btn { font-family: ui-monospace, monospace; }
+  #cl-qr-last { font-size: 11.5px; color: var(--faint); font-family: ui-monospace, monospace; margin-top: 4px; min-height: 1.2em; overflow-wrap: anywhere; }
+  #cl-qr-last:empty { display: none; }
+  #cl-qr-text.on { color: var(--good); border-color: var(--good); }
 </style>
 
 <dialog id="cl-qr-modal">
   <div id="cl-qr-reader"></div>
   <div id="cl-qr-status">Point the camera at the QR code.</div>
+  <div id="cl-qr-chips"></div>
+  <div id="cl-qr-last"></div>
   <div id="cl-qr-zoomwrap" style="display:none; margin-top:8px;">
     <label style="font-size:12px; color:var(--faint);">Zoom
       <input type="range" id="cl-qr-zoom" style="width:100%; max-width:none;"></label>
   </div>
-  <div style="margin-top:10px; text-align:right;">
+  <div style="margin-top:10px; display:flex; justify-content:space-between; gap:8px;">
+    {# #188: printed text instead of a code — on from the start for a text field with a pattern #}
+    <button type="button" class="es-btn quiet" id="cl-qr-text" title="Read printed text inside the box instead of a code">Read text</button>
     <button type="button" class="es-btn quiet" id="cl-qr-close">Close</button>
   </div>
 </dialog>
 
 <script src="{% static 'explore/html5-qrcode.min.js' %}"></script>
+<script src="{% static 'explore/tess/tesseract.min.js' %}"></script>
+<script src="{% static 'explore/textread.js' %}"></script>
 <script>
 (function () {
   var dlg = document.getElementById("cl-qr-modal");
   var status = document.getElementById("cl-qr-status");
-  var target = null, qr = null;
+  var chips = document.getElementById("cl-qr-chips"), textBtn = document.getElementById("cl-qr-text"), last = document.getElementById("cl-qr-last");
+  var TESS = "{% static 'explore/tess/' %}";
+  var target = null, qr = null, textOn = false, reader = null, lastBox = null, chipsKey = "", chipsAt = 0;
 
   // scanned text → PID: HWDB component URL first, then a bare PID, then a
   // PID with a label suffix — the Dashboard's rules (scanning.py). Anything
@@ -38,19 +52,89 @@
   }
 
   async function stopQr() {
+    if (reader) { reader.stop(); reader = null; }
     if (qr) { try { await qr.stop(); } catch (e) {} try { qr.clear(); } catch (e) {} qr = null; }
   }
   async function closeQr() { await stopQr(); if (dlg.open) dlg.close(); }
+
+  // a code or a read → the box: #112 type guard, #149 serial pattern
+  function accept(text) {
+    if (target) {
+      var pid = extractPid(text);
+      var tid = target.getAttribute("data-type-id"), sn = target.getAttribute("data-sn"), isSn = false;
+      if (!/^[A-Z]\d{11}-\d{5}$/i.test(pid)) { isSn = !sn; try { isSn = isSn || new RegExp("^(?:" + sn + ")$").test(pid); } catch (e) {} }
+      if (tid && pid.toUpperCase().indexOf(tid + "-") !== 0 && !isSn) {
+        status.textContent = "Scanned " + pid + " — expected type " + tid + ".";
+        return;
+      }
+      target.value = pid;
+      target.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    closeQr();
+  }
+  function showChips(c) {
+    var k = c.join("\n");
+    if (k === chipsKey || Date.now() - chipsAt < 1500) return;
+    chipsKey = k; chipsAt = Date.now(); chips.innerHTML = "";
+    c.forEach(function (v) {
+      var b = document.createElement("button"); b.type = "button"; b.className = "es-btn quiet"; b.textContent = v;
+      b.onclick = function () { accept(v); };
+      chips.appendChild(b);
+    });
+  }
+  // #188: the strip inside the box is read about once a second; the field's
+  // pattern (a text field's, or a PID field's serial pattern) keeps the
+  // candidates, and on a PID field (every Scan target but a text field) a
+  // PID-shaped read counts too — one seen twice in a row fills the box
+  // (the type guard in accept() still applies), several are chips
+  function startReading() {
+    var isText = !!(target && target.hasAttribute("pattern"));
+    var re = TextRead.fullMatch(target && (target.getAttribute("pattern") || target.getAttribute("data-sn")));
+    var agree = TextRead.agree();
+    reader = TextRead.loop({
+      video: function () { return document.querySelector("#cl-qr-reader video"); },
+      box: function () { return lastBox || { width: 300, height: 100 }; },
+      re: re, pid: !isText,
+      onCands: function (c, text) {
+        last.textContent = text ? "read: " + text.slice(0, 80) : "";   // what the reader sees, matching or not
+        if (c.length) showChips(c);
+        var v = agree(TextRead.vouched(c, re));
+        if (v) accept(v);
+      } });
+  }
+  // the text-mode hint names the pattern a read must match (a text field's, or a PID field's serial pattern)
+  function readHint() {
+    var p = target && (target.getAttribute("pattern") || target.getAttribute("data-sn"));
+    var isText = !!(target && target.hasAttribute("pattern"));
+    return "Hold the text inside the box — " + (p ? "it must match " + p + (isText ? "." : ", or be a PID.") : (isText ? "tap what was read." : "a PID fills the box, anything else is tapped."));
+  }
+  async function setText(on) {
+    textOn = on; textBtn.classList.toggle("on", on); chips.innerHTML = ""; chipsKey = ""; last.textContent = "";
+    if (qr) { await stopQr(); startCam(); }   // the box changes shape, the camera resolution with it
+  }
+  textBtn.addEventListener("click", function () { setText(!textOn); });
 
   document.addEventListener("click", function (e) {
     var b = e.target.closest && e.target.closest(".cl-scan");
     if (!b) return;
     target = document.getElementById(b.getAttribute("data-target"));
-    status.textContent = "Point the camera at the QR code or barcode.";
+    textOn = !!(target && target.hasAttribute("pattern"));   // a text field with a pattern reads text from the start
+    textBtn.classList.toggle("on", textOn);
+    chips.innerHTML = ""; chipsKey = ""; last.textContent = "";
     dlg.showModal();
+    startCam();
+  });
+
+  async function startCam() {
+    status.textContent = textOn ? readHint() : "Point the camera at the QR code or barcode.";
     if (typeof Html5Qrcode === "undefined") {
       status.textContent = "Scanner library did not load — type the PID instead.";
       return;
+    }
+    if (textOn) {
+      status.textContent = "Loading the text reader…";
+      try { await TextRead.load(TESS); status.textContent = readHint(); }
+      catch (e) { textOn = false; textBtn.classList.remove("on"); status.textContent = "✗ " + (e.message || e) + " — scanning codes only."; }
     }
     // native BarcodeDetector when the browser has one — far better at 1D
     // barcodes than the JS fallback; the explicit format list speeds the
@@ -66,35 +150,26 @@
       ];
     }
     qr = new Html5Qrcode("cl-qr-reader", cfg);
+    var reading = textOn;
     qr.start({ facingMode: "environment" },
       { fps: 12,
-        // a wide box, not a square — 1D barcodes need the width
+        // a wide box, not a square — 1D barcodes need the width; a short
+        // strip when reading text (small print needs 1080p, see TextRead.HD)
         qrbox: function (w, h) {
-          return { width: Math.floor(w * 0.9),
-                   height: Math.floor(Math.min(h * 0.6, w * 0.55)) };
-        } },
-      function (text) {
-        if (target) {
-          var pid = extractPid(text);
-          // #112: a type-guarded box refuses a wrong-type code — the modal
-          // stays open and keeps scanning (the callback fires per frame).
-          // #149: a code that isn't a PID is a serial number (a full match
-          // when the box has a pattern) — the fill page resolves it within the type.
-          var tid = target.getAttribute("data-type-id"), sn = target.getAttribute("data-sn"), isSn = false;
-          if (!/^[A-Z]\d{11}-\d{5}$/i.test(pid)) { isSn = !sn; try { isSn = isSn || new RegExp("^(?:" + sn + ")$").test(pid); } catch (e) {} }
-          if (tid && pid.toUpperCase().indexOf(tid + "-") !== 0 && !isSn) {
-            status.textContent = "Scanned " + pid + " — expected type " + tid + ".";
-            return;
-          }
-          target.value = pid;
-          target.dispatchEvent(new Event("input", { bubbles: true }));
-        }
-        closeQr();
-      },
+          lastBox = reading ? { width: Math.floor(w * 0.9), height: Math.floor(Math.min(h * 0.35, 120)) }
+                            : { width: Math.floor(w * 0.9), height: Math.floor(Math.min(h * 0.6, w * 0.55)) };
+          return lastBox;
+        },
+        videoConstraints: reading ? Object.assign({ facingMode: "environment" }, TextRead.HD) : undefined },
+      // #112: a type-guarded box refuses a wrong-type code — the modal
+      // stays open and keeps scanning (the callback fires per frame).
+      // #149: a code that isn't a PID is a serial number (a full match
+      // when the box has a pattern) — the fill page resolves it within the type.
+      accept,
       function () {})
-      .then(setupFocusZoom)
+      .then(function () { setupFocusZoom(); if (reading) startReading(); })
       .catch(function (err) { status.textContent = "Camera start failed: " + err; });
-  });
+  }
 
   // continuous focus + zoom slider — the scan page's recipe; focus hunting
   // is what usually stops 1D barcodes from registering

@@ -1909,6 +1909,46 @@ class TypeGuardTest(TestCase):
 
 
 
+class TextPatternTest(TestCase):
+    """#188 (Anselmo/Hajime): a text field's ``pattern`` — the browser
+    checks typed input against it and the phone reads the value off the
+    item, keeping only reads that match."""
+
+    def _field(self, **field):
+        s = checklistforms.normalize(
+            {"name": "t", "test_type_name": "T",
+             "sections": [{"title": "S", "fields": [field]}]}, "t")
+        return s["sections"][0]["fields"][0]
+
+    def test_normalize_keeps_a_compiling_pattern_on_text_fields_only(self):
+        self.assertEqual(self._field(type="text", label="Chip", pattern=r"011-\d{5}")["pattern"], r"011-\d{5}")
+        self.assertNotIn("pattern", self._field(type="text", label="Chip", pattern="011-("))
+        self.assertNotIn("pattern", self._field(type="text", label="Chip", pattern="  "))
+        self.assertNotIn("pattern", self._field(type="textarea", label="Chip", pattern=r"\d+"))
+
+    def test_fill_page_checks_the_pattern_and_offers_the_phone_in_text_mode(self):
+        user = get_user_model().objects.create_user("n", "n@n.io", "pw")
+        self.client.force_login(user)
+        schema = dict(SCHEMA)
+        schema["sections"] = [{"title": "S", "fields": [
+            {"type": "text", "label": "Chip", "pattern": r"011-\d{5}"},
+            {"type": "text", "label": "Note"}]}]
+        m1, m2 = _mocked(_api(schema=schema))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('pattern="011-\\d{5}" title="must match 011-\\d{5}"', html)
+        self.assertIn("pattern 011-\\d{5}", html)
+        # this device's camera (the Scan modal, in text mode) and the phone button; the phone's
+        # scan page opens in text mode from the start, the pattern as the filter, no type
+        self.assertIn('class="es-btn quiet cl-scan" data-target="f0-0"', html)
+        self.assertIn('id="cl-qr-text"', html)
+        self.assertIn('class="es-btn quiet cl-phone" data-target="f0-0"', html)
+        self.assertIn(f'href="http://testserver/hw/dev/scan/?target={PART}&amp;free=1&amp;sn=011-%5Cd%7B5%7D&amp;ocr=1&amp;one=1"', html)
+        # the plain text field has neither
+        self.assertNotIn('data-target="f0-1"', html)
+        self.assertEqual(html.count('class="cl-phone-panel"'), 1)
+
+
 class SerialResolveTest(TestCase):
     """#149 (Hajime, Anselmo's PDS checklist): a serial number typed or
     barcoded into a type-guarded box resolves to the PID of the item of
@@ -2268,8 +2308,8 @@ class ImageMapLinkTest(TestCase):
             # the scan page carrying the field's type when it has one
             self.assertIn('<button type="button" class="es-btn quiet cl-phone" data-target="f0-0" title="Scan with your phone">', html)
             self.assertIn('<button type="button" class="es-btn quiet cl-phone" data-target="f0-1" title="Scan with your phone">', html)
-            self.assertIn(f'href="http://testserver/hw/dev/scan/?target={PART}&amp;free=1"', html)
-            self.assertIn(f'href="http://testserver/hw/dev/scan/?target={PART}&amp;free=1&amp;type=D05700300001"', html)
+            self.assertIn(f'href="http://testserver/hw/dev/scan/?target={PART}&amp;free=1&amp;one=1"', html)
+            self.assertIn(f'href="http://testserver/hw/dev/scan/?target={PART}&amp;free=1&amp;type=D05700300001&amp;one=1"', html)
             self.assertEqual(html.count('<div class="cl-phone-panel" hidden'), 2)
             blank = self.client.get(f"/hw/dev/part/{PTID}-blank/checklist/{NAME}/").content.decode()
             self.assertNotIn('class="es-btn quiet cl-phone"', blank)   # the device's blank form has no item to scan for
