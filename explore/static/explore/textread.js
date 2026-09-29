@@ -59,23 +59,32 @@ var TextRead = (function () {
     return d;
   }
 
-  // reads about once a second until stopped: o = { video: () => <video>,
-  // box: () => {width, height}, re, pid, onCands(list, text) } — `text` is
-  // what was read, for the user to see why nothing matched; load() first
+  // reads frame after frame until stopped: o = { video: () => <video>,
+  // box: () => {width, height}, re, pid, vouch(v), onCands(list, text) } —
+  // `text` is what was read, for the user to see why nothing matched. The
+  // 2× pass runs only when the 1× pass found nothing vouched for, so a good
+  // read costs one pass (latency is what confuses: a result describes
+  // where the camera was when the frame was grabbed). load() first.
   function loop(o) {
     var on = true, t = null;
     function tick() {
       if (!on) return;
       var c = grab(o.video(), o.box());
       if (!c || !worker) { t = setTimeout(tick, 300); return; }
-      Promise.all([worker.recognize(c), worker.recognize(twice(c))])
-        .then(function (rs) {
-          if (!on) return;
-          var texts = rs.map(function (r) { return r.data.text || ""; }), seen = {}, cands = [];
-          texts.forEach(function (tx) { candidates(tx, o.re, o.pid).forEach(function (v) { if (!seen[v]) { seen[v] = 1; cands.push(v); } }); });
-          o.onCands(cands, texts[0].replace(/\s+/g, " ").trim());
-        }, function () {})
-        .then(function () { if (on) t = setTimeout(tick, 250); });
+      var text1 = "";
+      worker.recognize(c)
+        .then(function (r) {
+          text1 = r.data.text || "";
+          var c1 = candidates(text1, o.re, o.pid);
+          if (c1.some(o.vouch)) return c1;
+          return worker.recognize(twice(c)).then(function (r2) {
+            var seen = {}, out = [];
+            c1.concat(candidates(r2.data.text || "", o.re, o.pid)).forEach(function (v) { if (!seen[v]) { seen[v] = 1; out.push(v); } });
+            return out;
+          });
+        })
+        .then(function (cands) { if (on) o.onCands(cands, text1.replace(/\s+/g, " ").trim()); }, function () {})
+        .then(function () { if (on) t = setTimeout(tick, 150); });
     }
     tick();
     return { stop: function () { on = false; clearTimeout(t); } };
@@ -83,25 +92,33 @@ var TextRead = (function () {
 
   var PID = /^[A-Z]\d{11}-\d{5}$/i;
 
-  // votes over the frames: a string read once is noise (a digit misread
-  // still passes a pattern), so `seen()` lists what was read at least
-  // twice, most often first, and `winner()` names the leader once it is
-  // read twice and is two reads ahead of the runner-up
-  function tally() {
-    var n = {}, order = [];
+  // votes over the last few frames (a sliding window: what the camera left
+  // behind drops out within a few frames instead of lingering): a string
+  // read once is noise (a digit misread still passes a pattern), so
+  // `seen()` lists what was read at least twice, most often first, and
+  // `winner()` names the leader once it is read twice and is two reads
+  // ahead of the runner-up
+  function tally(window) {
+    var frames = [], K = window || 4;
+    function counts() {
+      var n = {}, order = [];
+      frames.forEach(function (f) { f.forEach(function (v) { if (!n[v]) { n[v] = 0; order.push(v); } n[v]++; }); });
+      return { n: n, order: order };
+    }
     return {
-      add: function (cands) { cands.forEach(function (v) { if (!n[v]) { n[v] = 0; order.push(v); } n[v]++; }); },
+      add: function (cands) { frames.push(cands); if (frames.length > K) frames.shift(); },
       seen: function () {
-        return order.filter(function (v) { return n[v] >= 2; })
-          .sort(function (a, b) { return n[b] - n[a] || order.indexOf(a) - order.indexOf(b); })
-          .map(function (v) { return { v: v, n: n[v] }; });
+        var c = counts();
+        return c.order.filter(function (v) { return c.n[v] >= 2; })
+          .sort(function (a, b) { return c.n[b] - c.n[a] || c.order.indexOf(a) - c.order.indexOf(b); })
+          .map(function (v) { return { v: v, n: c.n[v] }; });
       },
       winner: function (vouch) {
-        var top = order.filter(vouch).sort(function (a, b) { return n[b] - n[a]; });
-        if (!top.length || n[top[0]] < 2) return "";
-        return (top.length === 1 || n[top[0]] >= n[top[1]] + 2) ? top[0] : "";
+        var c = counts(), top = c.order.filter(vouch).sort(function (a, b) { return c.n[b] - c.n[a]; });
+        if (!top.length || c.n[top[0]] < 2) return "";
+        return (top.length === 1 || c.n[top[0]] >= c.n[top[1]] + 2) ? top[0] : "";
       },
-      reset: function () { n = {}; order = []; }
+      reset: function () { frames = []; }
     };
   }
 

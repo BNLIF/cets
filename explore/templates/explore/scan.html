@@ -228,7 +228,7 @@
       var votes = TextRead.tally(), vouch = TextRead.voucher(SN_RE);
       reader = TextRead.loop({
         video: function () { return document.querySelector("#reader video"); },
-        box: function () { return BOX_TXT; }, re: SN_RE, pid: !OCR,   // a PID field's page (not a text field's): a PID read counts
+        box: function () { return BOX_TXT; }, re: SN_RE, pid: !OCR, vouch: vouch,   // a PID field's page (not a text field's): a PID read counts
         onCands: function (c, text) {
           showLast(text);
           votes.add(c); showChips(votes.seen());
