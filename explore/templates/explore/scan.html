@@ -30,12 +30,13 @@
     .top p.short { display: none; }
     body.reading #reader video { max-height: 42vh; object-fit: cover; }   /* the strip stays in the upper half */
     body.reading .top p { display: none; }
-    #chips:empty { display: none; }
-    #chips { margin-top: 8px; }
-    #last { font-size: 12px; color: #9b937f; font-family: ui-monospace, monospace; margin-top: 4px; overflow-wrap: anywhere; }
-    #last:empty { display: none; }
+    body.reading #status { height: 22px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }   /* fixed rows: the camera never jumps */
+    #chips { display: none; }
+    body.reading #chips { display: flex; gap: 6px; height: 40px; margin-top: 6px; overflow-x: auto; overflow-y: hidden; align-items: center; }
+    #last { display: none; }
+    body.reading #last { display: block; height: 18px; font-size: 12px; line-height: 18px; color: #9b937f; font-family: ui-monospace, monospace; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .chip { font: inherit; font-family: ui-monospace, monospace; font-size: 14px; color: #e7dfce; background: #2a251c;
-      border: 1px solid #4a4335; border-radius: 999px; padding: 6px 12px; margin: 0 6px 6px 0; cursor: pointer; }
+      border: 1px solid #4a4335; border-radius: 999px; padding: 6px 12px; cursor: pointer; white-space: nowrap; flex: 0 0 auto; }
   </style>
 </head>
 <body>
@@ -198,7 +199,7 @@
     // tap. Only the strip is read, so a frame full of chips is neither slow
     // nor ambiguous — the user aims the strip at the number.
     var ocrOn = OCR, reader = null;
-    var ocrBtn = document.getElementById("ocrBtn"), chips = document.getElementById("chips"), chipsKey = "", chipsAt = 0, last = document.getElementById("last");
+    var ocrBtn = document.getElementById("ocrBtn"), chips = document.getElementById("chips"), last = document.getElementById("last");
     var SN_RE = typeof TextRead !== "undefined" ? TextRead.fullMatch(SN) : null;
     var BOX_QR = { width: 300, height: 300 }, BOX_TXT = { width: 320, height: 110 };
     var READ_HINT = "hold the text inside the box — " + (SN ? "it must match " + SN + (OCR ? "." : ", or be a PID.") : (OCR ? "tap what was read." : "a PID fills the box, anything else is tapped."));
@@ -206,15 +207,23 @@
       if (typeof TextRead === "undefined") return Promise.reject(new Error("the text reader did not load"));
       return TextRead.load(TESS);
     }
+    // candidates accumulate (newest first, eight kept) instead of changing
+    // with every frame, so a chip stays where it was long enough to tap
+    var chipSeen = {};
     function showChips(c) {
-      var k = c.join("\n");
-      if (k === chipsKey || Date.now() - chipsAt < 1500) return;
-      chipsKey = k; chipsAt = Date.now(); chips.innerHTML = "";
       c.forEach(function (v) {
+        if (chipSeen[v]) return;
+        chipSeen[v] = 1;
         var b = document.createElement("button"); b.type = "button"; b.className = "chip"; b.textContent = v;
         b.onclick = function () { send(v); };
-        chips.appendChild(b);
+        chips.insertBefore(b, chips.firstChild);
+        while (chips.children.length > 8) { delete chipSeen[chips.lastChild.textContent]; chips.removeChild(chips.lastChild); }
       });
+    }
+    var lastAt = 0;
+    function showLast(text) {   // what the reader saw, at most every 2 s so it can be read
+      if (!text || Date.now() - lastAt < 2000) return;
+      lastAt = Date.now(); last.textContent = "read: " + text.slice(0, 80);
     }
     function startReading() {
       var agree = TextRead.agree();
@@ -222,7 +231,7 @@
         video: function () { return document.querySelector("#reader video"); },
         box: function () { return BOX_TXT; }, re: SN_RE, pid: !OCR,   // a PID field's page (not a text field's): a PID read counts
         onCands: function (c, text) {
-          last.textContent = text ? "read: " + text.slice(0, 80) : "";   // what the reader sees, matching or not
+          showLast(text);
           if (c.length) showChips(c);
           var v = agree(TextRead.vouched(c, SN_RE));   // sent by itself only with the pattern's or the PID shape's say-so; refused() guards the type
           if (v && !sentBefore[v.toUpperCase()]) send(v);
@@ -230,7 +239,7 @@
     }
     function stopReading() { if (reader) reader.stop(); reader = null; last.textContent = ""; }
     async function setOcr(on) {
-      ocrOn = on; chips.innerHTML = ""; chipsKey = "";
+      ocrOn = on; chips.innerHTML = ""; chipSeen = {}; last.textContent = "";
       if (ocrBtn) ocrBtn.classList.toggle("on", on);
       document.body.classList.toggle("reading", on);
       stopReading();

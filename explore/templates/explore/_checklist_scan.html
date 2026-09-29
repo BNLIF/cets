@@ -6,11 +6,11 @@
   #cl-qr-modal::backdrop { background: rgba(0, 0, 0, .45); }
   #cl-qr-reader { width: 100%; }
   #cl-qr-status { font-size: 12px; color: var(--faint); margin-top: 6px; }
-  #cl-qr-chips:empty { display: none; }
-  #cl-qr-chips { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
-  #cl-qr-chips .es-btn { font-family: ui-monospace, monospace; }
-  #cl-qr-last { font-size: 11.5px; color: var(--faint); font-family: ui-monospace, monospace; margin-top: 4px; min-height: 1.2em; overflow-wrap: anywhere; }
-  #cl-qr-last:empty { display: none; }
+  #cl-qr-chips, #cl-qr-last { display: none; }   /* fixed rows in text mode: the camera never jumps */
+  #cl-qr-modal.reading #cl-qr-status { height: 18px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  #cl-qr-modal.reading #cl-qr-chips { display: flex; gap: 6px; height: 36px; overflow-x: auto; overflow-y: hidden; align-items: center; }
+  #cl-qr-chips .es-btn { font-family: ui-monospace, monospace; white-space: nowrap; flex: 0 0 auto; }
+  #cl-qr-modal.reading #cl-qr-last { display: block; height: 16px; line-height: 16px; font-size: 11.5px; color: var(--faint); font-family: ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #cl-qr-modal.reading #cl-qr-reader video { max-height: 42vh; object-fit: cover; }   /* the strip stays high, the chips in view */
   #cl-qr-text.on { color: var(--good); border-color: var(--good); }
 </style>
@@ -40,7 +40,7 @@
   var status = document.getElementById("cl-qr-status");
   var chips = document.getElementById("cl-qr-chips"), textBtn = document.getElementById("cl-qr-text"), last = document.getElementById("cl-qr-last");
   var TESS = "{% static 'explore/tess/' %}";
-  var target = null, qr = null, textOn = false, reader = null, lastBox = null, chipsKey = "", chipsAt = 0;
+  var target = null, qr = null, textOn = false, reader = null, lastBox = null;
 
   // scanned text → PID: HWDB component URL first, then a bare PID, then a
   // PID with a label suffix — the Dashboard's rules (scanning.py). Anything
@@ -73,15 +73,22 @@
     }
     closeQr();
   }
+  // candidates accumulate (newest first, eight kept) instead of changing
+  // with every frame, so a chip stays where it was long enough to tap
+  var chipSeen = {}, lastAt = 0;
   function showChips(c) {
-    var k = c.join("\n");
-    if (k === chipsKey || Date.now() - chipsAt < 1500) return;
-    chipsKey = k; chipsAt = Date.now(); chips.innerHTML = "";
     c.forEach(function (v) {
+      if (chipSeen[v]) return;
+      chipSeen[v] = 1;
       var b = document.createElement("button"); b.type = "button"; b.className = "es-btn quiet"; b.textContent = v;
       b.onclick = function () { accept(v); };
-      chips.appendChild(b);
+      chips.insertBefore(b, chips.firstChild);
+      while (chips.children.length > 8) { delete chipSeen[chips.lastChild.textContent]; chips.removeChild(chips.lastChild); }
     });
+  }
+  function showLast(text) {   // what the reader saw, at most every 2 s so it can be read
+    if (!text || Date.now() - lastAt < 2000) return;
+    lastAt = Date.now(); last.textContent = "read: " + text.slice(0, 80);
   }
   // #188: the strip inside the box is read about once a second; the field's
   // pattern (a text field's, or a PID field's serial pattern) keeps the
@@ -97,7 +104,7 @@
       box: function () { return lastBox || { width: 300, height: 100 }; },
       re: re, pid: !isText,
       onCands: function (c, text) {
-        last.textContent = text ? "read: " + text.slice(0, 80) : "";   // what the reader sees, matching or not
+        showLast(text);
         if (c.length) showChips(c);
         var v = agree(TextRead.vouched(c, re));
         if (v) accept(v);
@@ -110,7 +117,7 @@
     return "Hold the text inside the box — " + (p ? "it must match " + p + (isText ? "." : ", or be a PID.") : (isText ? "tap what was read." : "a PID fills the box, anything else is tapped."));
   }
   async function setText(on) {
-    textOn = on; textBtn.classList.toggle("on", on); chips.innerHTML = ""; chipsKey = ""; last.textContent = "";
+    textOn = on; textBtn.classList.toggle("on", on); chips.innerHTML = ""; chipSeen = {}; last.textContent = "";
     if (qr) { await stopQr(); startCam(); }   // the box changes shape, the camera resolution with it
   }
   textBtn.addEventListener("click", function () { setText(!textOn); });
@@ -121,7 +128,7 @@
     target = document.getElementById(b.getAttribute("data-target"));
     textOn = !!(target && target.hasAttribute("pattern"));   // a text field with a pattern reads text from the start
     textBtn.classList.toggle("on", textOn);
-    chips.innerHTML = ""; chipsKey = ""; last.textContent = "";
+    chips.innerHTML = ""; chipSeen = {}; last.textContent = "";
     dlg.showModal();
     startCam();
   });
