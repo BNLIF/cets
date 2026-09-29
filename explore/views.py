@@ -2473,13 +2473,15 @@ def _may_patch_type(request, inst, api=None) -> bool:
     return _is_architect(request, inst, api) or _is_admin(request, inst, api)
 
 
-def _my_roles(request, inst, api) -> list[dict] | None:
+def _my_roles(request, inst, api, refresh=False) -> list[dict] | None:
     """The account's HWDB roles on this instance (``users/whoami`` →
     ``roles: [{id, name}]``), session-cached like the architect flag. None =
-    unknown (whoami failed or an odd shape); a gate never fires on unknown."""
+    unknown (whoami failed or an odd shape); a gate never fires on unknown.
+    ``refresh`` re-reads HWDB (Chao 2026-09-29: a role granted mid-session
+    stayed invisible until a new login)."""
     key = f"hwdb_roles_{inst}"
     cached = request.session.get(key)
-    if isinstance(cached, list):
+    if isinstance(cached, list) and not refresh:
         return cached
     try:
         roles = (api.whoami().get("data") or {}).get("roles")
@@ -2512,10 +2514,17 @@ def _type_role_gate(request, inst, api, ptid, record=None) -> dict | None:
     if not isinstance(need, list):
         return None
     need = [r for r in need if isinstance(r, dict) and r.get("id") is not None]
-    if not need:
-        return None
     mine = _my_roles(request, inst, api)
-    if mine is None or {r["id"] for r in mine} & {r["id"] for r in need}:
+    # Chao 2026-09-29: an EMPTY list is not "anyone" — HWDB refused a
+    # specifications PATCH on Anselmo's role-less type with "Not authorized"
+    # while the same write went through on types listing a role the account
+    # holds. ``required`` is then [] and the pages say the type needs roles.
+    if mine is None or (need and {r["id"] for r in mine} & {r["id"] for r in need}):
+        return None
+    # a miss re-reads whoami once — the cached list may predate a grant;
+    # misses are rare, so the extra call costs nothing on the common path
+    mine = _my_roles(request, inst, api, refresh=True)
+    if mine is None or (need and {r["id"] for r in mine} & {r["id"] for r in need}):
         return None
     return {"required": [str(r.get("name") or r["id"]) for r in need],
             "mine": [r["name"] for r in mine]}
@@ -4638,6 +4647,10 @@ def _child_type_records(api, request, inst, children) -> tuple[dict, list[str]]:
         # Chao 2026-09-23: the child type's own roles gate its mint — a refusal
         # after the parent is minted would leave it standing with empty positions
         gate = _type_role_gate(request, inst, api, c["type_id"], rec.get("data") if isinstance(rec, dict) else None)
+        if gate and not gate["required"]:
+            errors.append(f"{c['name']}: its type lists no HWDB roles, so HWDB refuses minting its items — "
+                          f"an HWDB administrator must add roles to the type first")
+            continue
         if gate:
             errors.append(f"{c['name']}: minting its items needs one of the HWDB roles "
                           f"{', '.join(gate['required'])} — your account holds {', '.join(gate['mine']) or 'no roles'}")

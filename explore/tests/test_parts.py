@@ -736,6 +736,33 @@ class PartViewTest(TestCase):
         self.assertIn("need one of the HWDB roles <b>PDS tester</b>", html)
         self.assertIn("Your account holds <b>CE tester</b>, so HWDB will refuse the write.", html)
 
+    def test_a_role_granted_mid_session_clears_the_warning_on_the_next_visit(self):
+        # Chao 2026-09-29: Hajime granted "builder" while the session held the old list — the
+        # gate re-reads whoami on a miss instead of warning from the stale cache
+        api = self._api()
+        api.get_component_type.return_value = {"data": {
+            "manufacturers": [], "roles": [{"id": 9, "name": "builder"}]}}
+        api.whoami.return_value = {"data": {"roles": [{"id": 1, "name": "CE tester"}]}}
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            html = self.client.get(self.url + "?edit=1").content.decode()
+            self.assertIn("need one of the HWDB roles <b>builder</b>", html)
+            api.whoami.return_value = {"data": {"roles": [{"id": 1, "name": "CE tester"}, {"id": 9, "name": "builder"}]}}
+            html = self.client.get(self.url + "?edit=1").content.decode()
+        self.assertNotIn("HWDB will refuse", html)
+
+    def test_a_type_listing_no_roles_warns_that_hwdb_refuses_every_write(self):
+        # Chao 2026-09-29: HWDB said "Not authorized" to a specifications PATCH on a
+        # type whose roles list is empty — an empty list is nobody, not anyone
+        api = self._api()
+        api.get_component_type.return_value = {"data": {"manufacturers": [], "roles": []}}
+        api.whoami.return_value = {"data": {"roles": [{"id": 1, "name": "CE tester"}]}}
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            html = self.client.get(self.url + "?edit=1").content.decode()
+        self.assertIn("This type lists no HWDB roles, so HWDB refuses creating, editing, linking and testing its items.", html)
+        self.assertNotIn("need one of the HWDB roles", html)
+
     @mock.patch("django.conf.settings.HWDB_WRITE_INSTANCES", ["dev"])
     def test_item_edit_absent_and_forbidden_off_write_instances(self):
         api = self._api()
