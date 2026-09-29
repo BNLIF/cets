@@ -410,6 +410,7 @@ def _norm_field(f: dict) -> dict | None:
         cols, formulas, texts, col_tol, checks, col_color = [], {}, {}, {}, [], {}
         sums, sum_status = {}, {}
         counts, count_status = {}, {}   # #186 round 2: label → column holding a type ID
+        count_keys = {}   # #190: label → column naming the batch-size specification key
         for c in f.get("columns") or []:
             if isinstance(c, dict):
                 label = str(c.get("label") or "").strip()
@@ -418,9 +419,19 @@ def _norm_field(f: dict) -> dict | None:
                 # holding a component type ID — the cell shows how many items
                 # that type has in the mirror, ``status`` narrowing them.
                 # Display only, like ``sum``; text beats it.
+                # #190 (Anselmo 2026-09-29, PDS factory): ``count`` may be
+                # "C1 * C2" — the type in C1, each item weighted by the number
+                # in its specifications under the key named in THIS row's C2
+                # (a batch registered as one item counts its pieces); a row
+                # with a blank key counts items as before.
                 cn = str(c.get("count") or "").strip()
+                ck = ""
+                if "*" in cn:
+                    cn, ck = (x.strip() for x in cn.split("*", 1))
                 if label and cn and not str(c.get("text") or "").strip() and c.get("check") is not True:
                     counts[label] = cn
+                    if ck:
+                        count_keys[label] = ck
                     st = c.get("status")
                     if isinstance(st, str):
                         st = st.split("|")
@@ -489,6 +500,17 @@ def _norm_field(f: dict) -> dict | None:
                 out[key] = refs
             if statuses and refs:
                 out[skey] = {k: v for k, v in statuses.items() if k in refs}
+        # #190: the key column of a weighted count resolves the same way; it
+        # must be a third column (not the count, not the Type ID)
+        for label, ref in list(count_keys.items()):
+            m = re.fullmatch(r"[Cc](\d+)", ref)
+            target = cols[int(m.group(1)) - 1] if m and 0 < int(m.group(1)) <= len(cols) else ref
+            if label in counts and target in cols and target not in (label, counts[label]):
+                count_keys[label] = target
+            else:
+                count_keys.pop(label)
+        if count_keys:
+            out["count_keys"] = count_keys
         # #115 (HVS): a table-wide background tint keyed to the reference
         # drawing (one iPad row = one Dashboard table). Named colors map to
         # light hexes; anything else must be #rrggbb or it's dropped.
@@ -843,6 +865,8 @@ def _table_cells(f: dict, cells: dict, tx: dict, prefix: str, rr: dict | None = 
         if c in counts:   # #186: how many items the row's type has — filled by the page
             out.append({"column": c, "name": f"{prefix}-c{i}", "count": counts[c],
                         "count_ci": f["columns"].index(counts[c]),   # the row's cell holding the Type ID
+                        "count_key": (f.get("count_keys") or {}).get(c, ""),   # #190: the row's cell naming the batch-size key
+                        "count_kci": f["columns"].index((f.get("count_keys") or {})[c]) if c in (f.get("count_keys") or {}) else None,
                         "count_status": (f.get("count_status") or {}).get(c, []),
                         "value": "", "formula": "", "text": "", "min": None, "max": None, "range": "",
                         "color": cc.get(c, "")})

@@ -467,6 +467,20 @@
     var s = String(status || "").toLowerCase();
     return want.some(function (w) { return s.indexOf(w) >= 0; });
   }
+  function specValue(d, key) {   // an item's latest specifications DATA → the number under key (any section holding it, the literal key, or a dotted path), else NaN
+    var v = null, path = key.split(".").filter(Boolean);
+    function at(o) {
+      if (o && typeof o === "object" && key in o) return o[key];
+      for (var i = 0; i < path.length; i++) { if (!o || typeof o !== "object" || !(path[i] in o)) return null; o = o[path[i]]; }
+      return o === undefined ? null : o;
+    }
+    Object.keys(d || {}).forEach(function (sec) {
+      var sv = d[sec];
+      if (v === null && sv && typeof sv === "object") v = at(sv);
+    });
+    if (v === null) v = at(d || {});
+    return typeof v === "number" ? v : parseFloat(String(v === null || v === undefined ? "" : v).replace(/,/g, ""));
+  }
   // #176: sum fields — one sweep of the type's specifications per field (the
   // Plots page's NDJSON stream), adding the key's value from the latest
   // specifications DATA of every item (any section holding the key), in the
@@ -489,18 +503,7 @@
           if (!row.pid) return;
           seen++;
           if (want.length && !statusIn(row.status, want)) return;
-          var d = row.data || {}, v = null, path = key.split(".").filter(Boolean);
-          function at(o) {   // the value at the dotted path, or the literal key, in o
-            if (o && typeof o === "object" && key in o) return o[key];
-            for (var i = 0; i < path.length; i++) { if (!o || typeof o !== "object" || !(path[i] in o)) return null; o = o[path[i]]; }
-            return o === undefined ? null : o;
-          }
-          Object.keys(d).forEach(function (sec) {
-            var s = d[sec];
-            if (v === null && s && typeof s === "object") v = at(s);
-          });
-          if (v === null) v = at(d);
-          var num = typeof v === "number" ? v : parseFloat(String(v === null || v === undefined ? "" : v).replace(/,/g, ""));
+          var num = specValue(row.data, key);
           if (isNaN(num)) return;
           sum += num; n++;
           if (row.pid > latest) latest = row.pid;
@@ -570,11 +573,52 @@
   (function () {
     var cells = Array.prototype.slice.call(document.querySelectorAll(".cl-countcell"));
     if (!cells.length) return;
-    function typeIn(cell) {   // the Type ID in this row's referenced column (an input, or a constant's span)
-      var el = cell.closest("tr").querySelector('[data-ci="' + cell.dataset.countCi + '"]');
-      var v = el ? (el.value !== undefined ? el.value : el.textContent) : "";
-      v = v.trim().toUpperCase();
+    function cellText(cell, ci) {   // this row's cell in column ci (an input, or a constant's span)
+      var el = cell.closest("tr").querySelector('[data-ci="' + ci + '"]');
+      return (el ? (el.value !== undefined ? el.value : el.textContent) : "").trim();
+    }
+    function typeIn(cell) {   // the Type ID in this row's referenced column
+      var v = cellText(cell, cell.dataset.countCi).toUpperCase();
       return /^[A-Z]\d{11}$/.test(v) ? v : "";
+    }
+    // #190 (Anselmo): a cell with a key column whose cell in this row is
+    // filled counts each of the type's items by the number under that key in
+    // its specifications — one live sweep of the type (the sum field's
+    // stream), shared by every cell of the same type on the page.
+    var sweeps = {};
+    function sweep(tbl, tid) {
+      var tokenInput = document.querySelector('input[name="csrfmiddlewaretoken"]');   // csrf() lives in the first script block
+      if (!sweeps[tid]) sweeps[tid] = fetch(tbl.dataset.specUrl.replace("TYPEID", tid), { method: "POST", credentials: "same-origin", headers: { "X-CSRFToken": tokenInput ? tokenInput.value : "" } })
+        .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
+        .then(function (text) {
+          var items = [], err = "";
+          text.split("\n").forEach(function (line) {
+            if (!line.trim()) return;
+            var row; try { row = JSON.parse(line); } catch (e) { return; }
+            if (row.error) { err = row.error; return; }
+            if (row.pid) items.push({ status: String(row.status || "").toLowerCase(), data: row.data || {} });
+          });
+          if (err) throw new Error(err);
+          return items;
+        });
+      return sweeps[tid];
+    }
+    function weighted(cell, tbl, tid, key, want) {
+      var wl = want.split("|").filter(Boolean).map(function (x) { return x.toLowerCase(); });
+      return sweep(tbl, tid).then(function (items) {
+        var sum = 0, n = 0, seen = 0;
+        items.forEach(function (it) {
+          if (wl.length && !statusIn(it.status, wl)) return;
+          seen++;
+          var num = specValue(it.data, key);
+          if (isNaN(num)) return;
+          sum += num; n++;
+        });
+        var text = Number.isInteger(sum) ? sum.toLocaleString() : sum.toLocaleString(undefined, { maximumFractionDigits: 3 }), changed = cell.textContent !== text;
+        cell.textContent = text;
+        cell.title = "“" + key + "” added up over " + n + " of " + seen + " item" + (seen === 1 ? "" : "s") + " of " + tid + (wl.length ? " in " + want.split("|").join(" / ") : "") + " · read live";
+        if (changed && window.clRecomputeTable) window.clRecomputeTable(tbl);
+      }).catch(function (e) { cell.textContent = "\u2014"; cell.title = "couldn’t read the type’s items — " + e.message; });
     }
     function show(cell, d, want) {
       var text = Number(d.n).toLocaleString(), changed = cell.textContent !== text;
@@ -589,6 +633,8 @@
         var tbl = cell.closest("table"), tid = typeIn(cell), want = cell.dataset.countStatus || "";
         if (!tbl.dataset.countUrl) { cell.textContent = "\u2014"; cell.title = "the count shows on the form"; return; }
         if (!tid) { cell.textContent = "\u2014"; cell.title = "no Type ID in this row"; return; }
+        var skey = cell.dataset.countKci !== undefined && tbl.dataset.specUrl ? cellText(cell, cell.dataset.countKci) : "";
+        if (skey) { weighted(cell, tbl, tid, skey, want); return; }
         var key = want;
         if (!groups[key]) groups[key] = { tbl: tbl, want: want, cells: [], types: [] };
         groups[key].cells.push({ cell: cell, tid: tid });

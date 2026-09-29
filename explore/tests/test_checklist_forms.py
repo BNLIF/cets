@@ -4339,6 +4339,31 @@ class CountColumnTest(TestCase):
         self.assertEqual(html.count('class="cl-countcell"'), 2)
         self.assertIn('data-const><a href="/hw/dev/?node=Z00100300042" target="_blank" rel="noopener" title="the type’s page">Z00100300042</a></span>', html)   # the fixed Type ID links to its page
 
+    def test_a_weighted_count_names_the_row_column_holding_the_batch_size_key(self):
+        # #190 (Anselmo): "C1 * C2" — the type in C1, each item weighted by the
+        # specification named in this row's C2; the page sweeps that type live
+        schema = {"name": "Inv", "test_type_name": "Inv", "sections": [{"title": "Parts", "fields": [
+            {"type": "table", "label": "Stock", "columns": [
+                "Type", "Batch key", {"label": "Items", "count": "C1 * C2", "status": "Received"},
+                {"label": "Per module", "text": "4"}, {"label": "Buildable", "formula": "C3 / C4"}],
+             "rows": [{"label": "SiPM", "texts": {"Type": "Z00100300042", "Batch key": "Received"}}, {"label": "Other"}]}]}]}
+        f = checklistforms.normalize(schema, "I")["sections"][0]["fields"][0]
+        self.assertEqual((f["counts"], f["count_keys"], f["count_status"]),
+                         ({"Items": "Type"}, {"Items": "Batch key"}, {"Items": ["Received"]}))
+        api = _api(schema=schema, test_types=("ES", "Inv"))
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('data-count-url="/hw/dev/count/" data-spec-url="/hw/dev/plot/TYPEID/data/"', html)
+        self.assertIn('class="cl-countcell" data-count-col="Type" data-count-ci="0" data-count-kci="1" data-count-status="Received"', html)
+        self.assertEqual(html.count('data-count-kci="1"'), 2)
+        # a key column that is the count itself, the Type ID column, or nowhere drops the weighting, not the count
+        for bad in ("C1", "C3", "C9", "Nope"):
+            sc = {**schema}; sc["sections"] = [{"title": "Parts", "fields": [{**schema["sections"][0]["fields"][0], "columns": [
+                "Type", "Batch key", {"label": "Items", "count": f"C1 * {bad}"}]}]}]
+            f = checklistforms.normalize(sc, "I")["sections"][0]["fields"][0]
+            self.assertEqual((f["counts"], f.get("count_keys")), ({"Items": "Type"}, None), bad)
+
     def test_count_endpoint_reads_the_mirror_for_every_type_at_once(self):
         for i, st in enumerate(("Received", "Unknown", "Scrapped", "received", "QA/QC Tests - Passed All")):
             HwdbComponentEvent.objects.create(instance="dev", part_type_id="Z00100300042", part_id=f"Z00100300042-0000{i}", status=st)
