@@ -27,6 +27,9 @@
     #zoomWrap { display: none; margin-top: 8px; }
     #zoomWrap input { width: 100%; }
     .btn.on { background: #3a4a5e; border-color: #5a7a9a; }
+    .top p.short { display: none; }
+    body.reading #reader video { max-height: 42vh; object-fit: cover; }   /* the strip stays in the upper half */
+    body.reading .top p { display: none; }
     #chips:empty { display: none; }
     #chips { margin-top: 8px; }
     #last { font-size: 12px; color: #9b937f; font-family: ui-monospace, monospace; margin-top: 4px; overflow-wrap: anywhere; }
@@ -54,19 +57,22 @@
     {% endif %}
   </div>
 
-  <div id="reader"></div>
-
-  <div class="pane">
+  <div class="pane" style="padding-top:0;">
     <form id="csrf" style="display:none;">{% csrf_token %}</form>
-    <div class="row">
+    <div class="row" style="margin-top:0;">
       <button id="startBtn" class="btn primary">Start camera</button>
       <button id="stopBtn" class="btn">Stop</button>{% if target %}
       <button id="ocrBtn" class="btn{% if ocr %} on{% endif %}" title="Read printed text inside the box instead of a code">Read text</button>{% endif %}
     </div>
-    <div id="zoomWrap"><input id="zoomSlider" type="range"></div>
+    <div id="status">{% if ocr %}Tap “Start camera” and hold the text inside the box{% if scan_sn %} — it must match {{ scan_sn }}{% endif %}.{% else %}Tap “Start camera” and point at a label’s QR code or barcode.{% endif %}</div>
     <div id="chips"></div>
     <div id="last"></div>
-    <div id="status">{% if ocr %}Tap “Start camera” and hold the text inside the box{% if scan_sn %} — it must match {{ scan_sn }}{% endif %}.{% else %}Tap “Start camera” and point at a label’s QR code or barcode.{% endif %}</div>
+  </div>
+
+  <div id="reader"></div>
+
+  <div class="pane">
+    <div id="zoomWrap"><input id="zoomSlider" type="range"></div>
     <form id="manualForm" class="row">
       <input type="text" id="manualText" placeholder="…or type/paste a {% if free %}PID or serial number{% else %}PID{% endif %}" autocomplete="off"
              autocapitalize="characters">
@@ -226,11 +232,13 @@
     async function setOcr(on) {
       ocrOn = on; chips.innerHTML = ""; chipsKey = "";
       if (ocrBtn) ocrBtn.classList.toggle("on", on);
+      document.body.classList.toggle("reading", on);
       stopReading();
       if (started) { await stop(); await start(); }   // the box changes shape, the camera resolution with it
       else setStatus(on ? "Start the camera and " + READ_HINT : "Tap “Start camera” and point at a label’s QR code or barcode.");
     }
     if (ocrBtn) ocrBtn.onclick = function () { setOcr(!ocrOn); };
+    document.body.classList.toggle("reading", ocrOn);
 
     // --- camera (the Dashboard's html5-qrcode recipe, continuous mode) ---
     var html5 = null, started = false;
@@ -267,7 +275,7 @@
       }
       setStatus("Starting camera…");
       html5 = new Html5Qrcode("reader");
-      config.qrbox = ocrOn ? BOX_TXT : BOX_QR;
+      config.qrbox = ocrOn ? function (w, h) { BOX_TXT = { width: Math.min(320, Math.floor(w * 0.92)), height: 110 }; return BOX_TXT; } : BOX_QR;
       // small print needs the pixels: in text mode the camera is asked for 1080p
       // through videoConstraints (the only place html5-qrcode takes a resolution)
       config.videoConstraints = ocrOn ? Object.assign({ facingMode: "environment" }, TextRead.HD) : undefined;

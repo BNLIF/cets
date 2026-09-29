@@ -11,14 +11,15 @@
   #cl-qr-chips .es-btn { font-family: ui-monospace, monospace; }
   #cl-qr-last { font-size: 11.5px; color: var(--faint); font-family: ui-monospace, monospace; margin-top: 4px; min-height: 1.2em; overflow-wrap: anywhere; }
   #cl-qr-last:empty { display: none; }
+  #cl-qr-modal.reading #cl-qr-reader video { max-height: 42vh; object-fit: cover; }   /* the strip stays high, the chips in view */
   #cl-qr-text.on { color: var(--good); border-color: var(--good); }
 </style>
 
 <dialog id="cl-qr-modal">
+  <div id="cl-qr-status" style="margin:0 0 6px;">Point the camera at the QR code.</div>
+  <div id="cl-qr-chips" style="margin:0 0 6px;"></div>
+  <div id="cl-qr-last" style="margin:0 0 6px;"></div>
   <div id="cl-qr-reader"></div>
-  <div id="cl-qr-status">Point the camera at the QR code.</div>
-  <div id="cl-qr-chips"></div>
-  <div id="cl-qr-last"></div>
   <div id="cl-qr-zoomwrap" style="display:none; margin-top:8px;">
     <label style="font-size:12px; color:var(--faint);">Zoom
       <input type="range" id="cl-qr-zoom" style="width:100%; max-width:none;"></label>
@@ -151,6 +152,7 @@
     }
     qr = new Html5Qrcode("cl-qr-reader", cfg);
     var reading = textOn;
+    dlg.classList.toggle("reading", reading);
     qr.start({ facingMode: "environment" },
       { fps: 12,
         // a wide box, not a square — 1D barcodes need the width; a short
