@@ -50,6 +50,7 @@
     <tr><td>Instructions</td><td>Optional intro under the title. <a href="#text">Formatting</a> applies.</td></tr>
     <tr><td>Roles</td><td>HWDB role ids allowed to submit, comma-separated; blank = anyone. The form names them by name and warns an account that holds none. (The type's own HWDB roles gate every write regardless.)</td></tr>
     <tr><td>Shipping</td><td>Marks a packing / shipping / assembly procedure: linked from the <span class="dd-ui">Add items</span> / <span class="dd-ui">Link items</span> page of every item, and on a shipping box listed in step 1 of the pre-shipping checklist, which waits for it to be completed.</td></tr>
+    <tr><td>Organizer</td><td>Makes this an <a href="#organizer">organizer</a>: a checklist of checklists, opened with no item. Leave the test type blank.</td></tr>
     <tr><td>Item fields</td><td>HWDB's standard item fields shown in an <b>Item</b> card at the top of the form and written to the item on submit — manufacturer, status, installed, QA/QC flags, location, serial number, comments. All ticked by default; untick what the checklist should not touch.</td></tr>
   </table>
 
@@ -172,6 +173,10 @@ OK = check</pre>
   Photograph any damage
 Verify the serial against the shipping sheet</pre>
 
+  <h2 id="organizer">Organizer</h2>
+  <p>A checklist of checklists for a group with many Component Types — the order of the work, shared by the consortium (a bookmark is only yours). Tick <span class="dd-ui">Organizer</span> on the card, then build it from what any checklist has: sections, <a href="#static">static</a> fields with <b>Link to checklist</b> and a Type ID, a <code>select</code> (north / south, module type) with <a href="#sections">show-when</a> rules on the sections it drives. Nothing else is needed and nothing is submitted.</p>
+  <p>It lives like every checklist — <code>Checklist_&lt;type&gt;_&lt;Name&gt;.json</code> on a type in HWDB — so put it on the consortium's virtual type (the one that holds the inventory), where the type page's Checklists row, bookmarks and other checklists' links open it. The page remembers the selects on the device.</p>
+
   <h2 id="static">Static</h2>
   <p>Display only, in any combination:</p>
   <ul>
@@ -225,7 +230,7 @@ Board 3 @ 4.5, 32</pre>
     <span class="dd-ui">the item in position…</span> shows the positions of the sub-assembly in that position instead (the supercell in <code>SC1</code>).</p>
 
   <h2 id="text">Text formatting</h2>
-  <p>Instructions, field labels, a static note and each step accept <code>**bold**</code>, <code>*italic*</code> and line breaks. HTML stays escaped.
+  <p>Instructions, field labels, a static note and each step accept <code>**bold**</code>, <code>*italic*</code>, <code>[link text](https://…)</code> and line breaks. HTML stays escaped.
     Stored keys are the raw text, markers included. The fill page and the preview carry an A− / A+ / ↺ control that scales the whole checklist's text; the choice is remembered per device.</p>
 
   <h2 id="json">Schema JSON</h2>

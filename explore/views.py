@@ -4004,6 +4004,23 @@ def explore_type_checklist_view(request, part_type_id, name):
     schema, msg = checklistforms.load(api, part_type_id, name)
     if schema is None:
         raise Http404(msg)
+    bookmarked = ChecklistBookmark.for_instance(inst).filter(
+        username=activity.actor_of(request), part_type_id=part_type_id,
+        name=name).exists()
+    if schema["organizer"]:
+        # #189: an organizer has no item to choose — its links, selects and
+        # sections render right here; the bookmark, the type page's
+        # Checklists row and Link-to-checklist fields all land on this URL
+        return render(request, "explore/checklist_organizer.html", {
+            "active_nav": "hardware",
+            "sidebar": navigation.sidebar_tree(inst, {}),
+            "part_type_id": part_type_id,
+            "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
+            "cl_name": name,
+            "schema": schema,
+            "schema_msg": msg,
+            "bookmarked": bookmarked,
+        })
 
     pid = (request.GET.get("pid") or "").strip().upper()
     if pid:
@@ -4044,9 +4061,7 @@ def explore_type_checklist_view(request, part_type_id, name):
         "schema": schema,
         "schema_msg": msg,
         "parts_page": parts_page,
-        "bookmarked": ChecklistBookmark.for_instance(inst).filter(
-            username=activity.actor_of(request), part_type_id=part_type_id,
-            name=name).exists(),
+        "bookmarked": bookmarked,
     }
     if getattr(request, "htmx", False) and request.htmx.target == "clp-pane":
         return render(request, "explore/_checklist_pids_table.html", ctx)

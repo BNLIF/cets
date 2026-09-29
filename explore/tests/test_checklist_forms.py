@@ -592,6 +592,10 @@ class TextFormattingTest(TestCase):
         self.assertEqual(clmd("a **b** *c*\nd <i>x</i> 2*3"),
                          "a <strong>b</strong> <em>c</em><br>d &lt;i&gt;x&lt;/i&gt; 2*3")
         self.assertEqual(clmd(None), "")
+        # Hajime 2026-09-29: named links, http(s) only
+        self.assertEqual(clmd("see [the drawing](https://edms.cern.ch/d?a=1&b=2) now"),
+                         'see <a href="https://edms.cern.ch/d?a=1&amp;b=2" target="_blank" rel="noopener">the drawing</a> now')
+        self.assertEqual(clmd("[x](javascript:alert(1))"), "[x](javascript:alert(1))")
 
     def test_instructions_notes_and_steps_render_markdown_lite(self):
         html = self._page()
@@ -3817,6 +3821,66 @@ class OfflineTest(TestCase):
         # other pages leave the browser alone
         other = self.client.get("/hw/dev/docs/").content.decode()
         self.assertNotIn("serviceWorker", other)
+
+
+ORGANIZER = {
+    "name": "CPA work order",
+    "organizer": True,
+    "sections": [
+        {"title": "Which side", "fields": [
+            {"type": "select", "label": "Side", "options": ["North", "South"]},
+        ]},
+        {"title": "North planes", "when": {"field": "Side", "equals": "North"}, "fields": [
+            {"type": "static", "label": "Receive", "checklist": "Reception", "part_type_id": "Z00100300041"},
+            {"type": "static", "label": "Assemble", "checklist": "Assembly", "part_type_id": "Z00100300042"},
+        ]},
+        {"title": "South planes", "when": {"field": "Side", "equals": "South"}, "fields": [
+            {"type": "static", "label": "Receive", "checklist": "Reception", "part_type_id": "Z00100300043"},
+        ]},
+    ],
+}
+
+
+class OrganizerTest(TestCase):
+    """#189: a checklist of checklists on a consortium's virtual type — the
+    chooser URL renders it with no item, no PID box and nothing to submit."""
+
+    URL = f"/hw/dev/checklist/{PTID}/{NAME}/"
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("o", "o@o.io", "pw"))
+
+    def test_schema_flag_defaults_off(self):
+        self.assertFalse(checklistforms.normalize(SCHEMA, NAME)["organizer"])
+        self.assertTrue(checklistforms.normalize(ORGANIZER, NAME)["organizer"])
+
+    def test_organizer_renders_links_and_when_rules_without_an_item(self):
+        api = _api(schema=ORGANIZER)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            r = self.client.get(self.URL)
+            html = r.content.decode()
+        self.assertEqual(r.status_code, 200)
+        self.assertTemplateUsed(r, "explore/checklist_organizer.html")
+        self.assertIn("<h1>CPA work order", html)
+        self.assertIn('href="/hw/dev/checklist/Z00100300041/Reception/"', html)   # the links' targets
+        self.assertIn('href="/hw/dev/checklist/Z00100300042/Assembly/"', html)
+        self.assertIn('data-when-key="f0-0" data-when-eq="North"', html)         # sections driven by the select
+        self.assertIn('data-when-key="f0-0" data-when-eq="South"', html)
+        self.assertIn('<select id="f0-0" name="f0-0">', html)
+        self.assertIn('var KEY = "cl-org:dev:Z00100300041:Reception"', html)     # selects remembered per organizer
+        self.assertNotIn('name="pid"', html)                                     # no PID chooser
+        self.assertNotIn("Submit to HWDB", html)
+        self.assertNotIn("Blank checklist", html)
+        self.assertIn("&#9734; Bookmark", html)
+        api.get_component.assert_not_called()
+
+    def test_plain_checklist_still_gets_the_chooser(self):
+        m1, m2 = _mocked(_api())
+        with m1, m2:
+            r = self.client.get(self.URL)
+        self.assertTemplateUsed(r, "explore/checklist_entry.html")
+        self.assertIn('name="pid"', r.content.decode())
 
 
 class BlankFillPageTest(TestCase):

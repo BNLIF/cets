@@ -671,6 +671,11 @@ def normalize(cfg: dict, name: str) -> dict:
               # pack page and the pre-shipping checklist, which asks for a
               # confirmation that it has been completed
               "shipping": bool(cfg.get("shipping")),
+              # #189 (Hajime, for the CPA group): an organizer — a checklist
+              # of checklists on a consortium's virtual type, opened with no
+              # item: sections of Link-to-checklist fields, selects driving
+              # ``when`` rules, nothing to submit
+              "organizer": bool(cfg.get("organizer")),
               # #103: absent = every standard field; a list = that subset
               "item_fields": ([f for f in cfg["item_fields"] if f in ITEM_FIELDS]
                               if isinstance(cfg.get("item_fields"), list)
