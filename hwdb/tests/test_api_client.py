@@ -29,6 +29,20 @@ class FnalDbApiClientSessionTest(TestCase):
         # No leftover stateful attribute that callers might still reference.
         self.assertFalse(hasattr(api, "base_headers"))
 
+    def test_every_call_carries_a_timeout(self):
+        """A call with no timeout waits forever on a connection the network
+        lost mid-flight; only gunicorn's worker kill ends it, and the sync
+        page freezes on its last line (twister, 2026-09-30)."""
+        api = FnalDbApiClient("https://example/api", "fake-bearer")
+        fake_resp = mock.Mock()
+        fake_resp.ok = True
+        fake_resp.json.return_value = {"status": "OK", "data": {}}
+        with mock.patch.object(api.session, "request", return_value=fake_resp) as req:
+            api._make_request("GET", "components/D00000000001-00001")
+        connect, read = req.call_args.kwargs["timeout"]
+        self.assertGreater(connect, 0)
+        self.assertGreater(read, 0)
+
     def test_attach_test_image_uses_session_post(self):
         """The multipart upload must go through ``self.session.post`` so the
         session's Authorization header applies. If it ever falls back to a
@@ -118,7 +132,7 @@ class FnalDbApiClientMemoTest(TestCase):
         api = FnalDbApiClient("https://example/api", "b", memo=memo)
         self.calls = []
 
-        def fake(method, url, headers=None, json=None, params=None):
+        def fake(method, url, headers=None, json=None, params=None, timeout=None):
             self.calls.append((method, url.split("/api/")[1]))
             r = mock.Mock(); r.ok = True
             r.json.return_value = {"status": "OK", "data": {"connectors": {"P1": "D004"}, "n": len(self.calls)}}

@@ -28,6 +28,15 @@ logger = logging.getLogger(__name__)
 # so the mirror, the sync and every page keep one key per item.
 _LABEL_ID = re.compile(r"^([A-Za-z]\d{11}-\d{5})-[A-Za-z]{2}\d{3}$")
 
+# Connect / read timeout on every call. Without one, a connection HWDB
+# accepted and then lost (twister's route to FNAL dropped mid-sync,
+# 2026-09-30) waits forever, and only gunicorn killing the worker ends
+# it — the page's stream stops mid-sentence. With it the call raises, and
+# a sync counts the item as failed and keeps its rows. The read limit is
+# per socket read, not per response: a big listing that keeps sending
+# bytes is fine, a server silent for two minutes is not.
+_TIMEOUT = (10, 120)
+
 
 def _plain_ids(body) -> None:
     """Strip the label suffix off ``part_id`` / ``parent_part_id`` on a
@@ -83,7 +92,8 @@ class FnalDbApiClient:
             headers["Content-Type"] = "application/json"
         try:
             response = self.session.request(
-                method, url, headers=headers, json=data, params=params
+                method, url, headers=headers, json=data, params=params,
+                timeout=_TIMEOUT,
             )
         except requests.exceptions.RequestException:
             logger.exception("API request to %s failed", url)
@@ -280,7 +290,7 @@ class FnalDbApiClient:
         streaming response — drawn onto the shipping label (issue #65)."""
         url = f"{self.base_url}/get-qrcode/{part_id}"
         try:
-            response = self.session.get(url, stream=True)
+            response = self.session.get(url, stream=True, timeout=_TIMEOUT)
             response.raise_for_status()
             return response
         except requests.exceptions.RequestException:
@@ -294,7 +304,7 @@ class FnalDbApiClient:
         """
         url = f"{self.base_url}/img/{image_id}"
         try:
-            response = self.session.get(url, stream=True)
+            response = self.session.get(url, stream=True, timeout=_TIMEOUT)
             response.raise_for_status()
             return response
         except requests.exceptions.RequestException:
@@ -388,7 +398,7 @@ class FnalDbApiClient:
         files = {"comments": (None, comments),
                  "image": (filename, fileobj, content_type)}
         try:
-            response = self.session.post(url, files=files)
+            response = self.session.post(url, files=files, timeout=_TIMEOUT)
         except requests.exceptions.RequestException:
             logger.exception("post_component_image to %s failed", url)
             raise
@@ -413,7 +423,7 @@ class FnalDbApiClient:
         files = {"comments": (None, comments),
                  "image": (filename, fileobj, content_type)}
         try:
-            response = self.session.post(url, files=files)
+            response = self.session.post(url, files=files, timeout=_TIMEOUT)
         except requests.exceptions.RequestException:
             logger.exception("post_component_type_image to %s failed", url)
             raise
@@ -442,7 +452,7 @@ class FnalDbApiClient:
         files = {"comments": (None, comments),
                  "image": (filename, fileobj, content_type)}
         try:
-            response = self.session.post(url, files=files)
+            response = self.session.post(url, files=files, timeout=_TIMEOUT)
         except requests.exceptions.RequestException:
             logger.exception("post_test_image to %s failed", url)
             raise
@@ -467,7 +477,7 @@ class FnalDbApiClient:
         with path.open("rb") as fp:
             files = {"image": (path.name, fp, "text/csv")}
             try:
-                response = self.session.post(url, files=files)
+                response = self.session.post(url, files=files, timeout=_TIMEOUT)
                 response.raise_for_status()
                 return response.json()
             except requests.exceptions.RequestException:

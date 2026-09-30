@@ -97,7 +97,7 @@ def _memo_client(api):
     from hwdb.api_client import FnalDbApiClient
     real = FnalDbApiClient("https://x/api", "b", memo=True)
 
-    def fake(method, url, headers=None, json=None, params=None):
+    def fake(method, url, headers=None, json=None, params=None, timeout=None):
         path = url.split("/api/", 1)[1]
         r = mock.Mock(); r.ok = True
         if method == "GET" and path.startswith("component-types/") and path.count("/") == 1:
