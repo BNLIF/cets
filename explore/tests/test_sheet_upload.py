@@ -757,3 +757,25 @@ class ViewTest(TestCase):
 def _file(name, body):
     from django.core.files.uploadedfile import SimpleUploadedFile
     return SimpleUploadedFile(name, body)
+
+
+class SheetPruneCommandTest(TestCase):
+    """``sheet_prune`` drops jobs untouched for RETENTION_DAYS and keeps the
+    rest — the on-visit prune alone never fires for a user whose upload
+    succeeded and who does not return."""
+
+    def test_old_jobs_go_recent_stay(self):
+        from datetime import timedelta
+        from io import StringIO
+        from django.core.management import call_command
+        from django.utils import timezone
+        from explore import sheetupload
+        from explore.models import SheetJob
+        old = SheetJob.objects.create(part_type_id="Z001", username="u", name="old")
+        SheetJob.objects.filter(pk=old.pk).update(
+            updated_at=timezone.now() - timedelta(days=sheetupload.RETENTION_DAYS, hours=1))
+        SheetJob.objects.create(part_type_id="Z001", username="u", name="new")
+        out = StringIO()
+        call_command("sheet_prune", stdout=out)
+        self.assertIn("deleted 1 job(s)", out.getvalue())
+        self.assertEqual(list(SheetJob.objects.values_list("name", flat=True)), ["new"])

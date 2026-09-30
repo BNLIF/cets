@@ -642,7 +642,8 @@ class SheetJob(InstanceScoped):
     driven by the page, so the plan is what lets a job continue after a
     reload, a timeout or a day; the file itself is never kept, and a job
     expires ``sheetupload.RETENTION_DAYS`` after its last change (pruned
-    when the upload pages load) unless deleted sooner. ``username`` = the
+    when the upload pages load, and daily by ``sheet_prune`` from cron)
+    unless deleted sooner. ``username`` = the
     FNAL credkey."""
 
     part_type_id = models.CharField(max_length=20, db_index=True)

@@ -88,6 +88,15 @@ echo yes | python manage.py collectstatic
 sudo systemctl restart cets.service
 ```
 
+### Cron
+
+Beside the nightly backup (below), one line keeps the Upload-sheet retention
+true for users who never come back after a successful upload:
+
+```
+0 4 * * * cd /path/to/cets && venv/bin/python manage.py sheet_prune >> tmp/sheet-prune.log 2>&1
+```
+
 ### SQLite journal
 
 Once per database file, so syncs stop blocking page reads (readers and the
