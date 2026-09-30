@@ -87,3 +87,25 @@ python manage.py migrate
 echo yes | python manage.py collectstatic
 sudo systemctl restart cets.service
 ```
+
+### SQLite journal
+
+Once per database file, so syncs stop blocking page reads (readers and the
+writer no longer wait on each other):
+
+```bash
+sqlite3 db.sqlite3 "PRAGMA journal_mode=WAL"
+```
+
+Run it with the service stopped (an open connection makes it return `delete`,
+unchanged) and check it prints `wal`. It is a property of the file and
+survives restarts. `db.sqlite3-wal` and `db.sqlite3-shm` appear beside it on
+the first write, with the database's mode and the first opener's owner
+(www-data after a restart), and stay while any connection is open — so a
+shell user running `migrate`, `dbsize` or a backup against the live database
+must share the service's group (`id`; `usermod -aG www-data <user>`). The
+`-wal` file grows during a long sync and shrinks at the next quiet checkpoint. Back up with `sqlite3 db.sqlite3 ".backup
+copy.sqlite3"` rather than copying the file, so the three files stay
+consistent. The per-connection pragmas (`synchronous`, `cache_size`,
+`transaction_mode`) come from `settings.py`. Not for a database on a
+network filesystem.

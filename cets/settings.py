@@ -202,6 +202,18 @@ DATABASES = {
     )
 }
 
+# SQLite tuning (#182). The file itself is switched to WAL once, by hand
+# (README, "SQLite journal"); these pragmas are per connection. Under WAL
+# synchronous=NORMAL is still durable at half the fsync cost of FULL; the
+# 256 MB page cache keeps a type's value rows warm across requests; IMMEDIATE
+# takes the write lock at BEGIN, so writers queue instead of racing readers
+# into "database is locked".
+if DATABASES["default"]["ENGINE"] == "django.db.backends.sqlite3":
+    DATABASES["default"].setdefault("OPTIONS", {}).update({
+        "init_command": "PRAGMA synchronous=NORMAL; PRAGMA cache_size=-262144",
+        "transaction_mode": "IMMEDIATE",
+    })
+
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators

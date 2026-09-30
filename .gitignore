@@ -16,6 +16,8 @@ venv/
 local_settings.py
 db.sqlite3
 *.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
 *.db
 staticfiles/
 
