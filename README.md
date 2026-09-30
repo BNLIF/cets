@@ -106,6 +106,7 @@ shell user running `migrate`, `dbsize` or a backup against the live database
 must share the service's group (`id`; `usermod -aG www-data <user>`). The
 `-wal` file grows during a long sync and shrinks at the next quiet checkpoint. Back up with `sqlite3 db.sqlite3 ".backup
 copy.sqlite3"` rather than copying the file, so the three files stay
-consistent. The per-connection pragmas (`synchronous`, `cache_size`,
+consistent — `tools/backup_db.sh <dir> [days]` does that nightly from cron
+and rotates the copies. The per-connection pragmas (`synchronous`, `cache_size`,
 `transaction_mode`) come from `settings.py`. Not for a database on a
 network filesystem.
