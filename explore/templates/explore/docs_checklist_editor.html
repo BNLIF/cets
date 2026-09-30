@@ -30,6 +30,10 @@
     <span class="dd-ui">Submit to HWDB</span> posts a test record on the item. The editor builds the form: a type page's
     <span class="dd-ui">Add/Edit checklists</span> link opens it. Left, the editor and the schema JSON; right, a live preview
     of exactly what the fill page renders — click a field in the preview to jump to it in the editor.
+    <span class="dd-ui">Try the new editor</span> (top right) is the same editor arranged like the Plots page:
+    the preview fills the page at the fill page's width, and a side panel with Setup, Outline, Section, Field and JSON tabs
+    shows one thing at a time — click a field or a section title in the preview, or a row in the outline, to edit it.
+    Both layouts offer every option and save the same schema; <span class="dd-ui">Classic editor</span> switches back.
     <span class="dd-ui">Save to HWDB</span> uploads the schema onto the type; HWDB keeps every version and the newest wins,
     so a bad edit is always one save away from repair.</p>
 
@@ -80,7 +84,9 @@
     Unequal widths come from spans on a finer grid: six columns with a text spanning 3 beside three 1-wide inputs is a 3 : 1 : 1 : 1 row.
     On phones the grid collapses to one column in field order.</p>
   <p><span class="dd-ui">layout…</span> opens a schematic of the grid: click a chip and move it with the arrows, change its span or alignment,
-    drag it to a cell, drop it onto another chip to stack the two in one cell, <span class="dd-ui">unstack</span> to split a stack. Every change rewrites the field order and hints.</p>
+    drag it to a cell, drop it onto another chip to stack the two in one cell, <span class="dd-ui">unstack</span> to split a stack. Every change rewrites the field order and hints.
+    Opened on a 1-column section it shows the flow as it renders, with <span class="dd-ui">no grid</span> chosen; pick a column count to
+    start a grid, and <span class="dd-ui">no grid</span> returns the section to the flow layout with its earlier placements.</p>
 
   <h2 id="types">Field types</h2>
   <table>

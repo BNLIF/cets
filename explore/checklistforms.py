@@ -761,7 +761,8 @@ def normalize(cfg: dict, name: str) -> dict:
                 if nf:
                     nf["key"] = f"f{si}-{fi}"
                     fields.append(nf)
-        if title and fields:
+        if title:   # a titled section renders even before it has a field — the
+                    # editor shows a new section as soon as it is named (#192)
             sec = {"title": title, "fields": fields}
             # #120: a section may declare a column grid; rows are then
             # unwrapped (they don't mix with a grid) and every item — a leaf

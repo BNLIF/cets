@@ -1,7 +1,9 @@
 {% extends 'explore/base.html' %}
+{% load static %}
 {% block title %}Checklist editor · {{ part_type_id }} · HWDB Explorer{% endblock %}
 
 {% block content %}
+{% if wb %}<link rel="stylesheet" href="{% static 'explore/plot.css' %}">{% endif %}
 <style>
   .ec-page { padding: 22px 30px 56px; max-width: 1360px; }
   .ec-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
@@ -83,6 +85,7 @@
     touch-action: none; min-width: 0; overflow: hidden; z-index: 1; position: relative;
     display: flex; flex-direction: column; gap: 3px; justify-content: flex-end; }
   .lay-chip.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .lay-chip.flow { cursor: default; }
   .lay-chip.drag { opacity: .6; z-index: 3; }
   .lay-chip.a-top { justify-content: flex-start; }
   .lay-chip.a-middle { justify-content: center; }
@@ -126,30 +129,95 @@
   .clc-chips { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; }
   .clc-chips a { color: var(--accent-ink); text-decoration: none; }
   .clc-chips a:hover { text-decoration: underline; }
+  /* #192: the workbench layout — the preview is the page, at the fill page's
+     width; the editor is Plots' tab strip + panel + split on the left, showing
+     one pane of the SAME editor rows at a time (Outline · Setup · Section ·
+     Field · JSON); a click in the preview or the outline picks what shows */
+  .clc-wb { max-width: none; padding: 0; }
+  .clc-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+  .clc-head .clc-headr { display: flex; gap: 8px; align-items: center; white-space: nowrap; margin-bottom: 12px; }
+  .clc-wb .clc-head { padding: 16px 26px 10px; }
+  .clc-wb .clc-head .ec-sub { margin: 0; }
+  .clc-wb .clc-head .clc-headr { margin-bottom: 0; }
+  .clc-wb .clc-cols { grid-template-columns: 60px var(--pw, 420px) 6px minmax(0, 1fr); gap: 0;
+    border-top: 1px solid var(--rule); align-items: stretch; }
+  .clc-wb .clc-tabs { position: sticky; top: 0; align-self: start; height: 100vh; box-sizing: border-box; }
+  .clc-wb .pl-tab { width: 60px; }   /* "Outline" / "Section" need more than Plots' 46px */
+  .clc-wb #clc-editor { position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+    padding: 12px 14px 20px; box-sizing: border-box; min-width: 0; background: var(--page); }
+  .clc-wb #clc-editor > * { display: none; }
+  .clc-wb #clc-editor > #clc-panehead { display: flex; align-items: center; gap: 8px; min-height: 24px; margin-bottom: 10px;
+    font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+  #clc-panehead .for { font-weight: 400; text-transform: none; letter-spacing: 0; font-size: 11.5px; color: var(--faint);
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #clc-panehead .for b { color: var(--ink); font-weight: 600; }
+  #clc-panehead #clc-panex { margin-left: auto; flex: none; text-transform: none; letter-spacing: 0; font-weight: 400; }
+  .clc-wb .clc-fld.sel > .ec-row > .clc-x { display: none; }   /* the pane header carries it instead */
+  .clc-wb [data-pane=outline] > #clc-outline, .clc-wb [data-pane=outline] > #clc-addsec,
+  .clc-wb [data-pane=checklist] > #clc-existing, .clc-wb [data-pane=checklist] > #clc-top,
+  .clc-wb [data-pane=section] > #clc-sections, .clc-wb [data-pane=section] > #clc-secfoot,
+  .clc-wb [data-pane=field] > #clc-sections, .clc-wb [data-pane=field] > #clc-fldfoot,
+  .clc-wb [data-pane=json] > #clc-jsoncard { display: block; }
+  .clc-wb #clc-sections > .clc-sec:not(.sel) { display: none; }
+  .clc-wb [data-pane=section] .clc-sec.sel > .clc-fields { display: none; }
+  .clc-wb [data-pane=field] .clc-sec.sel > :not(.clc-fields) { display: none; }
+  .clc-wb [data-pane=field] .clc-fld:not(.sel) { display: none; }
+  .clc-wb .ec-card, .clc-wb .clc-fld.sel { border: 0; padding: 0; margin: 0; }
+  .clc-wb .ec-card > h2 { display: none; }   /* the pane header says it */
+  .clc-wb .clc-fld .ff-label { flex: 1 1 100%; }
+  .clc-wb #clc-top .ec-inline { white-space: normal; }   /* a long checkbox label wraps in the narrow panel */
+  .clc-wb .clc-fld .ec-row { gap: 6px 8px; }
+  .clc-wb #clc-sections .ec-add { margin-top: 12px; }
+  #clc-secfoot hr, #clc-fldfoot hr { border: 0; border-top: 1px solid var(--rule); margin: 16px 0 6px; }
+  #clc-outline { font-size: 12.5px; color: var(--dim); }
+  .clo-bar { display: flex; gap: 6px; margin-bottom: 8px; }
+  #clc-outline-q { flex: 1; min-width: 0; }
+  #clc-outline-fold { white-space: nowrap; }
+  .clo-sec { display: flex; gap: 6px; align-items: center; padding: 5px 8px; border-radius: var(--r-sm);
+    color: var(--ink); font-weight: 500; cursor: pointer; }
+  .clo-sec .car { color: var(--accent-ink); width: 12px; flex: none; }
+  .clo-fld { display: flex; gap: 8px; padding: 4px 8px 4px 30px; border-radius: var(--r-sm); cursor: pointer; min-width: 0; }
+  .clo-fld .t { font-family: var(--font-mono); color: var(--faint); width: 14px; flex: none; text-align: center; }
+  .clo-fld span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .clo-sec:hover, .clo-fld:hover { background: var(--surface); }
+  .clo-sec.on, .clo-fld.on { background: var(--accent-bg); color: var(--ink); font-weight: 600; }
+  .clo-fld.on .t { color: var(--accent-ink); }
+  .clc-wb .clc-preview-wrap { position: static; padding: 18px 26px 40px; max-width: 1280px; box-sizing: border-box; min-width: 0; }
+  .clc-wb .clc-preview-wrap > .ec-card { border: 1px solid var(--rule); padding: 12px 16px; }
+  .clc-wb .clc-preview-wrap > .ec-card > h2 { display: flex; }
+  .clc-wb #clc-preview .cl-row { flex-wrap: wrap; gap: 0 22px; }
+  .clc-wb #clc-preview .cl-row > .cl-field, .clc-wb #clc-preview .cl-row > .cl-col { flex: 1 1 220px; }
+  .clc-wb #clc-preview .cl-sec > h2 { cursor: pointer; }
+  .clc-wb #clc-preview .clc-sel { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: var(--r-sm); }
+  .clc-wb #clc-preview .cl-sec.clc-sel { outline-offset: -1px; border-radius: var(--r-lg); }
+  @media (max-width: 1100px) { .clc-wb .clc-cols { grid-template-columns: 60px var(--pw, 420px) 6px minmax(0, 1fr); } }
 </style>
 {% include "explore/_checklist_style.html" %}
 {% include "explore/_checklist_behavior.html" %}
 {% include "explore/_lightbox.html" %}
 
-<div class="ec-page">
+<div class="ec-page{% if wb %} clc-wb{% endif %}">
+  <div class="clc-head"><div style="min-width:0;">
   <div class="ec-crumbs">
     <a href="{% url 'explore:home' %}">Explorer</a>
-    {% if next %}<span class="sep">›</span><a href="{{ next }}">Back to the type</a>{% endif %}
+    <span class="sep">›</span>{% if type_url %}<a href="{{ type_url }}">{{ type_name }}</a>{% else %}{{ type_name }}{% endif %}
     <span class="sep">›</span>Checklist editor
   </div>
 
   {% for m in messages %}<div class="ec-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
 
   <h1>{% if current_name %}Edit{% else %}Create{% endif %} a checklist — <span class="mono">{{ part_type_id }}</span></h1>
-  <p class="ec-sub">{% if current_name %}Editing <span class="mono">{{ current_name }}</span>.{% else %}A new
-    checklist for this component type.{% endif %} Saving uploads
-    <span class="mono">Checklist_{{ part_type_id }}_&lt;name&gt;.json</span> onto the type — it shows on every
-    item's part page; HWDB keeps every version, the newest wins. Order is the layout: reorder with the
-    ▲▼ buttons; “&#8594; beside” puts a field next to the one above it (stacked on phones),
-    “&#8595; same cell” below it inside its cell.
+  <p class="ec-sub">{% if current_name %}Editing <span class="mono">{{ current_name }}</span>{% else %}A new
+    checklist, saved as <span class="mono">Checklist_{{ part_type_id }}_&lt;name&gt;.json</span>{% endif %}
+    on the type — HWDB keeps every version, the newest wins.
     <a href="{% url 'explore:docs_checklist_editor' %}" target="_blank" rel="noopener">Full guide &#x2197;</a></p>
+  </div>
+  {# #192: the same editor in the other layout — the workbench puts the preview full width with the editor in a side panel #}
+  <div class="clc-headr">
+    {% if wb %}<a class="es-btn quiet" id="clc-switch" href="?name={{ cl_name|urlencode }}&amp;next={{ next|urlencode }}">Classic editor</a><button class="ec-save" form="clc-save">Save to HWDB</button>{% else %}<a class="es-btn quiet" id="clc-switch" href="?name={{ cl_name|urlencode }}&amp;next={{ next|urlencode }}&amp;ui=wb">Try the new editor</a>{% endif %}
+  </div></div>
 
-  {% if existing %}
+  {% if existing and not wb %}
   <div class="ec-card"><h2>This type's checklists</h2>
     <div class="clc-chips">
       {% for c in existing %}<a href="?name={{ c.name|urlencode }}&amp;next={{ next|urlencode }}">{{ c.name }} ✎</a>{% endfor %}
@@ -159,8 +227,32 @@
   {% endif %}
 
   <div class="clc-cols">
-    <div class="ec-editor" id="clc-editor">
-      <div class="ec-card">
+    {% if wb %}
+    <nav class="pl-tabs clc-tabs" aria-label="editor panes">
+      <button type="button" class="pl-tab on" data-tab="checklist"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 12h6M9 16h6"/></svg>Setup</button>
+      <button type="button" class="pl-tab" data-tab="outline"><svg viewBox="0 0 24 24"><path d="M4 6h3M10 6h10M6 12h3M12 12h8M6 18h3M12 18h8"/></svg>Outline</button>
+      <button type="button" class="pl-tab" data-tab="section"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/></svg>Section</button>
+      <button type="button" class="pl-tab" data-tab="field"><svg viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="8" rx="2"/><path d="M7 12h6"/></svg>Field</button>
+      <button type="button" class="pl-tab" data-tab="json"><svg viewBox="0 0 24 24"><path d="M8 4c-2 0-3 1-3 3v3c0 1-1 2-2 2 1 0 2 1 2 2v3c0 2 1 3 3 3M16 4c2 0 3 1 3 3v3c0 1 1 2 2 2-1 0-2 1-2 2v3c0 2-1 3-3 3"/></svg>JSON</button>
+    </nav>
+    {% endif %}
+    <div class="ec-editor" id="clc-editor"{% if wb %} data-pane="checklist"{% endif %}>
+      {% if wb %}
+      <div id="clc-panehead"><span class="lbl">Checklist</span><span class="for"></span><button type="button" class="ec-del" id="clc-panex" title="Remove this field" hidden>&#x2715; remove</button></div>
+      <div id="clc-outline">
+        <div class="clo-bar"><input id="clc-outline-q" placeholder="find a field" autocomplete="off"><button type="button" class="ec-del" id="clc-outline-fold" title="Only the section titles">collapse all</button></div>
+        <div id="clc-outline-rows"></div>
+      </div>
+      {% if existing %}
+      <div class="ec-card" id="clc-existing">
+        <div class="clc-chips" style="margin-bottom:12px;">
+          {% for c in existing %}<a href="?name={{ c.name|urlencode }}&amp;next={{ next|urlencode }}&amp;ui=wb">{{ c.name }} ✎</a>{% endfor %}
+          {% if cl_name %}<a href="{% url 'explore:checklist_config' part_type_id=part_type_id %}?next={{ next|urlencode }}&amp;ui=wb">+ new checklist</a>{% endif %}
+        </div>
+      </div>
+      {% endif %}
+      {% endif %}
+      <div class="ec-card" id="clc-top">
         <h2>Checklist</h2>
         <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Name</span>
           <input id="f-name" value="{{ cl_name }}" placeholder="link name on the part page, e.g. Reception">
@@ -184,9 +276,9 @@
         <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Roles</span>
           <input id="f-roles" placeholder="HWDB role ids allowed to submit, comma-separated (blank = anyone)"></div>
         <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Shipping</span>
-          <label class="ec-inline" title="Linked from the Add-items / Link-items page of every item of this type; on a shipping box also from the pre-shipping checklist, which asks for a confirmation that it has been completed"><input type="checkbox" id="f-shipping"> packing / shipping / assembly checklist</label></div>
+          <label class="ec-inline" title="Linked from the Add-items / Link-items page of every item of this type; on a shipping box also from the pre-shipping checklist, which asks for a confirmation that it has been completed"><input type="checkbox" id="f-shipping"> shipping checklist</label></div>
         <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Organizer</span>
-          <label class="ec-inline" title="A checklist of checklists: opens with no item — sections of Link-to-checklist fields, selects that show or hide sections; nothing to submit, no test type needed"><input type="checkbox" id="f-org"> organizer — links to other checklists, viewed without an item</label></div>
+          <label class="ec-inline" title="A checklist of checklists: opens with no item — sections of Link-to-checklist fields, selects that show or hide sections; nothing to submit, no test type needed"><input type="checkbox" id="f-org"> type checklist</label></div>
         {# #103: HWDB's standard item fields — on by default, untick to drop from this checklist #}
         <div class="ec-row" style="align-items:flex-start;"><span class="ec-label" style="flex:0 0 90px;" title="HWDB’s own fields on the item — shown as an “Item” card at the top and written to the item record on submit">Item fields</span>
           <div id="f-itemf" style="display:flex; flex-wrap:wrap; gap:4px 14px; flex:1;">
@@ -197,8 +289,10 @@
 
       <div id="clc-sections"></div>
       <button type="button" class="ec-add" id="clc-addsec">+ add section</button>
+      {% if wb %}<div id="clc-secfoot"><hr><button type="button" class="ec-add" id="clc-addsec-below">+ add section below</button></div>
+      <div id="clc-fldfoot"><hr><button type="button" class="ec-add" id="clc-addf-last">+ add field</button></div>{% endif %}
 
-      <div class="ec-card" style="margin-top:12px;">
+      <div class="ec-card" id="clc-jsoncard" style="margin-top:12px;">
         <h2>Schema JSON</h2>
         <textarea id="clc-json" spellcheck="false"></textarea>
         <div class="ec-row">
@@ -210,16 +304,18 @@
       <form method="post" id="clc-save">
         {% csrf_token %}
         <input type="hidden" name="next" value="{{ next }}">
+        {% if wb %}<input type="hidden" name="ui" value="wb">{% endif %}
         <input type="hidden" name="cl_name" id="save-name">
         <input type="hidden" name="config_json" id="save-json">
         <button class="ec-save">Save to HWDB</button>
         <span class="ec-hint" style="margin-left:10px;">posts the schema onto the component type</span>
       </form>
     </div>
+    {% if wb %}<div class="pl-vsplit" id="clc-vsplit" title="drag to resize the panel"></div>{% endif %}
 
     <div class="clc-preview-wrap">
       <div class="ec-card" style="background: var(--surface);">
-        <h2 style="display:flex; align-items:center; gap:10px;">Live preview — exactly what the fill-out page renders; click a field to find it in the editor <span class="cl-scale"><button type="button" data-step="-0.1" title="Smaller text">A&minus;</button><button type="button" data-step="0.1" title="Larger text">A+</button><button type="button" data-set="1" title="Default text size">&#8634;</button></span></h2>
+        <h2 style="display:flex; align-items:center; gap:10px;">{% if wb %}Exactly what the fill-out page renders — click a field or a section title to edit it{% else %}Live preview — exactly what the fill-out page renders; click a field to find it in the editor{% endif %} <span class="cl-scale"><button type="button" data-step="-0.1" title="Smaller text">A&minus;</button><button type="button" data-step="0.1" title="Larger text">A+</button><button type="button" data-set="1" title="Default text size">&#8634;</button></span></h2>
         <div id="clc-preview"><p class="es-hint">…</p></div>
       </div>
     </div>
@@ -392,7 +488,7 @@
 <dialog id="clc-lay">{# #125: the layout dialog — a schematic of one grid section; drag a chip to a cell, onto a chip to stack #}
   <div class="ec-row" style="margin:0 0 8px; justify-content:space-between;">
     <span class="ec-row" style="margin:0;">
-      <label class="ec-inline">columns <select class="lay-n"><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select></label>
+      <label class="ec-inline">columns <select class="lay-n"><option value="1">no grid</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select></label>
       <span class="lay-sel">
         <button type="button" class="ec-del lay-mv" data-d="l" title="Move left">&#8592;</button>
         <button type="button" class="ec-del lay-mv" data-d="r" title="Move right">&#8594;</button>
@@ -407,7 +503,7 @@
     <button type="button" class="ec-del clc-lay-x" title="Close">&#x2715;</button>
   </div>
   <div class="clc-mz-scroll"><div class="lay-grid"></div></div>
-  <p class="ec-hint" style="margin:8px 0 0;">Click a chip, then move it; drag onto a chip to stack.</p>
+  <p class="ec-hint lay-hint" style="margin:8px 0 0;">Click a chip, then move it; drag onto a chip to stack.</p>
 </dialog>
 
 <dialog id="clc-tbl">{# #119: rows × columns — header = column syntax, body = a row's fixed text (blank = an input) #}
@@ -669,17 +765,43 @@
     refresh();
     layDraw();
   }
+  // the 1-column flow as it renders: a line per "new line" field, "beside"
+  // fields as cells to its right, "same cell" fields stacked — drawn on as
+  // many columns as the widest line, display-only (the grid is what moves)
+  function layFlow(s) {
+    var lines = [];
+    $$(".clc-fields > .clc-fld", s).forEach(function (r, i) {
+      var p = i ? $(".ff-place", r).value : "";
+      var last = lines[lines.length - 1];
+      if (p === "stack" && last) { last[last.length - 1].rows.push(r); return; }
+      if (p !== "pair" || !last) lines.push(last = []);
+      last.push({ rows: [r], s: 1 });
+    });
+    var items = [], n = 1;
+    lines.forEach(function (cells, li) {
+      n = Math.max(n, cells.length);
+      cells.forEach(function (it, ci) { it.r = li + 1; it.c = ci + 1; items.push(it); });
+    });
+    return { n: n, items: items, flow: true };
+  }
+  var layFlowMode = false;
   function layDraw() {
-    var m = layRead(laySec), n = m.n;
+    var m = (parseInt($(".fs-grid", laySec).value, 10) || 1) < 2 ? layFlow(laySec) : layRead(laySec), n = m.n;
+    layFlowMode = !!m.flow;
+    if (layFlowMode) laySelIdx = -1;
     layItems = m.items;
-    var rows = layItems.reduce(function (mx, it) { return Math.max(mx, it.r); }, 0) + 1;
+    var rows = layItems.reduce(function (mx, it) { return Math.max(mx, it.r); }, 0) + (layFlowMode ? 0 : 1);
     var g = $(".lay-grid", lay), h = "";
     g.style.gridTemplateColumns = "repeat(" + n + ", minmax(90px, 1fr))";
-    for (var r = 1; r <= rows; r++)
-      for (var c = 1; c <= n; c++)
-        h += '<div class="lay-cell" data-r="' + r + '" data-c="' + c + '" style="grid-area:' + r + "/" + c + '"></div>';
+    if (!layFlowMode)
+      for (var r = 1; r <= rows; r++)
+        for (var c = 1; c <= n; c++)
+          h += '<div class="lay-cell" data-r="' + r + '" data-c="' + c + '" style="grid-area:' + r + "/" + c + '"></div>';
+    $(".lay-hint", lay).textContent = layFlowMode
+      ? "The flow layout, as the placements say. Pick a column count to arrange the fields on a grid."
+      : "Click a chip, then move it; drag onto a chip to stack.";
     layItems.forEach(function (it, i) {
-      h += '<div class="lay-chip a-' + (it.align || "bottom") + (i === laySelIdx ? " on" : "") + '" data-i="' + i +
+      h += '<div class="lay-chip a-' + (it.align || "bottom") + (i === laySelIdx ? " on" : "") + (layFlowMode ? " flow" : "") + '" data-i="' + i +
            '" style="grid-area:' + it.r + "/" + it.c + "/auto/span " + it.s + '">' +
            it.rows.map(function (r, j) {
              var t = $(".ff-type", r).value, lab = $(".ff-label", r).value.trim() ||
@@ -695,16 +817,32 @@
       $(".lay-split", lay).hidden = sel.rows.length < 2;
     }
   }
+  // opening shows the section as it is — a 1-column section as its flow, with
+  // "no grid" chosen; nothing changes until a column count is picked. Going
+  // to a grid rewrites the placements, so the flow is kept aside on the
+  // section and "no grid" puts it back (rows, order, placements)
   function openLay(s) {
     laySec = s; laySelIdx = -1;
-    var n = parseInt($(".fs-grid", s).value, 10) || 1;
-    if (n < 2) { $(".fs-grid", s).value = "2"; refresh(); }       // a layout needs a grid
-    $(".lay-n", lay).value = $(".fs-grid", s).value;
+    $(".lay-n", lay).value = String(Math.max(1, parseInt($(".fs-grid", s).value, 10) || 1));
     layDraw();
     lay.showModal();
   }
+  function layUngrid() {
+    $(".fs-grid", laySec).value = "1";
+    var prev = laySec.layPrev, box = $(".clc-fields", laySec);
+    if (prev) prev.forEach(function (p) {
+      if (p.row.parentNode !== box) return;   // removed meanwhile
+      $(".ff-place", p.row).value = p.place; box.appendChild(p.row);
+    });
+    laySec.layPrev = null;
+    refresh(); layDraw();
+  }
   lay.addEventListener("change", function (e) {
     if (e.target.classList.contains("lay-n")) {
+      if (e.target.value === "1") { layUngrid(); return; }
+      if (layFlowMode) laySec.layPrev = $$(".clc-fields > .clc-fld", laySec).map(function (r) {
+        return { row: r, place: $(".ff-place", r).value };
+      });
       $(".fs-grid", laySec).value = e.target.value; refresh(); layDraw();
     } else if (e.target.classList.contains("lay-align") && layItems[laySelIdx]) {
       layItems[laySelIdx].align = e.target.value; layWrite();
@@ -713,7 +851,7 @@
   lay.addEventListener("click", function (e) {
     var t = e.target, chip = t.closest && t.closest(".lay-chip");
     if (t === lay || t.classList.contains("clc-lay-x")) { lay.close(); return; }
-    if (chip) { laySelIdx = +chip.dataset.i; layDraw(); return; }
+    if (chip) { if (!layFlowMode) { laySelIdx = +chip.dataset.i; layDraw(); } return; }
     var it = layItems[laySelIdx], n = parseInt($(".lay-n", lay).value, 10);
     if (!it) return;
     if (t.classList.contains("lay-mv")) {
@@ -739,7 +877,7 @@
   var layDrag = null;
   lay.addEventListener("pointerdown", function (e) {
     var chip = e.target.closest && e.target.closest(".lay-chip");
-    if (!chip) return;
+    if (!chip || layFlowMode) return;
     layDrag = { chip: chip, i: +chip.dataset.i, x: e.clientX, y: e.clientY, moved: false };
     chip.setPointerCapture(e.pointerId);
   });
@@ -1392,6 +1530,7 @@
     $("#clc-json").value = JSON.stringify(collect(), null, 2);
     clearTimeout(pTimer);
     pTimer = setTimeout(preview, 350);
+    if (WB) { buildOutline(); paneHead(); }   // #192
   }
   // #120: numeric options beyond the section's column count make no sense —
   // hide them (values are clamped server-side anyway)
@@ -1449,10 +1588,12 @@
           { method: "POST", body: fd })
       .then(function (r) { return r.text(); })
       .then(function (html) {
-        var pane = $("#clc-preview"), st = previewState(pane);
+        var pane = $("#clc-preview"), st = previewState(pane), y = window.scrollY;
         pane.innerHTML = html;
         restorePreview(pane, st);
         window.clApplyWhen(); window.clRecompute(); window.clPlots();
+        if (WB) window.scrollTo(0, y);   // #192: the swap shortens the page for a moment — stay put
+        markPreview(false);   // #192
       })
       .catch(function () {});
   }
@@ -1463,9 +1604,23 @@
   // click a preview field → scroll to and flash its editor row (long
   // checklists make the mapping hard to eyeball)
   document.getElementById("clc-preview").addEventListener("click", function (e) {
-    if (e.target.closest("input, select, textarea, button, a")) return;
+    if (e.target.closest("input, select, textarea, a") ||
+        (e.target.closest("button") && !(WB && e.target.closest(".cl-fold")))) return;
     var fld = e.target.closest("[data-key]");
     var row = fld && keyRow[fld.getAttribute("data-key")];
+    if (WB) {   // #192: a field selects itself; a section's title (or its
+                // padding) selects the section without folding it — the
+                // caret alone still folds, as on the fill page
+      if (row) select(row, true);
+      else if (e.target.closest(".cl-sec:not([data-title])")) {   // the Item card: its fields are ticked in Setup
+        select(null, true); itemOn = true; markPreview(false); setPane("checklist");
+      } else if (e.target.closest(".cl-sec[data-title]")) {
+        var fb = e.target.closest(".cl-fold");
+        if (fb && e.offsetX > 20) e.stopPropagation();   // the ::before caret is the first 20px
+        select(editorSecOf(e.target.closest(".cl-sec")), true);
+      }
+      return;
+    }
     if (!row) return;
     row.scrollIntoView({ behavior: "smooth", block: "center" });
     row.classList.add("clc-hit");
@@ -1473,6 +1628,7 @@
   });
 
   editor.addEventListener("input", function (e) {
+    if (e.target.id === "clc-outline-q") return;   // #192: the outline's filter isn't the schema
     if (e.target.classList && e.target.classList.contains("ff-color")) {
       e.target.dataset.on = "1";     // picking a color turns the tint on
       $(".ff-colorclear", e.target.closest(".clc-fld")).style.display = "";
@@ -1510,6 +1666,7 @@
     refresh();
   });
   editor.addEventListener("change", function (e) {
+    if (e.target.id === "clc-outline-q") return;   // #192 (a refresh here would rebuild the outline under a click)
     var r = e.target.closest && e.target.closest(".clc-fld");
     if (r && e.target.classList.contains("ff-imgfile")) { uploadRef(r, e.target); return; }
     if (r && e.target.classList.contains("ff-type")) { syncType(r); syncMap(r); }
@@ -1567,11 +1724,16 @@
       mz.showModal();
       return;
     }
-    if (t.classList.contains("clc-addf")) { addField(t.closest(".clc-sec")); refresh(); return; }
+    if (t.classList.contains("clc-addf")) { var nf = addField(t.closest(".clc-sec")); refresh(); select(nf); return; }
     if (t.classList.contains("fs-layout")) { openLay(t.closest(".clc-sec")); return; }   // #125
     var row = t.closest && (t.closest(".clc-fld") || t.closest(".clc-sec"));
     if (!row) return;
-    if (t.classList.contains("clc-x")) { row.remove(); refresh(); return; }
+    if (t.classList.contains("clc-x")) {
+      var ps = row.parentNode.closest(".clc-sec");
+      row.remove(); refresh();
+      if (row.classList.contains("sel")) select(ps);   // #192: a removed field → its section; a section → nothing
+      return;
+    }
     if (t.classList.contains("clc-up") && row.previousElementSibling) {
       row.parentNode.insertBefore(row, row.previousElementSibling); refresh();
     }
@@ -1580,7 +1742,8 @@
     }
   });
   document.getElementById("clc-addsec").addEventListener("click", function () {
-    addSection({ title: "" }); refresh();
+    var ns = addSection({ title: "" }); refresh(); select(ns);
+    if (WB) $(".fs-title", ns).focus();   // a section renders once it has a title — name it first
   });
   document.getElementById("clc-apply").addEventListener("click", function () {
     try { render(JSON.parse($("#clc-json").value)); }
@@ -1598,7 +1761,167 @@
     $("#save-json").value = JSON.stringify(collect());
   });
 
-  render(JSON.parse(document.getElementById("clc-initial").textContent));
+  // --- #192: the workbench layout — the same editor DOM, one pane at a time.
+  // Nothing here touches the schema: the rows are the classic ones, shown or
+  // hidden by the pane; the outline and the preview only pick which row shows.
+  var WB = document.querySelector(".clc-wb") !== null;
+  var TYPE_GLYPH = { check: "\u2713", number: "#", table: "\u25A6", text: "T", textarea: "\u00B6", datetime: "\u25F7",
+    select: "\u25BE", photo: "\u25EB", qr: "\u2317", link: "\u21C4", steps: "\u2261", static: "i", imagemap: "\u25CE",
+    plot: "\u223F", assembly: "\u229E", sum: "\u03A3" };
+  var PANE_LABEL = { outline: "Outline", checklist: "Checklist", section: "Section", field: "Field", json: "Schema JSON" };
+  function selSec() { return $("#clc-sections > .clc-sec.sel"); }
+  function selFld() { return $("#clc-sections .clc-fld.sel"); }
+  function secTitle(s) { return $(".fs-title", s).value.trim() || "untitled section"; }
+  function fldLabel(r) { return $(".ff-label", r).value.trim() || "(" + $(".ff-type", r).value + ")"; }
+  function setPane(name) {
+    if (!WB) return;
+    editor.dataset.pane = name;
+    $$(".clc-tabs .pl-tab").forEach(function (b) { b.classList.toggle("on", b.dataset.tab === name); });
+    editor.scrollTop = 0;
+    paneHead();
+  }
+  function paneHead() {
+    var h = $("#clc-panehead"), pane = editor.dataset.pane, s = selSec(), r = selFld(), f = "";
+    if (pane === "section") f = s ? "<b>" + esc(secTitle(s)) + "</b>" : "pick one in the preview or the outline";
+    if (pane === "field") f = r ? esc(secTitle(s)) + " \u203A <b>" + esc(fldLabel(r)) + "</b>" : "click a field in the preview or the outline";
+    $(".lbl", h).textContent = PANE_LABEL[pane] || "";
+    $(".for", h).innerHTML = f;
+    $("#clc-panex").hidden = !(pane === "field" && r);
+  }
+  // select a section or field row: it alone shows in its pane, the preview
+  // marks it (and scrolls to it unless the click came from the preview)
+  function select(node, fromPreview) {
+    if (!WB) return;
+    $$("#clc-sections .sel").forEach(function (n) { n.classList.remove("sel"); });
+    if (node) {
+      node.classList.add("sel");
+      var sec = node.closest(".clc-sec");
+      if (sec) sec.classList.add("sel");
+      setPane(node.classList.contains("clc-fld") ? "field" : "section");
+    } else paneHead();
+    markPreview(!fromPreview);
+    buildOutline();
+  }
+  // preview section ⇄ editor section, by title (the nth of that title)
+  function editorSecOf(ps) {
+    var t = ps.getAttribute("data-title") || "";
+    var same = $$("#clc-preview .cl-sec[data-title]").filter(function (x) { return x.getAttribute("data-title") === t; });
+    var cands = $$("#clc-sections > .clc-sec").filter(function (s) { return $(".fs-title", s).value.trim() === t; });
+    return cands[same.indexOf(ps)] || null;
+  }
+  function previewOf(node) {
+    if (!node) return null;
+    if (node.classList.contains("clc-sec")) {
+      var t = $(".fs-title", node).value.trim();
+      var cands = $$("#clc-sections > .clc-sec").filter(function (s) { return $(".fs-title", s).value.trim() === t; });
+      var same = $$("#clc-preview .cl-sec[data-title]").filter(function (x) { return x.getAttribute("data-title") === t; });
+      return same[cands.indexOf(node)] || null;
+    }
+    for (var k in keyRow) if (keyRow[k] === node) return $("#clc-preview [data-key=\"" + k + "\"]");
+    return null;
+  }
+  // the selection's preview element gets the ring; the page scrolls to it on
+  // an outline click, and on its own when a newly selected (or newly
+  // rendered — a section just named) element sits out of view
+  var lastMark = null, itemOn = false;   // itemOn: the Item card is the "selection" (Setup pane)
+  function markPreview(scroll) {
+    if (!WB) return;
+    $$("#clc-preview .clc-sel").forEach(function (n) { n.classList.remove("clc-sel"); });
+    var node = selFld() || selSec(), el = previewOf(node);
+    if (node) itemOn = false;
+    if (!node) lastMark = null;
+    if (itemOn) { var ic = $("#clc-preview .cl-sec:not([data-title])"); if (ic) ic.classList.add("clc-sel"); }
+    if (!el) return;
+    el.classList.add("clc-sel");
+    var id = node.classList.contains("clc-sec") ? "s" + $$("#clc-sections > .clc-sec").indexOf(node) : el.getAttribute("data-key");
+    var r = el.getBoundingClientRect(), seen = r.bottom > 0 && r.top < window.innerHeight;
+    if (scroll || (id !== lastMark && !seen)) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    lastMark = id;
+  }
+  function buildOutline() {
+    if (!WB) return;
+    var q = $("#clc-outline-q").value.trim().toLowerCase(), html = "", fsel = selFld();
+    $$("#clc-sections > .clc-sec").forEach(function (s, si) {
+      var rows = $$(".clc-fields > .clc-fld", s).map(function (r, fi) {
+        var lab = fldLabel(r);
+        if (q && lab.toLowerCase().indexOf(q) === -1) return "";
+        return '<div class="clo-fld' + (r === fsel ? " on" : "") + '" data-si="' + si + '" data-fi="' + fi + '">' +
+          '<span class="t">' + (TYPE_GLYPH[$(".ff-type", r).value] || "\u00B7") + '</span><span>' + esc(lab) + '</span></div>';
+      }).join("");
+      var t = secTitle(s), folded = s.outlineFolded && !q;
+      if (q && !rows && t.toLowerCase().indexOf(q) === -1) return;
+      html += '<div class="clo-sec' + (s.classList.contains("sel") && !fsel ? " on" : "") + '" data-si="' + si + '">' +
+        '<span class="car">' + (folded ? "\u25B8" : "\u25BE") + '</span>' + esc(t) + '</div>' + (folded ? "" : rows);
+    });
+    $("#clc-outline-rows").innerHTML = html || '<p class="ec-hint">' + (q ? "nothing matches" : "no sections yet") + '</p>';
+    var all = $$("#clc-sections > .clc-sec"), allFolded = all.length > 0 && all.every(function (s) { return s.outlineFolded; });
+    $("#clc-outline-fold").textContent = allFolded ? "expand all" : "collapse all";
+  }
+  if (WB) {
+    $("#clc-outline-rows").addEventListener("click", function (e) {
+      var row = e.target.closest(".clo-sec, .clo-fld");
+      if (!row) return;
+      var s = $$("#clc-sections > .clc-sec")[+row.dataset.si];
+      if (e.target.classList.contains("car")) { s.outlineFolded = !s.outlineFolded; buildOutline(); return; }   // the caret folds
+      select(row.dataset.fi !== undefined ? $$(".clc-fields > .clc-fld", s)[+row.dataset.fi] : s);
+    });
+    $("#clc-outline-fold").addEventListener("click", function () {   // collapse all ⇄ expand all
+      var all = $$("#clc-sections > .clc-sec"), fold = !all.every(function (s) { return s.outlineFolded; });
+      all.forEach(function (s) { s.outlineFolded = fold; });
+      buildOutline();
+    });
+    $("#clc-outline-q").addEventListener("input", buildOutline);
+    $("#clc-panex").addEventListener("click", function () {   // the row's own ✕, from the pane header
+      var r = selFld();
+      if (r) $(".clc-x", r).click();
+    });
+    $("#clc-addf-last").addEventListener("click", function () {   // last field of the current field's section
+      var cur = selSec();
+      if (!cur) { setPane("section"); return; }   // no field selected: pick a section first
+      var nf = addField(cur); refresh(); select(nf); $(".ff-label", nf).focus();
+    });
+    $("#clc-addsec-below").addEventListener("click", function () {   // under the current section (at the end if none)
+      var cur = selSec(), ns = addSection({ title: "" });
+      if (cur && cur.nextSibling) cur.parentNode.insertBefore(ns, cur.nextSibling);
+      refresh(); select(ns); $(".fs-title", ns).focus();
+    });
+    $$(".clc-tabs .pl-tab").forEach(function (b) { b.addEventListener("click", function () { setPane(b.dataset.tab); }); });
+    // panel width: drag the split; remembered per browser (as on Plots)
+    (function () {
+      var cols = $(".clc-cols"), sp = $("#clc-vsplit"), KEY = "cets-clc-pw";
+      try { var w = +localStorage.getItem(KEY); if (w >= 300 && w <= 720) cols.style.setProperty("--pw", w + "px"); } catch (e) {}
+      sp.addEventListener("mousedown", function (e) {
+        e.preventDefault(); sp.classList.add("on");
+        var x0 = e.clientX, w0 = editor.getBoundingClientRect().width;
+        function move(ev) { cols.style.setProperty("--pw", Math.max(300, Math.min(720, w0 + ev.clientX - x0)) + "px"); }
+        function up() {
+          document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); sp.classList.remove("on");
+          try { localStorage.setItem(KEY, String(Math.round(editor.getBoundingClientRect().width))); } catch (er) {}
+        }
+        document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+      });
+    })();
+  }
+
+  // #192: switching layouts keeps the design on screen — the other page
+  // opens with what this one shows (unsaved edits included), not HWDB's copy
+  var CARRY = "cets-clc-carry";
+  document.getElementById("clc-switch").addEventListener("click", function () {
+    try {
+      sessionStorage.setItem(CARRY, JSON.stringify({ t: "{{ part_type_id|escapejs }}", name: $("#f-name").value, cfg: collect() }));
+    } catch (e) {}
+  });
+  var carried = null;
+  try {
+    carried = JSON.parse(sessionStorage.getItem(CARRY) || "null");
+    sessionStorage.removeItem(CARRY);
+  } catch (e) {}
+  if (carried && carried.t === "{{ part_type_id|escapejs }}" && carried.cfg) {
+    $("#f-name").value = carried.name || "";
+    render(carried.cfg);
+  } else {
+    render(JSON.parse(document.getElementById("clc-initial").textContent));
+  }
 })();
 </script>
 {% endblock %}

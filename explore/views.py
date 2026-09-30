@@ -4302,6 +4302,8 @@ def explore_checklist_config_view(request, part_type_id):
                                     "it becomes the link on the part page.")
             return redirect(page_url)
         back = f"{page_url}?{urlencode({'name': cl_name, 'next': next_url})}"
+        if request.POST.get("ui") == "wb":   # #192: come back to the same layout
+            back += "&ui=wb"
         try:
             cfg = json.loads(request.POST.get("config_json") or "")
         except ValueError as e:
@@ -4335,14 +4337,19 @@ def explore_checklist_config_view(request, part_type_id):
     return render(request, "explore/checklist_config.html", {
         "item_field_choices": [(n, checklistforms.ITEM_FIELD_LABELS[n])
                                for n in checklistforms.ITEM_FIELDS],
-        "sidebar": navigation.sidebar_tree(inst, {}),
+        # #192: the workbench takes the whole width — no hierarchy tree beside it
+        "sidebar": None if request.GET.get("ui") == "wb" else navigation.sidebar_tree(inst, {}),
         "part_type_id": part_type_id,
+        "type_url": navigation.leaf_path_for(inst, part_type_id) or next_url,   # the breadcrumb's type link
+        "type_name": getattr(navigation.H.for_instance(inst).filter(
+            level=navigation.H.LEVEL_TYPE, part_type_id=part_type_id).first(), "name", "") or part_type_id,
         "cl_name": cl_name,
         "current_name": current_name,
         "next": next_url,
         "existing": checklistforms.available(api, part_type_id),
         "templates": checklistforms.builtin_templates(),
         "initial": raw if raw is not None else CHECKLIST_SKELETON,
+        "wb": request.GET.get("ui") == "wb",   # #192: the workbench layout
     })
 
 

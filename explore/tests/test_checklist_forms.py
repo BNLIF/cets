@@ -825,6 +825,42 @@ class ChecklistEditorTest(TestCase):
         self.assertEqual(args.args[0], PTID)
         self.assertEqual(args.args[2], f"Checklist_{PTID}_Assembly.json")
 
+    def test_a_titled_section_renders_before_it_has_a_field(self):   # #192
+        api = _api()
+        m1, m2 = _mocked(api)
+        cfg = {"name": "A", "test_type_name": "T",
+               "sections": [{"title": "Later", "fields": []}, {"title": "", "fields": []}]}
+        with m1, m2:
+            html = self.client.post(f"{CONFIG_PAGE}preview/", {
+                "config_json": json.dumps(cfg), "cl_name": NAME}).content.decode()
+        self.assertIn('data-title="Later"', html)     # named: a card already
+        self.assertNotIn('data-title=""', html)       # unnamed: nothing yet
+        self.assertEqual([s["title"] for s in checklistforms.normalize(cfg, NAME)["sections"]], ["Later"])
+
+    def test_workbench_layout_is_the_same_editor(self):   # #192
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            classic = self.client.get(CONFIG_PAGE).content.decode()
+            wb = self.client.get(f"{CONFIG_PAGE}?ui=wb").content.decode()
+        self.assertIn("Try the new editor", classic)        # each links to the other
+        self.assertNotIn('class="pl-tabs', classic)
+        self.assertIn("Classic editor", wb)
+        self.assertIn('class="pl-tabs clc-tabs"', wb)       # Plots' strip, on the left
+        self.assertIn('data-pane="checklist"', wb)          # Setup first: pick or name a checklist
+        self.assertIn('id="clc-vsplit"', wb)
+        self.assertIn('id="clc-addsec-below"', wb)
+        self.assertIn('ex-side ex-side-bare', wb)           # no hierarchy tree beside the workbench
+        self.assertNotIn('ex-side ex-side-bare', classic)
+        for el in ('id="clc-top"', 'id="clc-sections"', 'id="clc-jsoncard"', 'id="t-fld"', 'id="f-ttn"'):
+            self.assertIn(el, classic); self.assertIn(el, wb)   # one editor DOM in both
+        self.assertIn('name="ui" value="wb"', wb)           # the save comes back to the workbench
+        with m1, m2:
+            r = self.client.post(CONFIG_PAGE, {
+                "cl_name": "Assembly", "ui": "wb",
+                "config_json": json.dumps({"name": "A", "test_type_name": "T", "sections": []})})
+        self.assertIn("&ui=wb", r["Location"])
+
     def test_save_rejects_bad_names_and_bad_json(self):
         api = _api()
         m1, m2 = _mocked(api)
@@ -2105,7 +2141,7 @@ class ImageMapTest(TestCase):
     def test_normalize_drops_a_map_without_image_or_slots(self):
         for extra in ({"image_id": ""}, {"slots": []}):
             schema = self._schema(**extra)
-            self.assertEqual(schema["sections"], [], extra)
+            self.assertEqual(schema["sections"][0]["fields"], [], extra)   # the map is dropped (the titled section stays, #192)
 
     def test_bind_fills_slot_values(self):
         bound = checklistforms.bind(
@@ -2946,7 +2982,7 @@ class ChecklistLinkTest(TestCase):
     def test_checklist_alone_keeps_the_static_field(self):
         self.assertEqual(
             len(self._norm(checklist="Frame")["sections"][0]["fields"]), 1)
-        self.assertEqual(self._norm()["sections"], [])   # still all-empty drop
+        self.assertEqual(self._norm()["sections"][0]["fields"], [])   # an empty static is still dropped (its titled section stays, #192)
 
     def _render(self, field):
         user = get_user_model().objects.create_user("n", "n@n.io", "pw")
