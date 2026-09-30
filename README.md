@@ -112,7 +112,11 @@ survives restarts. `db.sqlite3-wal` and `db.sqlite3-shm` appear beside it on
 the first write, with the database's mode and the first opener's owner
 (www-data after a restart), and stay while any connection is open — so a
 shell user running `migrate`, `dbsize` or a backup against the live database
-must share the service's group (`id`; `usermod -aG www-data <user>`). The
+must share the service's group (`id`; `usermod -aG www-data <user>`, then
+a new login — and with ssh multiplexing, `ssh -O exit <host>` first, or the
+new session keeps the old connection's groups). Reads still work without it — SQLite falls back to read-only
+— so the symptom is only on writes: "attempt to write a readonly database"
+from `migrate`, `sheet_prune` or any command that changes rows. The
 `-wal` file grows during a long sync and shrinks at the next quiet checkpoint. Back up with `sqlite3 db.sqlite3 ".backup
 copy.sqlite3"` rather than copying the file, so the three files stay
 consistent — `tools/backup_db.sh <dir> [days]` does that nightly from cron
