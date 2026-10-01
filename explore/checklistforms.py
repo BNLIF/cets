@@ -11,7 +11,8 @@ checklist scenes as schema-driven web forms (Hajime/Greg, 2026-08-07).
   ``text``, ``textarea``, ``datetime``, ``select``, ``photo``, ``qr``,
   ``steps``, ``static``, ``imagemap``, ``plot`` — plus a ``row`` grouping that renders its child
   fields side by side (stacked on phones). Order IS the layout; there are
-  no coordinates.
+  no coordinates. A section's ``level`` (2, 3) nests it under the section
+  before it; the list stays flat, only the rendering nests.
 - **Data** — submissions land in HWDB only: photos post first (for their
   image_ids), then one test record of the schema's ``test_type_name`` whose
   ``test_data.DATA`` is keyed ``{section title: {field label: value}}``.
@@ -599,10 +600,12 @@ def unchecked_required(schema: dict, post) -> list[str]:
     unchecked — the server-side twin of the checkboxes' ``required``.
     Sections hidden by an unmet ``when`` rule don't count, exactly as the
     browser skips their controls."""
-    out = []
+    out, hidden = [], set()
     for si, sec in enumerate(schema["sections"]):
         w = sec.get("when")
-        if w and (post.get(f"w{si}" if w.get("path") else w["key"]) or "") != w["equals"]:
+        if (w and (post.get(f"w{si}" if w.get("path") else w["key"]) or "") != w["equals"]) \
+                or sec.get("parent") in hidden:   # a sub-section hides with its parent
+            hidden.add(si)
             continue
         for f in (leaf for top in sec["fields"] for leaf in _row_leaves(top)):
             if f["type"] == "steps" and f.get("require_all") and not all(
@@ -793,9 +796,33 @@ def normalize(cfg: dict, name: str) -> dict:
                 sec["collapsed"] = True            # #98: opens folded
             if isinstance(s.get("when"), dict):
                 sec["when"] = s["when"]            # resolved below
+            lv = _num(s.get("level"))
+            sec["level"] = max(1, min(3, int(lv))) if lv is not None else 1
             schema["sections"].append(sec)
     _resolve_when(schema)
+    _nest(schema)
     return schema
+
+
+def _nest(schema: dict) -> None:
+    """Sub-sections (Hajime 2026-10-01, for the organizer: CPA › CPA parts):
+    a section's ``level`` (2, 3) nests it under the nearest shallower section
+    before it — a level deeper than that drops to the next one down, the
+    first section is always top level. ``sections`` stays FLAT (data keys,
+    when rules, every reader); ``tree`` is the top level with ``subs`` on
+    each, for the renderer, and ``i`` the flat index (the ``w<i>`` input)."""
+    tree, stack = [], []                 # stack: the open section per level
+    for i, sec in enumerate(schema["sections"]):
+        lv = min(sec["level"], len(stack) + 1)
+        sec["level"], sec["i"] = lv, i
+        del stack[lv - 1:]
+        if stack:
+            sec["parent"] = stack[-1]["i"]
+            stack[-1].setdefault("subs", []).append(sec)
+        else:
+            tree.append(sec)
+        stack.append(sec)
+    schema["tree"] = tree
 
 
 def _resolve_when(schema: dict) -> None:

@@ -596,6 +596,10 @@ class TextFormattingTest(TestCase):
         self.assertEqual(clmd("see [the drawing](https://edms.cern.ch/d?a=1&b=2) now"),
                          'see <a href="https://edms.cern.ch/d?a=1&amp;b=2" target="_blank" rel="noopener">the drawing</a> now')
         self.assertEqual(clmd("[x](javascript:alert(1))"), "[x](javascript:alert(1))")
+        # Hajime 2026-10-01: coloured text — a fixed palette, other tags stay escaped
+        self.assertEqual(clmd("<red>**stop**</red> <grey>a\nb</grey> <pink>x</pink> <red>open"),
+                         '<span class="clmd-red"><strong>stop</strong></span> <span class="clmd-grey">a<br>b</span> '
+                         "&lt;pink&gt;x&lt;/pink&gt; &lt;red&gt;open")
 
     def test_instructions_notes_and_steps_render_markdown_lite(self):
         html = self._page()
@@ -3910,6 +3914,47 @@ class OrganizerTest(TestCase):
         self.assertNotIn("Blank checklist", html)
         self.assertIn("&#9734; Bookmark", html)
         api.get_component.assert_not_called()
+
+    def test_sub_sections_nest_under_the_section_before_them(self):
+        # Hajime 2026-10-01: CPA › CPA parts as a sub-section, not a second organizer
+        cfg = json.loads(json.dumps(ORGANIZER))
+        cfg["sections"][0]["level"] = 3                       # the first section is top level whatever it says
+        cfg["sections"][2]["level"] = 2                       # South planes under North planes
+        cfg["sections"].append({"title": "Parts", "level": 3, "fields": [   # 3 under a 2
+            {"type": "static", "label": "Bars", "checklist": "Bars", "part_type_id": "Z00100300044"}]})
+        cfg["sections"].append({"title": "Deep", "level": 9, "fields": [    # capped at 3 → beside Parts
+            {"type": "static", "label": "Nuts", "checklist": "Nuts", "part_type_id": "Z00100300045"}]})
+        cfg["sections"].append({"title": "Tail", "fields": [{"type": "text", "label": "t"}]})
+        schema = checklistforms.normalize(cfg, NAME)
+        self.assertEqual([(x["title"], x["level"], x.get("parent")) for x in schema["sections"]],
+                         [("Which side", 1, None), ("North planes", 1, None), ("South planes", 2, 1),
+                          ("Parts", 3, 2), ("Deep", 3, 2), ("Tail", 1, None)])
+        self.assertEqual([x["title"] for x in schema["tree"]], ["Which side", "North planes", "Tail"])
+        self.assertEqual([x["title"] for x in schema["tree"][1]["subs"]], ["South planes"])
+        self.assertEqual([x["title"] for x in schema["tree"][1]["subs"][0]["subs"]], ["Parts", "Deep"])
+        self.assertEqual(schema["sections"][2]["when"]["key"], "f0-0")   # its own rule still resolves
+        self.assertEqual(schema["sections"][2]["i"], 2)
+        api = _api(schema=cfg)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(self.URL).content.decode()
+        north = html.index('data-title="North planes"'); south = html.index('data-title="South planes"')
+        parts = html.index('data-title="Parts"'); tail = html.index('data-title="Tail"')
+        self.assertLess(north, south); self.assertLess(south, parts); self.assertLess(parts, tail)
+        self.assertEqual(html.count('class="es-card cl-sec cl-sub"'), 3)   # nested cards carry cl-sub
+        # the sub-section closes before its parent: North's card holds South, which holds Parts
+        self.assertIn('data-title="South planes"', html[north:html.index('data-title="Tail"')])
+        self.assertIn("function scopeOf(sec)", html)        # the driving select is found across the nesting
+
+    def test_a_sub_section_hides_with_its_parent_server_side(self):
+        cfg = json.loads(json.dumps(ORGANIZER))
+        cfg["sections"][2]["level"] = 2
+        del cfg["sections"][2]["when"]
+        cfg["sections"][2]["fields"].append({"type": "steps", "label": "Do", "require_all": True, "steps": ["a"]})
+        schema = checklistforms.normalize(cfg, NAME)
+        # South planes (no rule of its own) sits under North planes, shown only for North
+        self.assertEqual(checklistforms.unchecked_required(schema, {"f0-0": "South"}), [])
+        self.assertEqual(checklistforms.unchecked_required(schema, {"f0-0": "North"}), ["Do"])
 
     def test_plain_checklist_still_gets_the_chooser(self):
         m1, m2 = _mocked(_api())

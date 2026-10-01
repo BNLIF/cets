@@ -17,13 +17,19 @@
       .then(function (d) { looked[k] = d.value == null ? null : String(d.value); delete pending[k]; applyWhen(); });
     return undefined;
   }
+  function scopeOf(sec) {
+    // the sections' container (same form / same preview, never another
+    // checklist on the page) — a sub-section's driving select may sit in its
+    // parent section or beside it
+    var p = sec.parentNode;
+    while (p.closest && p.closest(".cl-sec")) p = p.closest(".cl-sec").parentNode;
+    return p;
+  }
   function applyWhen() {
     document.querySelectorAll(".cl-sec[data-when-key]").forEach(function (sec) {
-      // the driving select lives among this section's siblings (same form /
-      // same preview), never in another checklist on the page
       var path = sec.getAttribute("data-when-path");
       if (path) {
-        var inp = sec.parentNode.querySelector('input[name="' + sec.getAttribute("data-when-key") + '"]');
+        var inp = scopeOf(sec).querySelector('input[name="' + sec.getAttribute("data-when-key") + '"]');
         var pid = inp ? inp.value.trim().toUpperCase() : "";
         var v = pid ? lookup(sec, pid, path) : null;
         sec.querySelector(".cl-when-val").value = v == null ? "" : v;
@@ -31,7 +37,7 @@
         sec.querySelectorAll("[data-req]").forEach(function (i) { i.required = !sec.hidden; });
         return;
       }
-      var sel = sec.parentNode.querySelector('select[name="' + sec.getAttribute("data-when-key") + '"]');
+      var sel = scopeOf(sec).querySelector('select[name="' + sec.getAttribute("data-when-key") + '"]');
       sec.hidden = !(sel && sel.value === sec.getAttribute("data-when-eq"));
       // #131: a required box in a hidden section would silently block submit
       sec.querySelectorAll("[data-req]").forEach(function (i) { i.required = !sec.hidden; });

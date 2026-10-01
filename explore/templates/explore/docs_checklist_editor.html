@@ -60,7 +60,8 @@
 
   <h2 id="sections">Sections</h2>
   <p>A form is a list of sections, each a titled card of fields. ▲▼ reorder, ✕ removes. Every section header on the fill page folds;
-    <span class="dd-ui">start collapsed</span> opens it folded.</p>
+    <span class="dd-ui">start collapsed</span> opens it folded. <span class="dd-ui">sub-section</span> / <span class="dd-ui">sub-sub-section</span> nests a section inside the one above it:
+    it folds and hides with its parent and keeps its own show-when rule. Titles stay unique across the whole form; the submission is keyed by title as before.</p>
   <h3>Show a section only when…</h3>
   <p>The <span class="dd-ui">— always —</span> select lists the checklist's <code>select</code> and PID fields:</p>
   <ul>
@@ -184,7 +185,7 @@ OK = check</pre>
 Verify the serial against the shipping sheet</pre>
 
   <h2 id="organizer">Organizer</h2>
-  <p>A checklist of checklists for a group with many Component Types — the order of the work, shared by the consortium (a bookmark is only yours). Tick <span class="dd-ui">Organizer</span> on the card, then build it from what any checklist has: sections, <a href="#static">static</a> fields with <b>Link to checklist</b> and a Type ID, a <code>select</code> (north / south, module type) with <a href="#sections">show-when</a> rules on the sections it drives. Nothing else is needed and nothing is submitted.</p>
+  <p>A checklist of checklists for a group with many Component Types — the order of the work, shared by the consortium (a bookmark is only yours). Tick <span class="dd-ui">Organizer</span> on the card, then build it from what any checklist has: sections, <a href="#static">static</a> fields with <b>Link to checklist</b> and a Type ID, a <code>select</code> (north / south, module type) with <a href="#sections">show-when</a> rules on the sections it drives, <a href="#sections">sub-sections</a> for the parts of a part. Nothing else is needed and nothing is submitted.</p>
   <p>It lives like every checklist — <code>Checklist_&lt;type&gt;_&lt;Name&gt;.json</code> on a type in HWDB — so put it on the consortium's virtual type (the one that holds the inventory), where the type page's Checklists row, bookmarks and other checklists' links open it. The page remembers the selects on the device.</p>
 
   <h2 id="static">Static</h2>
@@ -240,7 +241,7 @@ Board 3 @ 4.5, 32</pre>
     <span class="dd-ui">the item in position…</span> shows the positions of the sub-assembly in that position instead (the supercell in <code>SC1</code>).</p>
 
   <h2 id="text">Text formatting</h2>
-  <p>Instructions, field labels, a static note and each step accept <code>**bold**</code>, <code>*italic*</code>, <code>[link text](https://…)</code> and line breaks. HTML stays escaped.
+  <p>Instructions, field labels, a static note and each step accept <code>**bold**</code>, <code>*italic*</code>, <code>[link text](https://…)</code>, <code>&lt;red&gt;text&lt;/red&gt;</code> (also orange, green, blue, gray) and line breaks. Other HTML stays escaped.
     Stored keys are the raw text, markers included. The fill page and the preview carry an A− / A+ / ↺ control that scales the whole checklist's text; the choice is remembered per device.</p>
 
   <h2 id="json">Schema JSON</h2>
@@ -260,6 +261,9 @@ Board 3 @ 4.5, 32</pre>
        "columns": ["P1", "P2", "Mean = (C1 + C2) / 2 [10 ± 1]"]},
       {"type": "steps", "label": "Procedure", "require_all": true,
        "steps": ["Power on", "  Wait 5 min", "Record"]}
+    ]},
+    {"title": "Remarks", "level": 2, "fields": [
+      {"type": "textarea", "label": "Notes"}
     ]}
   ]
 }</pre>

@@ -122,6 +122,8 @@
   /* #106: monospace so the indent spaces align by eye; Tab indents */
   .clc-fld .ff-steps { font-family: var(--font-mono); font-size: 12px; tab-size: 2; }
   .clc-sec > .ec-row .fs-title { font-weight: 600; }
+  .clc-sec[data-level="2"], .clo-sec[data-level="2"], .clo-fld[data-level="2"] { margin-left: 22px; }
+  .clc-sec[data-level="3"], .clo-sec[data-level="3"], .clo-fld[data-level="3"] { margin-left: 44px; }
   .clc-secopts { margin-top: 0; }
   .clc-secopts select { font: inherit; font-size: 12px; color: var(--ink); background: var(--surface);
     border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 2px 4px; max-width: 160px; }
@@ -335,6 +337,7 @@
         <select class="fs-grid"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select></label>
       <button type="button" class="ec-del fs-layout" title="arrange this section's fields on the grid: drag cells, change spans, stack">&#9638; layout&hellip;</button>
       <label class="ec-inline"><input type="checkbox" class="fs-collapsed"> start collapsed</label>
+      <label class="ec-inline" title="nest this section inside the one above it — it folds and hides with its parent"><select class="fs-level"><option value="1">section</option><option value="2">sub-section</option><option value="3">sub-sub-section</option></select></label>
       <label class="ec-inline" title="a select field: the section shows only while it holds this option. A PID field: the scanned item&#8217;s stored value at the path must equal the value — the path is a key chain into the item&#8217;s HWDB record; a bare Item Specs key like Side works, as do DATA.Side, specifications.DATA.Side, Warehouse.SKU (a key inside a list of entries), serial_number or location.name">show only when
         <select class="fs-whenf"><option value="">&mdash; always &mdash;</option></select>
         <span class="fs-whenwrap">= <select class="fs-wheneq"></select></span>
@@ -1144,6 +1147,8 @@
     $(".fs-title", n).value = s.title || "";
     $(".fs-grid", n).value = s.grid ? String(s.grid) : "1";            // #120
     $(".fs-collapsed", n).checked = s.collapsed === true;
+    $(".fs-level", n).value = s.level === 2 || s.level === 3 ? String(s.level) : "1";
+    n.dataset.level = $(".fs-level", n).value;
     // the when-pickers fill in at refresh() once every select field exists
     n.dataset.whenF = (s.when && s.when.field) || "";
     n.dataset.whenEq = (s.when && s.when.equals) || "";
@@ -1410,6 +1415,8 @@
       var sec = { title: $(".fs-title", s).value.trim(), fields: fields };
       if (gridN > 1) sec.grid = gridN;                                 // #120
       if ($(".fs-collapsed", s).checked) sec.collapsed = true;
+      var lv = parseInt($(".fs-level", s).value, 10) || 1;
+      if (lv > 1) sec.level = lv;
       var wf = $(".fs-whenf", s).value, we = $(".fs-wheneq", s).value;
       var wp = $(".fs-whenp", s).value.trim(), wt = $(".fs-wheneqt", s).value.trim();
       if (wf && $(".fs-whenpwrap", s).style.display !== "none") {        // #132 PID field
@@ -1671,6 +1678,7 @@
     if (r && e.target.classList.contains("ff-imgfile")) { uploadRef(r, e.target); return; }
     if (r && e.target.classList.contains("ff-type")) { syncType(r); syncMap(r); }
     if (r && e.target.classList.contains("ff-tospec")) syncType(r);   // #176: the Specs-key box follows the tick
+    if (e.target.classList.contains("fs-level")) e.target.closest(".clc-sec").dataset.level = e.target.value;
     if (e.target.id !== "clc-json") refresh();
   });
 
@@ -1845,12 +1853,12 @@
       var rows = $$(".clc-fields > .clc-fld", s).map(function (r, fi) {
         var lab = fldLabel(r);
         if (q && lab.toLowerCase().indexOf(q) === -1) return "";
-        return '<div class="clo-fld' + (r === fsel ? " on" : "") + '" data-si="' + si + '" data-fi="' + fi + '">' +
+        return '<div class="clo-fld' + (r === fsel ? " on" : "") + '" data-si="' + si + '" data-fi="' + fi + '" data-level="' + (s.dataset.level || 1) + '">' +
           '<span class="t">' + (TYPE_GLYPH[$(".ff-type", r).value] || "\u00B7") + '</span><span>' + esc(lab) + '</span></div>';
       }).join("");
       var t = secTitle(s), folded = s.outlineFolded && !q;
       if (q && !rows && t.toLowerCase().indexOf(q) === -1) return;
-      html += '<div class="clo-sec' + (s.classList.contains("sel") && !fsel ? " on" : "") + '" data-si="' + si + '">' +
+      html += '<div class="clo-sec' + (s.classList.contains("sel") && !fsel ? " on" : "") + '" data-si="' + si + '" data-level="' + (s.dataset.level || 1) + '">' +
         '<span class="car">' + (folded ? "\u25B8" : "\u25BE") + '</span>' + esc(t) + '</div>' + (folded ? "" : rows);
     });
     $("#clc-outline-rows").innerHTML = html || '<p class="ec-hint">' + (q ? "nothing matches" : "no sections yet") + '</p>';

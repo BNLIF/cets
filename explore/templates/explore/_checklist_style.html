@@ -15,6 +15,12 @@
   .cl-folded .cl-fold::before { content: "\25B8"; }
   .cl-folded .cl-sec-body { display: none; }
   .cl-sec h2 .cl-hint { text-transform: none; letter-spacing: 0; }
+  /* sub-sections (Hajime 2026-10-01): a section nested in the one before it */
+  .cl-sec .cl-sec { margin: 10px 0 0; padding: 8px 12px 10px; border-left-width: 3px; }
+  .cl-sec .cl-sec > h2 { font-size: calc(11.5px * var(--cl-scale, 1)); text-transform: none; letter-spacing: 0; color: var(--dim); }
+  /* coloured text in schema text (Hajime 2026-10-01): <red>…</red> in the clmd filter */
+  .clmd-red { color: #c0392b; } .clmd-orange { color: #c96a00; } .clmd-green { color: #2e7d32; }
+  .clmd-blue { color: #1f5fbf; } .clmd-gray, .clmd-grey { color: var(--dim); }
   .cl-check-item { flex: 0 1 200px !important; align-self: end; }
   .cl-check-item .cl-lab { color: var(--ink); font-size: calc(13px * var(--cl-scale, 1)); }
   .es-btn { font: inherit; font-size: calc(13px * var(--cl-scale, 1)); font-weight: 600; color: var(--accent-ink);
