@@ -42,7 +42,7 @@
         {% if bookmarked %}&#9733; Bookmarked{% else %}&#9734; Bookmark{% endif %}</button>
     </form>
   </div>
-  {% if schema.instructions %}<p class="es-sub">{{ schema.instructions|clmd }}</p>{% endif %}
+  {% if schema.instructions %}<div class="es-sub cl-md">{{ schema.instructions|clmd_block }}</div>{% endif %}
 
   <div id="cl-org">
     {% include "explore/_checklist_sections.html" %}

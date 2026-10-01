@@ -601,10 +601,25 @@ class TextFormattingTest(TestCase):
                          '<span class="clmd-red"><strong>stop</strong></span> <span class="clmd-grey">a<br>b</span> '
                          "&lt;pink&gt;x&lt;/pink&gt; &lt;red&gt;open")
 
+    def test_block_filter_renders_full_markdown(self):
+        # #193: instructions and a static note take headings, lists, tables;
+        # raw HTML and javascript: links stay out, colour tags still work
+        from explore.templatetags.checklist import clmd_block
+        html = clmd_block("# Prep\n\nline one\nline two <b>x</b>\n\n- a **b** <red>c</red>\n- [j](javascript:alert(1)) [ok](https://x.y/?a=1&b=2)\n\n| A | B |\n|---|---|\n| 1 | ~~2~~ |\n")
+        self.assertIn("<h1>Prep</h1>", html)
+        self.assertIn("<p>line one<br>\nline two &lt;b&gt;x&lt;/b&gt;</p>", html)
+        self.assertIn('<li>a <strong>b</strong> <span class="clmd-red">c</span></li>', html)
+        self.assertIn("<li>[j](javascript:alert(1)) ", html)
+        self.assertIn('<a href="https://x.y/?a=1&amp;b=2" target="_blank" rel="noopener">ok</a>', html)
+        self.assertIn("<td><s>2</s></td>", html)
+        self.assertEqual(clmd_block(None), "")
+        # a colour tag doesn't reach across blocks
+        self.assertNotIn("clmd-", clmd_block("<red>a\n\nb</red>"))
+
     def test_instructions_notes_and_steps_render_markdown_lite(self):
         html = self._page()
-        self.assertIn("Read <strong>carefully</strong>.<br>Then start.", html)
-        self.assertIn("<em>tilt</em> the board &lt;b&gt;now&lt;/b&gt;", html)
+        self.assertIn('<div class="es-sub cl-md"><p>Read <strong>carefully</strong>.<br>\nThen start.</p>', html)
+        self.assertIn('<div class="cl-note cl-md"><p><em>tilt</em> the board &lt;b&gt;now&lt;/b&gt;</p>', html)
         self.assertIn("Check <strong>torque</strong>", html)
         self.assertIn(">Gap <em>min</em> <span class=\"cl-units\">", html)   # visible label
         self.assertIn('for="f0-2"', html)                                     # key untouched

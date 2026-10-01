@@ -113,7 +113,7 @@
   {% if f.image_id %}<img class="cl-static-img" data-lightbox data-lb-src="{% url 'explore:shipment_image' image_id=f.image_id %}" src="{% url 'explore:shipment_image' image_id=f.image_id %}?thumb=1" alt="{{ f.label|default:'reference' }}">
   {% elif f.image %}<img class="cl-static-img" data-lightbox src="{{ f.image }}" alt="{{ f.label|default:'reference' }}">{% endif %}
   {% endif %}
-  {% if f.note %}<div class="cl-note">{{ f.note|clmd }}</div>{% endif %}
+  {% if f.note %}<div class="cl-note cl-md">{{ f.note|clmd_block }}</div>{% endif %}
   {% if f.url %}<div><a href="{{ f.url }}" target="_blank" rel="noopener">{{ f.url }} <span aria-hidden="true">&#x2197;</span></a></div>{% endif %}
   {% if f.checklist %}{# #118: jump to another checklist — this item's, or another type's chooser #}
   <div><a href="{% if f.checklist_type %}{% url 'explore:type_checklist' part_type_id=f.checklist_type name=f.checklist %}{% elif part_id %}{% url 'explore:checklist' part_id=part_id name=f.checklist %}{% else %}{% url 'explore:type_checklist' part_type_id=part_type_id name=f.checklist %}{% endif %}"

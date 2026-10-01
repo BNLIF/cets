@@ -274,7 +274,7 @@
         <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Test type</span>
           <input id="f-ttn" placeholder="test type the submission posts to (required)"></div>
         <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Instructions</span>
-          <input id="f-instr" placeholder="optional intro text shown under the title — **bold**, *italic*"></div>
+          <textarea id="f-instr" rows="3" placeholder="optional intro text shown under the title — Markdown: headings, lists, tables, **bold**, *italic*, <red>…</red>" style="flex:1 1 120px; min-width:0;"></textarea></div>
         <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Roles</span>
           <input id="f-roles" placeholder="HWDB role ids allowed to submit, comma-separated (blank = anyone)"></div>
         <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Shipping</span>
@@ -410,7 +410,7 @@
       <label class="ec-check"><input type="checkbox" class="ff-reqall"> all steps required to submit</label>
     </div>
     <div class="ec-row g-static" style="display:none;">
-      <input class="ff-note" placeholder="note text — **bold**, *italic*, [link text](https://…)">
+      <textarea class="ff-note" rows="3" placeholder="note text — Markdown: headings, lists, tables, **bold**, *italic*, [link text](https://…), <red>…</red>" style="flex:1 1 100%;"></textarea>
       <input class="ff-url" placeholder="reference URL (e.g. EDMS drawing)">
       <input class="ff-image" placeholder="image URL (external)">
     </div>

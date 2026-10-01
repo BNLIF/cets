@@ -241,7 +241,8 @@ Board 3 @ 4.5, 32</pre>
     <span class="dd-ui">the item in position…</span> shows the positions of the sub-assembly in that position instead (the supercell in <code>SC1</code>).</p>
 
   <h2 id="text">Text formatting</h2>
-  <p>Instructions, field labels, a static note and each step accept <code>**bold**</code>, <code>*italic*</code>, <code>[link text](https://…)</code>, <code>&lt;red&gt;text&lt;/red&gt;</code> (also orange, green, blue, gray) and line breaks. Other HTML stays escaped.
+  <p>Field labels, table columns and each step accept <code>**bold**</code>, <code>*italic*</code>, <code>[link text](https://…)</code>, <code>&lt;red&gt;text&lt;/red&gt;</code> (also orange, green, blue, gray) and line breaks. Other HTML stays escaped.
+    The checklist's instructions and a static field's note take full Markdown on top: <code># headings</code>, <code>- bullets</code>, <code>1. numbered</code>, <code>| tables |</code>, <code>&gt; quotes</code>, <code>`code`</code>, <code>~~struck~~</code> — so a detailed procedure can be written in a static field. A single line break is a line break.
     Stored keys are the raw text, markers included. The fill page and the preview carry an A− / A+ / ↺ control that scales the whole checklist's text; the choice is remembered per device.</p>
 
   <h2 id="json">Schema JSON</h2>

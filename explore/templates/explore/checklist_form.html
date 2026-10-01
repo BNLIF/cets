@@ -56,7 +56,7 @@
   </select></label></p>
   {% endif %}
   {% if rev %}<div class="banner banner-warn" style="margin: 0 0 14px;">An older submission is loaded below. Submit writes it, with your edits, as the new latest version.</div>{% endif %}
-  {% if schema.instructions %}<p class="es-sub">{{ schema.instructions|clmd }}</p>{% endif %}
+  {% if schema.instructions %}<div class="es-sub cl-md">{{ schema.instructions|clmd_block }}</div>{% endif %}
   {% if schema_roles %}{% if schema_roles.ok == False %}<div class="banner banner-warn" style="margin: 0 0 14px;">&#9888; Submitting this checklist needs one of the HWDB roles <b>{{ schema_roles.required|join:", " }}</b>. Your account holds {% if schema_roles.mine %}<b>{{ schema_roles.mine|join:", " }}</b>{% else %}no roles{% endif %}, so the submit will be refused.</div>
   {% else %}<p class="es-sub">Submitting needs one of the HWDB roles <b>{{ schema_roles.required|join:", " }}</b>{% if schema_roles.ok %} — your account holds one{% endif %}.</p>{% endif %}{% endif %}
 
