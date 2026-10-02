@@ -46,7 +46,7 @@ External ID,Serial Number,Status,S:Drawing Number,C:A1,Comments
     <tr><td>Comments</td><td>The record’s comments.</td></tr>
     <tr><td><code>T:</code>&lt;key&gt;</td><td>A value in the record’s DATA; dots nest (<code>T:Damage.count</code>). On a Test sheet every other column is a <code>T:</code> key too.</td></tr>
     <tr><td><code>T:</code>&lt;list&gt;<code>[]</code>…</td><td>A list: <code>T:Boxes[].Label</code>, <code>T:Boxes[].Checks[].Result</code>, <code>T:Notes[]</code>. Rows naming the same item with the same plain values become one record; inside it each <code>[]</code> level holds one element per distinct set of scalar members.</td></tr>
-    <tr><td>Test data</td><td>A cell holding the whole DATA object as JSON (what a <code>.zip</code> gives).</td></tr>
+    <tr><td>Test data</td><td>A cell holding the DATA object itself as JSON, <code>{"Inspected By": "CZ", "Boxes": 4}</code> (a zip file’s <code>{"data": {…}}</code> wrapper is accepted too). In a <code>.csv</code> the cell must be in double quotes with the quotes inside doubled; a <code>.tsv</code> or <code>.xlsx</code> needs no quoting.</td></tr>
   </table>
   <pre>External ID,T:Date,T:Boxes[].Label,T:Boxes[].Checks[].Name,T:Boxes[].Checks[].Result
 {{ part_type_id }}-00018,2026-09-25,box 1,seal,ok

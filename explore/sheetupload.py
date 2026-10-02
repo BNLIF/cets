@@ -666,7 +666,12 @@ def plan_tests(records_: list[dict], ptid: str, live: dict, test_name: str) -> l
             else:
                 raise SheetError("no External ID and no serial number")
             whole = rec.get("test_data")
+            if isinstance(whole, dict) and set(whole) == {"data"} and isinstance(whole["data"], dict):
+                whole = whole["data"]   # the zip file's {"data": {...}} wrapper, pasted into a cell (Hajime 2026-10-01)
             if whole is not None and not isinstance(whole, dict):
+                if _text(whole)[:1] == "{":   # an unquoted JSON cell, split at its commas by the CSV reader
+                    raise SheetError("the test data cell was split at a comma — in a .csv put the JSON in double quotes "
+                                     "(with the quotes inside doubled), or use a .tsv or .xlsx")
                 raise SheetError("the test data cell is not a JSON object")
             if not rec["tests"] and not whole:
                 raise SheetError("no test values (T: columns or test data) in this row")

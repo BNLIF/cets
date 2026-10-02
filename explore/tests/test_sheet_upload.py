@@ -313,6 +313,21 @@ class GroupTest(TestCase):
         rows = su.plan_tests(su.records(s, su.auto_map(cols, {}, {}), merge=False), T, LIVE, "QC")
         self.assertEqual([r["rec"]["data"] for r in rows], [{"a": {"b": 1}}, {"a": {"b": 2}}])
 
+    def test_test_data_cell(self):
+        # Hajime 2026-10-01: a cell holding the zip file's {"data": {...}} wrapper means the same as the DATA
+        # object itself; a JSON cell left unquoted in a .csv is cut at its first comma and the error says so
+        cols = ["Serial Number", "Test data"]
+        def plan(cell):
+            s = {"values": {}, "columns": cols, "rows": [[2, ["HPK-1", cell]]]}
+            return su.plan_tests(su.records(s, su.auto_map(cols, {}, {}, (), "test"), merge=False), T, LIVE, "QC")[0]
+        self.assertEqual(plan({"Boxes": 4, "Damage": {"count": 0}})["rec"]["data"], {"Boxes": 4, "Damage": {"count": 0}})
+        self.assertEqual(plan({"data": {"Boxes": 4}})["rec"]["data"], {"Boxes": 4})
+        self.assertEqual(plan({"data": {"Boxes": 4}, "Other": 1})["rec"]["data"], {"data": {"Boxes": 4}, "Other": 1})
+        self.assertEqual(plan('{"data": { "Inspected By": "CZ"')["error"][:44], "the test data cell was split at a comma — in")
+        self.assertEqual(plan("just text")["error"], "the test data cell is not a JSON object")
+        (s,) = su.read_sheets("h.csv", b'Serial Number,Test data\nHPK-1,{"Boxes": 4, "Damage": {"count": 0}}\n')
+        self.assertEqual(s["rows"][0][1][1], '{"Boxes": 4')
+
 
 class ImageTest(TestCase):
     COLS = ["External ID", "Serial Number", "Image File", "Save As", "Comments", "History Order"]

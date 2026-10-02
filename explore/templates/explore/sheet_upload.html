@@ -254,7 +254,7 @@
             res.j.rows.forEach(show); done += res.j.rows.length; left = res.j.left; nEl.textContent = left;
             if (left > 0 && res.j.rows.length) return next();
             prog.textContent = "Done — " + done + " row" + (done === 1 ? "" : "s") + " uploaded" + (left ? ", " + left + " left" : "") + ".";
-            btn.textContent = "Done";
+            btn.hidden = true;   // nothing left to press (Hajime 2026-10-01: a "Done" button that did nothing)
           })
           .catch(function (e) { prog.textContent = "Request failed: " + e + " — press Continue."; btn.textContent = "Continue"; btn.disabled = false; });
       }
@@ -269,7 +269,7 @@
         function one() {
           if (i >= todo.length) {
             prog.textContent = "Done — " + done + " file" + (done === 1 ? "" : "s") + " sent" + (left ? ", " + left + " row" + (left === 1 ? "" : "s") + " still pending" : "") + ".";
-            btn.textContent = left ? "Continue" : "Done"; btn.disabled = !left; return;
+            btn.textContent = "Continue"; btn.disabled = !left; btn.hidden = !left; return;
           }
           var p = todo[i++], fd = new FormData(form);
           prog.textContent = "Sending " + p.file + "… " + done + " done, " + (todo.length - i + 1) + " to go";
