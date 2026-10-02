@@ -3,7 +3,7 @@
 {% block title %}{{ schema.name }} · Checklist · {{ part_id }} · HWDB Explorer{% endblock %}
 
 {% block side %}
-<div class="ex-side-label">Outline</div>
+<div class="ex-side-label" style="display:flex; align-items:baseline;">Outline <button type="button" class="clo-all" id="cl-outline-all">collapse all</button></div>
 <div id="cl-outline"></div>{# filled by _checklist_outline.html, included at the end of the page #}
 {% endblock %}
 

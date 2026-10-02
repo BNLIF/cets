@@ -3,7 +3,10 @@
   #cl-outline { font-size: 12.5px; color: var(--dim); }
   .clo-sec { display: flex; gap: 6px; align-items: center; padding: 5px 8px; border-radius: var(--r-sm);
     color: var(--ink); font-weight: 500; cursor: pointer; }
-  .clo-sec .car { color: var(--accent-ink); width: 12px; flex: none; }
+  .clo-sec .car { color: var(--accent-ink); flex: none; margin: -5px 0 -5px -8px; padding: 5px 4px 5px 8px; }   /* a tap target wider than the glyph */
+  .clo-all { font: inherit; font-size: 11px; letter-spacing: 0; text-transform: none; font-weight: 500; color: var(--accent-ink);
+    background: none; border: 0; padding: 0; margin-left: auto; cursor: pointer; }
+  .clo-all:hover { text-decoration: underline; }
   .clo-sec span:last-child, .clo-fld span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .clo-fld { display: flex; padding: 4px 8px 4px 30px; border-radius: var(--r-sm); cursor: pointer; min-width: 0; }
   .clo-sec:hover, .clo-fld:hover { background: var(--surface); }
@@ -27,7 +30,10 @@
     secs.forEach(function (sec, i) {
       if (sec.hidden) return;
       var depth = 0, p = sec.parentElement;
-      while (p && p.id !== "{{ root }}") { if (p.classList.contains("cl-sec")) depth++; p = p.parentElement; }
+      while (p && p.id !== "{{ root }}") {   // a folded section takes its sub-sections with it (Hajime 2026-10-02)
+        if (p.classList.contains("cl-sec")) { if (p.dataset.clo === "folded") return; depth++; }
+        p = p.parentElement;
+      }
       var folded = sec.dataset.clo === "folded", title = sec.querySelector(":scope > h2 .cl-fold");
       html += '<div class="clo-sec" data-i="' + i + '" style="padding-left:' + (8 + depth * 14) + 'px"><span class="car">' +
         (folded ? "\u25B8" : "\u25BE") + '</span><span>' + esc(title ? title.textContent.trim() : "Section") + '</span></div>';
@@ -44,8 +50,16 @@
       });
     });
     box.innerHTML = html;
+    var all = document.getElementById("cl-outline-all");
+    if (all) all.textContent = secs.every(function (s) { return s.dataset.clo === "folded"; }) ? "expand all" : "collapse all";
     mark();
   }
+  var allBtn = document.getElementById("cl-outline-all");
+  if (allBtn) allBtn.addEventListener("click", function () {   // collapse all ⇄ expand all
+    var fold = !secs.every(function (s) { return s.dataset.clo === "folded"; });
+    secs.forEach(function (s) { s.dataset.clo = fold ? "folded" : ""; });
+    build();
+  });
   function unfold(sec) {   // the section and every section around it
     for (var s = sec; s; s = s.parentElement.closest(".cl-sec")) {
       s.classList.remove("cl-folded");
