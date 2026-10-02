@@ -3900,7 +3900,7 @@ def explore_checklist_view(request, part_id, name):
             f["scan_qr_svg"] = scanning.qr_svg(f["scan_url"])
     return render(request, "explore/checklist_form.html", {
         "active_nav": "hardware",
-        "sidebar": navigation.sidebar_tree(inst, {}),
+        "sidebar": True,   # the aside shows the checklist's outline (the template's side block), not the type tree
         "part_id": part_id,
         "hwdb_ui_base": settings.HWDB_PROFILES[inst]["ui"],
         "scan_feed_url": _rev(request, "explore:scan_feed") + f"?target={part_id}",
@@ -3970,7 +3970,7 @@ def explore_checklist_blank_view(request, part_type_id, name):
         raise Http404(msg)
     return render(request, "explore/checklist_form.html", {
         "active_nav": "hardware",
-        "sidebar": navigation.sidebar_tree(inst, {}),
+        "sidebar": True,   # the aside shows the checklist's outline (the template's side block), not the type tree
         "blank": True,
         "part_type_id": part_type_id,
         "part_id": "",
@@ -4022,7 +4022,7 @@ def explore_type_checklist_view(request, part_type_id, name):
         # Checklists row and Link-to-checklist fields all land on this URL
         return render(request, "explore/checklist_organizer.html", {
             "active_nav": "hardware",
-            "sidebar": navigation.sidebar_tree(inst, {}),
+            "sidebar": True,   # the aside shows the organizer's outline (the template's side block), not the type tree
             "part_type_id": part_type_id,
             "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
             "cl_name": name,

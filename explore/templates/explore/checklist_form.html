@@ -2,6 +2,11 @@
 {% load static checklist %}
 {% block title %}{{ schema.name }} · Checklist · {{ part_id }} · HWDB Explorer{% endblock %}
 
+{% block side %}
+<div class="ex-side-label">Outline</div>
+<div id="cl-outline"></div>{# filled by _checklist_outline.html, included at the end of the page #}
+{% endblock %}
+
 {% block content %}
 <style>
   .es-page { padding: 22px 30px 56px; max-width: 1280px; }
@@ -168,6 +173,7 @@
 {% include "explore/_checklist_scan.html" %}
 {% include "explore/_checklist_pick.html" %}
 {% include "explore/_checklist_photo.html" %}
+{% include "explore/_checklist_outline.html" with root="cl-form" %}
 <script>
 (function () {
   // --- live tolerance coloring on number/table inputs -----------------------

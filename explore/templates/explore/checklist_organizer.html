@@ -2,6 +2,11 @@
 {% load checklist %}
 {% block title %}{{ schema.name }} · Organizer · {{ part_type_id }} · HWDB Explorer{% endblock %}
 
+{% block side %}
+<div class="ex-side-label">Outline</div>
+<div id="cl-outline"></div>{# filled by _checklist_outline.html, included at the end of the page #}
+{% endblock %}
+
 {% block content %}
 {# #189 (Hajime, for the CPA group): an organizer — a checklist of checklists on a consortium's virtual type. Sections of Link-to-checklist fields, selects that show/hide sections; no item, nothing to submit. #}
 <style>
@@ -29,7 +34,7 @@
   </div>
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
 
-  <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+  <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
     <h1>{{ schema.name }}{% if cl_name != schema.name %} <span class="mono" style="font-size:.7em; font-weight:400; color:var(--dim);">· {{ cl_name }}</span>{% endif %}</h1>
     <form method="post" action="{% url 'explore:checklist_bookmark' %}" style="margin:0 0 0 auto;">
       {% csrf_token %}
@@ -50,6 +55,7 @@
 </div>
 
 {% include "explore/_checklist_behavior.html" %}
+{% include "explore/_checklist_outline.html" with root="cl-org" %}
 <script>
 (function () {
   // the selects (north/south, module type) are remembered on this device per

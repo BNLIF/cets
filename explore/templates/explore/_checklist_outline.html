@@ -1,0 +1,86 @@
+{# The outline in the aside (Chao 2026-10-02), for the fill page and the organizer: the sections under #root (the item card, every section and sub-section, indented) with their fields; the page's side block holds the #cl-outline box this fills. #}
+<style>
+  #cl-outline { font-size: 12.5px; color: var(--dim); }
+  .clo-sec { display: flex; gap: 6px; align-items: center; padding: 5px 8px; border-radius: var(--r-sm);
+    color: var(--ink); font-weight: 500; cursor: pointer; }
+  .clo-sec .car { color: var(--accent-ink); width: 12px; flex: none; }
+  .clo-sec span:last-child, .clo-fld span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .clo-fld { display: flex; padding: 4px 8px 4px 30px; border-radius: var(--r-sm); cursor: pointer; min-width: 0; }
+  .clo-sec:hover, .clo-fld:hover { background: var(--surface); }
+  .clo-sec.on { background: var(--accent-bg); font-weight: 600; }
+</style>
+<script>
+// One row per section, its fields under it; a caret folds a section's fields in the outline only.
+// A click opens a folded section and scrolls to it, or to the field and focuses it. The section in view
+// is marked while scrolling; a section hidden by its "shown when" condition leaves the outline.
+(function () {
+  var box = document.getElementById("cl-outline"), layout = document.getElementById("ex-layout");
+  if (!box) return;
+  var secs = [].slice.call(document.querySelectorAll("#{{ root }} .cl-sec"));
+  if (!secs.length) { box.innerHTML = '<p class="es-hint">No sections.</p>'; return; }
+  function esc(t) { return t.replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+  function fieldsOf(sec) {
+    return [].filter.call(sec.querySelectorAll(".cl-field[data-label]"), function (f) { return f.closest(".cl-sec") === sec; });
+  }
+  function build() {
+    var html = "";
+    secs.forEach(function (sec, i) {
+      if (sec.hidden) return;
+      var depth = 0, p = sec.parentElement;
+      while (p && p.id !== "{{ root }}") { if (p.classList.contains("cl-sec")) depth++; p = p.parentElement; }
+      var folded = sec.dataset.clo === "folded", title = sec.querySelector(":scope > h2 .cl-fold");
+      html += '<div class="clo-sec" data-i="' + i + '" style="padding-left:' + (8 + depth * 14) + 'px"><span class="car">' +
+        (folded ? "\u25B8" : "\u25BE") + '</span><span>' + esc(title ? title.textContent.trim() : "Section") + '</span></div>';
+      if (folded) return;
+      fieldsOf(sec).forEach(function (f, j) {
+        var lab = f.querySelector(".cl-lab"), text = f.dataset.label;
+        if (lab) {   // the label as shown, without its hints (allowed range, linked position …)
+          lab = lab.cloneNode(true);
+          [].forEach.call(lab.querySelectorAll(".cl-hint"), function (h) { h.remove(); });
+          text = lab.textContent;
+        }
+        html += '<div class="clo-fld" data-i="' + i + '" data-j="' + j + '" style="padding-left:' + (30 + depth * 14) + 'px"><span>' +
+          esc(text.trim()) + '</span></div>';
+      });
+    });
+    box.innerHTML = html;
+    mark();
+  }
+  function unfold(sec) {   // the section and every section around it
+    for (var s = sec; s; s = s.parentElement.closest(".cl-sec")) {
+      s.classList.remove("cl-folded");
+      var b = s.querySelector(":scope > h2 .cl-fold");
+      if (b) b.setAttribute("aria-expanded", "true");
+    }
+  }
+  box.addEventListener("click", function (e) {
+    var row = e.target.closest(".clo-sec, .clo-fld");
+    if (!row) return;
+    var sec = secs[+row.dataset.i];
+    if (e.target.classList.contains("car")) { sec.dataset.clo = sec.dataset.clo === "folded" ? "" : "folded"; build(); return; }
+    unfold(sec);
+    var target = row.dataset.j !== undefined ? fieldsOf(sec)[+row.dataset.j] : sec;
+    target.scrollIntoView({ behavior: "smooth", block: row.dataset.j !== undefined ? "center" : "start" });
+    if (row.dataset.j !== undefined) {
+      var inp = target.querySelector("input:not([type=hidden]), select, textarea");
+      if (inp) inp.focus({ preventScroll: true });
+    }
+    if (layout) layout.classList.remove("drawer-open");   // on a phone the aside is a drawer
+  });
+  var ticking = false;
+  function mark() {   // the section whose top is nearest above a third of the viewport
+    ticking = false;
+    var line = window.innerHeight / 3, best = null, bestTop = -Infinity;
+    secs.forEach(function (sec, i) {
+      if (sec.hidden) return;
+      var top = sec.getBoundingClientRect().top;
+      if (top <= line && top > bestTop) { bestTop = top; best = i; }
+    });
+    if (best === null) best = secs.findIndex(function (s) { return !s.hidden; });
+    [].forEach.call(box.querySelectorAll(".clo-sec"), function (r) { r.classList.toggle("on", +r.dataset.i === best); });
+  }
+  window.addEventListener("scroll", function () { if (!ticking) { ticking = true; requestAnimationFrame(mark); } }, { passive: true });
+  new MutationObserver(build).observe(document.getElementById("{{ root }}"), { attributes: true, attributeFilter: ["hidden"], subtree: true });
+  build();
+})();
+</script>

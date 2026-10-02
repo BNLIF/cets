@@ -221,6 +221,7 @@
                     <a{% if active_nav == 'docs' %} class="active"{% endif %} href="{% url 'explore:docs' %}">Docs</a>
                 </nav>
                 {% if sidebar %}
+                {% block side %}
                 <nav class="ex-side-instance" aria-label="HWDB instance">
                     <a{% if hwdb_instance == "prod" %} class="is-on" aria-current="true"{% endif %}
                        href="{{ instance_homes.prod }}" title="Production HWDB">Production</a>
@@ -229,6 +230,7 @@
                 </nav>
                 <div class="ex-side-label">{{ sidebar_label|default:"Curated hierarchy" }}</div>
                 {% for node in sidebar %}{% include "explore/_tree_node.html" with node=node %}{% endfor %}
+                {% endblock %}
                 {% endif %}
             </aside>
             <div class="ex-scrim" id="ex-scrim"></div>
