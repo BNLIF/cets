@@ -631,7 +631,7 @@
                 return '<a href="' + open.replace("__N__", encodeURIComponent(n)) +
                        '" title="fill this checklist out — scan or pick the item’s PID there, or mint a new item">' +
                        n.replace(/&/g, "&amp;").replace(/</g, "&lt;") + '</a>';
-            }).join('<span class="sep">·</span>');
+            }).join('<span class="sep">·</span> ');
             clDd.hidden = false;
             document.getElementById("cl-names-dt").hidden = false;
         })
