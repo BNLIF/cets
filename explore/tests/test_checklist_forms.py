@@ -1904,6 +1904,29 @@ class FormulaCellsTest(TestCase):
                          (10.0, 12.0))
         self.assertEqual(cells["Total"]["range"], "10 – 12")
 
+    def test_strict_limit_excludes_its_value(self):
+        # Hajime 2026-10-05: "< 30 mm" — a limit with a leading < or > is
+        # open; <= / >= stay closed
+        schema = self._schema([
+            {"label": "A", "max": "<30"},
+            {"label": "B", "min": ">5", "max": "<=30"},
+            {"label": "C", "min": "> 5", "max": "< 30"}])
+        f = schema["sections"][0]["fields"][0]
+        self.assertEqual(f["col_tol"], {
+            "A": {"min": None, "max": 30.0, "range": "< 30", "max_open": True},
+            "B": {"min": 5.0, "max": 30.0, "range": "5 < … ≤ 30", "min_open": True},
+            "C": {"min": 5.0, "max": 30.0, "range": "5 < … < 30",
+                  "min_open": True, "max_open": True}})
+        bound = checklistforms.bind(schema, {})["sections"][0]["fields"][0]
+        cells = {c["column"]: c for c in bound["cells"]}
+        self.assertEqual((cells["A"]["min_open"], cells["A"]["max_open"]), (False, True))
+        self.assertEqual((cells["B"]["min_open"], cells["B"]["max_open"]), (True, False))
+        # a number field: the same keys at the field level
+        f = checklistforms.normalize({"sections": [{"title": "S", "fields": [
+            {"label": "L", "type": "number", "min": ">0"}]}]}, "x")["sections"][0]["fields"][0]
+        self.assertEqual((f["min"], f["max"], f["range"], f.get("min_open")),
+                         (0.0, None, "> 0", True))
+
     def test_form_renders_computed_cells_readonly(self):
         user = get_user_model().objects.create_user("n", "n@n.io", "pw")
         self.client.force_login(user)
@@ -3436,11 +3459,11 @@ class LegacyTableGoldenTest(TestCase):
             "max": 1.7, "min": 1.5, "range": "1.5 – 1.7", "texts": {"Expected": "1.6"},
             "to_spec": False, "type": "table", "units": "mm"}
     BIND = [{"column": "P1", "formula": "", "max": 1.7, "min": 1.5, "name": "f1-0-c0",
-             "range": "", "text": "", "value": "1.7", "color": ""},
+             "range": "", "text": "", "value": "1.7", "color": "", "min_open": False, "max_open": False},
             {"column": "Expected", "formula": "", "max": None, "min": None,
-             "name": "f1-0-c1", "range": "", "text": "1.6", "value": "1.6", "color": ""},
+             "name": "f1-0-c1", "range": "", "text": "1.6", "value": "1.6", "color": "", "min_open": False, "max_open": False},
             {"column": "Diff", "formula": "C1 - C2", "max": 0.1, "min": -0.1,
-             "name": "f1-0-c2", "range": "-0.1 – 0.1", "text": "", "value": "0.1", "color": ""}]
+             "name": "f1-0-c2", "range": "-0.1 – 0.1", "text": "", "value": "0.1", "color": "", "min_open": False, "max_open": False}]
     HTML = ('<table class="cl-table cl-gridlines cl-tint" style="--cl-tint: #fff2cc;"> <thead><tr>'
             '<th title="">P1</th><th title="">Expected</th>'
             '<th title="= C1 - C2 · allowed -0.1 – 0.1">Diff <span aria-hidden="true">&fnof;</span> '

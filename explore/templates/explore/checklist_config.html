@@ -387,8 +387,8 @@
       <input class="ff-units" placeholder="units" style="flex:0 0 76px;">
       <input class="ff-nominal" placeholder="nominal" inputmode="decimal" style="flex:0 0 90px;">
       <input class="ff-tol" placeholder="&#177; tol" inputmode="decimal" style="flex:0 0 76px;">
-      <input class="ff-min" placeholder="min" inputmode="decimal" style="flex:0 0 76px;">
-      <input class="ff-max" placeholder="max" inputmode="decimal" style="flex:0 0 76px;">
+      <input class="ff-min" placeholder="min" inputmode="decimal" style="flex:0 0 76px;" title="lowest accepted value; > 5 excludes 5 itself">
+      <input class="ff-max" placeholder="max" inputmode="decimal" style="flex:0 0 76px;" title="highest accepted value; < 30 excludes 30 itself">
       <label class="ec-inline ff-color-w" title="cell background tint keyed to the reference drawing">tint
         <input type="color" class="ff-color" list="clc-tints"></label>
       <button type="button" class="ec-del ff-colorclear" style="display:none;" title="Remove the tint">&#x2715; tint</button>
@@ -1184,6 +1184,12 @@
     var v = parseFloat($(cls, r).value);
     return isNaN(v) ? null : v;
   }
+  // a min / max: a number, or "<30" / ">5" kept as a string for a strict
+  // limit (Hajime 2026-10-05); "<=30" is just 30
+  function parseBound(s) {
+    var m = /^([<>]=?)\s*(.*)$/.exec(s.trim()), n = parseFloat(m ? m[2] : s);
+    return isNaN(n) ? null : m && m[1].length === 1 ? m[1] + n : n;
+  }
   function list(raw, sep) {
     return raw.split(sep).map(function (x) { return x.trim(); }).filter(Boolean);
   }
@@ -1191,13 +1197,14 @@
   // #109 column syntax, both ways: "label = C1 + C2 [11 ± 1]" — optional
   // formula (or a quoted fixed text, #114), optional own tolerance in
   // brackets (nominal ± tol, nominal +- tol, or min..max)
-  function parseSpec(spec) {   // "[11 ± 1]" / "[11 +- 1]" / "[min..max]" → range keys
+  function parseSpec(spec) {   // "[11 ± 1]" / "[11 +- 1]" / "[min..max]" ("[>5..<30]" strict) → range keys
     var out = {}, t2 = /^(-?[\d.]+)\s*(?:±|\+-)\s*([\d.]+)$/.exec(spec),
-        mm = /^(-?[\d.]*)\s*\.\.\s*(-?[\d.]*)$/.exec(spec);
+        mm = /^([<>]?=?\s*-?[\d.]*)\s*\.\.\s*([<>]?=?\s*-?[\d.]*)$/.exec(spec);
     if (t2) { out.nominal = parseFloat(t2[1]); out.tol = parseFloat(t2[2]); }
     else if (mm) {
-      if (mm[1]) out.min = parseFloat(mm[1]);
-      if (mm[2]) out.max = parseFloat(mm[2]);
+      var lo = parseBound(mm[1]), hi = parseBound(mm[2]);
+      if (lo !== null) out.min = lo;
+      if (hi !== null) out.max = hi;
     }
     return out;
   }
@@ -1294,8 +1301,10 @@
     if (t === "number" || t === "table") {
       var units = $(".ff-units", r).value.trim();
       if (units) f.units = units;
-      [["nominal", ".ff-nominal"], ["tol", ".ff-tol"], ["min", ".ff-min"], ["max", ".ff-max"]]
+      [["nominal", ".ff-nominal"], ["tol", ".ff-tol"]]
         .forEach(function (p) { var v = num(r, p[1]); if (v !== null) f[p[0]] = v; });
+      [["min", ".ff-min"], ["max", ".ff-max"]]
+        .forEach(function (p) { var v = parseBound($(p[1], r).value); if (v !== null) f[p[0]] = v; });
     }
     if (t === "table") {
       f.columns = list($(".ff-columns", r).value, /[,\n]/).map(parseCol);
@@ -1555,7 +1564,9 @@
     if (el.value.trim() === "" || isNaN(v)) return;
     var lo = el.hasAttribute("data-min") ? parseFloat(el.getAttribute("data-min")) : -Infinity;
     var hi = el.hasAttribute("data-max") ? parseFloat(el.getAttribute("data-max")) : Infinity;
-    el.classList.add(v >= lo && v <= hi ? "cl-ok" : "cl-bad");
+    var okLo = el.hasAttribute("data-min-open") ? v > lo : v >= lo,   // a strict end (data-min-open) excludes the limit itself
+        okHi = el.hasAttribute("data-max-open") ? v < hi : v <= hi;
+    el.classList.add(okLo && okHi ? "cl-ok" : "cl-bad");
   }
   // what the previewer did in the pane — typed values, a picked variant,
   // folded/unfolded sections — survives the re-render, so a change can be

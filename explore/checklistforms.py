@@ -88,20 +88,44 @@ def _num(v):
         return None
 
 
-def _tol_range(f: dict):
-    """``(min, max, display range)`` from a tolerance spec: explicit min/max,
-    or nominal ± tol — the field-level vocabulary, reused per table column
-    (#109 review)."""
+# a limit with a leading < or > (Hajime 2026-10-05: "< 30 mm" excludes 30);
+# <= / >= keep the end closed
+_BOUND = re.compile(r"^\s*([<>])\s*(=?)\s*(.*)$")
+
+
+def _bound(v):
+    """A limit as ``(value, open)``: a number, or a string such as ``"<30"``
+    / ``">5"`` for a strict (open) end."""
+    m = _BOUND.match(v) if isinstance(v, str) else None
+    val = _num(m.group(3) if m else v)
+    return val, bool(m and not m.group(2) and val is not None)
+
+
+def _tol_range(f: dict) -> dict:
+    """``{min, max, range}`` (+ ``min_open`` / ``max_open`` when an end is
+    strict) from a tolerance spec: explicit min/max, or nominal ± tol — the
+    field-level vocabulary, reused per table column (#109 review)."""
     nominal, tol = _num(f.get("nominal")), _num(f.get("tol"))
-    lo, hi = _num(f.get("min")), _num(f.get("max"))
+    (lo, lo_open), (hi, hi_open) = _bound(f.get("min")), _bound(f.get("max"))
     if nominal is not None and tol is not None:
         # round: 1.6 + 0.1 must be 1.7, not 1.7000000000000002
         lo = round(nominal - tol, 9) if lo is None else lo
         hi = round(nominal + tol, 9) if hi is None else hi
-    rng = (f"{lo:g} – {hi:g}" if lo is not None and hi is not None
-           else f"≥ {lo:g}" if lo is not None
-           else f"≤ {hi:g}" if hi is not None else "")
-    return lo, hi, rng
+    if lo is not None and hi is not None:
+        rng = (f"{lo:g} – {hi:g}" if not (lo_open or hi_open)
+               else f"{lo:g} {'<' if lo_open else '≤'} … {'<' if hi_open else '≤'} {hi:g}")
+    elif lo is not None:
+        rng = f"{'>' if lo_open else '≥'} {lo:g}"
+    elif hi is not None:
+        rng = f"{'<' if hi_open else '≤'} {hi:g}"
+    else:
+        rng = ""
+    out = {"min": lo, "max": hi, "range": rng}
+    if lo_open:
+        out["min_open"] = True
+    if hi_open:
+        out["max_open"] = True
+    return out
 
 
 # #109: computed table cells — only digits, cell refs and + - * / ( ) ever
@@ -402,7 +426,7 @@ def _norm_field(f: dict) -> dict | None:
         if expect and "." not in expect:
             out["expect"] = expect
     if t in ("number", "table"):
-        out["min"], out["max"], out["range"] = _tol_range(f)
+        out.update(_tol_range(f))
     if t == "table":
         # #109 (Hajime): a column may be {"label": …, "formula": "C1 + C2*(C3/C4)"}
         # — computed from the row's other cells, C<n> = 1-based column index —
@@ -477,9 +501,9 @@ def _norm_field(f: dict) -> dict | None:
                     texts[label] = tx
                 elif label and fx and _FORMULA_CHARS.match(fx):
                     formulas[label] = fx
-                lo, hi, rng = _tol_range(c)
-                if label and (lo is not None or hi is not None):
-                    col_tol[label] = {"min": lo, "max": hi, "range": rng}
+                tr = _tol_range(c)
+                if label and (tr["min"] is not None or tr["max"] is not None):
+                    col_tol[label] = tr
             else:
                 label = str(c).strip()
             if label:
@@ -555,8 +579,8 @@ def _norm_field(f: dict) -> dict | None:
             rr = {str(k).strip(): _tol_range(v) for k, v in rr.items()
                   if isinstance(v, dict) and str(k).strip() in cols
                   and str(k).strip() not in checks}
-            rr = {k: {"min": lo, "max": hi, "range": rng} for k, (lo, hi, rng) in rr.items()
-                  if lo is not None or hi is not None}
+            rr = {k: tr for k, tr in rr.items()
+                  if tr["min"] is not None or tr["max"] is not None}
             if rr:
                 row["ranges"] = rr
             if _tint(rw.get("color")):
@@ -911,12 +935,13 @@ def _table_cells(f: dict, cells: dict, tx: dict, prefix: str, rr: dict | None = 
                         "formula": "", "text": "", "min": None, "max": None, "range": "",
                         "color": cc.get(c, "")})
             continue
+        tr = {} if c in tx else (ct[c] if c in ct else f)
         out.append({"column": c, "name": f"{prefix}-c{i}", "color": cc.get(c, ""),
                     "value": tx[c] if c in tx else _fmt("" if isinstance(v, dict) else v),
                     "formula": "" if c in tx else fx.get(c, ""),
                     "text": tx.get(c, ""),
-                    "min": None if c in tx else (ct[c]["min"] if c in ct else f["min"]),
-                    "max": None if c in tx else (ct[c]["max"] if c in ct else f["max"]),
+                    "min": tr.get("min"), "max": tr.get("max"),
+                    "min_open": tr.get("min_open", False), "max_open": tr.get("max_open", False),
                     "range": ct[c]["range"] if c in ct and c not in tx else ""})
         # Chao 2026-09-28: a fixed Type ID a count column reads links to the type's page
         if c in counts.values() and re.fullmatch(r"[A-Za-z]\d{11}", tx.get(c, "").strip()):

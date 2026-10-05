@@ -183,7 +183,9 @@
     if (el.value.trim() === "" || isNaN(v)) return;
     var lo = el.hasAttribute("data-min") ? parseFloat(el.getAttribute("data-min")) : -Infinity;
     var hi = el.hasAttribute("data-max") ? parseFloat(el.getAttribute("data-max")) : Infinity;
-    el.classList.add(v >= lo && v <= hi ? "cl-ok" : "cl-bad");
+    var okLo = el.hasAttribute("data-min-open") ? v > lo : v >= lo,   // a strict end (data-min-open) excludes the limit itself
+        okHi = el.hasAttribute("data-max-open") ? v < hi : v <= hi;
+    el.classList.add(okLo && okHi ? "cl-ok" : "cl-bad");
   }
   document.addEventListener("input", function (e) {
     if (e.target.matches && e.target.matches("input[data-min], input[data-max]")) paint(e.target);
