@@ -88,6 +88,20 @@ echo yes | python manage.py collectstatic
 sudo systemctl restart cets.service
 ```
 
+### Ops page
+
+`/hw/ops/` shows who uses the app, the warning log, sync health and machine
+facts to the accounts named in the environment; everyone else gets a 404.
+The warning log it tails, `cets.log` (warnings and above, rotating), lives
+in `CETS_LOG_DIR` (default `tmp/` under the checkout). The service user
+must be able to write it; under a tree owned by someone else, pre-create
+it once:
+
+```
+CETS_OPS_USERS=fnal:chaoz          # in .env; comma-separated Django usernames
+touch tmp/cets.log && chmod 666 tmp/cets.log
+```
+
 ### Cron
 
 Beside the nightly backup (below), one line keeps the Upload-sheet retention

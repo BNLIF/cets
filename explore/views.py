@@ -36,8 +36,8 @@ from hwdb.fnal import session as fnal_session
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for, verify_link
 
 from . import (activity, charts, checklistforms, checklists, curation, events,
-               execsummary, itemsedit, labels, navigation, parts, plotting, scanning, sheetupload,
-               watches)
+               execsummary, itemsedit, labels, navigation, ops, parts, plotting, scanning,
+               sheetupload, watches)
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, refresh_component_row, sync_test_events
 from .hierarchy import sync_hierarchy, sync_system
@@ -6747,6 +6747,19 @@ def explore_watch_seen_view(request):
 
 @login_not_required
 @fnal_login_required
+def explore_ops_view(request):
+    """The ops page (#194): who uses the app, what broke, how the server is
+    doing — users and their request counts, the WARNING+ log tail, sync
+    health on both instances, the Activities feed by day, sheet uploads,
+    machine facts, the access-log tail. Only the usernames in
+    ``settings.OPS_USERS`` may open it; everyone else gets a 404 so the page
+    doesn't advertise itself. Local database and log files only, never
+    HWDB (``ops.collect``)."""
+    if not ops.allowed(request.user):
+        raise Http404
+    return render(request, "explore/ops.html", {"active_nav": "ops", **ops.collect()})
+
+
 def explore_docs_view(request):
     """External DUNE HWDB documentation links (training site, API reference,
     the HWDB web UIs, consortium references). Static curated content — the

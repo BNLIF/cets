@@ -68,6 +68,7 @@ urlpatterns = [
          name="checklist_bookmark"),
     path("sw.js", views.explore_sw_view, name="sw"),
     path("profile/", views.explore_profile_view, name="profile"),
+    path("ops/", views.explore_ops_view, name="ops"),   # #194: OPS_USERS only, 404 otherwise
     path("login/", views.login_view, name="login"),
     path("login/poll/", views.login_poll_view, name="login_poll"),
     path("sync/", views.explore_sync_view, name="sync"),

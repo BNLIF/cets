@@ -3,6 +3,7 @@ and the prod⇄dev switch targets rendered in explore/base.html. Plus the
 watched-activity badge (#90), computed lazily so only templates that render
 it (explore/base.html) pay its two small mirror queries."""
 
+from django.conf import settings
 from django.urls import reverse
 from django.utils.functional import SimpleLazyObject
 
@@ -41,4 +42,12 @@ def instance(request):
         },
         "watch_unread": SimpleLazyObject(_unread),
         "user_initials": SimpleLazyObject(_initials),
+        # #194: the Ops nav item shows only for the allow-listed accounts
+        "is_ops_user": SimpleLazyObject(lambda: _ops(request)),
     }
+
+
+def _ops(request) -> bool:
+    user = getattr(request, "user", None)
+    return bool(user is not None and user.is_authenticated
+                and user.get_username() in settings.OPS_USERS)

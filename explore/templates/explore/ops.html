@@ -1,0 +1,202 @@
+{% extends 'explore/base.html' %}
+{% block title %}Ops · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  /* Chosen layout (#194): B's one-line health strip over A's one-page dashboard, full window width. */
+  .ops-strip { position: sticky; top: 0; z-index: 2; background: var(--surface); border-bottom: 1px solid var(--rule);
+    font-size: 12.5px; color: var(--dim); padding: 7px 30px; display: flex; gap: 6px 20px; flex-wrap: wrap; align-items: center; }
+  .ops-strip b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .ops-strip .at { margin-left: auto; color: var(--faint); }
+  .ops { padding: 18px 30px 56px; }
+  @media (max-width: 600px) { .ops { padding: 14px 16px 40px; } .ops-strip { padding: 7px 16px; } }
+  .ops-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+  .ops-head h1 { font-size: 1.5rem; color: var(--ink); margin: 0; letter-spacing: -0.01em; }
+  .ops-head .hint { font-size: 13px; }
+  .ops-grid { display: grid; grid-template-columns: minmax(0,1.5fr) minmax(0,1fr); gap: 16px; }
+  @media (max-width: 900px) { .ops-grid { grid-template-columns: 1fr; } }
+  .ops-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .ops-card { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg); padding: 14px 16px 16px; min-width: 0; }
+  .ops-card.full { margin-top: 16px; }
+  .ops-card h2 { font-size: 12px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; font-weight: 600;
+    margin: 0 0 10px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .ops-card h2 .cnt { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--dim); }
+  .ops-card h2 .more { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 12px; color: var(--accent-ink); text-decoration: none; }
+  .hint { font-size: 11.5px; color: var(--faint); }
+  .ago { white-space: nowrap; }
+  .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  .num { font-variant-numeric: tabular-nums; }
+  .twrap { overflow-x: auto; margin: 0 -4px; }
+  .t { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .t th { text-align: left; font-weight: 600; color: var(--faint); font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em;
+    padding: 4px 8px 6px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+  .t td { padding: 5px 8px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  .t tr:last-child td { border-bottom: 0; }
+  .t td.r, .t th.r { text-align: right; }
+  .t .mono { font-size: 12.5px; }
+  .t .dimc { color: var(--dim); } .t .faintc { color: var(--faint); }
+  .bar { display: inline-block; width: 60px; height: 8px; background: var(--accent-bg); border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+  .bar i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+  .pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--rule); color: var(--dim); white-space: nowrap; line-height: 1.5; }
+  .pill.ok { color: var(--good); background: oklch(0.95 0.04 145); border-color: transparent; }
+  .pill.warn { color: var(--warn); background: var(--warn-bg); border-color: transparent; }
+  .pill.bad { color: var(--bad); background: oklch(0.95 0.04 25); border-color: transparent; }
+  .pill.acc { color: var(--accent-ink); background: var(--accent-soft); border-color: transparent; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--rule-hard); vertical-align: middle; margin-right: 6px; }
+  .dot.ok { background: var(--good); } .dot.warn, .dot.running { background: var(--warn); } .dot.bad { background: var(--bad); }
+  .log { background: #1c1812; color: #e7dfce; border-radius: var(--r-md); padding: 10px 12px; font-family: var(--font-mono); font-size: 12px;
+    line-height: 1.5; overflow-x: auto; white-space: pre; margin: 0; max-height: 420px; overflow-y: auto; }
+  .log .d { color: #9b8f78; } .log .w { color: #e8b86b; font-weight: 600; } .log .e { color: #ee8f7d; font-weight: 600; } .log .x { color: #b8ad96; }
+  .kv { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .kv td { padding: 3px 6px 3px 0; vertical-align: baseline; }
+  .kv td.k { color: var(--faint); width: 36%; white-space: nowrap; }
+  .chart { display: grid; grid-template-columns: repeat(30, 1fr); gap: 2px; align-items: end; height: 110px; margin: 8px 0 4px; }
+  .chart .col { display: flex; flex-direction: column-reverse; min-width: 0; height: 100%; }
+  .chart .col i { display: block; width: 100%; }
+  .chart-x { display: flex; justify-content: space-between; font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--dim); margin-top: 8px; }
+  .legend span i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 5px; }
+  .k-checklist { background: oklch(0.55 0.13 55); } .k-item { background: oklch(0.68 0.10 55); } .k-es { background: oklch(0.80 0.07 70); }
+  .k-pack { background: oklch(0.50 0.10 145); } .k-location { background: oklch(0.70 0.08 145); } .k-minted { background: oklch(0.42 0.13 55); }
+  .k-spec { background: oklch(0.62 0.05 240); } .k-curation { background: oklch(0.75 0.05 240); } .k-sync { background: var(--rule-hard); }
+  .problem { border: 1px solid var(--bad); background: oklch(0.95 0.04 25); color: var(--ink); border-radius: var(--r-md); padding: 8px 12px; font-size: 13px; margin-bottom: 12px; }
+  .empty { color: var(--faint); font-size: 13px; padding: 6px 2px; }
+</style>
+
+<div class="ops-strip">
+  {% for s in sync.instances %}<span><span class="dot {{ s.status }}"></span>{{ s.instance }} sync {% if s.running %}<b>running</b>{% elif s.state and s.state.finished_at %}<b>{{ s.finished_ago }}</b>{% if s.status == 'bad' %} · errors{% endif %}{% else %}<b>never</b>{% endif %}</span>{% endfor %}
+  {% if errors %}<span><span class="dot {% if errors.error_24h %}bad{% elif errors.warn_24h %}warn{% else %}ok{% endif %}"></span><b>{{ errors.warn_24h }}{% if errors.capped %}+{% endif %}</b> warning{{ errors.warn_24h|pluralize }} · 24 h</span>{% endif %}
+  {% if users %}<span><b>{{ users.today }}</b> user{{ users.today|pluralize }} today</span><span><b>{{ users.requests_today }}</b> request{{ users.requests_today|pluralize }} today</span>{% endif %}
+  {% if machine.load %}<span>load <b>{{ machine.load.0|floatformat:2 }}</b></span>{% endif %}
+  {% if machine.db_size %}<span>db <b>{{ machine.db_size|filesizeformat }}</b></span><span><b>{{ machine.disk_free|filesizeformat }}</b> free</span>{% endif %}
+  <span class="at">{{ now|date:"Y-m-d H:i" }} UTC</span>
+</div>
+
+<div class="ops">
+  <div class="ops-head"><h1>Ops</h1><span class="hint">Who uses the app, what broke, how the server is doing. Local database and log files only; nothing here calls HWDB.</span></div>
+  {% for p in problems %}<div class="problem">Section unavailable — {{ p }}</div>{% endfor %}
+
+  <div class="ops-grid">
+    <div class="ops-col">
+
+      <div class="ops-card">
+        <h2>Users {% if users %}<span class="cnt">{{ users.today }} active today · {{ users.month }} of {{ users.total }} logged in within 30 days</span>{% endif %}</h2>
+        {% if users %}
+        <div class="twrap"><table class="t">
+          <thead><tr><th>User</th><th>First seen</th><th>Last login</th><th>Last seen</th><th class="r">Requests 7 d</th><th></th></tr></thead>
+          <tbody>
+          {% for u in users.rows %}
+          <tr>
+            <td class="mono">{{ u.username }}</td>
+            <td class="mono dimc">{{ u.joined|date:"Y-m-d" }}</td>
+            <td class="mono dimc">{{ u.last_login|date:"Y-m-d H:i"|default:"—" }}</td>
+            <td class="mono">{% if u.last_seen %}{{ u.last_seen|date:"Y-m-d H:i" }} <span class="faintc ago">· {{ u.last_seen_ago }}</span>{% else %}<span class="faintc">—</span>{% endif %}</td>
+            <td class="r num"><span class="bar"><i style="width:{{ u.pct }}%"></i></span>{{ u.week }}</td>
+            <td>{% if u.superuser %}<span class="pill">superuser</span>{% elif u.member %}<span class="pill acc">cets</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table></div>
+        <p class="hint" style="margin:8px 0 0">Last seen and request counts come from the usage table{% if users.tracked_since %}, kept since {{ users.tracked_since|date:"Y-m-d" }}{% endif %}; last login is Django's, which only moves at sign-in.</p>
+        {% endif %}
+      </div>
+
+      <div class="ops-card">
+        <h2>Errors {% if errors %}<span class="cnt">warnings and above · last {{ errors.entries|length }} record{{ errors.entries|length|pluralize }}{% if errors.size %} · {{ errors.size|filesizeformat }}{% endif %}</span>{% endif %}</h2>
+        {% if errors and errors.entries %}
+        <pre class="log">{% for e in errors.entries %}<span class="d">{{ e.ts|date:"Y-m-d H:i:s" }}</span> <span class="{% if e.level == 'ERROR' or e.level == 'CRITICAL' %}e{% else %}w{% endif %}">{{ e.level|ljust:"8" }}</span><span class="d">{{ e.logger }}</span>  {{ e.message }}{% for x in e.extra %}
+<span class="x">{{ x }}</span>{% endfor %}
+{% endfor %}</pre>
+        {% elif errors and not errors.exists %}
+        <div class="empty">No log file yet at <span class="mono">{{ errors.path }}</span>. It appears with the first warning once the file is writable by the service user.</div>
+        {% elif errors %}
+        <div class="empty">Nothing logged.</div>
+        {% endif %}
+      </div>
+
+    </div>
+    <div class="ops-col">
+
+      <div class="ops-card">
+        <h2>Sync health</h2>
+        {% if sync %}
+        <div class="twrap"><table class="t">
+          <thead><tr><th>Instance</th><th>Hierarchy sync</th><th>Types</th><th>Mirror</th></tr></thead>
+          <tbody>
+          {% for s in sync.instances %}
+          <tr>
+            <td><span class="dot {{ s.status }}"></span><span class="mono">{{ s.instance }}</span></td>
+            <td class="mono">{% if s.running %}running since {{ s.state.started_at|date:"H:i" }}{% elif s.state and s.state.finished_at %}{{ s.state.finished_at|date:"Y-m-d H:i" }} <span class="faintc ago">· {{ s.finished_ago }}</span><br><span class="dimc">{{ s.state.systems_count }} systems · {{ s.state.nodes_count }} nodes</span>{% else %}<span class="faintc">never</span>{% endif %}
+              {% if s.state and s.state.last_error %}<br><span style="color:var(--bad); font-size:12px">{{ s.state.last_error|truncatechars:160 }}</span>{% endif %}</td>
+            <td class="num">{{ s.synced }} of {{ s.types }} tests-synced{% if s.newest %}<br><span class="dimc ago">newest {{ s.newest_ago }}</span>{% endif %}{% if s.errors %}<br><span class="pill bad">{{ s.errors }} with errors</span>{% endif %}</td>
+            <td class="num dimc">{{ s.items }} items<br>{{ s.tests }} tests</td>
+          </tr>
+          {% for t in s.error_types %}<tr><td></td><td colspan="3" class="mono" style="font-size:12px" title="{{ t.full }}">{{ t.part_type_id }} <span class="dimc">{{ t.name }}</span> <span style="color:var(--bad)">· {{ t.short }}</span></td></tr>{% endfor %}
+          {% endfor %}
+          </tbody>
+        </table></div>
+        {% if sync.chips %}
+        <div class="twrap" style="margin-top:12px"><table class="t">
+          <thead><tr><th>CE chip mirror</th><th>Last run</th><th class="r">Chips</th><th class="r">New</th><th class="r">Gone</th></tr></thead>
+          <tbody>
+          {% for c in sync.chips %}
+          <tr><td><span class="dot {% if c.error %}bad{% elif c.finished %}ok{% endif %}"></span><span class="mono">{{ c.family }}</span></td>
+            <td class="mono dimc">{{ c.finished|date:"Y-m-d H:i"|default:"—" }}{% if c.finished_ago %} <span class="faintc ago">· {{ c.finished_ago }}</span>{% endif %}{% if c.error %}<br><span style="color:var(--bad); font-size:12px">{{ c.error|truncatechars:120 }}</span>{% endif %}</td>
+            <td class="r num">{{ c.total }}</td><td class="r num">{{ c.new }}</td><td class="r num">{{ c.gone }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table></div>
+        {% endif %}
+        {% endif %}
+      </div>
+
+      <div class="ops-card">
+        <h2>Machine</h2>
+        {% if machine %}
+        <table class="kv">
+          {% if machine.db_size %}<tr><td class="k">Database</td><td class="mono">{{ machine.db_size|filesizeformat }} <span class="hint">+ WAL {{ machine.wal_size|filesizeformat }} · {{ machine.free_bytes|filesizeformat }} free pages</span></td></tr>
+          <tr><td class="k">Disk</td><td class="mono">{{ machine.disk_free|filesizeformat }} free of {{ machine.disk_total|filesizeformat }} <span class="bar" style="width:70px"><i style="width:{{ machine.disk_pct }}%"></i></span></td></tr>{% endif %}
+          {% if machine.load %}<tr><td class="k">Load</td><td class="mono">{{ machine.load.0|floatformat:2 }} {{ machine.load.1|floatformat:2 }} {{ machine.load.2|floatformat:2 }}</td></tr>{% endif %}
+          {% if machine.mem_total %}<tr><td class="k">Memory</td><td class="mono">{{ machine.mem_used|filesizeformat }} of {{ machine.mem_total|filesizeformat }} <span class="bar" style="width:70px"><i style="width:{{ machine.mem_pct }}%"></i></span></td></tr>{% endif %}
+          <tr><td class="k">gunicorn up since</td><td class="mono">{% if machine.started %}{{ machine.started|date:"Y-m-d H:i" }} <span class="hint">· {{ machine.started_ago }}</span>{% else %}<span class="hint">not available on this platform</span>{% endif %}</td></tr>
+          <tr><td class="k">Code</td><td class="mono">{{ machine.rev|default:"—" }} <span class="hint">· Python {{ machine.python }} · Django {{ machine.django }} · SQLite {{ machine.sqlite }}</span></td></tr>
+        </table>
+        {% endif %}
+      </div>
+
+      <div class="ops-card">
+        <h2>Sheet uploads {% if jobs %}<span class="cnt">last {{ jobs.days }} days</span>{% endif %}</h2>
+        {% if jobs and jobs.rows %}
+        <div class="twrap"><table class="t">
+          <thead><tr><th>When</th><th>User</th><th>Type</th><th class="r">Rows</th><th>Status</th></tr></thead>
+          <tbody>
+          {% for j in jobs.rows %}
+          <tr>
+            <td class="mono dimc">{{ j.job.updated_at|date:"m-d H:i" }}</td>
+            <td class="mono">{{ j.job.username }}</td>
+            <td class="mono dimc">{{ j.job.part_type_id }} <span class="faintc">{{ j.job.kind }}</span><br><span class="faintc">{{ j.job.name|truncatechars:40 }}</span></td>
+            <td class="r num">{{ j.rows }}</td>
+            <td>{% if j.status == 'done' %}<span class="pill ok">done</span>{% elif j.status == 'failed' %}<span class="pill bad">{{ j.counts.failed }} failed</span>{% else %}<span class="pill warn">{{ j.counts.pending }} pending</span>{% endif %}
+              {% for e in j.errors %}<br><span class="hint">{{ e|truncatechars:90 }}</span>{% endfor %}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table></div>
+        {% elif jobs %}
+        <div class="empty">No uploads in the last {{ jobs.days }} days.</div>
+        {% endif %}
+      </div>
+
+    </div>
+  </div>
+
+  <div class="ops-card full">
+    <h2>Writes {% if writes %}<span class="cnt">Activities rows per day · {{ writes.days }} days · {{ writes.total }} total, both instances</span>{% endif %}<a class="more" href="{% url 'explore:activities' %}">Activities feed →</a></h2>
+    {% if writes %}
+    <div class="chart">{% for b in writes.bars %}<div class="col" title="{{ b.day|date:'Y-m-d' }} · {{ b.total }}">{% for s in b.segs %}<i class="k-{{ s.kind }}" style="height:{{ s.pct|floatformat:1 }}%" title="{{ s.label }} {{ s.n }}"></i>{% endfor %}</div>{% endfor %}</div>
+    <div class="chart-x"><span>{{ writes.first|date:"M j" }}</span><span>{{ writes.mid|date:"M j" }}</span><span>{{ writes.last|date:"M j" }}</span></div>
+    <div class="legend">{% for l in writes.legend %}<span><i class="k-{{ l.kind }}"></i>{{ l.label }} <b class="num">{{ l.n }}</b></span>{% empty %}<span>No writes in the window.</span>{% endfor %}</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
