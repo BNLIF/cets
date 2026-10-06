@@ -691,3 +691,25 @@ class SheetJob(InstanceScoped):
             elif r.get("state") == "error" and r.get("action") != "error":
                 c["failed"] += 1
         return c
+
+
+class UsageDay(models.Model):
+    """One row per signed-in user per UTC day (#194): how many requests they
+    made and when the last one was. Written by ``UsageMiddleware`` as one
+    UPDATE per request, read only by the ops page. ``auth_user.last_login``
+    alone undercounts — it moves at login and sessions last weeks. Not
+    instance-scoped: a person is one user across /hw/ and /hw/dev/. Rows
+    older than ``ops.USAGE_RETENTION_DAYS`` are pruned when the ops page
+    loads."""
+
+    username = models.CharField(max_length=150, db_index=True)
+    day = models.DateField()
+    requests = models.PositiveIntegerField(default=0)
+    last_seen = models.DateTimeField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["username", "day"],
+                                               name="usageday_username_day")]
+
+    def __str__(self):
+        return f"UsageDay({self.username}, {self.day}, {self.requests})"

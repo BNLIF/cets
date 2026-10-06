@@ -10,6 +10,8 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
+
 from decouple import config, Csv
 from pathlib import Path
 
@@ -87,6 +89,8 @@ MIDDLEWARE = [
     "explore.middleware.CetsZoneMiddleware",
     # Pin {% url %} reversing to the URL's explore instance (/hw/ vs /hw/dev/).
     "explore.middleware.ExploreInstanceMiddleware",
+    # One UPDATE per signed-in request into UsageDay, for the ops page (#194).
+    "explore.middleware.UsageMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django_htmx.middleware.HtmxMiddleware",
@@ -252,6 +256,42 @@ USE_TZ = True
 # STATIC_URL = "static/"
 STATIC_URL = config("STATIC_URL", default="static/")
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# Ops page (#194): the Django usernames that may open /hw/ops/, e.g.
+# "fnal:chaoz". Empty = nobody; everyone else gets a 404 there.
+OPS_USERS = config("CETS_OPS_USERS", default="", cast=Csv())
+
+# Warnings and errors from every logger go to one rotating file the ops page
+# tails (#194) — gunicorn's own stderr lands in the journal, which the deploy
+# account cannot read on twister. The directory is deployment-specific
+# (``tmp/`` under the checkout by default). The file must be writable by the
+# service user: gunicorn runs as
+# www-data under a tree owned by chao, so the deploy ritual pre-creates it
+# (README). An unwritable location falls back to the console instead of
+# failing startup. Timestamps are UTC like everything else the app shows.
+LOG_DIR = Path(config("CETS_LOG_DIR", default=str(BASE_DIR / "tmp")))
+LOG_FILE = LOG_DIR / "cets.log"
+_log_writable = (os.access(LOG_FILE, os.W_OK) if LOG_FILE.exists()
+                 else os.access(LOG_DIR, os.W_OK))
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "ops": {"()": "cets.logformat.UtcFormatter",
+                "format": "{asctime} {levelname} {name} {message}",
+                "style": "{", "datefmt": "%Y-%m-%d %H:%M:%S"},
+    },
+    "handlers": {
+        # Handler-level WARNING too: Django's own "django" logger runs at INFO
+        # and propagates here, and its INFO chatter must not reach the file.
+        "console": {"class": "logging.StreamHandler", "formatter": "ops", "level": "WARNING"},
+        "file": ({"class": "logging.handlers.RotatingFileHandler", "level": "WARNING",
+                  "filename": str(LOG_FILE), "maxBytes": 5 * 2**20, "backupCount": 3,
+                  "encoding": "utf-8", "formatter": "ops"}
+                 if _log_writable else {"class": "logging.NullHandler"}),
+    },
+    "root": {"handlers": ["file" if _log_writable else "console"], "level": "WARNING"},
+}
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

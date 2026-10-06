@@ -16,11 +16,17 @@ superusers bypass entirely.
 
 from __future__ import annotations
 
+import logging
 from urllib.parse import urlencode
 
 from django.conf import settings
+from django.db import IntegrityError, transaction
+from django.db.models import F
 from django.http import HttpResponseForbidden
 from django.urls import reverse
+from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 CETS_GROUP = "cets"
 
@@ -112,3 +118,41 @@ class CetsZoneMiddleware:
         return HttpResponseForbidden(
             _FORBIDDEN_HTML.format(explore=reverse("explore:home"), login=login)
         )
+
+
+class UsageMiddleware:
+    """Count the request on the user's ``UsageDay`` row (#194): one UPDATE
+    per signed-in request, after the response is built so a slow or failing
+    write never delays or sinks the page. Static files, the service worker's
+    HEAD pings and anonymous requests are not counted."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        try:
+            self._record(request)
+        except Exception:
+            logger.exception("usage record failed for %s", request.path)
+        return response
+
+    @staticmethod
+    def _record(request):
+        if request.method == "HEAD" or request.path.endswith("/sw.js") \
+                or request.path.startswith(_static_prefix()):
+            return
+        user = getattr(request, "user", None)
+        if user is None or not user.is_authenticated:
+            return
+        from .models import UsageDay
+        now = timezone.now()
+        row = UsageDay.objects.filter(username=user.get_username(), day=now.date())
+        if row.update(requests=F("requests") + 1, last_seen=now):
+            return
+        try:
+            with transaction.atomic():
+                UsageDay.objects.create(username=user.get_username(), day=now.date(),
+                                        requests=1, last_seen=now)
+        except IntegrityError:      # another worker inserted the day's row first
+            row.update(requests=F("requests") + 1, last_seen=now)
