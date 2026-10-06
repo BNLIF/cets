@@ -3951,6 +3951,7 @@ class OrganizerTest(TestCase):
         self.assertNotIn("Submit to HWDB", html)
         self.assertNotIn("Blank checklist", html)
         self.assertIn("&#9734; Bookmark", html)
+        self.assertIn('id = "cl-lightbox"', html)   # Hajime 2026-10-06: reference drawings open in the viewer, not as a download
         api.get_component.assert_not_called()
 
     def test_sub_sections_nest_under_the_section_before_them(self):
