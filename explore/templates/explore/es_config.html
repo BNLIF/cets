@@ -136,29 +136,39 @@
 </div>
 
 <template id="t-todo">
-  <div class="ec-row"><input class="f-todo" placeholder="e.g. Contents match the manifest">
+  <div class="ec-row"><button type="button" class="ec-del ec-up" title="Move up">&#9650;</button>
+    <button type="button" class="ec-del ec-dn" title="Move down">&#9660;</button>
+    <input class="f-todo" placeholder="e.g. Contents match the manifest">
     <button type="button" class="ec-del" title="Remove">&#x2715;</button></div>
 </template>
 <template id="t-signee">
-  <div class="ec-row"><input class="f-name" placeholder="Full name (as in HWDB)">
+  <div class="ec-row"><button type="button" class="ec-del ec-up" title="Move up">&#9650;</button>
+    <button type="button" class="ec-del ec-dn" title="Move down">&#9660;</button>
+    <input class="f-name" placeholder="Full name (as in HWDB)">
     <input class="f-rank" type="number" value="0" title="rank">
     <input class="f-roles" placeholder="role ids, e.g. 41, 7" title="HWDB role ids, comma-separated">
     <input class="f-emails" placeholder="emails, comma-separated" title="notify addresses — a position held by several people can list them all">
     <button type="button" class="ec-del" title="Remove">&#x2715;</button></div>
 </template>
 <template id="t-ref">
-  <div class="ec-row"><input class="f-url" placeholder="https://…">
+  <div class="ec-row"><button type="button" class="ec-del ec-up" title="Move up">&#9650;</button>
+    <button type="button" class="ec-del ec-dn" title="Move down">&#9660;</button>
+    <input class="f-url" placeholder="https://…">
     <input class="f-comments" placeholder="link text / comment">
     <button type="button" class="ec-del" title="Remove">&#x2715;</button></div>
 </template>
 <template id="t-extra">
-  <div class="ec-row"><input class="f-key" placeholder="field name" style="flex:0 0 160px;">
+  <div class="ec-row"><button type="button" class="ec-del ec-up" title="Move up">&#9650;</button>
+    <button type="button" class="ec-del ec-dn" title="Move down">&#9660;</button>
+    <input class="f-key" placeholder="field name" style="flex:0 0 160px;">
     <input class="f-value" placeholder='JSON value, e.g. "text" or {"a": 1}' style="font-family:var(--font-mono); font-size:12px;">
     <button type="button" class="ec-del" title="Remove">&#x2715;</button></div>
 </template>
 <template id="t-plot">
   <div class="ec-plot">
     <div class="ec-row">
+      <button type="button" class="ec-del ec-up" title="Move up">&#9650;</button>
+      <button type="button" class="ec-del ec-dn" title="Move down">&#9660;</button>
       <select class="f-kind" style="flex:0 0 210px;">
         <option value="image">image (from a test record)</option>
         <option value="numeric">numeric (from a test record)</option>
@@ -200,6 +210,8 @@
 </template>
 <template id="t-field">
   <div class="ec-row ec-field" style="margin-left:14px;">
+    <button type="button" class="ec-del ec-up" title="Move up">&#9650;</button>
+    <button type="button" class="ec-del ec-dn" title="Move down">&#9660;</button>
     <input class="f-flabel" placeholder="field label, e.g. RMS mean (e-)">
     <input class="f-fpath" placeholder="data_path (from the test record)" style="font-family:var(--font-mono); font-size:12px;">
     <input class="f-fipath" placeholder="item_path (from the Item Specs)" style="font-family:var(--font-mono); font-size:12px;">
@@ -387,7 +399,16 @@
       // a field row first — it sits inside .ec-plot, which must NOT match
       var row = e.target.closest(".ec-field") || e.target.closest(".ec-plot")
                 || e.target.closest(".ec-row");
-      if (row) { row.remove(); refresh(); }
+      if (!row) return;
+      // ▲▼ reorder within the list (Top CRP via Hajime 2026-10-06), as in the checklist editor
+      if (e.target.classList.contains("ec-up")) {
+        if (row.previousElementSibling) row.parentNode.insertBefore(row, row.previousElementSibling);
+      } else if (e.target.classList.contains("ec-dn")) {
+        if (row.nextElementSibling) row.parentNode.insertBefore(row.nextElementSibling, row);
+      } else {
+        row.remove();
+      }
+      refresh();
     }
   });
   form.addEventListener("input", function (e) { if (e.target !== preview) refresh(); });

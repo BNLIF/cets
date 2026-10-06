@@ -1194,6 +1194,10 @@ class ConfigEditorTest(TestCase):
         # per-plot field rows (#85): the plot template carries the editor
         self.assertIn("data-add-field", html)
         self.assertIn('id="t-field"', html)
+        # ▲▼ on every list row (Top CRP via Hajime 2026-10-06): todo, signee,
+        # reference, extra, plot and plot-field templates all carry the pair
+        self.assertEqual(html.count('class="ec-del ec-up"'), 6)
+        self.assertEqual(html.count('class="ec-del ec-dn"'), 6)
 
     def test_signee_row_offers_the_emails_field(self):
         # #91: notify addresses ride on each signee entry.
