@@ -26,8 +26,6 @@ from django.db import connection
 from django.db.models import Count, Max, Min, Q, Sum
 from django.utils import timezone
 
-from hwdb.models import HwdbSyncState
-
 from . import sheetupload
 from .middleware import CETS_GROUP
 from .models import ActivityEvent, HierarchyNode, HierarchySyncState, SheetJob, UsageDay
@@ -35,6 +33,7 @@ from .models import ActivityEvent, HierarchyNode, HierarchySyncState, SheetJob, 
 TAIL_BYTES = 256 * 1024
 ERROR_LINES = 200
 WRITES_DAYS = 30
+USERS_SHOWN = 20
 USAGE_RETENTION_DAYS = 400
 
 
@@ -97,11 +96,12 @@ def users(now) -> dict:
     epoch = datetime(1970, 1, 1, tzinfo=dt_timezone.utc)
     rows.sort(key=lambda r: r["last_seen"] or r["last_login"] or r["joined"] or epoch,
               reverse=True)
-    top = max((r["week"] for r in rows), default=0)
-    for r in rows:
+    shown = rows[:USERS_SHOWN]
+    top = max((r["week"] for r in shown), default=0)
+    for r in shown:
         r["pct"] = round(r["week"] / top * 100) if top else 0
     return {
-        "rows": rows, "total": len(rows),
+        "rows": shown, "total": len(rows),
         "month": sum(1 for r in rows
                      if r["last_login"] and r["last_login"] >= now - timedelta(days=30)),
         "today": today_rows.count(),
@@ -171,15 +171,24 @@ def sync(now) -> dict:
             "types": agg["n"], "synced": agg["synced"], "newest": agg["newest"],
             "newest_ago": ago(agg["newest"], now), "oldest": agg["oldest"],
             "errors": agg["errors"], "items": agg["items"] or 0, "tests": agg["tests"] or 0,
-            "error_types": [{"part_type_id": t[0], "name": t[1], "full": t[2], "short": _short(t[2])}
-                            for t in types.exclude(tests_sync_error="").order_by("-synced_at")
-                            .values_list("part_type_id", "name", "tests_sync_error")[:5]],
         })
-    chips = [{"family": c.family, "finished": c.finished_at,
-              "finished_ago": ago(c.finished_at, now), "total": c.chips_total,
-              "new": c.chips_new, "gone": c.chips_disappeared, "error": c.last_error}
-             for c in HwdbSyncState.objects.order_by("family")]
-    return {"instances": out, "chips": chips}
+    return {"instances": out}
+
+
+def sync_errors(now) -> list[dict]:
+    """Every mirror node holding a sync error, newest first, both instances —
+    the ops page's "N with errors" link lands here. Mostly HWDB refusing a
+    type (403 on a consortium's type the account has no role on, 500 on a
+    broken sandbox type); a later successful sync of the node clears it."""
+    rows = []
+    for n in (HierarchyNode.objects.exclude(tests_sync_error="")
+              .order_by("-synced_at").only("instance", "level", "part_type_id", "name",
+                                           "system_name", "synced_at", "tests_sync_error")):
+        rows.append({"instance": n.instance, "level": n.get_level_display(),
+                     "part_type_id": n.part_type_id, "name": n.name, "system": n.system_name,
+                     "synced_at": n.synced_at, "ago": ago(n.synced_at, now),
+                     "error": n.tests_sync_error, "short": _short(n.tests_sync_error)})
+    return rows
 
 
 # ---- writes (the Activities feed, by day) ----------------------------------

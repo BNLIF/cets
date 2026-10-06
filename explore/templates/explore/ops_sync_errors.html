@@ -1,0 +1,41 @@
+{% extends 'explore/base.html' %}
+{% block title %}Sync errors · Ops · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .ose { padding: 22px 30px 56px; max-width: 1100px; }
+  @media (max-width: 600px) { .ose { padding: 14px 16px 40px; } }
+  .ose-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 10px; }
+  .ose-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .ose h1 { font-size: 1.5rem; color: var(--ink); margin: 0 0 4px; letter-spacing: -0.01em; }
+  .ose-sub { color: var(--dim); font-size: 13.5px; margin: 0 0 18px; }
+  .ose-row { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg); padding: 12px 16px; margin-bottom: 10px; }
+  .ose-head { display: flex; gap: 10px 14px; flex-wrap: wrap; align-items: baseline; font-size: 13px; margin-bottom: 6px; }
+  .ose-head .mono { font-family: var(--font-mono); font-size: 12.5px; }
+  .ose-head .dim { color: var(--dim); } .ose-head .faint { color: var(--faint); font-size: 12px; }
+  .ose-head .when { margin-left: auto; color: var(--faint); font-size: 12px; white-space: nowrap; }
+  .ose-status { font-weight: 600; color: var(--bad); }
+  .ose-err { font-family: var(--font-mono); font-size: 12px; color: var(--body); white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; background: var(--surface); border-radius: var(--r-sm); padding: 8px 10px; }
+  .ose-empty { color: var(--faint); font-size: 13.5px; padding: 24px 2px; }
+</style>
+<div class="ose">
+  <div class="ose-crumbs"><a href="{% url 'explore:ops' %}">Ops</a> › Sync errors</div>
+  <h1>Sync errors</h1>
+  <p class="ose-sub">Every mirror node whose last sync failed, newest first, both instances. Most are HWDB refusing a type: a 403 is a consortium type this account holds no role on, a 500 is HWDB failing on its own. A later successful sync of the node clears its row.</p>
+  {% for r in rows %}
+  <div class="ose-row">
+    <div class="ose-head">
+      <span class="mono">{{ r.instance }}</span>
+      <span class="mono">{{ r.part_type_id|default:r.level }}</span>
+      <span>{{ r.name }}</span>
+      <span class="faint">{{ r.system }}</span>
+      <span class="ose-status">{{ r.short }}</span>
+      <span class="when">{{ r.synced_at|date:"Y-m-d H:i" }} UTC · {{ r.ago }}</span>
+    </div>
+    <pre class="ose-err">{{ r.error }}</pre>
+  </div>
+  {% empty %}
+  <div class="ose-empty">No sync errors recorded.</div>
+  {% endfor %}
+</div>
+{% endblock %}

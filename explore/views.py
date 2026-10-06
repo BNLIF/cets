@@ -6760,6 +6760,16 @@ def explore_ops_view(request):
     return render(request, "explore/ops.html", {"active_nav": "ops", **ops.collect()})
 
 
+def explore_ops_sync_errors_view(request):
+    """Every mirror node with a sync error, in full (#194) — the ops page
+    only counts them, since most are HWDB refusing a type. Same gate."""
+    if not ops.allowed(request.user):
+        raise Http404
+    now = timezone.now()
+    return render(request, "explore/ops_sync_errors.html", {
+        "active_nav": "ops", "now": now, "rows": ops.sync_errors(now)})
+
+
 def explore_docs_view(request):
     """External DUNE HWDB documentation links (training site, API reference,
     the HWDB web UIs, consortium references). Static curated content — the

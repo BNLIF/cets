@@ -97,7 +97,7 @@
           {% endfor %}
           </tbody>
         </table></div>
-        <p class="hint" style="margin:8px 0 0">Last seen and request counts come from the usage table{% if users.tracked_since %}, kept since {{ users.tracked_since|date:"Y-m-d" }}{% endif %}; last login is Django's, which only moves at sign-in.</p>
+        <p class="hint" style="margin:8px 0 0">{% if users.total > users.rows|length %}The {{ users.rows|length }} most recently seen of {{ users.total }}. {% endif %}Last seen and request counts come from the usage table{% if users.tracked_since %}, kept since {{ users.tracked_since|date:"Y-m-d" }}{% endif %}; last login is Django's, which only moves at sign-in.</p>
         {% endif %}
       </div>
 
@@ -128,25 +128,12 @@
             <td><span class="dot {{ s.status }}"></span><span class="mono">{{ s.instance }}</span></td>
             <td class="mono">{% if s.running %}running since {{ s.state.started_at|date:"H:i" }}{% elif s.state and s.state.finished_at %}{{ s.state.finished_at|date:"Y-m-d H:i" }} <span class="faintc ago">· {{ s.finished_ago }}</span><br><span class="dimc">{{ s.state.systems_count }} systems · {{ s.state.nodes_count }} nodes</span>{% else %}<span class="faintc">never</span>{% endif %}
               {% if s.state and s.state.last_error %}<br><span style="color:var(--bad); font-size:12px">{{ s.state.last_error|truncatechars:160 }}</span>{% endif %}</td>
-            <td class="num">{{ s.synced }} of {{ s.types }} tests-synced{% if s.newest %}<br><span class="dimc ago">newest {{ s.newest_ago }}</span>{% endif %}{% if s.errors %}<br><span class="pill bad">{{ s.errors }} with errors</span>{% endif %}</td>
+            <td class="num">{{ s.synced }} of {{ s.types }} tests-synced{% if s.newest %}<br><span class="dimc ago">newest {{ s.newest_ago }}</span>{% endif %}{% if s.errors %}<br><a class="pill bad" href="{% url 'explore:ops_sync_errors' %}" style="text-decoration:none" title="Every node's full sync error">{{ s.errors }} with errors →</a>{% endif %}</td>
             <td class="num dimc">{{ s.items }} items<br>{{ s.tests }} tests</td>
           </tr>
-          {% for t in s.error_types %}<tr><td></td><td colspan="3" class="mono" style="font-size:12px" title="{{ t.full }}">{{ t.part_type_id }} <span class="dimc">{{ t.name }}</span> <span style="color:var(--bad)">· {{ t.short }}</span></td></tr>{% endfor %}
           {% endfor %}
           </tbody>
         </table></div>
-        {% if sync.chips %}
-        <div class="twrap" style="margin-top:12px"><table class="t">
-          <thead><tr><th>CE chip mirror</th><th>Last run</th><th class="r">Chips</th><th class="r">New</th><th class="r">Gone</th></tr></thead>
-          <tbody>
-          {% for c in sync.chips %}
-          <tr><td><span class="dot {% if c.error %}bad{% elif c.finished %}ok{% endif %}"></span><span class="mono">{{ c.family }}</span></td>
-            <td class="mono dimc">{{ c.finished|date:"Y-m-d H:i"|default:"—" }}{% if c.finished_ago %} <span class="faintc ago">· {{ c.finished_ago }}</span>{% endif %}{% if c.error %}<br><span style="color:var(--bad); font-size:12px">{{ c.error|truncatechars:120 }}</span>{% endif %}</td>
-            <td class="r num">{{ c.total }}</td><td class="r num">{{ c.new }}</td><td class="r num">{{ c.gone }}</td></tr>
-          {% endfor %}
-          </tbody>
-        </table></div>
-        {% endif %}
         {% endif %}
       </div>
 

@@ -13,7 +13,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from explore import ops
-from explore.models import ActivityEvent, HierarchySyncState, UsageDay
+from explore.models import ActivityEvent, HierarchyNode, HierarchySyncState, UsageDay
 
 PAGE = "/hw/ops/"
 HOME = "/hw/"
@@ -39,6 +39,21 @@ class OpsGateTest(TestCase):
         self.client.force_login(self.bob)
         self.assertEqual(self.client.get(PAGE).status_code, 404)
         self.assertNotIn(">Ops</a>", self.client.get(HOME).content.decode())
+
+    @override_settings(OPS_USERS=["fnal:chaoz"])
+    def test_sync_errors_page_lists_the_full_error_behind_the_same_gate(self):
+        HierarchyNode.objects.create(instance="dev", level=HierarchyNode.LEVEL_TYPE, system_id=1,
+                                     system_name="S", name="whatchamacallit", part_type_id="Z00100300016",
+                                     tests_sync_error="403 FORBIDDEN for https://x/api/v1/component-types/Z00100300016/components: {}")
+        self.client.force_login(self.bob)
+        self.assertEqual(self.client.get(PAGE + "sync-errors/").status_code, 404)
+        self.client.force_login(self.chaoz)
+        html = self.client.get(PAGE).content.decode()
+        self.assertIn("1 with errors", html)
+        self.assertNotIn("component-types/Z00100300016", html)     # the URL stays off the ops page
+        html = self.client.get(PAGE + "sync-errors/").content.decode()
+        self.assertIn("component-types/Z00100300016/components", html)
+        self.assertIn("403 FORBIDDEN", html)
 
     @override_settings(OPS_USERS=[])
     def test_empty_list_means_nobody(self):

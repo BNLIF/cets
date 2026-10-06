@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import os
+import tempfile
 
 from decouple import config, Csv
 from pathlib import Path
@@ -292,6 +293,14 @@ LOGGING = {
     },
     "root": {"handlers": ["file" if _log_writable else "console"], "level": "WARNING"},
 }
+
+# matplotlib (the executive summary's plots) wants a writable config/cache
+# directory; the service user's HOME on twister has none, so every worker
+# logged two warnings and rebuilt its font cache at import. A stable
+# directory under the system temp dir is writable for anyone and shared
+# across workers (matplotlib locks its cache). Must be set before the first
+# matplotlib import, which settings always precede. #194.
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(tempfile.gettempdir(), "cets-matplotlib"))
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
