@@ -110,6 +110,25 @@ class CollectorsTest(TestCase):
         self.assertEqual(len(e["entries"][0]["extra"]), 3)
         self.assertEqual(e["warn_24h"], 1)
         self.assertEqual(e["error_24h"], 1)
+        self.assertEqual([x["level"] for x in e["shown"]], ["ERROR"])     # the 2020 line is outside the window
+        self.assertEqual(e["in_window"], 1)
+
+    def test_ops_pane_shows_ten_and_the_errors_page_shows_all(self):
+        stamp = self.now.strftime("%Y-%m-%d %H:%M:%S")
+        log = Path(self.dir.name) / "cets.log"
+        log.write_text("".join(f"{stamp} WARNING hwdb.api_client warning number {i}\n" for i in range(30)))
+        with override_settings(LOG_FILE=log):
+            e = ops.errors(self.now)
+        self.assertEqual(len(e["shown"]), ops.ERRORS_SHOWN)
+        self.assertEqual(e["shown"][0]["message"], "warning number 29")
+        self.assertEqual(len(e["entries"]), 30)
+        user = get_user_model().objects.create_user("fnal:chaoz", password="x")
+        self.client.force_login(user)
+        with override_settings(LOG_FILE=log, OPS_USERS=["fnal:chaoz"]):
+            self.assertIn("10 of 30", self.client.get(PAGE).content.decode())
+            full = self.client.get(PAGE + "errors/").content.decode()
+        self.assertIn("warning number 0", full)
+        self.assertIn("warning number 29", full)
 
     def test_writes_bins_feed_rows_by_day(self):
         ActivityEvent.objects.create(instance="prod", kind="checklist", summary="a")

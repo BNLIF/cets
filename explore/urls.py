@@ -69,6 +69,7 @@ urlpatterns = [
     path("sw.js", views.explore_sw_view, name="sw"),
     path("profile/", views.explore_profile_view, name="profile"),
     path("ops/", views.explore_ops_view, name="ops"),   # #194: OPS_USERS only, 404 otherwise
+    path("ops/errors/", views.explore_ops_errors_view, name="ops_errors"),
     path("ops/sync-errors/", views.explore_ops_sync_errors_view, name="ops_sync_errors"),
     path("login/", views.login_view, name="login"),
     path("login/poll/", views.login_poll_view, name="login_poll"),

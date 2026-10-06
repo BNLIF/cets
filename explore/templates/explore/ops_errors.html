@@ -1,0 +1,32 @@
+{% extends 'explore/base.html' %}
+{% block title %}Errors · Ops · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .oe { padding: 22px 30px 56px; }
+  @media (max-width: 600px) { .oe { padding: 14px 16px 40px; } }
+  .oe-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 10px; }
+  .oe-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .oe h1 { font-size: 1.5rem; color: var(--ink); margin: 0 0 4px; letter-spacing: -0.01em; }
+  .oe-sub { color: var(--dim); font-size: 13.5px; margin: 0 0 18px; }
+  .oe-sub .mono { font-family: var(--font-mono); font-size: 12.5px; }
+  .log { background: #1c1812; color: #e7dfce; border-radius: var(--r-md); padding: 10px 12px; font-family: var(--font-mono); font-size: 12px;
+    line-height: 1.5; overflow-x: auto; white-space: pre; margin: 0; }
+  .log .d { color: #9b8f78; } .log .w { color: #e8b86b; font-weight: 600; } .log .e { color: #ee8f7d; font-weight: 600; } .log .x { color: #b8ad96; }
+  .oe-empty { color: var(--faint); font-size: 13.5px; padding: 24px 2px; }
+</style>
+<div class="oe">
+  <div class="oe-crumbs"><a href="{% url 'explore:ops' %}">Ops</a> › Errors</div>
+  <h1>Errors</h1>
+  <p class="oe-sub">Warnings and above, newest first: the last {{ errors.entries|length }} record{{ errors.entries|length|pluralize }} of <span class="mono">{{ errors.path }}</span>{% if errors.size %} ({{ errors.size|filesizeformat }}){% endif %}, at most {{ limit }}. Times UTC. The file rotates at 5 MB; older copies sit beside it on the server.</p>
+  {% if errors.entries %}
+  <pre class="log">{% for e in errors.entries %}<span class="d">{{ e.ts|date:"Y-m-d H:i:s" }}</span> <span class="{% if e.level == 'ERROR' or e.level == 'CRITICAL' %}e{% else %}w{% endif %}">{{ e.level|ljust:"8" }}</span><span class="d">{{ e.logger }}</span>  {{ e.message }}{% for x in e.extra %}
+<span class="x">{{ x }}</span>{% endfor %}
+{% endfor %}</pre>
+  {% elif not errors.exists %}
+  <div class="oe-empty">No log file yet at <span class="mono">{{ errors.path }}</span>.</div>
+  {% else %}
+  <div class="oe-empty">Nothing logged.</div>
+  {% endif %}
+</div>
+{% endblock %}

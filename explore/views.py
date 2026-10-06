@@ -6760,6 +6760,16 @@ def explore_ops_view(request):
     return render(request, "explore/ops.html", {"active_nav": "ops", **ops.collect()})
 
 
+def explore_ops_errors_view(request):
+    """The warning log's whole tail (#194) — the ops page shows only the
+    newest few from the last days. Same gate."""
+    if not ops.allowed(request.user):
+        raise Http404
+    now = timezone.now()
+    return render(request, "explore/ops_errors.html", {
+        "active_nav": "ops", "now": now, "errors": ops.errors(now), "limit": ops.ERROR_LINES})
+
+
 def explore_ops_sync_errors_view(request):
     """Every mirror node with a sync error, in full (#194) — the ops page
     only counts them, since most are HWDB refusing a type. Same gate."""

@@ -31,7 +31,9 @@ from .middleware import CETS_GROUP
 from .models import ActivityEvent, HierarchyNode, HierarchySyncState, SheetJob, UsageDay
 
 TAIL_BYTES = 256 * 1024
-ERROR_LINES = 200
+ERROR_LINES = 200          # records kept from the tail; the errors page shows them all
+ERRORS_SHOWN = 10          # the ops page shows this many, from the last ERRORS_DAYS
+ERRORS_DAYS = 3
 WRITES_DAYS = 30
 USERS_SHOWN = 20
 USAGE_RETENTION_DAYS = 400
@@ -133,7 +135,10 @@ def errors(now) -> dict:
     for e in entries:
         e["ago"] = ago(e["ts"], now)
     size = path.stat().st_size if path.exists() else None
+    window = [e for e in entries if e["ts"] >= now - timedelta(days=ERRORS_DAYS)]
     return {"entries": entries, "path": str(path), "exists": path.exists(), "size": size,
+            # the ops page's pane: the newest few from the last days; the errors page has them all
+            "shown": window[:ERRORS_SHOWN], "in_window": len(window), "days": ERRORS_DAYS,
             "warn_24h": len(recent),
             # every kept record is recent → the real day count is at least this
             "capped": len(entries) == ERROR_LINES and len(recent) == len(entries),

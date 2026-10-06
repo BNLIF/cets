@@ -102,15 +102,15 @@
       </div>
 
       <div class="ops-card">
-        <h2>Errors {% if errors %}<span class="cnt">warnings and above · last {{ errors.entries|length }} record{{ errors.entries|length|pluralize }}{% if errors.size %} · {{ errors.size|filesizeformat }}{% endif %}</span>{% endif %}</h2>
-        {% if errors and errors.entries %}
-        <pre class="log">{% for e in errors.entries %}<span class="d">{{ e.ts|date:"Y-m-d H:i:s" }}</span> <span class="{% if e.level == 'ERROR' or e.level == 'CRITICAL' %}e{% else %}w{% endif %}">{{ e.level|ljust:"8" }}</span><span class="d">{{ e.logger }}</span>  {{ e.message }}{% for x in e.extra %}
+        <h2>Errors {% if errors %}<span class="cnt">warnings and above · last {{ errors.days }} days · {{ errors.shown|length }} of {{ errors.in_window }}</span><a class="more" href="{% url 'explore:ops_errors' %}">all {{ errors.entries|length }} →</a>{% endif %}</h2>
+        {% if errors and errors.shown %}
+        <pre class="log">{% for e in errors.shown %}<span class="d">{{ e.ts|date:"Y-m-d H:i:s" }}</span> <span class="{% if e.level == 'ERROR' or e.level == 'CRITICAL' %}e{% else %}w{% endif %}">{{ e.level|ljust:"8" }}</span><span class="d">{{ e.logger }}</span>  {{ e.message }}{% for x in e.extra %}
 <span class="x">{{ x }}</span>{% endfor %}
 {% endfor %}</pre>
         {% elif errors and not errors.exists %}
         <div class="empty">No log file yet at <span class="mono">{{ errors.path }}</span>. It appears with the first warning once the file is writable by the service user.</div>
         {% elif errors %}
-        <div class="empty">Nothing logged.</div>
+        <div class="empty">Nothing logged in the last {{ errors.days }} days.</div>
         {% endif %}
       </div>
 
