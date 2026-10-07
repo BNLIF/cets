@@ -962,12 +962,13 @@ def _by_label(schema: dict, types: tuple) -> dict:
 
 def _pick(cands, section: str):
     """#196: the field a rule means when its label sits in several sections
-    — the one in the named ``section``, else the last (as before, when the
-    label was the only name). Returns (leaf, section title) — the title
-    only when the label is ambiguous, for the page's hint."""
+    — the one in the named ``section``, else the FIRST in form order (Chao
+    2026-10-07: a field added later must not take over an existing rule).
+    Returns (leaf, section title) — the title only when the label is
+    ambiguous, for the page's hint."""
     if not cands:
         return None, ""
-    hit = next((c for c in cands if section and c[0] == section), cands[-1])
+    hit = next((c for c in cands if section and c[0] == section), cands[0])
     return hit[1], (hit[0] if len(cands) > 1 else "")
 
 

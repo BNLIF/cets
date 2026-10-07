@@ -4598,7 +4598,7 @@ class DuplicateLabelAndDescriptionTest(TestCase):
 
 class SameLabelAcrossSectionsTest(TestCase):
     """#196: a label in two sections — a rule says which with ``section``
-    (``from_section`` on a read-from field); without it the last wins as before."""
+    (``from_section`` on a read-from field); without it the FIRST is meant."""
     SCHEMA = {"name": "X", "test_type_name": "X", "sections": [
         {"title": "A", "fields": [{"type": "qr", "label": "PID"}, {"type": "select", "label": "Mode", "options": ["a"]}]},
         {"title": "B", "fields": [{"type": "qr", "label": "PID"}, {"type": "select", "label": "Mode", "options": ["a", "b"]}]},
@@ -4615,13 +4615,13 @@ class SameLabelAcrossSectionsTest(TestCase):
         n = checklistforms.normalize(self.SCHEMA, "X")
         secs = {s["title"]: s for s in n["sections"]}
         self.assertEqual(secs["ByA"]["when"], {"field": "PID", "key": "f0-0", "path": "Side", "equals": "N", "section": "A"})
-        self.assertEqual(secs["Last"]["when"], {"field": "PID", "key": "f1-0", "path": "Side", "equals": "N", "section": "B"})
+        self.assertEqual(secs["Last"]["when"], {"field": "PID", "key": "f0-0", "path": "Side", "equals": "N", "section": "A"})   # unqualified → first
         s1, s2, s3 = secs["ByA"]["fields"][0], secs["Last"]["fields"][0], secs["Last"]["fields"][1]
         self.assertEqual((s1["from_key"], s1["from_section"]), ("f0-0", "A"))
-        self.assertEqual((s2["from_key"], s2["from_section"]), ("f1-0", "B"))
+        self.assertEqual((s2["from_key"], s2["from_section"]), ("f0-0", "A"))
         self.assertEqual(s3["from_key"], "f2-0"); self.assertNotIn("from_section", s3)   # unique label: no qualifier, bad section ignored
         self.assertEqual(secs["SelB"]["when"], {"field": "Mode", "key": "f1-1", "equals": "b", "section": "B"})
-        self.assertEqual(secs["SelBad"]["when"]["key"], "f1-1")   # unknown section → last, which happens to have "b"
+        self.assertNotIn("when", secs["SelBad"])   # unknown section → the first Mode, whose options lack "b" → rule dropped, section shows
 
     def test_hints_name_the_section(self):
         self.client.force_login(get_user_model().objects.create_user("x", "x@x.io", "pw"))

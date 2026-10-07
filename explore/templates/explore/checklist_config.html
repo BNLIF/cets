@@ -1545,7 +1545,7 @@
       if (!label) return "";
       var secs = Object.keys(inSecs[label] || {});
       if (secs.length <= 1) return label;
-      return qualify(label, sec && secs.indexOf(sec) !== -1 ? sec : secs[secs.length - 1]);
+      return qualify(label, sec && secs.indexOf(sec) !== -1 ? sec : secs[0]);   // no section named → the first, as the form does
     }
     $$(".clc-fld").forEach(function (r) {   // #195 read-from pickers: PID fields only
       var sel = $(".ff-from", r), cur = sel.value || current(r.dataset.fromF, r.dataset.fromSec);
