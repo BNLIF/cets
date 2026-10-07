@@ -168,6 +168,12 @@
   .clc-wb .ec-card > h2 { display: none; }   /* the pane header says it */
   .clc-wb .clc-fld .ff-label { flex: 1 1 100%; }
   .clc-wb #clc-top .ec-inline { white-space: normal; }   /* a long checkbox label wraps in the narrow panel */
+  /* the show-when rule (field › key = value) wraps onto its own lines in the narrow panel instead of running off it (Chao 2026-10-07) */
+  .fs-whenpwrap { display: inline-flex; align-items: center; gap: 4px; }
+  .fs-whenp { width: 220px; } .fs-wheneqt { width: 110px; }
+  .clc-wb .fs-whenlab { flex: 1 1 100%; flex-wrap: wrap; white-space: normal; }
+  .clc-wb .fs-whenpwrap { flex: 1 1 100%; flex-wrap: wrap; }
+  .clc-wb .fs-whenp, .clc-wb .fs-wheneqt { width: auto; flex: 1 1 120px; min-width: 0; }
   .clc-wb .clc-fld .ec-row { gap: 6px 8px; }
   .clc-wb #clc-sections .ec-add { margin-top: 12px; }
   #clc-secfoot hr, #clc-fldfoot hr { border: 0; border-top: 1px solid var(--rule); margin: 16px 0 6px; }
@@ -338,10 +344,10 @@
       <button type="button" class="ec-del fs-layout" title="arrange this section's fields on the grid: drag cells, change spans, stack">&#9638; layout&hellip;</button>
       <label class="ec-inline"><input type="checkbox" class="fs-collapsed"> start collapsed</label>
       <label class="ec-inline" title="nest this section inside the one above it — it folds and hides with its parent"><select class="fs-level"><option value="1">section</option><option value="2">sub-section</option><option value="3">sub-sub-section</option></select></label>
-      <label class="ec-inline" title="a select field: the section shows only while it holds this option. A PID field: the scanned item&#8217;s stored value at the path must equal the value — the path is a key chain into the item&#8217;s HWDB record; a bare Item Specs key like Side works, as do DATA.Side, specifications.DATA.Side, Warehouse.SKU (a key inside a list of entries), serial_number or location.name">show only when
+      <label class="ec-inline fs-whenlab" title="a select field: the section shows only while it holds this option. A PID field: the scanned item&#8217;s stored value at the path must equal the value — the path is a key chain into the item&#8217;s HWDB record; a bare Item Specs key like Side works, as do DATA.Side, specifications.DATA.Side, Warehouse.SKU (a key inside a list of entries), serial_number or location.name">show only when
         <select class="fs-whenf"><option value="">&mdash; always &mdash;</option></select>
         <span class="fs-whenwrap">= <select class="fs-wheneq"></select></span>
-        <span class="fs-whenpwrap" style="display:none;">› <input class="fs-whenp" placeholder="Item Specs key, e.g. Side" style="width:220px;"> = <input class="fs-wheneqt" placeholder="value" style="width:110px;"></span></label>
+        <span class="fs-whenpwrap" style="display:none;">› <input class="fs-whenp" placeholder="Item Specs key, e.g. Side"> = <input class="fs-wheneqt" placeholder="value"></span></label>
     </div>
     <div class="clc-fields"></div>
     <button type="button" class="ec-add clc-addf">+ add field</button>
@@ -395,7 +401,7 @@
       <label class="ec-inline ff-grid-w" title="draw cell borders like a real table"><input type="checkbox" class="ff-grid" checked> borders</label>
       <button type="button" class="ec-del ff-tbl" title="named rows, each with its own fixed cells and tint">&#9636; rows&hellip;</button>
       <input type="hidden" class="ff-rows">
-      <textarea class="ff-columns" rows="2" style="flex:1 1 100%;" placeholder="columns — comma- or line-separated; computed: Total = C1 + C2*(C3/C4) [11 ± 1]; fixed: Expected = &quot;3.1+-0.1&quot;; pass/fail: OK = check; over the type's items: Received = sum(C4)" title="label = formula makes a computed column (C1 = first column's value, formula/fixed cells count too); label = &quot;text&quot; makes a fixed non-editable cell (no commas in the text); label = sum(C4) totals that column's value in the row over every item of the type (sum(C4 in Received | Unknown) counts only those statuses); label = count(C1) shows how many items the type whose ID is in column 1 has (count(C1 * C2): each item weighted by the number in its specifications under the key named in column 2 — a batch registered as one item counts its pieces); [nominal ± tol] or [min..max] gives that column its own accepted range"></textarea>
+      <textarea class="ff-columns" rows="2" style="flex:1 1 100%;" placeholder="columns — comma- or line-separated; computed: Total = C1 + C2*(C3/C4) [11 ± 1]; fixed: Expected = &quot;3.1+-0.1&quot;; pass/fail: OK = check; over the type's items: Received = sum(C4)" title="label = formula makes a computed column (C1 = first column's value, formula/fixed cells count too); label = &quot;text&quot; makes a fixed non-editable cell (no commas in the text); label = sum(C4) totals that column's value in the row over every item of the type (sum(C4 in Received | Unknown) counts only those statuses); label = count(C1) shows how many items the type whose ID is in column 1 has (count(C1 * C2): each item weighted by the number in its specifications under the key named in column 2 — a batch registered as one item counts its pieces); label = lookup(Side of C1) shows the value stored under Side on the item whose PID is in column 1; [nominal ± tol] or [min..max] gives that column its own accepted range"></textarea>
     </div>
     <div class="ec-row g-select" style="display:none;">
       <input class="ff-options" placeholder="options, comma-separated">
@@ -403,6 +409,9 @@
     <div class="ec-row g-textpat" style="display:none;">
       <input class="ff-pattern" placeholder="pattern (regex, e.g. 011-\d{5}) — adds a Phone button that reads the value off the item" style="flex:1 1 100%;"
         title="a typed value must match it in full; the phone&#8217;s camera reads printed text and sends a read that matches">
+      <input class="ff-from" placeholder="read from: label of a PID field" style="flex:1 1 220px;"
+        title="the box becomes read-only and shows a value stored on the item scanned into that field">
+      <input class="ff-path" placeholder="key on that item, e.g. Side (its Item Specifications; serial_number = the standard field)" style="flex:1 1 300px;">
     </div>
     <div class="ec-row g-steps" style="display:none;">
       <span class="ec-hint" style="flex:1 1 100%;">One step per line. Tab / Shift+Tab indents the current line (2 spaces = 1 level). **bold**, *italic*.</span>
@@ -608,6 +617,8 @@
     $(".ff-typeid", r).value = f.type_id || "";
     $(".ff-sn", r).value = f.sn || "";                                 // #149
     $(".ff-pattern", r).value = f.type === "text" ? (f.pattern || "") : "";   // #188
+    $(".ff-from", r).value = f.type === "text" ? (f.from || "") : "";         // #195
+    $(".ff-path", r).value = f.type === "text" ? (f.path || "") : "";
     $(".ff-plot", r).value = f.plot || "";                             // #160
     $(".ff-plotsecs", r).value = (f.sections || []).join(", ");
     $(".ff-plotflds", r).value = (f.fields || []).join(", ");
@@ -965,8 +976,8 @@
         var rg = (rw.ranges || {})[c.label], v = (rw.texts || {})[c.label] || "";
         if (rg) v += (v ? " " : "") + "[" + specText(rg) + "]";
         h += '<td><input class="tc-cell" data-i="' + i + '" data-j="' + j + '" value="' + esc(v) +
-             '" placeholder="' + esc(c.check ? "✓ ✗" : c.sum ? "Σ" : c.count ? "#" : c.formula ? "ƒ [range]" : c.text || "") + '"' +
-             (c.check || c.sum || c.count ? " disabled" : "") + ' title="fixed text and/or an accepted range in brackets, e.g. 3.1 [3.0..3.2] or [0 ± 0.01]"></td>';
+             '" placeholder="' + esc(c.check ? "✓ ✗" : c.sum ? "Σ" : c.count ? "#" : c.lookup ? "↗" : c.formula ? "ƒ [range]" : c.text || "") + '"' +
+             (c.check || c.sum || c.count || c.lookup ? " disabled" : "") + ' title="fixed text and/or an accepted range in brackets, e.g. 3.1 [3.0..3.2] or [0 ± 0.01]"></td>';
       });
       h += '<td class="tc-ops"><button type="button" class="ec-del tc-up" data-i="' + i + '" title="Move up">&#8593;</button>' +
            '<button type="button" class="ec-del tc-down" data-i="' + i + '" title="Move down">&#8595;</button>' +
@@ -1011,7 +1022,7 @@
     else if (t.classList.contains("tc-cell")) {
       var rw = tblM.rows[i], lab = tblM.cols[j].label, pc = parseCell(t.value);
       rw.texts = rw.texts || {}; rw.ranges = rw.ranges || {};
-      rw.texts[lab] = tblM.cols[j].formula || tblM.cols[j].sum || tblM.cols[j].count ? "" : pc.text;   // a formula / sum / count column takes only a range
+      rw.texts[lab] = tblM.cols[j].formula || tblM.cols[j].sum || tblM.cols[j].count || tblM.cols[j].lookup ? "" : pc.text;   // a formula / sum / count column takes only a range
       if (pc.range) rw.ranges[lab] = pc.range; else delete rw.ranges[lab];
     } else if (t.classList.contains("tc-color")) {
       tblM.rows[i].color = t.value;
@@ -1229,8 +1240,10 @@
     if (i !== -1) {
       var rhs = c.slice(i + 1).trim(), q = /^"(.*)"$/.exec(rhs);
       var sm = /^(sum|count)\(\s*(.+?)\s*(?:\bin\b\s*(.+?))?\s*\)$/i.exec(rhs);   // #186: sum(C4) / count(C1 in Received | Unknown)
+      var lk = /^lookup\(\s*(.+?)\s+of\s+(.+?)\s*\)$/i.exec(rhs);   // #195: lookup(Side of C1) — the key's value off the PID in C1 (no comma: the box splits on them)
       if (q) out.text = q[1];
       else if (rhs.toLowerCase() === "check") out.check = true;   // #116: pass/fail column
+      else if (lk) { out.lookup = lk[2]; out.path = lk[1]; }
       else if (sm) { out[sm[1].toLowerCase()] = sm[2]; if (sm[3]) out.status = sm[3].split("|").map(function (x) { return x.trim(); }).filter(Boolean); }
       else out.formula = rhs;
       c = c.slice(0, i);
@@ -1245,6 +1258,7 @@
     return c.label + (c.text ? ' = "' + c.text + '"'
                       : c.check ? " = check"
                       : c.sum || c.count ? " = " + (c.sum ? "sum(" + c.sum : "count(" + c.count) + (c.status && c.status.length ? " in " + c.status.join(" | ") : "") + ")"
+                      : c.lookup ? " = lookup(" + (c.path || "") + " of " + c.lookup + ")"
                       : (c.formula ? " = " + c.formula : ""))
                    + (tol ? " [" + tol + "]" : "")
                    + (c.color ? " {" + c.color + "}" : "");
@@ -1326,6 +1340,9 @@
       if (pos) f.position = pos;
     }
     if (t === "text" && $(".ff-pattern", r).value.trim()) f.pattern = $(".ff-pattern", r).value.trim();   // #188
+    if (t === "text" && $(".ff-from", r).value.trim() && $(".ff-path", r).value.trim()) {   // #195
+      f.from = $(".ff-from", r).value.trim(); f.path = $(".ff-path", r).value.trim();
+    }
     if (t === "qr" || t === "link" || t === "imagemap" || (t === "table" && $(".ff-tbllink", r).checked)) {
       var tid = $(".ff-typeid", r).value.trim().toUpperCase(), sn = $(".ff-sn", r).value.trim();
       if (tid) f.type_id = tid;
@@ -1609,7 +1626,7 @@
         var pane = $("#clc-preview"), st = previewState(pane), y = window.scrollY;
         pane.innerHTML = html;
         restorePreview(pane, st);
-        window.clApplyWhen(); window.clRecompute(); window.clPlots();
+        window.clApplyWhen(); if (window.clFillLookups) window.clFillLookups(); window.clRecompute(); window.clPlots();
         if (WB) window.scrollTo(0, y);   // #192: the swap shortens the page for a moment — stay put
         markPreview(false);   // #192
       })

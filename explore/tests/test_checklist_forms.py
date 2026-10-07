@@ -4496,3 +4496,57 @@ class CountColumnTest(TestCase):
         d = self.client.get("/hw/dev/count/", {"types": "z00100300042", "status": "passed all"}).json()["counts"]
         self.assertEqual(d["Z00100300042"]["n"], 1)   # part of a name
         self.assertEqual(self.client.get("/hw/dev/count/").json(), {"counts": {}})
+
+
+class LookupTest(TestCase):
+    """#195 (Hajime, CPA): a read-only text field ``from`` a PID field +
+    ``path``, and a table column ``lookup(C1, Side)`` — both show a value
+    stored on the scanned item, read live through the #132 lookup, and
+    are submitted like text."""
+    SCHEMA = {"name": "Asm", "test_type_name": "Asm", "sections": [{"title": "Parts", "fields": [
+        {"type": "qr", "label": "Panel"},
+        {"type": "text", "label": "Side", "from": "Panel", "path": "Side"},
+        {"type": "text", "label": "Orphan", "from": "Nobody", "path": "Side"},        # no such PID field → plain text
+        {"type": "text", "label": "Half", "from": "Panel"},                           # no path → plain text
+        {"type": "table", "label": "Panels", "link": True, "type_id": "Z00100300042", "columns": [
+            "PID", {"label": "Side", "lookup": "C1", "path": "Side"},
+            {"label": "Bad", "lookup": "C9", "path": "Side"},                           # points nowhere → an input
+            {"label": "Fixed", "lookup": "C1", "path": "Side", "text": "x"}]}]}]}      # text beats it
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("l", "l@l.io", "pw"))
+
+    def test_normalize_resolves_the_source_field_and_column(self):
+        schema = checklistforms.normalize(self.SCHEMA, "A")
+        panel, side, orphan, half, tbl = schema["sections"][0]["fields"]
+        self.assertEqual((side["from"], side["from_key"], side["path"]), ("Panel", panel["key"], "Side"))
+        self.assertNotIn("from", orphan)
+        self.assertNotIn("from_key", orphan)
+        self.assertNotIn("from", half)
+        self.assertEqual(tbl["lookups"], {"Side": "PID"})
+        self.assertEqual(tbl["lookup_paths"], {"Side": "Side"})
+        self.assertEqual(tbl["columns"], ["PID", "Side", "Bad", "Fixed"])
+        self.assertEqual(tbl["texts"], {"Fixed": "x"})
+
+    def test_values_land_in_the_record_like_text(self):
+        schema = checklistforms.normalize(self.SCHEMA, "A")
+        panel, side, _o, _h, tbl = schema["sections"][0]["fields"]
+        data = checklistforms.parse(schema, {panel["key"]: "Z00100300042-00001", side["key"]: "North",
+                                             f"{tbl['key']}-c0": "Z00100300042-00002", f"{tbl['key']}-c1": "South"})
+        self.assertEqual(data["Parts"]["Side"], "North")
+        self.assertEqual(data["Parts"]["Panels"], {"PID": "Z00100300042-00002", "Side": "South", "Fixed": "x"})
+        self.assertEqual([r["pids"] for r in checklistforms.table_link_requests(schema, data)],
+                         [["Z00100300042-00002"]])                        # the looked-up word is never a PID to link
+
+    def test_form_renders_read_only_boxes_wired_to_the_lookup(self):
+        api = _api(schema=self.SCHEMA, test_types=("ES", "Asm"))
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('readonly tabindex="-1" class="cl-lookup" data-lookup-key="f0-0" data-lookup-path="Side" '
+                      'data-lookup-url="/hw/dev/lookup/PID/" title="read from the item in “Panel”"', html)
+        self.assertIn('<span class="cl-hint">Panel › Side</span>', html)
+        self.assertIn('readonly tabindex="-1" data-ci="1" class="cl-lookup" data-lookup-ci="0" data-lookup-path="Side" '
+                      'data-lookup-url="/hw/dev/lookup/PID/" title="“Side” of the item in “PID”"', html)
+        self.assertEqual(html.count('class="cl-lookup"'), 2)          # Orphan, Half and Bad are plain inputs
+        self.assertIn('<input id="f0-2" name="f0-2" value="" autocomplete="off">', html)

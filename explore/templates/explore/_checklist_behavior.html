@@ -6,16 +6,27 @@
   // #132: values read off a scanned item — {"<PID>|<path>": string|null},
   // fetched once per pair; unknown = the section stays hidden
   var looked = {}, pending = {};
-  function lookup(sec, pid, path) {
+  // one fetch per PID and path, however many rules and lookup boxes ask;
+  // ``done`` runs once the value is in (#195 fills its boxes from it too)
+  window.clLookup = function (url, pid, path, done) {
     var k = pid + "|" + path;
-    if (k in looked || pending[k]) return looked[k];
-    pending[k] = true;
-    fetch(sec.getAttribute("data-when-url").replace("PID", encodeURIComponent(pid)) +
-          "?path=" + encodeURIComponent(path))
-      .then(function (r) { return r.ok ? r.json() : { value: null }; })
-      .catch(function () { return { value: null }; })
-      .then(function (d) { looked[k] = d.value == null ? null : String(d.value); delete pending[k]; applyWhen(); });
+    if (k in looked) return looked[k];
+    if (!pending[k]) {
+      pending[k] = [];
+      fetch(url.replace("PID", encodeURIComponent(pid)) + "?path=" + encodeURIComponent(path))
+        .then(function (r) { return r.ok ? r.json() : { value: null }; })
+        .catch(function () { return { value: null }; })
+        .then(function (d) {
+          looked[k] = d.value == null ? null : String(d.value);
+          var cbs = pending[k]; delete pending[k];
+          cbs.forEach(function (cb) { cb(looked[k]); });
+        });
+    }
+    if (done) pending[k].push(done);
     return undefined;
+  };
+  function lookup(sec, pid, path) {
+    return window.clLookup(sec.getAttribute("data-when-url"), pid, path, applyWhen);
   }
   function scopeOf(sec) {
     // the sections' container (same form / same preview, never another
@@ -53,6 +64,40 @@
     if (!document.querySelector('.cl-sec[data-when-path][data-when-key="' + e.target.name + '"]')) return;
     clearTimeout(whenT); whenT = setTimeout(applyWhen, 350);
   });
+  // #195: read-only boxes showing a value stored on a scanned item — a
+  // field names the PID field (data-lookup-key), a table cell its row's PID
+  // column (data-lookup-ci); filled when the page opens and as PIDs change
+  function fillLookup(box) {
+    var src;
+    if (box.hasAttribute("data-lookup-ci")) {
+      src = box.closest("tr").querySelector('[data-ci="' + box.getAttribute("data-lookup-ci") + '"]');
+    } else {
+      src = scopeOf(box.closest(".cl-sec")).querySelector('input[name="' + box.getAttribute("data-lookup-key") + '"]');
+    }
+    var pid = src ? (src.value !== undefined ? src.value : src.textContent).trim().toUpperCase() : "";
+    var path = box.getAttribute("data-lookup-path"), title = box.getAttribute("data-lookup-title") || box.title;
+    box.setAttribute("data-lookup-title", title);
+    function show(val) {   // nothing at the key: a dash and the tooltip say so (a blank box looks like a lookup that never ran)
+      box.value = val == null ? "" : val;
+      box.placeholder = val == null && pid ? "\u2014" : "";
+      box.title = val == null && pid ? "no value at \u201c" + path + "\u201d on " + pid : title;
+    }
+    if (!/^[A-Z]\d{11}-\d{5}$/.test(pid)) { pid = ""; show(null); return; }
+    var v = window.clLookup(box.getAttribute("data-lookup-url"), pid, path, function (val) {
+      show(val);
+      box.dispatchEvent(new Event("input", { bubbles: true }));   // formulas / plots that read it
+    });
+    if (v !== undefined) show(v);
+  }
+  var lookT = null;
+  function fillLookups() { document.querySelectorAll("input.cl-lookup").forEach(fillLookup); }
+  window.clFillLookups = fillLookups;
+  document.addEventListener("input", function (e) {
+    if (e.target.tagName !== "INPUT" || e.target.classList.contains("cl-lookup")) return;
+    if (!document.querySelector("input.cl-lookup")) return;
+    clearTimeout(lookT); lookT = setTimeout(fillLookups, 350);
+  });
+  if (document.querySelector("input.cl-lookup")) fillLookups();
   document.addEventListener("click", function (e) {
     var b = e.target.closest && e.target.closest(".cl-fold");
     if (!b) return;

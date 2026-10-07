@@ -436,6 +436,7 @@ def _norm_field(f: dict) -> dict | None:
         sums, sum_status = {}, {}
         counts, count_status = {}, {}   # #186 round 2: label → column holding a type ID
         count_keys = {}   # #190: label → column naming the batch-size specification key
+        lookups, lookup_paths = {}, {}   # #195: label → column holding the PID, and the key read off it
         for c in f.get("columns") or []:
             if isinstance(c, dict):
                 label = str(c.get("label") or "").strip()
@@ -463,6 +464,18 @@ def _norm_field(f: dict) -> dict | None:
                     st = [str(x).strip() for x in st if str(x).strip()] if isinstance(st, list) else []
                     if st:
                         count_status[label] = st
+                    cols.append(label)
+                    continue
+                # #195 (Hajime, CPA): ``lookup`` = a column (C<n> or its
+                # label) holding a PID in THIS row, ``path`` a key on that
+                # item — the cell shows the stored value, read live when the
+                # PID is typed or scanned (the #132 lookup). Display only
+                # but submitted, like a text. Text beats it.
+                lk = str(c.get("lookup") or "").strip()
+                lp = str(c.get("path") or "").strip().strip(".")
+                if label and lk and lp and not str(c.get("text") or "").strip() and c.get("check") is not True:
+                    lookups[label] = lk
+                    lookup_paths[label] = lp
                     cols.append(label)
                     continue
                 # #186 (Anselmo / Dave Warner, PDS inventory): ``sum`` = a
@@ -510,7 +523,8 @@ def _norm_field(f: dict) -> dict | None:
                 cols.append(label)
         out["columns"] = cols
         for refs, statuses, key, skey in ((sums, sum_status, "sums", "sum_status"),
-                                          (counts, count_status, "counts", "count_status")):
+                                          (counts, count_status, "counts", "count_status"),
+                                          (lookups, lookup_paths, "lookups", "lookup_paths")):
             # a C<n> reference becomes the column's label; one that points
             # nowhere (or at itself) drops the column back to an input
             for label, ref in list(refs.items()):
@@ -601,6 +615,15 @@ def _norm_field(f: dict) -> dict | None:
                 out["pattern"] = pat
             except re.error:
                 pass
+        # #195 (Hajime, CPA): ``from`` names a qr/link field of the form and
+        # ``path`` a key on the item scanned there — the box is read-only
+        # and shows that value (the #132 lookup: a bare key reads the Item
+        # Specifications, ``serial_number`` the standard field), submitted
+        # like any text. Resolved to the field's key by _resolve_lookups.
+        src = str(f.get("from") or "").strip()
+        path = str(f.get("path") or "").strip().strip(".")
+        if src and path:
+            out["from"], out["path"] = src, path
     if t == "select":
         out["options"] = [str(o).strip() for o in f.get("options") or []
                           if str(o).strip()]
@@ -824,8 +847,26 @@ def normalize(cfg: dict, name: str) -> dict:
             sec["level"] = max(1, min(3, int(lv))) if lv is not None else 1
             schema["sections"].append(sec)
     _resolve_when(schema)
+    _resolve_lookups(schema)
     _nest(schema)
     return schema
+
+
+def _resolve_lookups(schema: dict) -> None:
+    """#195: a text field's ``from`` names a qr/link field by label; the
+    runtime reads the PID off that field's input, so store its key. A
+    label that names nothing (or not a PID field) drops the pair and the
+    box is an ordinary text, as a bad ``when`` shows its section."""
+    pids = {leaf["label"]: leaf["key"] for _, leaf in leaf_fields(schema)
+            if leaf["type"] in ("qr", "link")}
+    for _, leaf in leaf_fields(schema):
+        if leaf["type"] != "text" or "from" not in leaf:
+            continue
+        key = pids.get(leaf["from"])
+        if key and key != leaf["key"]:
+            leaf["from_key"] = key
+        else:
+            leaf.pop("from"), leaf.pop("path")
 
 
 def _nest(schema: dict) -> None:
@@ -911,9 +952,18 @@ def _table_cells(f: dict, cells: dict, tx: dict, prefix: str, rr: dict | None = 
     cc = f.get("col_color") or {}
     sums = f.get("sums") or {}
     counts = f.get("counts") or {}
+    lookups = f.get("lookups") or {}
     out = []
     for i, c in enumerate(f["columns"]):
         v = cells.get(c)
+        if c in lookups:   # #195: a value read off the PID in this row's column — filled by the page
+            out.append({"column": c, "name": f"{prefix}-c{i}", "lookup": lookups[c],
+                        "lookup_ci": f["columns"].index(lookups[c]),
+                        "lookup_path": (f.get("lookup_paths") or {}).get(c, ""),
+                        "value": _fmt("" if isinstance(v, dict) else v),
+                        "formula": "", "text": "", "min": None, "max": None, "range": "",
+                        "color": cc.get(c, "")})
+            continue
         if c in counts:   # #186: how many items the row's type has — filled by the page
             out.append({"column": c, "name": f"{prefix}-c{i}", "count": counts[c],
                         "count_ci": f["columns"].index(counts[c]),   # the row's cell holding the Type ID
@@ -1062,6 +1112,7 @@ def _parse_table_row(f: dict, post, prefix: str, texts: dict, resolve=None):
     formulas = f.get("formulas") or {}
     checks = f.get("checks") or []
     sums = {**(f.get("sums") or {}), **(f.get("counts") or {})}
+    lookups = f.get("lookups") or {}
     link = bool(f.get("link"))
     # #114: constant cells first, so formulas can reference a numeric one;
     # posted overrides for them are ignored like formulas'.
@@ -1076,7 +1127,9 @@ def _parse_table_row(f: dict, post, prefix: str, texts: dict, resolve=None):
                 cells[c] = raw == "pass"
                 typed = True
             continue
-        if raw and link:
+        if raw and c in lookups:   # #195: the page's read of the item — kept as text, never a PID, not a submission on its own
+            cells[c] = _num_or_str(raw)
+        elif raw and link:
             pid = _guarded(f.get("type_id"), raw, resolve, f.get("sn"))
             if pid and not _planned_ok(f.get("planned"), None, pid):
                 pid = None   # #185: not one of the pre-assigned items — dropped like a mismatch
@@ -1394,7 +1447,7 @@ def table_link_requests(schema: dict, data: dict) -> list[dict]:
             continue
         rows = list(vals.values()) if f.get("rows") else [vals]
         skip = (set(f.get("checks") or []) | set(f.get("texts") or {}) | set(f.get("formulas") or {})
-                | set(f.get("sums") or {}) | set(f.get("counts") or {}))
+                | set(f.get("sums") or {}) | set(f.get("counts") or {}) | set(f.get("lookups") or {}))
         pids = []
         for row in rows:
             for c in f["columns"]:

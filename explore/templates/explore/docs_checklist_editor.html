@@ -95,7 +95,8 @@
     <tr><td>check</td><td>a ✓ / ✗ toggle</td><td><code>true</code> / <code>false</code>; untouched = omitted</td></tr>
     <tr><td>number</td><td>a numeric box with units and an accepted range, red when out of it</td><td>the number</td></tr>
     <tr><td>table</td><td>a grid of cells — inputs, computed, fixed text, pass/fail; optional named rows</td><td><code>{column: value}</code>, or <code>{row: {column: value}}</code> with rows</td></tr>
-    <tr><td>text / textarea</td><td>one line / several; a text field may carry a <a href="#read">pattern</a> the value must match</td><td>the text</td></tr>
+    <tr><td>text / textarea</td><td>one line / several; a text field may carry a <a href="#read">pattern</a> the value must match, or <span class="dd-ui">read from</span> a PID field
+      and a key: the box is then read-only and shows the value stored under that key on the item scanned there (a bare key reads its Item Specifications; <code>serial_number</code>, <code>location.name</code> read the standard fields; dots walk deeper) — a sub-component's installed side, read when its parent's assembly form scans it</td><td>the text</td></tr>
     <tr><td>date/time</td><td>a date-time picker</td><td><code>YYYY-MM-DDTHH:MM</code></td></tr>
     <tr><td>select</td><td>a dropdown of the options (comma-separated in the editor)</td><td>the chosen option</td></tr>
     <tr><td>photo</td><td>take or pick a picture, with an optional comment; uploaded to the item at submit</td><td>the HWDB image id and name</td></tr>
@@ -141,6 +142,8 @@
       for a component not tracked individually, whose HWDB item is a delivered batch: its reception checklist writes the batch size with <span class="dd-ui">→ Specs</span>
       (say under <code>Received</code>), the Stock row names that key, and the cell shows the pieces, not the batches. A row with a blank key column counts items as above.
       Read live from HWDB, one sweep per type named this way</td></tr>
+    <tr><td><code>Side = lookup(Side of C1)</code></td><td>the value stored under the key <code>Side</code> on the item whose PID is in column 1 of the row — read live when the PID is typed or scanned,
+      as the <span class="dd-ui">read from</span> text field does; a bare key reads the Item Specifications, <code>serial_number</code> the standard field. Read-only, kept in the record</td></tr>
     <tr><td><code>Diff = C2 - C1 [0 ± 0.1]</code>, <code>P1 [1.4..1.6]</code></td><td>the column's own accepted range, beating the table's; not on fixed or check columns</td></tr>
     <tr><td><code>Batch No. {yellow}</code></td><td>tints that column's cells</td></tr>
   </table>
