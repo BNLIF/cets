@@ -495,6 +495,14 @@ class ShipmentDetailsTest(TestCase):
         self.assertEqual(len(secs), 3)
         self.assertTrue(all(not s["fields"] and not s["attachments"] for s in secs))
 
+    def test_string_blob_returns_three_empty_sections(self):
+        # Z00100300005-05044 on dev had DATA stored as a bare string; the
+        # box page must not crash on it.
+        for blob in ("some text", ["a", "b"], 42):
+            secs = shipments.shipment_details(blob)
+            self.assertEqual(len(secs), 3)
+            self.assertTrue(all(not s["fields"] and not s["attachments"] for s in secs))
+
 
 class PartDetailEngineTest(TestCase):
     """parts.part_detail — the generic engine (box page is is_shipping=True)."""

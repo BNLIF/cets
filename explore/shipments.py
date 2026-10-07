@@ -203,9 +203,11 @@ def shipment_details(data_blob: dict | None) -> list[dict]:
     stage not yet reached has empty ``fields``/``attachments``), so the page
     can show the whole timeline (ADR-0013).
     """
+    if not isinstance(data_blob, dict):  # DATA may be a bare string or list
+        data_blob = {}
     out = []
     for key, title in _DETAIL_SECTIONS:
-        entries = (data_blob or {}).get(key)
+        entries = data_blob.get(key)
         fields, attachments = fold_entries(entries if isinstance(entries, list) else [])
         out.append({"title": title, "fields": fields, "attachments": attachments})
     return out
