@@ -36,7 +36,8 @@
 
   <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
     <h1>{{ schema.name }}{% if cl_name != schema.name %} <span class="mono" style="font-size:.7em; font-weight:400; color:var(--dim);">· {{ cl_name }}</span>{% endif %}</h1>
-    <form method="post" action="{% url 'explore:checklist_bookmark' %}" style="margin:0 0 0 auto;">
+    <a class="es-btn quiet" style="margin-left:auto; text-decoration:none;" href="{% url 'explore:checklist_config' part_type_id=part_type_id %}?name={{ cl_name|urlencode }}&amp;next={{ request.get_full_path|urlencode }}" title="Open this checklist in the editor">&#9998; Edit checklist</a>
+    <form method="post" action="{% url 'explore:checklist_bookmark' %}" style="margin:0;">
       {% csrf_token %}
       <input type="hidden" name="part_type_id" value="{{ part_type_id }}">
       <input type="hidden" name="name" value="{{ cl_name }}">

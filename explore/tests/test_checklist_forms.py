@@ -4631,3 +4631,24 @@ class SameLabelAcrossSectionsTest(TestCase):
         self.assertIn("shown when A › PID › Side = N", html)
         self.assertIn('<span class="cl-hint">A › PID › Side</span>', html)
         self.assertIn('<span class="cl-hint">Other › Side</span>', html)
+
+
+class EditChecklistLinkTest(TestCase):
+    """Chao 2026-10-07: the chooser, the fill page and the organizer link
+    straight to the editor, which comes back here when done."""
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("k", "k@k.io", "pw"))
+
+    def test_three_pages_link_to_the_editor(self):
+        edit = f'href="/hw/dev/checklist-config/{PTID}/?name={NAME}&amp;next='
+        m1, m2 = _mocked(_api())
+        with m1, m2:
+            entry = self.client.get(f"/hw/dev/checklist/{PTID}/{NAME}/").content.decode()
+            form = self.client.get(PAGE).content.decode()
+        self.assertIn(edit + f"/hw/dev/checklist/{PTID}/{NAME}/" + '" title="Open this checklist in the editor">&#9998; Edit checklist</a>', entry)
+        self.assertIn(edit + PAGE + '" title="Open this checklist in the editor">&#9998; Edit checklist</a>', form)
+        m1, m2 = _mocked(_api(schema=ORGANIZER))
+        with m1, m2:
+            org = self.client.get(f"/hw/dev/checklist/{PTID}/{NAME}/").content.decode()
+        self.assertIn(edit, org)
+        self.assertEqual(org.count("Edit checklist"), 1)
