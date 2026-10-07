@@ -90,6 +90,9 @@
     start a grid, and <span class="dd-ui">no grid</span> returns the section to the flow layout with its earlier placements.</p>
 
   <h2 id="types">Field types</h2>
+  <p>The label is the field's name: the record stores values by section title and label, and show-when and read-from rules name fields by it.
+    A label repeated within one section becomes <code>Label (2)</code>, <code>Label (3)</code>… in field order, so no value is lost and a rule can name the one it means;
+    the editor outlines such a label box. The same label in two sections is fine for the record; the show-when and read-from pickers then list it once per section as <code>Label ‹Section›</code>, and the rule remembers the section. A <span class="dd-ui">description</span> is a sentence shown after the label for what to enter there, with inline Markdown; keep the label short.</p>
   <table>
     <tr><th>Type</th><th>On the form</th><th>Stored</th></tr>
     <tr><td>check</td><td>a ✓ / ✗ toggle</td><td><code>true</code> / <code>false</code>; untouched = omitted</td></tr>

@@ -63,6 +63,7 @@
   .clc-fld .ff-label { flex: 1 1 80px; }
   /* a non-static field without a label is dropped from the schema/preview */
   .clc-fld .ff-label.miss { border-color: var(--bad, #a33); }
+  .clc-fld .ff-label.dup { border-color: var(--warn, #b8860b); }   /* #196: repeated in its section — the form shows it as "Label (2)" */
   /* clicked in the preview → its editor row flashes */
   .clc-hit { outline: 2px solid var(--accent-ink); outline-offset: 2px;
     border-radius: var(--r-sm); transition: outline-color .3s; }
@@ -403,14 +404,17 @@
       <input type="hidden" class="ff-rows">
       <textarea class="ff-columns" rows="2" style="flex:1 1 100%;" placeholder="columns — comma- or line-separated; computed: Total = C1 + C2*(C3/C4) [11 ± 1]; fixed: Expected = &quot;3.1+-0.1&quot;; pass/fail: OK = check; over the type's items: Received = sum(C4)" title="label = formula makes a computed column (C1 = first column's value, formula/fixed cells count too); label = &quot;text&quot; makes a fixed non-editable cell (no commas in the text); label = sum(C4) totals that column's value in the row over every item of the type (sum(C4 in Received | Unknown) counts only those statuses); label = count(C1) shows how many items the type whose ID is in column 1 has (count(C1 * C2): each item weighted by the number in its specifications under the key named in column 2 — a batch registered as one item counts its pieces); label = lookup(Side of C1) shows the value stored under Side on the item whose PID is in column 1; [nominal ± tol] or [min..max] gives that column its own accepted range"></textarea>
     </div>
+    <div class="ec-row g-desc">
+      <input class="ff-desc" placeholder="description — a sentence on what this field is for, shown after the label" style="flex:1 1 100%;">
+    </div>
     <div class="ec-row g-select" style="display:none;">
       <input class="ff-options" placeholder="options, comma-separated">
     </div>
     <div class="ec-row g-textpat" style="display:none;">
       <input class="ff-pattern" placeholder="pattern (regex, e.g. 011-\d{5}) — adds a Phone button that reads the value off the item" style="flex:1 1 100%;"
         title="a typed value must match it in full; the phone&#8217;s camera reads printed text and sends a read that matches">
-      <input class="ff-from" placeholder="read from: label of a PID field" style="flex:1 1 220px;"
-        title="the box becomes read-only and shows a value stored on the item scanned into that field">
+      <select class="ff-from" style="flex:1 1 220px;"
+        title="the box becomes read-only and shows a value stored on the item scanned into that field"><option value="">read from: a PID field&hellip;</option></select>
       <input class="ff-path" placeholder="key on that item, e.g. Side (its Item Specifications; serial_number = the standard field)" style="flex:1 1 300px;">
     </div>
     <div class="ec-row g-steps" style="display:none;">
@@ -568,6 +572,7 @@
       (t === "table" && $(".ff-color", r).dataset.on) ? "" : "none";
     $(".g-select", r).style.display = t === "select" ? "" : "none";
     $(".g-textpat", r).style.display = t === "text" ? "" : "none";     // #188
+    $(".g-desc", r).style.display = t === "static" || t === "plot" ? "none" : "";   // #196: a note has its own text
     $(".g-steps", r).style.display = t === "steps" ? "" : "none";
     $$(".g-static", r).forEach(function (g) { g.style.display = t === "static" ? "" : "none"; });
     $(".g-img", r).style.display = (t === "static" || t === "imagemap") ? "" : "none";
@@ -593,6 +598,7 @@
     f = f || {};
     $(".ff-type", r).value = f.type || "check";
     $(".ff-label", r).value = f.label || "";
+    $(".ff-desc", r).value = f.description || "";                       // #196
     $(".ff-place", r).value = place || "";
     $(".ff-tospec", r).checked = !!f.to_spec;
     $(".ff-spec", r).value = f.spec || "";                             // #176
@@ -617,7 +623,8 @@
     $(".ff-typeid", r).value = f.type_id || "";
     $(".ff-sn", r).value = f.sn || "";                                 // #149
     $(".ff-pattern", r).value = f.type === "text" ? (f.pattern || "") : "";   // #188
-    $(".ff-from", r).value = f.type === "text" ? (f.from || "") : "";         // #195
+    r.dataset.fromF = f.type === "text" ? (f.from || "") : "";              // #195 — the picker is filled by syncWhenPickers
+    r.dataset.fromSec = f.type === "text" ? (f.from_section || "") : "";    // #196
     $(".ff-path", r).value = f.type === "text" ? (f.path || "") : "";
     $(".ff-plot", r).value = f.plot || "";                             // #160
     $(".ff-plotsecs", r).value = (f.sections || []).join(", ");
@@ -1162,6 +1169,7 @@
     n.dataset.level = $(".fs-level", n).value;
     // the when-pickers fill in at refresh() once every select field exists
     n.dataset.whenF = (s.when && s.when.field) || "";
+    n.dataset.whenSec = (s.when && s.when.section) || "";                // #196
     n.dataset.whenEq = (s.when && s.when.equals) || "";
     n.dataset.whenP = (s.when && s.when.path) || "";                     // #132
     (s.fields || []).forEach(function (f) {
@@ -1278,6 +1286,7 @@
     var t = $(".ff-type", r).value, label = $(".ff-label", r).value.trim();
     var f = { type: t };
     if (label) f.label = label;
+    if (t !== "static" && t !== "plot" && $(".ff-desc", r).value.trim()) f.description = $(".ff-desc", r).value.trim();   // #196
     if (t === "static") {
       var note = $(".ff-note", r).value.trim(), url = $(".ff-url", r).value.trim(),
           image = $(".ff-image", r).value.trim(),
@@ -1340,8 +1349,10 @@
       if (pos) f.position = pos;
     }
     if (t === "text" && $(".ff-pattern", r).value.trim()) f.pattern = $(".ff-pattern", r).value.trim();   // #188
-    if (t === "text" && $(".ff-from", r).value.trim() && $(".ff-path", r).value.trim()) {   // #195
-      f.from = $(".ff-from", r).value.trim(); f.path = $(".ff-path", r).value.trim();
+    if (t === "text" && $(".ff-from", r).value && $(".ff-path", r).value.trim()) {   // #195
+      var fr = unqualify($(".ff-from", r).value);
+      f.from = fr.label; f.path = $(".ff-path", r).value.trim();
+      if (fr.section) f.from_section = fr.section;   // #196
     }
     if (t === "qr" || t === "link" || t === "imagemap" || (t === "table" && $(".ff-tbllink", r).checked)) {
       var tid = $(".ff-typeid", r).value.trim().toUpperCase(), sn = $(".ff-sn", r).value.trim();
@@ -1445,9 +1456,11 @@
       if (lv > 1) sec.level = lv;
       var wf = $(".fs-whenf", s).value, we = $(".fs-wheneq", s).value;
       var wp = $(".fs-whenp", s).value.trim(), wt = $(".fs-wheneqt", s).value.trim();
+      var wq = unqualify(wf);                                            // #196: "Label ‹Section›" when the label repeats
       if (wf && $(".fs-whenpwrap", s).style.display !== "none") {        // #132 PID field
-        if (wp && wt) sec.when = { field: wf, path: wp, equals: wt };
-      } else if (wf && we) sec.when = { field: wf, equals: we };
+        if (wp && wt) sec.when = { field: wq.label, path: wp, equals: wt };
+      } else if (wf && we) sec.when = { field: wq.label, equals: we };
+      if (sec.when && wq.section) sec.when.section = wq.section;
       return sec;
     }).filter(function (s) { return s.title || s.fields.length; });
     keyRow = {};
@@ -1485,24 +1498,70 @@
     sel.innerHTML = opts.join("");
     sel.value = current || "";
   }
+  // #196: the label the form will use — a repeat within a section becomes
+  // "Label (2)", "Label (3)"… in field order (static notes and plots keep
+  // theirs); the box is marked so the author sees it
+  function effLabels() {
+    var out = {};
+    $$("#clc-sections > .clc-sec").forEach(function (s) {
+      var seen = {};
+      $$(".clc-fld", s).forEach(function (r) {
+        var t = $(".ff-type", r).value, box = $(".ff-label", r), base = box.value.trim(), lab = base, n = 2;
+        if (!base || t === "static" || t === "plot") { box.classList.remove("dup"); return; }
+        while (seen[lab]) lab = base + " (" + (n++) + ")";
+        seen[lab] = true;
+        out[r.dataset.fid || (r.dataset.fid = String(Math.random()).slice(2))] = lab;
+        box.classList.toggle("dup", lab !== base);
+        box.title = lab !== base ? "another field in this section has this label — the form shows this one as \u201c" + lab + "\u201d" : "";
+      });
+    });
+    return out;
+  }
+  // #196: a label that sits in several sections is listed once per section
+  // as "Label ‹Section›"; the rule then carries the section. unqualify()
+  // splits that back. A label in one section only stays bare.
+  function qualify(label, section) { return section ? label + " \u2039" + section + "\u203a" : label; }
+  function unqualify(v) {
+    var m = /^(.*) \u2039(.*)\u203a$/.exec(v || "");
+    return m ? { label: m[1], section: m[2] } : { label: v || "", section: "" };
+  }
   function syncWhenPickers() {
-    var selects = {}, pids = {};                    // #132: PID fields drive too
-    $$(".clc-fld").forEach(function (r) {
-      var t = $(".ff-type", r).value, label = $(".ff-label", r).value.trim();
-      if (!label) return;
-      if (t === "select") selects[label] = list($(".ff-options", r).value, ",");
-      if (t === "qr" || t === "link") pids[label] = true;
+    var selects = {}, pids = {}, eff = effLabels(), rows = [], inSecs = {};   // #132: PID fields drive too
+    $$("#clc-sections > .clc-sec").forEach(function (s) {
+      var title = $(".fs-title", s).value.trim();
+      $$(".clc-fld", s).forEach(function (r) {
+        var t = $(".ff-type", r).value, label = eff[r.dataset.fid] || $(".ff-label", r).value.trim();
+        if (!label || (t !== "select" && t !== "qr" && t !== "link")) return;
+        rows.push({ t: t, label: label, sec: title, r: r });
+        (inSecs[label] = inSecs[label] || {})[title] = true;
+      });
+    });
+    rows.forEach(function (x) {
+      var v = qualify(x.label, Object.keys(inSecs[x.label]).length > 1 ? x.sec : "");
+      if (x.t === "select") selects[v] = list($(".ff-options", x.r).value, ",");
+      else pids[v] = true;
+    });
+    function current(label, sec) {   // a loaded rule → the picker value it means today
+      if (!label) return "";
+      var secs = Object.keys(inSecs[label] || {});
+      if (secs.length <= 1) return label;
+      return qualify(label, sec && secs.indexOf(sec) !== -1 ? sec : secs[secs.length - 1]);
+    }
+    $$(".clc-fld").forEach(function (r) {   // #195 read-from pickers: PID fields only
+      var sel = $(".ff-from", r), cur = sel.value || current(r.dataset.fromF, r.dataset.fromSec);
+      r.dataset.fromF = r.dataset.fromSec = "";
+      fillSelect(sel, Object.keys(pids), cur, "read from: a PID field&hellip;");
     });
     $$("#clc-sections > .clc-sec").forEach(function (s) {
       var fsel = $(".fs-whenf", s), esel = $(".fs-wheneq", s);
-      var curF = fsel.value || s.dataset.whenF || "";
+      var curF = fsel.value || current(s.dataset.whenF, s.dataset.whenSec);
       var curE = esel.value || s.dataset.whenEq || "";
       if (s.dataset.whenP) {                       // loading a path rule
         $(".fs-whenp", s).value = s.dataset.whenP;
         $(".fs-wheneqt", s).value = s.dataset.whenEq || "";
         curE = "";
       }
-      s.dataset.whenF = s.dataset.whenEq = s.dataset.whenP = "";
+      s.dataset.whenF = s.dataset.whenEq = s.dataset.whenP = s.dataset.whenSec = "";
       fillSelect(fsel, Object.keys(selects).concat(Object.keys(pids)), curF, "&mdash; always &mdash;");
       var isPid = !!pids[curF];
       fillSelect(esel, selects[curF] || [], curF && !isPid ? curE : "", "");

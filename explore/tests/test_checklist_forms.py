@@ -4550,3 +4550,84 @@ class LookupTest(TestCase):
                       'data-lookup-url="/hw/dev/lookup/PID/" title="“Side” of the item in “PID”"', html)
         self.assertEqual(html.count('class="cl-lookup"'), 2)          # Orphan, Half and Bad are plain inputs
         self.assertIn('<input id="f0-2" name="f0-2" value="" autocomplete="off">', html)
+
+
+class DuplicateLabelAndDescriptionTest(TestCase):
+    """#196 (Chao): a label repeated in a section gets " (2)", " (3)" so the
+    record keeps every value and a rule can name the one it means; a
+    ``description`` shows under the field."""
+    SCHEMA = {"name": "Dup", "test_type_name": "Dup", "sections": [
+        {"title": "A", "fields": [
+            {"type": "qr", "label": "PID", "description": "the **north** panel"},
+            {"type": "row", "fields": [{"type": "qr", "label": "PID"}, {"type": "text", "label": "PID"}]},
+            {"type": "static", "label": "PID", "note": "a note"},
+            {"type": "static", "label": "PID", "note": "another"},
+            {"type": "text", "label": "PID (2)"}]},                       # already taken → (4)
+        {"title": "B", "fields": [{"type": "qr", "label": "PID"}]},     # another section: untouched
+        {"title": "N", "when": {"field": "PID (2)", "path": "Side", "equals": "North"},
+         "fields": [{"type": "text", "label": "Side", "from": "PID (2)", "path": "Side"}]}]}
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("d", "d@d.io", "pw"))
+
+    def test_labels_are_suffixed_within_a_section_only(self):
+        n = checklistforms.normalize(self.SCHEMA, "D")
+        a = [(l["type"], l["label"], l.get("relabeled", False)) for _, l in checklistforms.leaf_fields(n) if _ == "A"]
+        self.assertEqual(a, [("qr", "PID", False), ("qr", "PID (2)", True), ("text", "PID (3)", True),
+                             ("static", "PID", False), ("static", "PID", False), ("text", "PID (2) (2)", True)])
+        self.assertEqual([l["label"] for t, l in checklistforms.leaf_fields(n) if t == "B"], ["PID"])
+        self.assertEqual(n["sections"][2]["when"]["key"], "f0-1-0")        # the rule names the second PID box
+        self.assertEqual(n["sections"][2]["fields"][0]["from_key"], "f0-1-0")
+        self.assertEqual(n["sections"][0]["fields"][0]["description"], "the **north** panel")
+
+    def test_every_value_lands_in_the_record(self):
+        n = checklistforms.normalize(self.SCHEMA, "D")
+        data = checklistforms.parse(n, {"f0-0": "Z00100300042-00001", "f0-1-0": "Z00100300042-00002",
+                                        "f0-1-1": "x", "f1-0": "Z00100300042-00003"})
+        self.assertEqual(data["A"], {"PID": "Z00100300042-00001", "PID (2)": "Z00100300042-00002", "PID (3)": "x"})
+        self.assertEqual(data["B"], {"PID": "Z00100300042-00003"})
+
+    def test_form_shows_the_suffix_and_the_description(self):
+        m1, m2 = _mocked(_api(schema=self.SCHEMA, test_types=("ES", "Dup")))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('<label class="cl-lab" for="f0-1-0">PID (2)', html)
+        self.assertIn('for="f0-0">PID <span class="cl-desc">the <strong>north</strong> panel</span></label>', html)   # on the label's line
+        self.assertIn("shown when PID (2) › Side = North", html)
+
+
+class SameLabelAcrossSectionsTest(TestCase):
+    """#196: a label in two sections — a rule says which with ``section``
+    (``from_section`` on a read-from field); without it the last wins as before."""
+    SCHEMA = {"name": "X", "test_type_name": "X", "sections": [
+        {"title": "A", "fields": [{"type": "qr", "label": "PID"}, {"type": "select", "label": "Mode", "options": ["a"]}]},
+        {"title": "B", "fields": [{"type": "qr", "label": "PID"}, {"type": "select", "label": "Mode", "options": ["a", "b"]}]},
+        {"title": "Only", "fields": [{"type": "qr", "label": "Other"}]},
+        {"title": "ByA", "when": {"field": "PID", "section": "A", "path": "Side", "equals": "N"},
+         "fields": [{"type": "text", "label": "s1", "from": "PID", "from_section": "A", "path": "Side"}]},
+        {"title": "Last", "when": {"field": "PID", "path": "Side", "equals": "N"},
+         "fields": [{"type": "text", "label": "s2", "from": "PID", "path": "Side"},
+                    {"type": "text", "label": "s3", "from": "Other", "from_section": "Nope", "path": "Side"}]},
+        {"title": "SelB", "when": {"field": "Mode", "section": "B", "equals": "b"}, "fields": [{"type": "text", "label": "t"}]},
+        {"title": "SelBad", "when": {"field": "Mode", "section": "Zzz", "equals": "b"}, "fields": [{"type": "text", "label": "u"}]}]}
+
+    def test_section_picks_the_field_else_the_last(self):
+        n = checklistforms.normalize(self.SCHEMA, "X")
+        secs = {s["title"]: s for s in n["sections"]}
+        self.assertEqual(secs["ByA"]["when"], {"field": "PID", "key": "f0-0", "path": "Side", "equals": "N", "section": "A"})
+        self.assertEqual(secs["Last"]["when"], {"field": "PID", "key": "f1-0", "path": "Side", "equals": "N", "section": "B"})
+        s1, s2, s3 = secs["ByA"]["fields"][0], secs["Last"]["fields"][0], secs["Last"]["fields"][1]
+        self.assertEqual((s1["from_key"], s1["from_section"]), ("f0-0", "A"))
+        self.assertEqual((s2["from_key"], s2["from_section"]), ("f1-0", "B"))
+        self.assertEqual(s3["from_key"], "f2-0"); self.assertNotIn("from_section", s3)   # unique label: no qualifier, bad section ignored
+        self.assertEqual(secs["SelB"]["when"], {"field": "Mode", "key": "f1-1", "equals": "b", "section": "B"})
+        self.assertEqual(secs["SelBad"]["when"]["key"], "f1-1")   # unknown section → last, which happens to have "b"
+
+    def test_hints_name_the_section(self):
+        self.client.force_login(get_user_model().objects.create_user("x", "x@x.io", "pw"))
+        m1, m2 = _mocked(_api(schema=self.SCHEMA, test_types=("ES", "X")))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("shown when A › PID › Side = N", html)
+        self.assertIn('<span class="cl-hint">A › PID › Side</span>', html)
+        self.assertIn('<span class="cl-hint">Other › Side</span>', html)

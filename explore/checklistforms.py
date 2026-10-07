@@ -340,6 +340,10 @@ def _norm_field(f: dict) -> dict | None:
         return None
     out = {"type": t, "label": label, "units": str(f.get("units") or "").strip(),
            "to_spec": bool(f.get("to_spec")) and t in SPEC_CAPABLE}
+    # #196 (Chao): a sentence on what the field is for, shown under it —
+    # the label stays a short name
+    if str(f.get("description") or "").strip():
+        out["description"] = str(f["description"]).strip()
     # #176 (Chao): ``spec`` = the key the value is stored under in the item's
     # specifications when it differs from the label — a descriptive label
     # ("Number of items received") with a short key ("Received") for a sum field
@@ -624,6 +628,8 @@ def _norm_field(f: dict) -> dict | None:
         path = str(f.get("path") or "").strip().strip(".")
         if src and path:
             out["from"], out["path"] = src, path
+            if str(f.get("from_section") or "").strip():   # #196: which section's field, when the label repeats
+                out["from_section"] = str(f["from_section"]).strip()
     if t == "select":
         out["options"] = [str(o).strip() for o in f.get("options") or []
                           if str(o).strip()]
@@ -811,6 +817,7 @@ def normalize(cfg: dict, name: str) -> dict:
                 if nf:
                     nf["key"] = f"f{si}-{fi}"
                     fields.append(nf)
+        _dedupe_labels(fields)
         if title:   # a titled section renders even before it has a field — the
                     # editor shows a new section as soon as it is named (#192)
             sec = {"title": title, "fields": fields}
@@ -852,19 +859,40 @@ def normalize(cfg: dict, name: str) -> dict:
     return schema
 
 
+def _dedupe_labels(fields: list) -> None:
+    """#196 (Chao): the record is keyed by section title › label, so two
+    fields of one section with the same label would silently keep only the
+    later value — and a ``when`` / ``from`` rule naming it would bind to
+    the last. A repeated label gets `` (2)``, `` (3)``… in form order, so
+    every value lands and a rule can name the one it means. Static notes
+    and plots show their label only, so they keep it as written."""
+    seen = set()
+    for f in fields:
+        for leaf in _row_leaves(f):
+            if leaf["type"] in ("static", "plot") or not leaf.get("label"):
+                continue
+            base, lab, n = leaf["label"], leaf["label"], 2
+            while lab in seen:
+                lab, n = f"{base} ({n})", n + 1
+            if lab != base:
+                leaf["label"], leaf["relabeled"] = lab, True
+            seen.add(lab)
+
+
 def _resolve_lookups(schema: dict) -> None:
     """#195: a text field's ``from`` names a qr/link field by label; the
     runtime reads the PID off that field's input, so store its key. A
     label that names nothing (or not a PID field) drops the pair and the
     box is an ordinary text, as a bad ``when`` shows its section."""
-    pids = {leaf["label"]: leaf["key"] for _, leaf in leaf_fields(schema)
-            if leaf["type"] in ("qr", "link")}
+    pids = _by_label(schema, ("qr", "link"))
     for _, leaf in leaf_fields(schema):
         if leaf["type"] != "text" or "from" not in leaf:
             continue
-        key = pids.get(leaf["from"])
-        if key and key != leaf["key"]:
-            leaf["from_key"] = key
+        src, ssec = _pick(pids.get(leaf["from"]), str(leaf.pop("from_section", "") or "").strip())
+        if src and src["key"] != leaf["key"]:
+            leaf["from_key"] = src["key"]
+            if ssec:
+                leaf["from_section"] = ssec   # #196: the label sits in several sections — say which
         else:
             leaf.pop("from"), leaf.pop("path")
 
@@ -896,10 +924,8 @@ def _resolve_when(schema: dict) -> None:
     select's input key (the runtime toggles on that input's value) or drop
     it when nothing matches, so a typo shows the section rather than hiding
     it forever."""
-    selects = {leaf["label"]: leaf for _, leaf in leaf_fields(schema)
-               if leaf["type"] == "select"}
-    pids = {leaf["label"]: leaf for _, leaf in leaf_fields(schema)
-            if leaf["type"] in ("qr", "link")}
+    selects = _by_label(schema, ("select",))
+    pids = _by_label(schema, ("qr", "link"))
     for sec in schema["sections"]:
         w = sec.pop("when", None)
         if not w:
@@ -907,17 +933,42 @@ def _resolve_when(schema: dict) -> None:
         label = str(w.get("field") or "").strip()
         eq = str(w.get("equals") or "").strip()
         path = str(w.get("path") or "").strip().strip(".")
+        where = str(w.get("section") or "").strip()
         if path:
             # #132: ``{field: <qr/link label>, path: "specifications.DATA.Row",
             # equals: "North"}`` — the value is read off the scanned item
             # (any type) at fill time; the page posts what it resolved
-            q = pids.get(label)
+            q, qsec = _pick(pids.get(label), where)
             if q and eq:
                 sec["when"] = {"field": label, "key": q["key"], "path": path, "equals": eq}
+                if qsec:
+                    sec["when"]["section"] = qsec
             continue
-        sel = selects.get(label)
+        sel, ssec = _pick(selects.get(label), where)
         if sel and eq in sel["options"]:
             sec["when"] = {"field": label, "key": sel["key"], "equals": eq}
+            if ssec:
+                sec["when"]["section"] = ssec
+
+
+def _by_label(schema: dict, types: tuple) -> dict:
+    """label → [(section title, leaf), …] in form order, for the leaf types given."""
+    out: dict = {}
+    for title, leaf in leaf_fields(schema):
+        if leaf["type"] in types:
+            out.setdefault(leaf["label"], []).append((title, leaf))
+    return out
+
+
+def _pick(cands, section: str):
+    """#196: the field a rule means when its label sits in several sections
+    — the one in the named ``section``, else the last (as before, when the
+    label was the only name). Returns (leaf, section title) — the title
+    only when the label is ambiguous, for the page's hint."""
+    if not cands:
+        return None, ""
+    hit = next((c for c in cands if section and c[0] == section), cands[-1])
+    return hit[1], (hit[0] if len(cands) > 1 else "")
 
 
 def _row_leaves(f: dict) -> list[dict]:

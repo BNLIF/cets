@@ -1,5 +1,5 @@
 <div class="es-card cl-sec{% if sec.level > 1 %} cl-sub{% endif %}{% if sec.collapsed %} cl-folded{% endif %}" data-title="{{ sec.title }}"{% if sec.when %} data-when-key="{{ sec.when.key }}" data-when-eq="{{ sec.when.equals }}"{% if sec.when.path %} data-when-path="{{ sec.when.path }}" data-when-url="{% url 'explore:lookup' part_id='PID' %}"{% endif %}{% endif %}>
-  <h2><button type="button" class="cl-fold" aria-expanded="{% if sec.collapsed %}false{% else %}true{% endif %}">{{ sec.title }}</button>{% if sec.when %}<span class="cl-hint">shown when {{ sec.when.field }}{% if sec.when.path %} › {{ sec.when.path }}{% endif %} = {{ sec.when.equals }}</span>{% endif %}</h2>
+  <h2><button type="button" class="cl-fold" aria-expanded="{% if sec.collapsed %}false{% else %}true{% endif %}">{{ sec.title }}</button>{% if sec.when %}<span class="cl-hint">shown when {% if sec.when.section %}{{ sec.when.section }} › {% endif %}{{ sec.when.field }}{% if sec.when.path %} › {{ sec.when.path }}{% endif %} = {{ sec.when.equals }}</span>{% endif %}</h2>
   {% if sec.when.path %}<input type="hidden" name="w{{ sec.i }}" class="cl-when-val">{% endif %}
   <div class="cl-sec-body">
   {% if sec.grid %}
