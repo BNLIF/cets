@@ -11,6 +11,7 @@ urlpatterns = [
     path("browse/", views.explore_view, name="browse"),
     path("hierarchy/", views.explore_hierarchy_view, name="hierarchy"),
     path("hierarchy/summary/", views.explore_type_summary_view, name="type_summary"),
+    path("status/<str:part_type_id>/", views.explore_production_status_view, name="production_status"),   # #199
     path("type-positions/<str:part_type_id>/", views.explore_type_positions_view,
          name="type_positions"),
     path("type-locations/<str:part_type_id>/", views.explore_type_locations_view,
@@ -42,12 +43,15 @@ urlpatterns = [
     path("test-date/<str:part_type_id>/", views.explore_test_date_view, name="test_date"),
     path("shipping-type/<str:part_type_id>/", views.explore_shipping_type_toggle_view,
          name="shipping_type_toggle"),
+    path("type-class/<str:part_type_id>/", views.explore_type_class_view,
+         name="type_class"),   # the Category dropdown: none / shipping container / consortium type (#101, #199)
     path("box-type/<str:part_type_id>/", views.explore_box_type_view,
          name="box_type"),
     path("es-config/<str:part_type_id>/", views.explore_es_config_view,
          name="es_config"),
     path("checklist-config/<str:part_type_id>/",
          views.explore_checklist_config_view, name="checklist_config"),
+    path("text-preview/", views.explore_text_preview_view, name="text_preview"),   # the cell text editor's live preview (Chao 2026-10-08)
     path("checklist-config/<str:part_type_id>/preview/",
          views.explore_checklist_preview_view, name="checklist_preview"),
     path("checklist-config/<str:part_type_id>/asset/",

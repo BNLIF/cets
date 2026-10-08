@@ -380,22 +380,23 @@ class NavigationTest(TestCase):
         toggle = "/hw/shipping-type/D05700200001/"
         with mock.patch("explore.views._is_architect", return_value=True):
             html = self._html(leaf_url)
-            self.assertIn("treat as shipping-container", html)
-            self.assertIn(toggle, html)
+            # the Category dropdown (Chao 2026-10-08) replaced the inline link; the toggle endpoint stays
+            self.assertIn('<option value="shipping">shipping container</option>', html)
+            self.assertIn('action="/hw/type-class/D05700200001/"', html)
             resp = self.client.post(toggle, {"next": leaf_url})
             self.assertEqual(resp["Location"], leaf_url)
             self.assertTrue(ShippingTypeOverride.objects.filter(
                 instance="prod", part_type_id="D05700200001").exists())
             html = self._html(leaf_url)
-            self.assertIn(">shipping-container</span>", html)
-            self.assertIn('value="remove"', html)           # "undo" for a UI-added type
+            self.assertIn('<option value="shipping" selected>shipping container</option>', html)
+            self.assertNotIn("disabled title=", html)      # a UI-added class can be changed back
             self.assertIn("Boxes in HWDB", html)          # renders as a shipping leaf now
             self.client.post(toggle, {"next": leaf_url, "action": "remove"})
             self.assertFalse(ShippingTypeOverride.objects.exists())
         self.assertEqual(ActivityEvent.objects.filter(kind="curation").count(), 2)
         with mock.patch("explore.views._is_architect", return_value=False):
             html = self._html(leaf_url)
-            self.assertNotIn(toggle, html)                # no control for non-architects
+            self.assertNotIn('<select name="class"', html)   # no control for non-architects
             resp = self.client.post(toggle, {"next": leaf_url})
         self.assertEqual(resp.status_code, 403)
 

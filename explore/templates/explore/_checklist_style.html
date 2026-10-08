@@ -104,6 +104,22 @@
   /* #139: opt-in cell borders; inputs keep their own box inside the cell
      so an entry cell still reads as one */
   .cl-table.cl-gridlines th, .cl-table.cl-gridlines td { border: 1px solid var(--rule); }
+  /* #199: a production-status table (status page, Detector tab) — the
+     named-row table above, read-only: past months green, long comments wrap wide */
+  .ps-card { margin: 14px 0 26px; }
+  .ps-card h2 { font-size: 1.05rem; margin: 0 0 6px; color: var(--ink); display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .ps-card h2 .ps-serial { font-size: .8em; font-weight: 400; color: var(--dim); }
+  .ps-card h2 .ps-asof { font-size: 12px; font-weight: 400; color: var(--faint); }
+  .ps-card h2 a.ps-edit { margin-left: auto; font-size: 12px; font-weight: 400; text-decoration: none; color: var(--accent-ink); }
+  .ps-table th.cl-rowlab { color: var(--ink); font-weight: 600; }
+  .ps-table td.cl-const.ps-past { color: var(--good, #2e7d32); }
+  .ps-table td.cl-const.ps-types { font-family: var(--font-mono); font-size: calc(11.5px * var(--cl-scale, 1)); }
+  .ps-table td.cl-const.ps-types a { color: var(--accent-ink); text-decoration: none; }
+  .ps-table td.cl-const.ps-types a:hover { text-decoration: underline; }
+  .ps-table td.cl-const.cl-wrap.ps-long { max-width: 440px; min-width: 260px; }
+  .ps-table td.cl-const > p, .ps-table td.cl-const > ul, .ps-table td.cl-const > ol { margin: 0; }   /* full Markdown in a cell: no paragraph gaps */
+  .ps-table td.cl-const > p + p, .ps-table td.cl-const > * + ul, .ps-table td.cl-const > * + ol { margin-top: 6px; }
+  .ps-table td.cl-const > ul, .ps-table td.cl-const > ol { padding-left: 18px; }
   .cl-table.cl-gridlines th.cl-rowlab { padding-right: 8px; }
   /* #115: table tint keyed to the reference drawing, painted as picked
      across the whole row, inputs included (cells only, not the header);
@@ -143,6 +159,30 @@
   .cl-map img { display: block; max-width: 100%; max-height: 440px;
     border: 1px solid var(--rule); border-radius: var(--r-sm); cursor: zoom-in; }
   /* zoomed map view (tap the drawing): full resolution, slots still tappable */
+  /* Chao 2026-10-08: a plain cell's ✎ (shown on hover / focus, and always once the text is long)
+     opens a text editor for a comment that doesn't fit an input */
+  .cl-table td textarea.cl-cell-ta { width: 160px; height: 1.9em; min-height: 0; resize: none; font: inherit; font-size: calc(13px * var(--cl-scale, 1));
+    padding: 3px 6px; border: 1px solid var(--rule); border-radius: var(--r-sm); background: var(--cl-input-bg, var(--page)); color: var(--ink);
+    white-space: pre; overflow: hidden; vertical-align: middle; box-sizing: border-box; }
+  .cl-table td:has(> .cl-cell-expand) { position: relative; }   /* the ✎ sits INSIDE the box, at its right edge (Chao: beside it, it fell past the cell and flickered) */
+  .cl-table td:has(> .cl-cell-expand) > input, .cl-table td:has(> .cl-cell-expand) > textarea { padding-right: 22px; }
+  .cl-table td .cl-cell-expand { opacity: 0; position: absolute; right: 7px; top: 50%; transform: translateY(-50%); margin: 0; padding: 0 4px;
+    border-color: transparent; background: transparent; line-height: 1.2; }
+  .cl-table td:hover .cl-cell-expand, .cl-table td:focus-within .cl-cell-expand, .cl-table td.cl-long .cl-cell-expand { opacity: 1; }
+  @media (hover: none) { .cl-table td .cl-cell-expand { opacity: 1; } }
+  .cl-textdlg { border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 14px 16px; background: var(--surface); color: var(--ink);
+    width: min(1000px, 94vw); }
+  .cl-textdlg .cl-td-panes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 700px) { .cl-textdlg .cl-td-panes { grid-template-columns: 1fr; } }
+  .cl-textdlg .cl-td-prev { min-height: 220px; max-height: 60vh; overflow: auto; font-size: 13.5px; padding: 8px 10px; border: 1px solid var(--rule); border-radius: var(--r-sm);
+    background: var(--page); color: var(--ink); box-sizing: border-box; }
+  .cl-textdlg .cl-td-prev-note { color: var(--faint); font-size: 12px; }
+  .cl-textdlg::backdrop { background: rgba(0, 0, 0, .45); }
+  .cl-textdlg h3 { margin: 0 0 8px; font-size: 14px; }
+  .cl-textdlg textarea { width: 100%; min-height: 220px; font: inherit; font-size: 13.5px; padding: 8px; border: 1px solid var(--rule); border-radius: var(--r-sm);
+    background: var(--page); color: var(--ink); resize: vertical; box-sizing: border-box; }
+  .cl-textdlg .cl-td-hint { font-size: 12px; color: var(--faint); margin: 6px 0 10px; }
+  .cl-textdlg .cl-td-bar { display: flex; gap: 8px; justify-content: flex-end; }
   .cl-mapzoom { border: 1px solid var(--rule); border-radius: var(--r-sm);
     padding: 10px; background: var(--surface); color: var(--ink); }
   .cl-mapzoom::backdrop { background: rgba(0, 0, 0, .45); }

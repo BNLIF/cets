@@ -1,0 +1,15 @@
+{% load checklist %}
+{# #199: one consortium's production-status table, drawn as the fill page draws a named-row table (cl-table) but read-only — shared by the status page (live) and the Detector tab (cached). Context: t = {title, serial, part_id, checklist, instructions, columns, rows, as_of, edit_url, read_at?}. #}
+<div class="ps-card">
+  <h2>{{ t.title }}{% if t.serial %} <span class="mono ps-serial">{{ t.serial }}</span>{% endif %}
+    <span class="ps-asof">{{ t.part_id }}{% if t.as_of %} · as of {{ t.as_of|slice:":10" }}{% endif %}{% if t.read_at %} · read {{ t.read_at|date:"Y-m-d H:i" }}{% endif %}</span>
+    <a class="ps-edit" href="{{ t.edit_url }}" title="Fill in or change the table">&#9998; Edit table</a></h2>
+  {# the checklist's instructions are for the fill page, not the rendered table (Chao 2026-10-08) #}
+  <div class="tbl-scroll"><table class="cl-table cl-gridlines ps-table">
+    <thead><tr><th></th>{% for c in t.columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for r in t.rows %}<tr><th scope="row" class="cl-rowlab">{{ r.label }}</th>{% for cell in r.cells %}{% if cell.kind == "month" %}<td class="cl-const{% if cell.past %} ps-past{% endif %}">{{ cell.text }}</td>{% elif cell.kind == "types" %}<td class="cl-const ps-types">{% for id in cell.ids %}<a href="{% url 'explore:home' %}?node={{ id }}" title="the type’s page">{{ id }}</a>{% if not forloop.last %}<br>{% endif %}{% empty %}{{ cell.text }}{% endfor %}</td>{% else %}<td class="cl-const{% if cell.text|length > 24 %} cl-wrap ps-long{% endif %}">{{ cell.text|clmd_block }}</td>{% endif %}{% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>

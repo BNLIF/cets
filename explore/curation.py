@@ -49,6 +49,27 @@ def extra_projects(instance: str) -> list[str]:
     return out
 
 
+def consortium_types(instance: str) -> list[str]:
+    """#199: the consortium types — each consortium's virtual type, holding
+    its production-status checklist (the Detector tab's table) and its
+    organizer checklists: the yaml's ``consortium_types`` in order, then the
+    UI/auto-added overrides (``ConsortiumTypeOverride``) by id."""
+    yaml_ids = [str(t).strip().upper() for t in (_block(instance).get("consortium_types") or [])
+                if str(t).strip()]
+    return yaml_ids + sorted(consortium_overrides(instance) - set(yaml_ids))
+
+
+def consortium_overrides(instance: str) -> set[str]:
+    """Part-type ids marked as consortium types outside the yaml (#199)."""
+    from .models import ConsortiumTypeOverride   # lazy: curation loads before apps
+    return set(ConsortiumTypeOverride.for_instance(instance)
+               .values_list("part_type_id", flat=True))
+
+
+def is_consortium_type(instance: str, part_type_id: str) -> bool:
+    return part_type_id in consortium_types(instance)
+
+
 def project_is_test(instance: str, project_id: str) -> bool:
     """Whether an extra project is a test/sandbox one (``test: true`` in the
     yaml) — shown in the tree but excluded from the overview stats."""

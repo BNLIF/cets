@@ -441,9 +441,17 @@ def _norm_field(f: dict) -> dict | None:
         counts, count_status = {}, {}   # #186 round 2: label → column holding a type ID
         count_keys = {}   # #190: label → column naming the batch-size specification key
         lookups, lookup_paths = {}, {}   # #195: label → column holding the PID, and the key read off it
+        months = []   # #199: month columns (a date picker, stored YYYY-MM)
         for c in f.get("columns") or []:
             if isinstance(c, dict):
                 label = str(c.get("label") or "").strip()
+                # #199: ``month: true`` — a month picker (PRR date, Completed
+                # by, Needed by); the value is a plain "YYYY-MM" string, so
+                # no formula, range or text applies to it
+                if label and c.get("month") is True:
+                    months.append(label)
+                    cols.append(label)
+                    continue
                 # Anselmo 2026-09-28 ("the received column should be filled
                 # by the HWDB"): ``count`` = a column (C<n> or its label)
                 # holding a component type ID — the cell shows how many items
@@ -573,6 +581,8 @@ def _norm_field(f: dict) -> dict | None:
             out["checks"] = checks
         if col_color:
             out["col_color"] = col_color
+        if months:
+            out["months"] = months
         # #119: named rows sharing the columns; each may carry its own
         # constants (an Expected column differs per row) and tint, which
         # override the table-wide ones. No rows = the single implicit row,
@@ -754,6 +764,12 @@ def normalize(cfg: dict, name: str) -> dict:
               # item: sections of Link-to-checklist fields, selects driving
               # ``when`` rules, nothing to submit
               "organizer": bool(cfg.get("organizer")),
+              # #199 (Anselmo's DPC review table): a production-status
+              # checklist on a consortium's virtual type — its table (one
+              # named row per component) is what the status page and the
+              # Detector tab show, and its month columns feed the real
+              # types' plan lines; the table always goes to Specs
+              "status": bool(cfg.get("status")),
               # #103: absent = every standard field; a list = that subset
               "item_fields": ([f for f in cfg["item_fields"] if f in ITEM_FIELDS]
                               if isinstance(cfg.get("item_fields"), list)
@@ -856,6 +872,12 @@ def normalize(cfg: dict, name: str) -> dict:
     _resolve_when(schema)
     _resolve_lookups(schema)
     _nest(schema)
+    if schema["status"]:
+        # #199: the status page reads the table off the item's
+        # specifications, so a production-status table is always → Specs
+        for _t, f in leaf_fields(schema):
+            if f["type"] == "table":
+                f["to_spec"] = True
     return schema
 
 
@@ -1031,6 +1053,12 @@ def _table_cells(f: dict, cells: dict, tx: dict, prefix: str, rr: dict | None = 
                         "value": "", "formula": "", "text": "", "min": None, "max": None, "range": "",
                         "color": cc.get(c, "")})
             continue
+        if c in (f.get("months") or []):   # #199: a month picker
+            out.append({"column": c, "name": f"{prefix}-c{i}", "month": True,
+                        "value": _fmt("" if isinstance(v, dict) else v),
+                        "formula": "", "text": "", "min": None, "max": None, "range": "",
+                        "color": cc.get(c, "")})
+            continue
         if c in checks:   # #116: tri-state cell
             out.append({"column": c, "name": f"{prefix}-c{i}", "check": True,
                         "value": _tri(v),
@@ -1040,6 +1068,8 @@ def _table_cells(f: dict, cells: dict, tx: dict, prefix: str, rr: dict | None = 
         tr = {} if c in tx else (ct[c] if c in ct else f)
         out.append({"column": c, "name": f"{prefix}-c{i}", "color": cc.get(c, ""),
                     "value": tx[c] if c in tx else _fmt("" if isinstance(v, dict) else v),
+                    # Chao 2026-10-08: a multi-line comment keeps its lines in a textarea (an input can't)
+                    **({"multiline": True} if c not in tx and isinstance(v, str) and "\n" in v else {}),
                     "formula": "" if c in tx else fx.get(c, ""),
                     "text": tx.get(c, ""),
                     "min": tr.get("min"), "max": tr.get("max"),

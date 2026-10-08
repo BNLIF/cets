@@ -39,15 +39,15 @@ from hwdb.fnal import session as fnal_session
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for, verify_link
 
 from . import (activity, charts, checklistforms, checklists, curation, events,
-               execsummary, itemsedit, labels, navigation, ops, parts, plotting, scanning,
-               sheetupload, watches)
+               execsummary, itemsedit, labels, navigation, ops, parts, plotting, production,
+               scanning, sheetupload, watches)
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, refresh_component_row, sync_test_events
 from .hierarchy import sync_hierarchy, sync_system
 from .instances import instance_of, namespace_of
-from .models import (ChildMintSetting, 
+from .models import (ChildMintSetting, ConsortiumTypeOverride, 
     ActivityEvent, BoxChecklist, ChecklistBookmark, ChecklistDraft, HierarchyNode,
-    InstitutionPref, SheetJob, ShippingTypeOverride,
+    InstitutionPref, ProductionPlan, ProductionTable, SheetJob, ShippingTypeOverride,
     HierarchySyncState, HwdbComponentEvent, HwdbTestEvent, PackScan, ShipmentItem, TestDateSetting,
 )
 from .queries import (
@@ -222,6 +222,9 @@ def explore_view(request, trail=None):
     # #101: "Add to Shipments" — an override row on top of curation.yaml;
     # yaml-curated types can't be removed from the UI
     shipping_override = bool(leaf) and leaf.part_type_id in curation.shipping_overrides(inst)
+    # #199: a consortium type — its production-status table is on the Detector tab
+    is_consortium = bool(leaf) and curation.is_consortium_type(inst, leaf.part_type_id)
+    consortium_override = bool(leaf) and leaf.part_type_id in curation.consortium_overrides(inst)
     empty_pids = []
     if is_shipping:
         # Shipping extras — boxes are regular components too (charts/breakdown
@@ -262,6 +265,16 @@ def explore_view(request, trail=None):
         # Status / QC-flag overlay menu (#52) — mirror-only, precomputed so the
         # selector swaps series client-side without a reload.
         comp_chart["filters"] = component_update_filters(inst, ptid)
+        # #199: the consortium's production-status table names this type —
+        # its Needed / Completed by / Needed by become the plan lines (the
+        # browser-stored plan of #174 stays the fallback for unlisted types)
+        plan = (ProductionPlan.for_instance(inst).filter(part_type_id=ptid)
+                .exclude(needed=None, completed_by="", needed_by="").first())
+        if plan:
+            comp_chart["plan"] = {
+                "total": plan.needed or "", "done": plan.completed_by, "need": plan.needed_by,
+                "source": plan.component,
+                "url": _rev(request, "explore:production_status", args=[plan.source_type_id])}
         phys = physics_date_field(inst, ptid)
         test_chart = chart_config(
             slug=f"{ptid}_test",
@@ -334,6 +347,11 @@ def explore_view(request, trail=None):
             "date_candidates": date_candidates,
             "date_styles": TestDateSetting.STYLES,
         "shipping_override": shipping_override,
+        "is_consortium": is_consortium,
+        "consortium_override": consortium_override,
+        # the dropdown is read-only when the current class comes from the yaml
+        "class_locked": (is_shipping and not shipping_override) or (is_consortium and not consortium_override),
+        "status_url": _rev(request, "explore:production_status", args=[leaf.part_type_id]) if is_consortium else "",
             "empty_pids": empty_pids,
             # Deep-link the part type to this instance's FNAL web UI.
             "hwdb_ui_base": settings.HWDB_PROFILES[inst]["ui"],
@@ -355,6 +373,90 @@ def explore_hierarchy_view(request):
         "sidebar": navigation.sidebar_tree(inst, {}),
         "chart": charts.svg_chart("fd-vd-v11"),
         "type_mapping": charts.type_mapping("fd-vd-v11", inst),
+        "status_types": _production_status_list(request, inst),
+    })
+
+
+def _production_status_list(request, inst) -> list[dict]:
+    """#199: the consortium virtual types curated under ``production_status``
+    — name from the mirror, a link to the status page, and what the plan
+    cache holds for it (components named, last read) — no HWDB call."""
+    out = []
+    for tid in curation.consortium_types(inst):
+        node = HierarchyNode.for_instance(inst).filter(
+            level=HierarchyNode.LEVEL_TYPE, part_type_id=tid).first()
+        tables = [{
+            "part_id": t.source_part_id, "serial": t.serial, "checklist": t.checklist,
+            "title": t.title, "instructions": t.instructions, "columns": t.columns,
+            "rows": t.rows, "as_of": t.as_of, "read_at": t.read_at,
+            "edit_url": _rev(request, "explore:checklist", args=[t.source_part_id, t.checklist]),
+        } for t in ProductionTable.for_instance(inst).filter(source_type_id=tid)]
+        out.append({"part_type_id": tid, "name": (node.name if node else "") or tid,
+                    "url": _rev(request, "explore:production_status", args=[tid]),
+                    "tables": tables})
+    return out
+
+
+@login_not_required
+@fnal_login_required
+def explore_production_status_view(request, part_type_id):
+    """#199: a consortium's production-status table (Anselmo's DPC-review
+    slide) read live off its virtual type: every checklist on the type
+    flagged ``status``, rendered for each item of the type from the item's
+    latest specifications. Reading it also rewrites the plan cache the
+    real types' dashboards draw their plan lines from."""
+    inst = instance_of(request)
+    page_url = _rev(request, "explore:production_status", args=[part_type_id])
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(_rev(request, "explore:hierarchy"))
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    node = HierarchyNode.for_instance(inst).filter(
+        level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
+    checklists_ = production.status_checklists(api, part_type_id)
+    if not checklists_ and part_type_id in curation.consortium_overrides(inst):
+        # the mark was automatic or from the type page; with no status checklist
+        # left on the type (every newest version unticked) it comes off again
+        ConsortiumTypeOverride.for_instance(inst).filter(part_type_id=part_type_id).delete()
+    pids = sorted(set(HwdbComponentEvent.for_instance(inst)
+                      .filter(part_type_id=part_type_id).values_list("part_id", flat=True))
+                  ) if checklists_ else []   # no status checklist: nothing to read off the items
+    if not pids and checklists_:   # a virtual type not yet synced — ask HWDB for its items
+        try:
+            pids = sorted({r["part_id"] for r in (api.get_component_types(part_type_id).get("data") or [])
+                           if isinstance(r, dict) and r.get("part_id")})
+        except requests.RequestException as e:
+            logger.info("production status: items of %s failed: %s", part_type_id, e)
+    cards = []
+    for pid in pids:
+        try:
+            rec = api.get_component(pid).get("data") or {}
+        except requests.RequestException as e:
+            messages.error(request, f"{pid}: HWDB didn’t answer — {_hwdb_error_detail(e)}")
+            continue
+        data, as_of = production.latest_data(rec)
+        serial = rec.get("serial_number") or ""
+        for c in checklists_:
+            card = production.card(c["name"], c["schema"], data, as_of)
+            production.refresh(inst, part_type_id, pid, serial, card, checklist=c["name"])
+            if card is not None:
+                cards.append({**card, "part_id": pid, "serial": serial,
+                              "edit_url": _rev(request, "explore:checklist", args=[pid, c["name"]])})
+    return render(request, "explore/production_status.html", {
+        "active_nav": "detector",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "part_type_id": part_type_id,
+        "type_name": (node.name if node else "") or part_type_id,
+        "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
+        "checklists": checklists_,
+        "cards": cards,
+        "no_items": not pids,
+        "editor_url": _rev(request, "explore:checklist_config", args=[part_type_id]),
     })
 
 
@@ -3865,6 +3967,11 @@ def explore_checklist_view(request, part_id, name):
             # the Item card may have changed status/flags/serial/location —
             # pull the item's mirror row current too
             refresh_component_row(api, inst, part_id)
+            if schema["status"]:   # #199: the cached table + plan follow what was just written
+                production.refresh(inst, ptid, part_id, (item or {}).get("serial_number") or "",
+                                   production.card(name, schema, checklistforms.spec_values(
+                                       schema, checklistforms.parse(schema, request.POST)),
+                                       timezone.localtime().isoformat()), checklist=name)
             messages.success(
                 request, f"Checklist “{schema['name']}” submitted — every "
                          f"submission is a new version, old ones are preserved.")
@@ -4332,6 +4439,12 @@ def explore_checklist_config_view(request, part_type_id):
                      f"Checklist “{cl_name}” updated for type {part_type_id}",
                      part_type_id=part_type_id,
                      actor=activity.actor_of(request))
+        if cfg.get("status") and not curation.is_consortium_type(inst, part_type_id):
+            # #199: a production-status checklist makes the type a consortium type
+            ConsortiumTypeOverride.objects.create(instance=inst, part_type_id=part_type_id,
+                                                  added_by=activity.actor_of(request))
+            messages.info(request, f"{part_type_id} is now a consortium type — its production "
+                                   f"status shows on the Detector tab.")
         return redirect(back)
 
     cl_name = (request.GET.get("name") or "").strip()
@@ -4354,6 +4467,18 @@ def explore_checklist_config_view(request, part_type_id):
         "initial": raw if raw is not None else CHECKLIST_SKELETON,
         "wb": request.GET.get("ui") == "wb",   # #192: the workbench layout
     })
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_text_preview_view(request):
+    """Chao 2026-10-08: the cell text editor's preview — POST ``text``, get
+    it back rendered by the same filter the status page and the Detector tab
+    use (``clmd_block``: full Markdown + the colour tags), so what the
+    dialog shows is what the table will show."""
+    from .templatetags.checklist import clmd_block
+    return HttpResponse(clmd_block(request.POST.get("text") or ""))
 
 
 @login_not_required
@@ -4814,6 +4939,62 @@ def explore_test_date_view(request, part_type_id):
                  part_type_id=part_type_id, actor=actor)
     messages.success(request, f"Test-date field set to “{row.label}” — run a Full re-sync to "
                               f"re-bin the Tests chart.")
+    return redirect(back)
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_type_class_view(request, part_type_id):
+    """The type page's classification dropdown (Chao 2026-10-08): ``class`` =
+    ``none`` / ``shipping`` (#101) / ``consortium`` (#199) — the override
+    rows follow, the yaml baselines are read-only (the dropdown is disabled
+    on a yaml-curated type; a stray POST is refused). Architects on write
+    instances, like every type-level edit."""
+    inst = instance_of(request)
+    nxt = request.POST.get("next") or ""
+    back = nxt if url_has_allowed_host_and_scheme(nxt, allowed_hosts={request.get_host()}) \
+        else _rev(request, "explore:home")
+    want = request.POST.get("class") or "none"
+    if want not in ("none", "shipping", "consortium"):
+        return HttpResponseBadRequest("class must be none, shipping or consortium")
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return HttpResponseForbidden("Type classification is not enabled here.")
+    if not _is_architect(request, inst):
+        return HttpResponseForbidden("Classifying types needs the HWDB architect role.")
+    ship = ShippingTypeOverride.for_instance(inst).filter(part_type_id=part_type_id)
+    cons = ConsortiumTypeOverride.for_instance(inst).filter(part_type_id=part_type_id)
+    yaml_locked = ((curation.is_shipping_type(inst, part_type_id) and not ship.exists())
+                   or (curation.is_consortium_type(inst, part_type_id) and not cons.exists()))
+    if yaml_locked:
+        messages.error(request, f"{part_type_id} is curated in curation.yaml — edit the yaml to change it.")
+        return redirect(back)
+    actor = activity.actor_of(request)
+    changed = []
+    if want != "shipping" and ship.exists():
+        ship.delete()
+        changed.append(f"{part_type_id} removed from the shipping types")
+    if want != "consortium" and cons.exists():
+        cons.delete()
+        changed.append(f"{part_type_id} unmarked as a consortium type")
+    if want == "shipping" and not curation.is_shipping_type(inst, part_type_id):
+        ShippingTypeOverride.objects.create(instance=inst, part_type_id=part_type_id, added_by=actor)
+        changed.append(f"{part_type_id} added to the shipping types")
+    if want == "consortium" and not curation.is_consortium_type(inst, part_type_id):
+        ConsortiumTypeOverride.objects.create(instance=inst, part_type_id=part_type_id, added_by=actor)
+        changed.append(f"{part_type_id} marked as a consortium type")
+    for line in changed:
+        activity.log(inst, ActivityEvent.KIND_CURATION, line, part_type_id=part_type_id, actor=actor)
+    if not changed:
+        messages.info(request, f"{part_type_id} is unchanged.")
+    elif want == "shipping":
+        messages.success(request, f"{part_type_id} is now a shipping type — run its sync to "
+                                  f"mirror its boxes.")
+    elif want == "consortium":
+        messages.success(request, f"{part_type_id} is now a consortium type — its production "
+                                  f"status shows on the Detector tab.")
+    else:
+        messages.success(request, f"{part_type_id} has no classification now.")
     return redirect(back)
 
 

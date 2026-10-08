@@ -79,6 +79,9 @@
   .panel-meta dt { color: var(--faint); }
   .panel-meta dd { margin: 0; font-family: var(--font-mono); }
   .panel-meta a { color: var(--accent-ink); }
+  .panel-meta .type-class select { font: inherit; font-family: var(--font-sans, inherit); font-size: 12.5px; color: var(--ink);
+    padding: 2px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff); vertical-align: baseline; }
+  .panel-meta .type-class select:disabled { color: var(--dim); background: var(--page); cursor: not-allowed; }
   .panel-meta .linkish { font: inherit; color: var(--accent-ink); background: none; border: 0;
     padding: 0; cursor: pointer; text-decoration: underline; }
   .panel-meta dd.span { grid-column: 2 / -1; }
@@ -196,9 +199,8 @@
             <button id="system-walk-btn" class="btn btn-sm btn-ghost" type="button" style="margin-left: 8px;"
                     data-sync-url="{% url 'explore:system_sync' system_id=leaf.system_id %}?project={{ leaf.project }}"
                     title="Not mirrored yet — re-walk this system’s structure from HWDB">not mirrored — re-walk system</button>{% endif %}
-            {# Shipping-container classification (#101): items of such types are boxes — Shipments tab, packing, ship/receive checklists. Architects flip it here. #}
-            {% if is_shipping %}<span class="sep">|</span><span title="{% if shipping_override %}Treated as shipping containers — set from this page{% else %}Listed in curation.yaml’s shipping_types — edit the yaml to change{% endif %}">shipping-container</span>{% if can_edit_type and shipping_override %} <form method="post" action="{% url 'explore:shipping_type_toggle' part_type_id=leaf.part_type_id %}" style="display:inline; margin:0;">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><input type="hidden" name="action" value="remove"><button class="linkish" title="Stop treating this type’s items as shipping containers">undo</button></form>{% endif %}
-            {% elif can_edit_type %}<span class="sep">|</span><form method="post" action="{% url 'explore:shipping_type_toggle' part_type_id=leaf.part_type_id %}" style="display:inline; margin:0;">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><button class="linkish" title="Treat this type’s items as shipping containers: Shipments tab, packing, ship/receive checklists (needs the HWDB architect role)">treat as shipping-container</button></form>{% endif %}</dd>
+            {# Explorer classification (#101 shipping container, #199 consortium type): one dropdown for architects, plain text for everyone else; a yaml-curated class is read-only here (Chao 2026-10-08: the inline links made the pane messy) #}
+            {% if can_edit_type %}<form method="post" action="{% url 'explore:type_class' part_type_id=leaf.part_type_id %}" class="type-class" style="display:inline; margin:0 0 0 8px;">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><select name="class"{% if class_locked %} disabled title="Listed in curation.yaml — edit the yaml to change"{% else %} title="How the Explorer treats this type: a shipping container’s items are boxes (Shipments tab, packing, ship/receive checklists); a consortium type holds the consortium’s production-status and organizer checklists"{% endif %}><option value="none"{% if not is_shipping and not is_consortium %} selected{% endif %}>no classification</option><option value="shipping"{% if is_shipping %} selected{% endif %}>shipping container</option><option value="consortium"{% if is_consortium %} selected{% endif %}>consortium type</option></select></form>{% elif is_shipping %} <span class="sep">·</span> shipping container{% elif is_consortium %} <span class="sep">·</span> consortium type{% endif %}</dd>
         <dt>System</dt><dd>{{ leaf.system_name }} ({{ leaf.system_id }})</dd>
         <dt>Subsystem</dt><dd>{{ leaf.subsystem_name }} ({{ leaf.subsystem_id }})</dd>
         <dt>{% if is_shipping %}Boxes in HWDB{% else %}Items in HWDB{% endif %}</dt><dd>{{ leaf.n_components }}<span class="chart-plan-note" data-kind="comp"></span></dd>
@@ -220,7 +222,12 @@
           {% endif %}
         </dd>
         {% endif %}
+        {% if is_consortium %}
+        {# #199: the consortium's production-status table (its own line — Chao 2026-10-08) #}
+        <dt>Status</dt><dd class="span"><a href="{{ status_url }}" title="This consortium’s production-status table, read from HWDB">Production status</a></dd>
+        {% endif %}
     </dl>
+    <script>document.querySelectorAll("form.type-class select").forEach(function (s) { s.addEventListener("change", function () { s.form.submit(); }); });</script>
     <pre id="system-sync-log"></pre>
 
     {% if leaf.category == "cable" %}
@@ -272,7 +279,7 @@
                     <span class="chart-exp-list" style="display: inline-flex; gap: 6px; flex-wrap: wrap;"></span>
                 </div>
                 {# Plan lines (TB via Anselmo 2026-09-23): total to produce, completed-by and needed-by dates → dashed lines on the cumulative; kept in this browser only until they live on the type in HWDB. #}
-                <div class="chart-plan" style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--faint);">
+                <div class="chart-plan" style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--faint);"{% if c.plan %} data-plan-total="{{ c.plan.total }}" data-plan-done="{{ c.plan.done }}" data-plan-need="{{ c.plan.need }}" data-plan-source="{{ c.plan.source }}" data-plan-url="{{ c.plan.url }}"{% endif %}>
                     <span>Plan</span>
                     <input type="number" class="chart-plan-total" min="0" step="1" placeholder="total to produce" title="Total to produce" style="font: inherit; color: var(--ink); width: 118px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff);">
                     <span>completed by</span>
@@ -819,14 +826,25 @@
             try { plan = JSON.parse(localStorage.getItem(planKey) || '{}') || {}; } catch (e) { plan = {}; }
             var planIn = { total: panel.querySelector('.chart-plan-total'), done: panel.querySelector('.chart-plan-done'), need: panel.querySelector('.chart-plan-need') };
             var planNote = document.querySelector('.chart-plan-note[data-kind="' + kind + '"]');
+            var planFixed = false;   // #199: true when HWDB's production-status table sets the plan — never stored here
             function savePlan() {
                 var ym = function (v) { return /^\d{4}-\d{2}/.test(v || '') ? v.slice(0, 7) : ''; };   // months; a typed fallback or an old day value is cut to one
                 plan = { total: parseInt(planIn.total.value, 10) > 0 ? parseInt(planIn.total.value, 10) : 0, done: ym(planIn.done.value), need: ym(planIn.need.value) };
-                try { if (plan.total || plan.done || plan.need) localStorage.setItem(planKey, JSON.stringify(plan)); else localStorage.removeItem(planKey); } catch (e) {}
+                try { if (planFixed) {} else if (plan.total || plan.done || plan.need) localStorage.setItem(planKey, JSON.stringify(plan)); else localStorage.removeItem(planKey); } catch (e) {}
                 if (planNote) planNote.textContent = (plan.total ? ' · of ' + plan.total.toLocaleString() + ' to produce' : '')
                     + (plan.done ? ' · completed by ' + plan.done : '') + (plan.need ? ' · needed by ' + plan.need : '');
             }
+            // #199: the consortium's production-status table names this type — its values win, read-only here
+            var planEl = panel.querySelector('.chart-plan');
+            if (planEl && planEl.dataset.planUrl) {
+                planFixed = true;
+                plan = { total: parseInt(planEl.dataset.planTotal, 10) > 0 ? parseInt(planEl.dataset.planTotal, 10) : 0, done: planEl.dataset.planDone || '', need: planEl.dataset.planNeed || '' };
+                Object.keys(planIn).forEach(function (k) { planIn[k].readOnly = true; planIn[k].tabIndex = -1; planIn[k].title = 'From the production status table (' + planEl.dataset.planSource + ')'; });
+                var src = document.createElement('a'); src.href = planEl.dataset.planUrl; src.textContent = 'from ' + planEl.dataset.planSource; src.title = 'The consortium’s production status table'; src.style.color = 'var(--accent-ink)';
+                planEl.appendChild(src);
+            }
             planIn.total.value = plan.total > 0 ? plan.total : ''; planIn.done.value = (plan.done || '').slice(0, 7); planIn.need.value = (plan.need || '').slice(0, 7);
+            if (planEl && planEl.dataset.planUrl) savePlan();   // the note under Items in HWDB, nothing stored
             Object.keys(planIn).forEach(function (k) { planIn[k].addEventListener('change', function () { savePlan(); apply(currentRange()); }); });
             // Projected points (#141): [{d: 'YYYY-MM-DD', n: count, s: series
             // label}], this browser only (localStorage per page + chart).

@@ -288,6 +288,8 @@
           <label class="ec-inline" title="Linked from the Add-items / Link-items page of every item of this type; on a shipping box also from the pre-shipping checklist, which asks for a confirmation that it has been completed"><input type="checkbox" id="f-shipping"> shipping checklist</label></div>
         <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Organizer</span>
           <label class="ec-inline" title="A checklist of checklists: opens with no item — sections of Link-to-checklist fields, selects that show or hide sections; nothing to submit, no test type needed"><input type="checkbox" id="f-org"> type checklist</label></div>
+        <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Status</span>
+          <label class="ec-inline" title="A consortium's production-status table: one table with a named row per component, month columns (PRR date = month) for the dates, a Type IDs column naming the real types; shown on the status page and the Detector tab, its dates drawn as plan lines on those types' dashboards; the table always goes to Specs"><input type="checkbox" id="f-status"> production status</label></div>
         {# #103: HWDB's standard item fields — on by default, untick to drop from this checklist #}
         <div class="ec-row" style="align-items:flex-start;"><span class="ec-label" style="flex:0 0 90px;" title="HWDB’s own fields on the item — shown as an “Item” card at the top and written to the item record on submit">Item fields</span>
           <div id="f-itemf" style="display:flex; flex-wrap:wrap; gap:4px 14px; flex:1;">
@@ -402,7 +404,7 @@
       <label class="ec-inline ff-grid-w" title="draw cell borders like a real table"><input type="checkbox" class="ff-grid" checked> borders</label>
       <button type="button" class="ec-del ff-tbl" title="named rows, each with its own fixed cells and tint">&#9636; rows&hellip;</button>
       <input type="hidden" class="ff-rows">
-      <textarea class="ff-columns" rows="2" style="flex:1 1 100%;" placeholder="columns — comma- or line-separated; computed: Total = C1 + C2*(C3/C4) [11 ± 1]; fixed: Expected = &quot;3.1+-0.1&quot;; pass/fail: OK = check; over the type's items: Received = sum(C4)" title="label = formula makes a computed column (C1 = first column's value, formula/fixed cells count too); label = &quot;text&quot; makes a fixed non-editable cell (no commas in the text); label = sum(C4) totals that column's value in the row over every item of the type (sum(C4 in Received | Unknown) counts only those statuses); label = count(C1) shows how many items the type whose ID is in column 1 has (count(C1 * C2): each item weighted by the number in its specifications under the key named in column 2 — a batch registered as one item counts its pieces); label = lookup(Side of C1) shows the value stored under Side on the item whose PID is in column 1; [nominal ± tol] or [min..max] gives that column its own accepted range"></textarea>
+      <textarea class="ff-columns" rows="2" style="flex:1 1 100%;" placeholder="columns — comma- or line-separated; computed: Total = C1 + C2*(C3/C4) [11 ± 1]; fixed: Expected = &quot;3.1+-0.1&quot;; pass/fail: OK = check; over the type's items: Received = sum(C4); month picker: PRR date = month" title="label = formula makes a computed column (C1 = first column's value, formula/fixed cells count too); label = &quot;text&quot; makes a fixed non-editable cell (no commas in the text); label = sum(C4) totals that column's value in the row over every item of the type (sum(C4 in Received | Unknown) counts only those statuses); label = month makes a month picker (stored YYYY-MM); label = count(C1) shows how many items the type whose ID is in column 1 has (count(C1 * C2): each item weighted by the number in its specifications under the key named in column 2 — a batch registered as one item counts its pieces); label = lookup(Side of C1) shows the value stored under Side on the item whose PID is in column 1; [nominal ± tol] or [min..max] gives that column its own accepted range"></textarea>
     </div>
     <div class="ec-row g-desc">
       <input class="ff-desc" placeholder="description — a sentence on what this field is for, shown after the label" style="flex:1 1 100%;">
@@ -1251,6 +1253,7 @@
       var lk = /^lookup\(\s*(.+?)\s+of\s+(.+?)\s*\)$/i.exec(rhs);   // #195: lookup(Side of C1) — the key's value off the PID in C1 (no comma: the box splits on them)
       if (q) out.text = q[1];
       else if (rhs.toLowerCase() === "check") out.check = true;   // #116: pass/fail column
+      else if (rhs.toLowerCase() === "month") out.month = true;   // #199: a month picker (production-status dates)
       else if (lk) { out.lookup = lk[2]; out.path = lk[1]; }
       else if (sm) { out[sm[1].toLowerCase()] = sm[2]; if (sm[3]) out.status = sm[3].split("|").map(function (x) { return x.trim(); }).filter(Boolean); }
       else out.formula = rhs;
@@ -1265,6 +1268,7 @@
     var tol = specText(c);
     return c.label + (c.text ? ' = "' + c.text + '"'
                       : c.check ? " = check"
+                      : c.month ? " = month"
                       : c.sum || c.count ? " = " + (c.sum ? "sum(" + c.sum : "count(" + c.count) + (c.status && c.status.length ? " in " + c.status.join(" | ") : "") + ")"
                       : c.lookup ? " = lookup(" + (c.path || "") + " of " + c.lookup + ")"
                       : (c.formula ? " = " + c.formula : ""))
@@ -1275,8 +1279,8 @@
     var parts = cols.map(colText);
     return parts.join(", ").length > 60 ? parts.join("\n") : parts.join(", ");
   }
-  function rowsOf(r) {        // #119: the rows live as JSON on the field row
-    try { return JSON.parse($(".ff-rows", r).value || "[]"); } catch (e) { return []; }
+  function rowsOf(r) {        // #119: the rows live as JSON on the field row; a bare name is a row too (the server reads it so — Chao 2026-10-08)
+    try { return JSON.parse($(".ff-rows", r).value || "[]").map(function (rw) { return typeof rw === "string" ? { label: rw } : rw; }); } catch (e) { return []; }
   }
   function syncTblBtn(r) {
     var n = rowsOf(r).length;
@@ -1397,6 +1401,7 @@
     if (roles.length) cfg.roles = roles;
     if ($("#f-shipping").checked) cfg.shipping = true;   // #150
     if ($("#f-org").checked) cfg.organizer = true;   // #189
+    if ($("#f-status").checked) cfg.status = true;   // #199
     cfg.item_fields = $$(".f-itemf").filter(function (c) { return c.checked; })
                         .map(function (c) { return c.value; });
     cfg.sections = $$("#clc-sections > .clc-sec").map(function (s) {
@@ -1577,6 +1582,7 @@
     $("#f-roles").value = (cfg.roles || []).join(", ");
     $("#f-shipping").checked = !!cfg.shipping;   // #150
     $("#f-org").checked = !!cfg.organizer;   // #189
+    $("#f-status").checked = !!cfg.status;   // #199
     $$(".f-itemf").forEach(function (c) {      // absent = every field on
       c.checked = !Array.isArray(cfg.item_fields) || cfg.item_fields.indexOf(c.value) !== -1;
     });

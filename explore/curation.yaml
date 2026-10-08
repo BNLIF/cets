@@ -118,6 +118,14 @@ instances:
       - {id: L, name: LBNF}
       - {id: Z, name: Sandbox, test: true}   # excluded from overview stats
 
+    # Consortium types (#199): each consortium's virtual type, holding its
+    # production-status checklist (Anselmo's DPC-review table, shown on the
+    # Detector tab) and its organizer checklists. This list is the audited
+    # baseline; a type is also marked from its type page (architects) or
+    # automatically when a production-status checklist is saved onto it
+    # (ConsortiumTypeOverride). Z00100600001 is Hajime's test type (2026-10-08).
+    consortium_types: [Z00100600001]
+
     regions:
       - name: Far Detector
         key: FD

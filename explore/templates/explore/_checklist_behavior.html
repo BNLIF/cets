@@ -163,7 +163,7 @@
     });
   }
   document.addEventListener("input", function (e) {
-    if (!e.target.matches || !e.target.matches("input[data-ci]")
+    if (!e.target.matches || !e.target.matches("input[data-ci], textarea[data-ci]")
         || e.target.hasAttribute("data-formula")) return;
     var tbl = e.target.closest("table");
     if (tbl) recomputeTable(tbl);
@@ -397,6 +397,76 @@
 
   // #113: tap the map drawing → zoomed view at full resolution with the
   // slot circles; the cloned dots keep cl-scan + data-target, so tapping
+  // Chao 2026-10-08: ✎ on a plain table cell — a long comment edited in a
+  // textarea, written back to the cell (input/change fire so formulas and
+  // the autosave see it). Markdown + <green> colours render on the status page.
+  var textDlg = null, textTarget = null;
+  function markLong(inp) {
+    var td = inp.closest("td");
+    if (td) td.classList.toggle("cl-long", (inp.value || "").length > 24);
+  }
+  document.querySelectorAll(".cl-table td > input:not([readonly]), .cl-table td > textarea").forEach(markLong);
+  document.addEventListener("input", function (e) {
+    if (e.target.matches && e.target.matches(".cl-table td > input, .cl-table td > textarea")) markLong(e.target);
+  });
+  // an <input> drops newlines: a multi-line text lives in a one-row <textarea> of the same name
+  // (data-ci kept, so formulas / counts / the autosave see it); a single line goes back to an input
+  function swapCell(el, multi) {
+    if ((el.tagName === "TEXTAREA") === multi) return el;
+    var nu = document.createElement(multi ? "textarea" : "input");
+    nu.name = el.name; nu.setAttribute("data-ci", el.getAttribute("data-ci"));
+    if (multi) { nu.rows = 1; nu.className = "cl-cell-ta"; }
+    else { nu.setAttribute("inputmode", "decimal"); nu.autocomplete = "off"; }
+    nu.value = el.value;
+    el.replaceWith(nu);
+    return nu;
+  }
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest && e.target.closest(".cl-cell-expand");
+    if (!btn) return;
+    textTarget = document.getElementsByName(btn.dataset.target)[0];
+    if (!textTarget) return;
+    if (!textDlg) {
+      textDlg = document.createElement("dialog");
+      textDlg.className = "cl-textdlg";
+      textDlg.innerHTML = '<h3></h3><div class="cl-td-panes"><textarea></textarea><div class="cl-td-prev cl-md"></div></div>'
+        + '<div class="cl-td-hint">Markdown (**bold**, *italic*, lists, [links](https://…)) and &lt;green&gt;…&lt;/green&gt; (red, orange, blue, gray) render where the table is shown — the right pane is that rendering.</div>'
+        + '<div class="cl-td-bar"><button type="button" class="es-btn quiet cl-td-cancel">Cancel</button><button type="button" class="es-btn quiet cl-td-done">Done</button></div>';
+      document.body.appendChild(textDlg);
+      // live preview: the server renders it with the status page's own filter (debounced; offline = a note)
+      var prevTimer = null, prevSeq = 0;
+      function preview() {
+        var pane = textDlg.querySelector(".cl-td-prev"), txt = textDlg.querySelector("textarea").value, seq = ++prevSeq;
+        if (!navigator.onLine) { pane.innerHTML = '<span class="cl-td-prev-note">Preview needs the connection.</span>'; return; }
+        var fd = new FormData(); fd.append("text", txt);
+        fetch("{% url 'explore:text_preview' %}", { method: "POST", body: fd, credentials: "same-origin", headers: { "X-CSRFToken": csrf() } })
+          .then(function (r) { return r.ok ? r.text() : Promise.reject(); })
+          .then(function (h) { if (seq === prevSeq) pane.innerHTML = h || '<span class="cl-td-prev-note">(empty)</span>'; })
+          .catch(function () { if (seq === prevSeq) pane.innerHTML = '<span class="cl-td-prev-note">Preview unavailable.</span>'; });
+      }
+      textDlg.querySelector("textarea").addEventListener("input", function () { clearTimeout(prevTimer); prevTimer = setTimeout(preview, 350); });
+      textDlg.clPreview = preview;
+      textDlg.addEventListener("click", function (ev) {
+        if (ev.target.classList.contains("cl-td-cancel")) textDlg.close();
+        if (ev.target.classList.contains("cl-td-done")) {
+          var txt = textDlg.querySelector("textarea").value.replace(/\s+$/, "");
+          textTarget = swapCell(textTarget, txt.indexOf("\n") !== -1);
+          textTarget.value = txt;
+          textTarget.dispatchEvent(new Event("input", { bubbles: true }));
+          textTarget.dispatchEvent(new Event("change", { bubbles: true }));
+          textDlg.close();
+        }
+      });
+    }
+    var th = textTarget.closest("tr") && textTarget.closest("tr").querySelector(".cl-rowlab"),
+        col = textTarget.closest("table").querySelectorAll("thead th")[Array.prototype.indexOf.call(textTarget.closest("tr").children, textTarget.closest("td"))];
+    textDlg.querySelector("h3").textContent = (th ? th.firstChild.textContent.trim() + " · " : "") + (col ? col.firstChild.textContent.trim() : "");
+    textDlg.querySelector("textarea").value = textTarget.value;
+    textDlg.showModal();
+    textDlg.querySelector("textarea").focus();
+    textDlg.clPreview();
+  });
+
   // one there opens the scanner on top (where the scan modal is included)
   var mapDlg = null;
   document.addEventListener("click", function (e) {
@@ -707,7 +777,7 @@
     fill(cells);
     var pending = null;
     document.addEventListener("input", function (e) {   // a typed Type ID refreshes its row's counts
-      if (!e.target.matches || !e.target.matches("input[data-ci]") || e.target.hasAttribute("data-formula")) return;   // a recompute's own event is not a typed cell
+      if (!e.target.matches || !e.target.matches("input[data-ci], textarea[data-ci]") || e.target.hasAttribute("data-formula")) return;   // a recompute's own event is not a typed cell
       var row = e.target.closest("tr");
       if (!row || !row.querySelector(".cl-countcell")) return;
       clearTimeout(pending);

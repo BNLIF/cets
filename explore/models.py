@@ -713,3 +713,78 @@ class UsageDay(models.Model):
 
     def __str__(self):
         return f"UsageDay({self.username}, {self.day}, {self.requests})"
+
+
+class ConsortiumTypeOverride(InstanceScoped):
+    """#199: a component type marked as a consortium's type — the virtual
+    type holding its production-status checklist (shown on the Detector
+    tab) and its organizer checklists. The runtime overlay over
+    ``curation.yaml``'s ``consortium_types`` (``curation.consortium_types``
+    unions both), like ``ShippingTypeOverride``: set from the type page by
+    an architect, or automatically when a production-status checklist is
+    saved onto the type; dropped when a status read finds none left."""
+
+    part_type_id = models.CharField(max_length=20, db_index=True)
+    added_by = models.CharField(max_length=150, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=["instance", "part_type_id"], name="uniq_consortium_type_override")]
+
+    def __str__(self):
+        return f"{self.instance}:{self.part_type_id}"
+
+
+class ProductionPlan(InstanceScoped):
+    """#199: one row of a consortium's production-status table, cached per
+    real component type it names — what the type page's *Plan* row and the
+    Detector tab's consortia list read (mirror-only, no HWDB call). The
+    table itself lives in HWDB as a checklist on the consortium's virtual
+    type (``source_type_id``), on that type's item (``source_part_id``);
+    the status page rewrites a source item's rows whenever it reads them,
+    as does a submit of the checklist. ``completed_by`` / ``needed_by`` are
+    ``YYYY-MM`` strings, the plan lines' month convention (#174)."""
+
+    part_type_id = models.CharField(max_length=20, db_index=True, blank=True)   # the real type the row names ("" = none)
+    source_type_id = models.CharField(max_length=20, db_index=True)
+    source_part_id = models.CharField(max_length=50)
+    checklist = models.CharField(max_length=200, blank=True, default="")   # the status checklist's name
+    component = models.CharField(max_length=200, blank=True, default="")   # the row's label
+    needed = models.IntegerField(null=True, blank=True)
+    completed_by = models.CharField(max_length=7, blank=True, default="")
+    needed_by = models.CharField(max_length=7, blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["source_part_id", "id"]
+
+    def __str__(self):
+        return f"{self.instance}:{self.part_type_id} ← {self.source_part_id} “{self.component}”"
+
+
+class ProductionTable(InstanceScoped):
+    """#199: a consortium's production-status table as last read from HWDB
+    — one per (item, status checklist) — so the Detector tab shows every
+    consortium at once without a live call. ``columns`` / ``rows`` are the
+    engine's shaped table (``production.rows``); the status page is the
+    live reader that rewrites it, as does a submit of the checklist."""
+
+    source_type_id = models.CharField(max_length=20, db_index=True)
+    source_part_id = models.CharField(max_length=50)
+    checklist = models.CharField(max_length=200)
+    title = models.CharField(max_length=200, blank=True, default="")
+    serial = models.CharField(max_length=120, blank=True, default="")
+    instructions = models.TextField(blank=True, default="")
+    columns = models.JSONField(default=list)
+    rows = models.JSONField(default=list)
+    as_of = models.CharField(max_length=40, blank=True, default="")   # the HWDB specs entry's created stamp
+    read_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["source_type_id", "source_part_id", "checklist"]
+        constraints = [models.UniqueConstraint(
+            fields=["instance", "source_part_id", "checklist"], name="uniq_production_table")]
+
+    def __str__(self):
+        return f"{self.instance}:{self.source_part_id}/{self.checklist}"

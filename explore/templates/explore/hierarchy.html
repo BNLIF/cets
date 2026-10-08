@@ -1,4 +1,5 @@
 {% extends 'explore/base.html' %}
+{% load checklist %}
 {% block title %}Detector · HWDB Explorer{% endblock %}
 
 {% block content %}
@@ -42,9 +43,41 @@
   .hc-pop-id { font-family: var(--font-mono); font-size: 11px; color: var(--faint); }
   .hc-chip { display: inline-block; font-size: 10.5px; padding: 1px 8px; margin: 2px 4px 2px 0;
     border: 1px solid var(--rule); border-radius: 999px; color: var(--dim); }
+  /* #199: tabs — the hierarchy chart, and the consortia's production-status tables */
+  .hc-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--rule); margin: 0 0 16px; }
+  .hc-tab { font: inherit; font-size: 14px; font-weight: 600; color: var(--dim); background: none; border: none;
+    border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 6px 14px 8px; cursor: pointer; }
+  .hc-tab:hover { color: var(--ink); }
+  .hc-tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent-ink); }
+  .hc-cons { margin: 0 0 30px; }
+  .hc-cons h2 { font-size: 1.2rem; color: var(--ink); margin: 0 0 4px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .hc-cons h2 .mono { font-family: var(--font-mono); font-size: 12px; font-weight: 400; color: var(--faint); }
+  .hc-cons h2 a.hc-cons-open { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--accent-ink); text-decoration: none; }
+  .hc-cons h2 a.hc-cons-open:hover { text-decoration: underline; }
+  .hc-cons .ps-empty { color: var(--dim); font-size: 13.5px; margin: 6px 0 0; }
+  .mono { font-family: var(--font-mono); }
 </style>
+{% include "explore/_checklist_style.html" %}
 
 <div class="hc-page">
+  {% if status_types %}
+  <div class="hc-tabs" role="tablist">
+    <button class="hc-tab" type="button" role="tab" data-tab="chart" aria-selected="true">Hierarchy chart</button>
+    <button class="hc-tab" type="button" role="tab" data-tab="status" aria-selected="false">Production status</button>
+  </div>
+  <div id="hc-pane-status" hidden>
+    {% for c in status_types %}
+    <div class="hc-cons">
+      <h2>{{ c.name }} <span class="mono">{{ c.part_type_id }}</span>
+        <a class="hc-cons-open" href="{{ c.url }}" title="Read it from HWDB now">Refresh from HWDB &rarr;</a></h2>
+      {% for t in c.tables %}{% include "explore/_production_table.html" %}{% empty %}
+      <p class="ps-empty">Not read yet — <a href="{{ c.url }}">open its status page</a> once; it is remembered here from then on.</p>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <div id="hc-pane-chart">
   <div class="hc-head">
     <h1>{{ chart.title }}</h1>
     <span class="hc-hint">scroll to zoom · drag to pan</span>
@@ -54,6 +87,7 @@
   </div>
   <p class="subtitle">Component-type hierarchy chart{% if chart.source_url %}
     · source: <a href="{{ chart.source_url }}" target="_blank" rel="noopener">{{ chart.source_url }}</a>{% endif %}</p>
+
 
   <div class="hc-canvas">
     <svg id="hc-svg" viewBox="0 0 {{ chart.width }} {{ chart.height }}"
@@ -106,7 +140,25 @@
     </svg>
     <div class="hc-pop" id="hc-pop" hidden></div>
   </div>
+  </div>{# hc-pane-chart #}
 </div>
+{% if status_types %}
+<script>
+(function () {   // #199: tabs — ?tab=status or the last choice; the chart refits when it comes back into view
+  var tabs = document.querySelectorAll(".hc-tab"), panes = { chart: document.getElementById("hc-pane-chart"), status: document.getElementById("hc-pane-status") };
+  function show(which) {
+    tabs.forEach(function (t) { t.setAttribute("aria-selected", t.dataset.tab === which ? "true" : "false"); });
+    Object.keys(panes).forEach(function (k) { panes[k].hidden = k !== which; });
+    try { localStorage.setItem("hcTab", which); } catch (e) {}
+    if (which === "chart" && window.hcFit) window.hcFit();
+  }
+  tabs.forEach(function (t) { t.addEventListener("click", function () { show(t.dataset.tab); }); });
+  var want = new URLSearchParams(location.search).get("tab");
+  if (!want) { try { want = localStorage.getItem("hcTab"); } catch (e) {} }
+  if (want === "status") show("status");
+})();
+</script>
+{% endif %}
 
 {{ type_mapping|json_script:"hc-mapping" }}
 <script>
@@ -278,6 +330,7 @@
   });
 
   document.getElementById("hc-reset").addEventListener("click", fit);
+  window.hcFit = fit;   // #199: the Production status tab hides the chart; it refits when shown
   fit();
 })();
 </script>
