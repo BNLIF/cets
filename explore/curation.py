@@ -50,10 +50,11 @@ def extra_projects(instance: str) -> list[str]:
 
 
 def consortium_types(instance: str) -> list[str]:
-    """#199: the consortium types — each consortium's virtual type, holding
-    its production-status checklist (the Detector tab's table) and its
-    organizer checklists: the yaml's ``consortium_types`` in order, then the
-    UI/auto-added overrides (``ConsortiumTypeOverride``) by id."""
+    """#199/#200: the consortium types — each consortium's virtual type,
+    holding its component list for the production status (the Detector
+    area's tables) and its organizer checklists: the yaml's
+    ``consortium_types`` in order, then the UI/auto-added overrides
+    (``ConsortiumTypeOverride``) by id."""
     yaml_ids = [str(t).strip().upper() for t in (_block(instance).get("consortium_types") or [])
                 if str(t).strip()]
     return yaml_ids + sorted(consortium_overrides(instance) - set(yaml_ids))

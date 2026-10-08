@@ -1,0 +1,71 @@
+{% extends 'explore/base.html' %}
+{% block title %}Component list · {{ type_name }} · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .es-page { padding: 22px 30px 56px; max-width: 980px; }
+  .es-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .es-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .es-crumbs a:hover { text-decoration: underline; }
+  .es-crumbs .sep { color: var(--faint); margin: 0 7px; }
+  .es-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 2px; }
+  .es-sub { color: var(--dim); font-size: 13px; margin: 0 0 14px; }
+  .mono { font-family: var(--font-mono); }
+  .es-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
+  .es-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
+    border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+  .es-flash.success { color: var(--good, #2e7d32); background: var(--good-bg, var(--surface)); border: 1px solid var(--rule); }
+  .es-flash.info { color: var(--ink); background: var(--surface); border: 1px solid var(--rule); }
+  .es-card { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg); padding: 16px 20px; margin: 0 0 18px; }
+  .pl-rows { width: 100%; min-height: 200px; font-family: var(--font-mono); font-size: 13px; color: var(--ink); padding: 8px 10px;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff); resize: vertical; white-space: pre; }
+  .pl-reason { font: inherit; width: 100%; color: var(--ink); padding: 4px 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff); margin-top: 10px; }
+  .pl-actions { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
+  .es-btn { font: inherit; font-size: 13px; padding: 6px 14px; border-radius: 8px; cursor: pointer; text-decoration: none; }
+  .es-btn.primary { color: var(--accent-contrast, #fff); background: var(--accent-ink); border: 1px solid var(--accent-ink); }
+  .es-btn.quiet { color: var(--dim); background: var(--page); border: 1px solid var(--rule); }
+  .es-btn.quiet:hover { border-color: var(--rule-hard); color: var(--ink); }
+  .pl-list { border-collapse: collapse; font-size: 13px; }
+  .pl-list th { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; text-align: left; padding: 2px 14px 4px 0; border-bottom: 1px solid var(--rule); }
+  .pl-list td { padding: 5px 14px 5px 0; border-bottom: 1px solid var(--rule); color: var(--ink); }
+  .pl-list .pl-dim { color: var(--faint); }
+  .pl-file { color: var(--faint); font-size: 12px; margin-top: 10px; }
+</style>
+{# #200: a consortium type's component list — the types its production-status table reports, one per line, kept as Production_list_<type>.json on the type in HWDB (every version kept); architects edit. #}
+
+<div class="es-page">
+  <div class="es-crumbs">
+    <a href="{% url 'explore:hierarchy' %}">Detector</a>
+    <span class="sep">›</span><a href="{% url 'explore:production_overview' %}">Production status</a>
+    <span class="sep">›</span><a href="{{ status_url }}">{{ type_name }}</a>
+    <span class="sep">›</span>Component list
+  </div>
+  {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+  <h1>Component list <span class="mono" style="font-size:.75em; font-weight:400; color:var(--dim);">{{ part_type_id }}</span></h1>
+  <p class="es-sub">{{ type_name }} · the component types its production-status table reports, in order.</p>
+  {% if role_gate %}<div class="banner banner-warn" style="margin: 0 0 14px;">&#9888; {% if role_gate.required %}Saving onto this type needs one of its HWDB roles <b>{{ role_gate.required|join:", " }}</b>. Your account holds {% if role_gate.mine %}<b>{{ role_gate.mine|join:", " }}</b>{% else %}no roles{% endif %}, so HWDB will refuse the save.{% else %}This type lists no HWDB roles, so HWDB refuses every write onto it. An HWDB administrator must add roles to the type first.{% endif %}</div>{% endif %}
+
+  <div class="es-card">
+  {% if can_edit %}
+    <form method="post">
+      {% csrf_token %}
+      {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+      <textarea class="pl-rows" name="rows" spellcheck="false" placeholder="D00400300001  SiPM boards&#10;Z10400100001  PDS modules&#10;one type per line: the type id, then a label (the type’s name when left out)">{{ text }}</textarea>
+      <input type="text" class="pl-reason" name="reason" placeholder="reason — kept with this version">
+      <div class="pl-actions">
+        <button type="submit" class="es-btn primary">Save list to HWDB</button>
+        <a class="es-btn quiet" href="{{ next|default:status_url }}">Cancel</a>
+      </div>
+    </form>
+  {% elif rows %}
+    <table class="pl-list">
+      <thead><tr><th>Type ID</th><th>Label</th><th>Type</th></tr></thead>
+      <tbody>{% for r in rows %}<tr><td class="mono">{{ r.type }}</td><td>{{ r.label|default:"—" }}</td><td class="{% if not r.name %}pl-dim{% endif %}">{{ r.name|default:"not in the mirror" }}</td></tr>{% endfor %}</tbody>
+    </table>
+  {% else %}
+    <p style="margin:0; color:var(--dim); font-size:13.5px;">No component list on this type yet.</p>
+  {% endif %}
+    <p class="pl-file"><span class="mono">{{ file_name }}</span> on the type in HWDB{% if n_versions %} · {{ n_versions }} version{{ n_versions|pluralize }}{% if last.when %} · last saved {{ last.when }}{% endif %}{% endif %}</p>
+  </div>
+</div>
+{% endblock %}

@@ -3,7 +3,7 @@
 {% block title %}Production status · HWDB Explorer{% endblock %}
 
 {% block content %}
-{# #199 / Chao 2026-10-08: the consortia's production-status tables as last read (the cache, no HWDB call) — an index table, then one consortium at a time; each consortium's live page is /status/<type>/ #}
+{# #199/#200 / Chao 2026-10-08: the consortia's production-status tables as last read (the caches, no HWDB call) — an index table, then one consortium at a time; each consortium's live page is /status/<type>/ #}
 <style>
   .hc-page { padding: 26px 30px 56px; }
   .hc-page h1 { font-size: 1.5rem; color: var(--ink); margin: 0 0 14px; letter-spacing: -0.01em; }
@@ -17,6 +17,7 @@
   .hc-cons { margin: 0 0 30px; }
   .hc-cons h2 { font-size: 1.2rem; color: var(--ink); margin: 0 0 4px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .hc-cons h2 .mono { font-family: var(--font-mono); font-size: 12px; font-weight: 400; color: var(--faint); }
+  .hc-cons h2 .hc-read { font-size: 12px; font-weight: 400; color: var(--faint); }
   .hc-cons h2 a.hc-cons-open { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--accent-ink); text-decoration: none; }
   .hc-cons h2 a.hc-cons-open:hover { text-decoration: underline; }
   .hc-cons .ps-empty { color: var(--dim); font-size: 13.5px; margin: 6px 0 0; }
@@ -48,10 +49,10 @@
       <thead><tr><th>Consortium</th><th>Components</th><th>Earliest needed by</th><th>Completed-by passed</th><th>Last read</th><th></th></tr></thead>
       <tbody>
       {% for c in status_types %}
-      <tr><td><a href="?c={{ c.part_type_id }}" class="hc-pick" data-c="{{ c.part_type_id }}">{{ c.name }}</a> <span class="mono">{{ c.part_type_id }}</span></td>
-        <td class="num">{% if c.tables %}{{ c.n }}{% else %}—{% endif %}</td>
+      <tr><td>{% if c.type_url %}<a href="{{ c.type_url }}" title="the consortium type’s page">{{ c.name }}</a>{% else %}{{ c.name }}{% endif %} <span class="mono">{{ c.part_type_id }}</span></td>
+        <td class="num">{% if c.rows is not None %}{{ c.n }}{% else %}—{% endif %}</td>
         <td>{{ c.needed_by|default:"—" }}</td>
-        <td class="num">{% if c.tables %}{{ c.due }}{% else %}—{% endif %}</td>
+        <td class="num">{% if c.rows is not None %}{{ c.due }}{% else %}—{% endif %}</td>
         <td>{% if c.read_at %}{{ c.read_at|date:"Y-m-d H:i" }}{% else %}<span class="hc-dim">not read yet</span>{% endif %}</td>
         <td><a href="{{ c.url }}" title="Read it from HWDB now">refresh &rarr;</a></td></tr>
       {% endfor %}
@@ -63,14 +64,16 @@
     {% for c in status_types %}
     <div class="hc-cons" data-c="{{ c.part_type_id }}"{% if not forloop.first %} hidden{% endif %}>
       <h2>{{ c.name }} <span class="mono">{{ c.part_type_id }}</span>
+        {% if c.read_at %}<span class="hc-read">read {{ c.read_at|date:"Y-m-d H:i" }}</span>{% endif %}
         <a class="hc-cons-open" href="{{ c.url }}" title="Read it from HWDB now">Refresh from HWDB &rarr;</a></h2>
-      {% for t in c.tables %}{% include "explore/_production_table.html" %}{% empty %}
-      <p class="ps-empty">Not read yet — <a href="{{ c.url }}">open its status page</a> once; it is remembered here from then on.</p>
-      {% endfor %}
+      {% if c.rows %}{% include "explore/_production_table.html" with rows=c.rows %}
+      {% elif c.rows is not None %}<p class="ps-empty">No component list on this type yet — <a href="{{ c.list_url }}">add the component types</a> it reports.</p>
+      {% else %}<p class="ps-empty">Not read yet — <a href="{{ c.url }}">open its status page</a> once; it is remembered here from then on.</p>
+      {% endif %}
     </div>
     {% endfor %}
   {% else %}
-  <p class="hc-none">No consortium type yet — a type becomes one when a production-status checklist is saved onto it (or from its type page's Category dropdown).</p>
+  <p class="hc-none">No consortium type yet — an architect marks one in the Category dropdown on its type page.</p>
   {% endif %}
 </div>
 {% if status_types %}
@@ -87,7 +90,6 @@
     try { localStorage.setItem("hcCons", id); } catch (e) {}
   }
   pills.forEach(function (p) { p.addEventListener("click", function () { pick(p.dataset.c); }); });
-  document.querySelectorAll(".hc-pick").forEach(function (a) { a.addEventListener("click", function (e) { e.preventDefault(); pick(a.dataset.c); }); });
   var c = q.get("c"); if (!c) { try { c = localStorage.getItem("hcCons"); } catch (e) {} }
   if (c) pick(c);
 })();

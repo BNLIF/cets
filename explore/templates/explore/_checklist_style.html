@@ -112,12 +112,13 @@
   .ps-card h2 .ps-asof { font-size: 12px; font-weight: 400; color: var(--faint); }
   .ps-card h2 a.ps-edit { margin-left: auto; font-size: 12px; font-weight: 400; text-decoration: none; color: var(--accent-ink); }
   .ps-table th.cl-rowlab { color: var(--ink); font-weight: 600; }
-  .ps-card select.ps-rev { font: inherit; font-size: 12.5px; color: var(--ink); padding: 2px 6px; border: 1px solid var(--rule); border-radius: 6px; background: var(--page); }
-  .ps-card .ps-oldnote { color: var(--bad, #a33); font-size: 12px; margin-left: 8px; }
   .ps-table td.cl-const.ps-past { color: var(--good, #2e7d32); }
-  .ps-table td.cl-const.ps-types { font-family: var(--font-mono); font-size: calc(11.5px * var(--cl-scale, 1)); }
-  .ps-table td.cl-const.ps-types a { color: var(--accent-ink); text-decoration: none; }
-  .ps-table td.cl-const.ps-types a:hover { text-decoration: underline; }
+  .ps-table td.cl-const.ps-num { text-align: right; font-variant-numeric: tabular-nums; }
+  .ps-table td.cl-const.ps-types { font-family: var(--font-mono); font-size: calc(11.5px * var(--cl-scale, 1)); white-space: nowrap; }
+  .ps-table td.cl-const.ps-types a, .ps-table th.cl-rowlab a { color: var(--accent-ink); text-decoration: none; }
+  .ps-table td.cl-const.ps-types a:hover, .ps-table th.cl-rowlab a:hover { text-decoration: underline; }
+  .ps-table td.cl-const.ps-types a.ps-plan { margin-left: 8px; font-family: inherit; font-size: 12px; color: var(--dim); }
+  .ps-table td.cl-const.ps-none { color: var(--faint); }
   .ps-table td.cl-const.cl-wrap.ps-long { max-width: 440px; min-width: 260px; }
   .ps-table td.cl-const > p, .ps-table td.cl-const > ul, .ps-table td.cl-const > ol { margin: 0; }   /* full Markdown in a cell: no paragraph gaps */
   .ps-table td.cl-const > p + p, .ps-table td.cl-const > * + ul, .ps-table td.cl-const > * + ol { margin-top: 6px; }

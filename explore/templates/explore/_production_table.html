@@ -1,20 +1,17 @@
 {% load checklist %}
-{# #199: one consortium's production-status table, drawn as the fill page draws a named-row table (cl-table) but read-only — shared by the status page (live) and the Detector tab (cached). Context: t = {title, serial, part_id, checklist, instructions, columns, rows, as_of, edit_url, read_at?}. #}
-<div class="ps-card">
-  <h2>{{ t.title }}{% if t.serial %} <span class="mono ps-serial">{{ t.serial }}</span>{% endif %}
-    <span class="ps-asof">{{ t.part_id }}{% if t.as_of %} · as of {{ t.as_of|slice:":10" }}{% endif %}{% if t.read_at %} · read {{ t.read_at|date:"Y-m-d H:i" }}{% endif %}</span>
-    <a class="ps-edit" href="{{ t.edit_url }}" title="Fill in or change the table">&#9998; Edit table</a></h2>
-  {# the checklist's instructions are for the fill page, not the rendered table (Chao 2026-10-08) #}
-  {% if t.revs|length > 1 %}{# Hajime 2026-10-08: an older submission, as on the fill page (#184) #}
-  <p class="es-sub"><label>Submission <select class="ps-rev" data-pid="{{ t.part_id }}" onchange="location.search='?rev='+this.value+'&amp;pid='+this.dataset.pid">
-    {% for r in t.revs %}<option value="{{ r.i }}"{% if r.i == t.rev %} selected{% endif %}>{{ r.when }}{% if r.who %} · {{ r.who }}{% endif %}{% if r.i == 0 %} (latest){% endif %}</option>{% endfor %}
-  </select></label>{% if t.rev %} <span class="ps-oldnote">an older submission — the Detector tab and the plan lines keep the latest</span>{% endif %}</p>
-  {% endif %}
-  <div class="tbl-scroll"><table class="cl-table cl-gridlines ps-table">
-    <thead><tr><th></th>{% for c in t.columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
-    <tbody>
-    {% for r in t.rows %}<tr><th scope="row" class="cl-rowlab">{{ r.label }}</th>{% for cell in r.cells %}{% if cell.kind == "month" %}<td class="cl-const{% if cell.past %} ps-past{% endif %}">{{ cell.text }}</td>{% elif cell.kind == "types" %}<td class="cl-const ps-types">{% for id in cell.ids %}<a href="{% url 'explore:home' %}?node={{ id }}" title="the type’s page">{{ id }}</a>{% if not forloop.last %}<br>{% endif %}{% empty %}{{ cell.text }}{% endfor %}</td>{% else %}<td class="cl-const{% if cell.text|length > 24 %} cl-wrap ps-long{% endif %}">{{ cell.text|clmd_block }}</td>{% endif %}{% endfor %}</tr>
-    {% endfor %}
-    </tbody>
-  </table></div>
-</div>
+{# #200: one consortium's generated production-status table, drawn as the fill page draws a named-row table (cl-table) but read-only — shared by the status page (live) and the overview (cached). Context: rows = production.table(...), can_edit. #}
+<div class="tbl-scroll"><table class="cl-table cl-gridlines ps-table">
+  <thead><tr><th>Component</th><th>Type ID</th><th>Needed</th><th>In HWDB</th><th>Completed by</th><th>Needed by</th><th>Float (months)</th><th>Comment</th></tr></thead>
+  <tbody>
+  {% for r in rows %}<tr>
+    <th scope="row" class="cl-rowlab"><a href="{% url 'explore:home' %}?node={{ r.type }}" title="the type’s page">{{ r.label }}</a></th>
+    <td class="cl-const ps-types">{{ r.type }}<a class="ps-plan" href="{% url 'explore:production_plan' part_type_id=r.type %}" title="{% if r.has_plan %}The plan and its history{% if r.updated %} — set {{ r.updated }}{% endif %}{% if r.updated_by %} by {{ r.updated_by }}{% endif %}{% else %}No plan on this type yet{% endif %}">{% if r.has_plan %}plan{% elif can_edit %}set plan{% else %}no plan{% endif %}</a></td>
+    <td class="cl-const ps-num{% if not r.needed %} ps-none{% endif %}">{{ r.needed|default:"—" }}</td>
+    <td class="cl-const ps-num" title="{{ r.by_status|default:'no items in the mirror' }}">{{ r.n }}</td>
+    <td class="cl-const{% if r.completed_past %} ps-past{% endif %}{% if not r.completed_by %} ps-none{% endif %}">{{ r.completed_by|default:"—" }}</td>
+    <td class="cl-const{% if r.needed_past %} ps-past{% endif %}{% if not r.needed_by %} ps-none{% endif %}">{{ r.needed_by|default:"—" }}</td>
+    <td class="cl-const ps-num{% if not r.float %} ps-none{% endif %}">{{ r.float|default:"—" }}</td>
+    <td class="cl-const{% if r.comment|length > 24 %} cl-wrap ps-long{% endif %}">{{ r.comment|clmd_block }}</td>
+  </tr>{% endfor %}
+  </tbody>
+</table></div>

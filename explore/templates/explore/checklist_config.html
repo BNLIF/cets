@@ -131,6 +131,7 @@
   #clc-json { width: 100%; min-height: 200px; font-family: var(--font-mono); font-size: 12px; }
   .clc-chips { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; }
   .clc-chips a { color: var(--accent-ink); text-decoration: none; }
+  .clc-chips a.ec-retired { color: var(--faint); text-decoration: line-through; }
   .clc-chips a:hover { text-decoration: underline; }
   /* #192: the workbench layout — the preview is the page, at the fill page's
      width; the editor is Plots' tab strip + panel + split on the left, showing
@@ -229,7 +230,7 @@
   {% if existing and not wb %}
   <div class="ec-card"><h2>This type's checklists</h2>
     <div class="clc-chips">
-      {% for c in existing %}<a href="?name={{ c.name|urlencode }}&amp;next={{ next|urlencode }}">{{ c.name }} ✎</a>{% endfor %}
+      {% for c in existing %}<a href="?name={{ c.name|urlencode }}&amp;next={{ next|urlencode }}"{% if c.retired %} class="ec-retired" title="Retired — not shown on item pages"{% endif %}>{{ c.name }} ✎</a>{% endfor %}
       {% if cl_name %}<a href="{% url 'explore:checklist_config' part_type_id=part_type_id %}?next={{ next|urlencode }}">+ new checklist</a>{% endif %}
     </div>
   </div>
@@ -255,7 +256,7 @@
       {% if existing %}
       <div class="ec-card" id="clc-existing">
         <div class="clc-chips" style="margin-bottom:12px;">
-          {% for c in existing %}<a href="?name={{ c.name|urlencode }}&amp;next={{ next|urlencode }}&amp;ui=wb">{{ c.name }} ✎</a>{% endfor %}
+          {% for c in existing %}<a href="?name={{ c.name|urlencode }}&amp;next={{ next|urlencode }}&amp;ui=wb"{% if c.retired %} class="ec-retired" title="Retired — not shown on item pages"{% endif %}>{{ c.name }} ✎</a>{% endfor %}
           {% if cl_name %}<a href="{% url 'explore:checklist_config' part_type_id=part_type_id %}?next={{ next|urlencode }}&amp;ui=wb">+ new checklist</a>{% endif %}
         </div>
       </div>
@@ -288,8 +289,8 @@
           <label class="ec-inline" title="Linked from the Add-items / Link-items page of every item of this type; on a shipping box also from the pre-shipping checklist, which asks for a confirmation that it has been completed"><input type="checkbox" id="f-shipping"> shipping checklist</label></div>
         <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Organizer</span>
           <label class="ec-inline" title="A checklist of checklists: opens with no item — sections of Link-to-checklist fields, selects that show or hide sections; nothing to submit, no test type needed"><input type="checkbox" id="f-org"> type checklist</label></div>
-        <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Status</span>
-          <label class="ec-inline" title="A consortium's production-status table: one table with a named row per component, month columns (PRR date = month) for the dates, a Type IDs column naming the real types; shown on the status page and the Detector tab, its dates drawn as plan lines on those types' dashboards; the table always goes to Specs"><input type="checkbox" id="f-status"> production status</label></div>
+        <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Retired</span>
+          <label class="ec-inline" title="Left off item pages and choosers (HWDB never deletes a type image); still listed here, untick to bring it back"><input type="checkbox" id="f-retired"> hidden from item pages</label></div>
         {# #103: HWDB's standard item fields — on by default, untick to drop from this checklist #}
         <div class="ec-row" style="align-items:flex-start;"><span class="ec-label" style="flex:0 0 90px;" title="HWDB’s own fields on the item — shown as an “Item” card at the top and written to the item record on submit">Item fields</span>
           <div id="f-itemf" style="display:flex; flex-wrap:wrap; gap:4px 14px; flex:1;">
@@ -1403,7 +1404,7 @@
     if (roles.length) cfg.roles = roles;
     if ($("#f-shipping").checked) cfg.shipping = true;   // #150
     if ($("#f-org").checked) cfg.organizer = true;   // #189
-    if ($("#f-status").checked) cfg.status = true;   // #199
+    if ($("#f-retired").checked) cfg.retired = true;
     cfg.item_fields = $$(".f-itemf").filter(function (c) { return c.checked; })
                         .map(function (c) { return c.value; });
     cfg.sections = $$("#clc-sections > .clc-sec").map(function (s) {
@@ -1584,7 +1585,7 @@
     $("#f-roles").value = (cfg.roles || []).join(", ");
     $("#f-shipping").checked = !!cfg.shipping;   // #150
     $("#f-org").checked = !!cfg.organizer;   // #189
-    $("#f-status").checked = !!cfg.status;   // #199
+    $("#f-retired").checked = !!cfg.retired;
     $$(".f-itemf").forEach(function (c) {      // absent = every field on
       c.checked = !Array.isArray(cfg.item_fields) || cfg.item_fields.indexOf(c.value) !== -1;
     });

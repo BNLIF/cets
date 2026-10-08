@@ -55,8 +55,7 @@
   {% firstof part_type_id part_id|slice:":12" as cl_ptid %}
   <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
     <h1>{{ schema.name }}{% if cl_name != schema.name %} <span class="mono" style="font-size:.7em; font-weight:400; color:var(--dim);">· {{ cl_name }}</span>{% endif %}</h1>
-    {% if schema.status %}<a class="es-btn quiet cl-need-net" style="margin-left:auto; text-decoration:none;" href="{% url 'explore:production_status' part_type_id=cl_ptid %}" title="The table as last submitted, rendered (Chao 2026-10-08)">Production status</a>{% endif %}
-    <a class="es-btn quiet cl-need-net" style="{% if not schema.status %}margin-left:auto; {% endif %}text-decoration:none;" href="{% url 'explore:checklist_config' part_type_id=cl_ptid %}?name={{ cl_name|urlencode }}&amp;next={{ request.get_full_path|urlencode }}" title="Open this checklist in the editor">&#9998; Edit checklist</a>
+    <a class="es-btn quiet cl-need-net" style="margin-left:auto; text-decoration:none;" href="{% url 'explore:checklist_config' part_type_id=cl_ptid %}?name={{ cl_name|urlencode }}&amp;next={{ request.get_full_path|urlencode }}" title="Open this checklist in the editor">&#9998; Edit checklist</a>
   </div>
   <p class="es-sub" id="cl-sub">Checklist on <span class="mono" data-cl-pid>{{ part_id }}</span> — submitted to HWDB as
     <span class="mono">{{ schema.test_type_name }}</span> test records.</p>

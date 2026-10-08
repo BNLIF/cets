@@ -165,6 +165,7 @@
     {# ---- Component-type leaf: detail + plots. All leaves, incl. shipping types — boxes are regular components; box panes are appended below. ---- #}
     <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;">
         <div class="page-subtitle">{{ leaf.system_name }} <span class="crumbs-sep">›</span> {{ leaf.subsystem_name }}</div>
+        {% if not is_consortium %}{# a consortium type has no items to sync, plot or label (Chao 2026-10-08) #}
         <div style="text-align: right; white-space: nowrap;">
             <div style="display: flex; gap: 6px; justify-content: flex-end; align-items: center;">
                 <span class="cell-muted" style="font-size: 12px; margin-right: 6px;">{% if leaf.tests_synced_at %}synced {{ leaf.tests_synced_at|timesince }} ago{% else %}never synced{% endif %}<span id="sync-new-note" hidden></span></span>
@@ -183,6 +184,7 @@
                 <a class="btn btn-sm" href="{% url 'explore:labels' part_type_id=leaf.part_type_id %}" title="QR / bar-code label sheets for a list of this type’s items">Labels</a>
             </div>
         </div>
+        {% endif %}
     </div>
 
     {% if leaf.tests_sync_error %}
@@ -203,8 +205,10 @@
             {% if can_edit_type %}<form method="post" action="{% url 'explore:type_class' part_type_id=leaf.part_type_id %}" class="type-class" style="display:inline; margin:0 0 0 8px;">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><select name="class"{% if class_locked %} disabled title="Listed in curation.yaml — edit the yaml to change"{% else %} title="How the Explorer treats this type: a shipping container’s items are boxes (Shipments tab, packing, ship/receive checklists); a consortium type holds the consortium’s production-status and organizer checklists"{% endif %}><option value="none"{% if not is_shipping and not is_consortium %} selected{% endif %}>no classification</option><option value="shipping"{% if is_shipping %} selected{% endif %}>shipping container</option><option value="consortium"{% if is_consortium %} selected{% endif %}>consortium type</option></select></form>{% elif is_shipping %} <span class="sep">·</span> shipping container{% elif is_consortium %} <span class="sep">·</span> consortium type{% endif %}</dd>
         <dt>System</dt><dd>{{ leaf.system_name }} ({{ leaf.system_id }})</dd>
         <dt>Subsystem</dt><dd>{{ leaf.subsystem_name }} ({{ leaf.subsystem_id }})</dd>
+        {% if not is_consortium %}
         <dt>{% if is_shipping %}Boxes in HWDB{% else %}Items in HWDB{% endif %}</dt><dd>{{ leaf.n_components }}<span class="chart-plan-note" data-kind="comp"></span></dd>
         <dt>Test events</dt><dd>{{ leaf.n_tests }}<span class="chart-plan-note" data-kind="test"></span></dd>
+        {% endif %}
         {# #110: fill-out links for the type's consortium checklists — each opens the PID chooser (scan / items table / new item). Filled lazily so the mirror-only render never waits on HWDB; no checklists = no row. #}
         <dt id="cl-names-dt" hidden>Checklists</dt><dd id="cl-names-dd" class="span" hidden
             data-names-url="{% url 'explore:checklist_names' part_type_id=leaf.part_type_id %}"
@@ -212,6 +216,9 @@
         {% if can_edit_es %}
         {# One compact "Manage" row for every type-level editing action (review of #101): the pane must not grow a line per link. #}
         <dt>Manage</dt><dd class="span">
+          {% if is_consortium %}{# only the organizer checklists make sense on a consortium type (Chao 2026-10-08) #}
+          <a href="{% url 'explore:checklist_config' part_type_id=leaf.part_type_id %}?next={{ request.path|urlencode }}" target="_blank" rel="noopener" title="Create or edit the type’s organizer checklists (Checklist_{{ leaf.part_type_id }}_*.json in HWDB)">Edit checklists <span aria-hidden="true">&#x2197;</span></a>
+          {% else %}
           <a href="{% url 'explore:es_config' part_type_id=leaf.part_type_id %}?next={{ request.path|urlencode }}" target="_blank" rel="noopener" title="Create or edit the type’s executive-summary config (ES_{{ leaf.part_type_id }}_*.json in HWDB)">ES config <span aria-hidden="true">&#x2197;</span></a>
           <span class="sep">·</span><a href="{% url 'explore:checklist_config' part_type_id=leaf.part_type_id %}?next={{ request.path|urlencode }}" target="_blank" rel="noopener" title="Create or edit the type’s consortium checklists (Checklist_{{ leaf.part_type_id }}_*.json in HWDB) — they render as fill-out forms on every item">Edit checklists <span aria-hidden="true">&#x2197;</span></a>
           <span class="sep">·</span><a href="{% url 'explore:item_create' part_type_id=leaf.part_type_id %}" target="_blank" rel="noopener" title="Mint a new item of this type in HWDB (institution + optional serial), then fill its checklist">New item <span aria-hidden="true">&#x2197;</span></a>
@@ -220,11 +227,18 @@
           {% if can_edit_positions %}
           <span class="sep">·</span><a href="{% url 'explore:box_type' part_type_id=leaf.part_type_id %}" target="_blank" rel="noopener" title="Type-level change: add, edit or delete the type’s connector positions (HWDB administrator flag), or clone it into a new type (architect flag)">&#9888; Positions <span aria-hidden="true">&#x2197;</span></a>
           {% endif %}
+          {% endif %}
         </dd>
         {% endif %}
         {% if is_consortium %}
-        {# #199: the consortium's production-status table (its own line — Chao 2026-10-08) #}
-        <dt>Status</dt><dd class="span"><a href="{{ status_url }}" title="This consortium’s production-status table, read from HWDB">Production status</a></dd>
+        {# #199: the consortium's production-status table (its own line — Chao 2026-10-08); #200: the component list it is generated from #}
+        <dt>Status</dt><dd class="span"><a href="{{ status_url }}" title="This consortium’s production-status table, read from HWDB">Production status</a>
+          <span class="sep">·</span><a href="{{ list_url }}?next={{ request.path|urlencode }}" title="The component types the table reports, one per line (Production_list_{{ leaf.part_type_id }}.json in HWDB)">Component list</a></dd>
+        {% endif %}
+        {% if not is_consortium and type_plan or not is_consortium and can_edit_type %}
+        {# #200 (Anselmo): the type's production plan, kept on the type in HWDB (Production_plan_<type>.json, every version kept) — the cache here, the plan page to see the history or edit #}
+        <dt>Plan</dt><dd class="span">{% if type_plan %}{% if type_plan.needed is not None %}needed {{ type_plan.needed }}{% endif %}{% if type_plan.completed_by %}{% if type_plan.needed is not None %}<span class="sep">·</span>{% endif %}completed by {{ type_plan.completed_by }}{% endif %}{% if type_plan.needed_by %}{% if type_plan.needed is not None or type_plan.completed_by %}<span class="sep">·</span>{% endif %}needed by {{ type_plan.needed_by }}{% endif %}{% if type_plan.needed is None and not type_plan.completed_by and not type_plan.needed_by %}no dates{% endif %}
+          <span class="sep">·</span><a href="{{ plan_url }}?next={{ request.path|urlencode }}" title="The plan and its history{% if type_plan.updated %} — last set {{ type_plan.updated }}{% if type_plan.updated_by %} by {{ type_plan.updated_by }}{% endif %}{% endif %}">{% if can_edit_type %}Edit{% else %}History{% endif %}</a>{% else %}<a href="{{ plan_url }}?next={{ request.path|urlencode }}" title="How many are needed and when — drawn on the dashboard and in the consortium’s production-status table">Set plan</a>{% endif %}</dd>
         {% endif %}
     </dl>
     <script>document.querySelectorAll("form.type-class select").forEach(function (s) { s.addEventListener("change", function () { s.form.submit(); }); });</script>
@@ -278,8 +292,8 @@
                     <button type="button" class="chart-exp-add" style="font: inherit; color: var(--ink); border: 1px solid var(--rule); border-radius: 6px; padding: 2px 8px; background: var(--page); cursor: pointer;">+</button>
                     <span class="chart-exp-list" style="display: inline-flex; gap: 6px; flex-wrap: wrap;"></span>
                 </div>
-                {# Plan lines (TB via Anselmo 2026-09-23): total to produce, completed-by and needed-by dates → dashed lines on the cumulative; kept in this browser only until they live on the type in HWDB. #}
-                <div class="chart-plan" style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--faint);"{% if c.plan %} data-plan-total="{{ c.plan.total }}" data-plan-done="{{ c.plan.done }}" data-plan-need="{{ c.plan.need }}" data-plan-source="{{ c.plan.source }}" data-plan-url="{{ c.plan.url }}"{% endif %}>
+                {# Plan lines (TB via Anselmo 2026-09-23): total to produce, completed-by and needed-by dates → dashed lines on the cumulative; from the type's production plan in HWDB (#200) when it has one, else kept in this browser only. #}
+                <div class="chart-plan" style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--faint);"{% if c.plan %} data-plan-total="{{ c.plan.total }}" data-plan-done="{{ c.plan.done }}" data-plan-need="{{ c.plan.need }}" data-plan-url="{{ c.plan.url }}"{% endif %}>
                     <span>Plan</span>
                     <input type="number" class="chart-plan-total" min="0" step="1" placeholder="total to produce" title="Total to produce" style="font: inherit; color: var(--ink); width: 118px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff);">
                     <span>completed by</span>
@@ -826,7 +840,7 @@
             try { plan = JSON.parse(localStorage.getItem(planKey) || '{}') || {}; } catch (e) { plan = {}; }
             var planIn = { total: panel.querySelector('.chart-plan-total'), done: panel.querySelector('.chart-plan-done'), need: panel.querySelector('.chart-plan-need') };
             var planNote = document.querySelector('.chart-plan-note[data-kind="' + kind + '"]');
-            var planFixed = false;   // #199: true when HWDB's production-status table sets the plan — never stored here
+            var planFixed = false;   // #200: true when the type's production plan in HWDB sets the plan — never stored here
             function savePlan() {
                 var ym = function (v) { return /^\d{4}-\d{2}/.test(v || '') ? v.slice(0, 7) : ''; };   // months; a typed fallback or an old day value is cut to one
                 plan = { total: parseInt(planIn.total.value, 10) > 0 ? parseInt(planIn.total.value, 10) : 0, done: ym(planIn.done.value), need: ym(planIn.need.value) };
@@ -834,13 +848,13 @@
                 if (planNote) planNote.textContent = (plan.total ? ' · of ' + plan.total.toLocaleString() + ' to produce' : '')
                     + (plan.done ? ' · completed by ' + plan.done : '') + (plan.need ? ' · needed by ' + plan.need : '');
             }
-            // #199: the consortium's production-status table names this type — its values win, read-only here
+            // #200: the type's production plan in HWDB — its values win, read-only here (the plan page edits them)
             var planEl = panel.querySelector('.chart-plan');
             if (planEl && planEl.dataset.planUrl) {
                 planFixed = true;
                 plan = { total: parseInt(planEl.dataset.planTotal, 10) > 0 ? parseInt(planEl.dataset.planTotal, 10) : 0, done: planEl.dataset.planDone || '', need: planEl.dataset.planNeed || '' };
-                Object.keys(planIn).forEach(function (k) { planIn[k].readOnly = true; planIn[k].tabIndex = -1; planIn[k].title = 'From the production status table (' + planEl.dataset.planSource + ')'; });
-                var src = document.createElement('a'); src.href = planEl.dataset.planUrl; src.textContent = 'from ' + planEl.dataset.planSource; src.title = 'The consortium’s production status table'; src.style.color = 'var(--accent-ink)';
+                Object.keys(planIn).forEach(function (k) { planIn[k].readOnly = true; planIn[k].tabIndex = -1; planIn[k].title = 'From the type’s production plan in HWDB'; });
+                var src = document.createElement('a'); src.href = planEl.dataset.planUrl; src.textContent = 'from the production plan'; src.title = 'The plan and its history'; src.style.color = 'var(--accent-ink)';
                 planEl.appendChild(src);
             }
             planIn.total.value = plan.total > 0 ? plan.total : ''; planIn.done.value = (plan.done || '').slice(0, 7); planIn.need.value = (plan.need || '').slice(0, 7);

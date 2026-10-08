@@ -19,10 +19,10 @@
   .es-btn.quiet { color: var(--dim); background: var(--page); border: 1px solid var(--rule); }
   .es-btn.quiet:hover { border-color: var(--rule-hard); color: var(--ink); }
   .ps-empty { color: var(--dim); font-size: 13.5px; margin: 16px 0; }
-  @media print { .es-crumbs, .ps-edit, .es-btn { display: none; } .es-page { padding: 0; } }
+  @media print { .es-crumbs, .es-btn { display: none; } .es-page { padding: 0; } }
 </style>
 {% include "explore/_checklist_style.html" %}
-{# #199 (Anselmo's DPC-review table): a consortium's production-status table, read live off its virtual type — every checklist flagged "status" on the type, one table per item from the item's latest specifications. Reading it rewrites the plan cache the real types' dashboards draw plan lines from. #}
+{# #200 (Anselmo's DPC-review table): a consortium's production-status table, generated — the component list off the consortium type, each type's plan off that type, the counts off the mirror. Read-only: the plans are edited on their own pages. #}
 
 <div class="es-page">
   <div class="es-crumbs">
@@ -34,18 +34,14 @@
   <div style="display:flex; align-items:baseline; gap:12px; flex-wrap:wrap;">
     <h1>{{ type_name }}</h1>
     <span class="mono" style="font-size:12px; color:var(--dim);">{{ part_type_id }}</span>
-    {% if checklists %}<a class="es-btn quiet" style="margin-left:auto; text-decoration:none;" href="{{ editor_url }}?name={{ checklists.0.name|urlencode }}&amp;next={{ request.get_full_path|urlencode }}" title="Open the production-status checklist in the editor">&#9998; Edit checklist</a>{% endif %}
+    <a class="es-btn quiet" style="margin-left:auto; text-decoration:none;" href="{{ list_url }}?next={{ request.get_full_path|urlencode }}" title="The component types this table reports, one per line">{% if can_edit %}&#9998; {% endif %}Component list</a>
   </div>
-  <p class="es-sub">Production status — read from HWDB just now.</p>
+  <p class="es-sub">Production status — read from HWDB just now. Dates and comments come from each type’s plan, counts from the items in HWDB.</p>
 
-  {% if not checklists %}
-  <p class="ps-empty">No production-status checklist on this type yet. <a href="{{ editor_url }}?next={{ request.get_full_path|urlencode }}">Create one</a>: tick <b>production status</b>, add a table with a named row per component and columns such as <span class="mono">Type ID, PRR date = month, Needed, Produced and tested, Completed by = month, Needed by = month, Comments</span>.</p>
-  {% elif no_items %}
-  <p class="ps-empty">No item on this type yet — the table is filled on an item (one per consortium).{% if type_url %} <a href="{{ type_url }}">Type page</a>{% endif %}</p>
-  {% elif not cards %}
-  <p class="ps-empty">The production-status checklist has no table with named rows yet.</p>
+  {% if not rows %}
+  <p class="ps-empty">No component list on this type yet{% if can_edit %} — <a href="{{ list_url }}?next={{ request.get_full_path|urlencode }}">add the component types</a> it reports{% endif %}.</p>
+  {% else %}
+  {% include "explore/_production_table.html" %}
   {% endif %}
-
-  {% for t in cards %}{% include "explore/_production_table.html" %}{% endfor %}
 </div>
 {% endblock %}

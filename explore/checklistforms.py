@@ -38,12 +38,19 @@ SPEC_CAPABLE = {"check", "number", "table", "text", "textarea", "datetime",
                 "select", "qr"}
 
 
+RETIRED_MARK = "[retired]"   # in the image's HWDB comment, so a listing knows without loading the schema
+
+
 def available(api, part_type_id: str, rows=None) -> list[dict]:
-    """``[{name, image_id, image_name, created}]`` — the newest row per
-    checklist name among the type's ``Checklist_{typeid}_{name}.json``
+    """``[{name, image_id, image_name, created, retired}]`` — the newest row
+    per checklist name among the type's ``Checklist_{typeid}_{name}.json``
     images. ``rows`` lets a caller that already listed the type's images
     (the part page shares the ES config's listing) skip the fetch. Any
-    failure is an empty list — the card just doesn't render."""
+    failure is an empty list — the card just doesn't render. ``retired``
+    (Chao 2026-10-08): the schema's ``retired`` flag, mirrored into the
+    newest version's HWDB comment by the editor — such a checklist is
+    left off item pages and choosers (``active``), the editor still
+    lists it."""
     try:
         if rows is None:
             rows = api.get_component_type_images(part_type_id).get("data") or []
@@ -59,11 +66,18 @@ def available(api, part_type_id: str, rows=None) -> list[dict]:
                          or (r.get("created") or "") > (cur.get("created") or "")):
                 best[name] = r
         return [{"name": k, "image_id": str(v["image_id"]),
-                 "image_name": v.get("image_name"), "created": v.get("created")}
+                 "image_name": v.get("image_name"), "created": v.get("created"),
+                 "retired": RETIRED_MARK in str(v.get("comments") or "")}
                 for k, v in sorted(best.items())]
     except Exception as e:
         logger.warning("checklist listing for %s failed: %s", part_type_id, e)
         return []
+
+
+def active(api, part_type_id: str, rows=None) -> list[dict]:
+    """``available`` without the retired checklists — what item pages and
+    choosers list."""
+    return [r for r in available(api, part_type_id, rows=rows) if not r["retired"]]
 
 
 def load(api, part_type_id: str, name: str):
@@ -772,12 +786,9 @@ def normalize(cfg: dict, name: str) -> dict:
               # item: sections of Link-to-checklist fields, selects driving
               # ``when`` rules, nothing to submit
               "organizer": bool(cfg.get("organizer")),
-              # #199 (Anselmo's DPC review table): a production-status
-              # checklist on a consortium's virtual type — its table (one
-              # named row per component) is what the status page and the
-              # Detector tab show, and its month columns feed the real
-              # types' plan lines; the table always goes to Specs
-              "status": bool(cfg.get("status")),
+              # Chao 2026-10-08: a retired checklist stays in HWDB (type
+              # images are never deleted) but is left off item pages
+              "retired": bool(cfg.get("retired")),
               # #103: absent = every standard field; a list = that subset
               "item_fields": ([f for f in cfg["item_fields"] if f in ITEM_FIELDS]
                               if isinstance(cfg.get("item_fields"), list)
@@ -880,12 +891,6 @@ def normalize(cfg: dict, name: str) -> dict:
     _resolve_when(schema)
     _resolve_lookups(schema)
     _nest(schema)
-    if schema["status"]:
-        # #199: the status page reads the table off the item's
-        # specifications, so a production-status table is always → Specs
-        for _t, f in leaf_fields(schema):
-            if f["type"] == "table":
-                f["to_spec"] = True
     return schema
 
 
