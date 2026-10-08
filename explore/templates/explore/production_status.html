@@ -27,8 +27,8 @@
 <div class="es-page">
   <div class="es-crumbs">
     <a href="{% url 'explore:hierarchy' %}">Detector</a>
+    <span class="sep">›</span><a href="{% url 'explore:production_overview' %}">Production status</a>
     <span class="sep">›</span>{% if type_url %}<a href="{{ type_url }}">{{ type_name }}</a>{% else %}{{ type_name }}{% endif %}
-    <span class="sep">›</span>Production status
   </div>
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
   <div style="display:flex; align-items:baseline; gap:12px; flex-wrap:wrap;">
@@ -39,7 +39,7 @@
   <p class="es-sub">Production status — read from HWDB just now.</p>
 
   {% if not checklists %}
-  <p class="ps-empty">No production-status checklist on this type yet. <a href="{{ editor_url }}?next={{ request.get_full_path|urlencode }}">Create one</a>: tick <b>production status</b>, add a table with a named row per component and columns such as <span class="mono">Type IDs, PRR date = month, Needed, Produced and tested, Completed by = month, Needed by = month, Comments</span>.</p>
+  <p class="ps-empty">No production-status checklist on this type yet. <a href="{{ editor_url }}?next={{ request.get_full_path|urlencode }}">Create one</a>: tick <b>production status</b>, add a table with a named row per component and columns such as <span class="mono">Type ID, PRR date = month, Needed, Produced and tested, Completed by = month, Needed by = month, Comments</span>.</p>
   {% elif no_items %}
   <p class="ps-empty">No item on this type yet — the table is filled on an item (one per consortium).{% if type_url %} <a href="{{ type_url }}">Type page</a>{% endif %}</p>
   {% elif not cards %}

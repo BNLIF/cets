@@ -85,6 +85,11 @@ def table_value(schema: dict, title: str, f: dict, data) -> dict:
     else:
         sec = data.get(title)
         node = sec.get(key or f["label"]) if isinstance(sec, dict) else None
+    if not isinstance(node, dict):
+        # a test record's DATA (an older submission, Hajime 2026-10-08) keeps
+        # the table under its section and label, whatever the Specs key
+        sec = data.get(title)
+        node = sec.get(f["label"]) if isinstance(sec, dict) else None
     return node if isinstance(node, dict) else {}
 
 

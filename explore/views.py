@@ -368,11 +368,27 @@ def explore_hierarchy_view(request):
     The chart model is instance-independent; the node → part-type mapping
     (#58) and sidebar are per-instance."""
     inst = instance_of(request)
+    if request.GET.get("tab") == "status":   # the production status used to be a tab here (2026-10-08)
+        return redirect(_rev(request, "explore:production_overview"))
     return render(request, "explore/hierarchy.html", {
         "active_nav": "detector",
         "sidebar": navigation.sidebar_tree(inst, {}),
         "chart": charts.svg_chart("fd-vd-v11"),
         "type_mapping": charts.type_mapping("fd-vd-v11", inst),
+    })
+
+
+@login_not_required
+@fnal_login_required
+def explore_production_overview_view(request):
+    """#199 / Chao 2026-10-08: the Detector area's second page — every
+    consortium's production-status table as last read (mirror only): an
+    index table, then one consortium at a time. ``/status/<type>/`` is a
+    consortium's own live page."""
+    inst = instance_of(request)
+    return render(request, "explore/production_overview.html", {
+        "active_nav": "detector",
+        "sidebar": navigation.sidebar_tree(inst, {}),
         "status_types": _production_status_list(request, inst),
     })
 
@@ -391,9 +407,16 @@ def _production_status_list(request, inst) -> list[dict]:
             "rows": t.rows, "as_of": t.as_of, "read_at": t.read_at,
             "edit_url": _rev(request, "explore:checklist", args=[t.source_part_id, t.checklist]),
         } for t in ProductionTable.for_instance(inst).filter(source_type_id=tid)]
+        # Chao 2026-10-08: the tab's index row — components, last read, the
+        # earliest Needed-by, rows whose Completed-by month has passed
+        rows = [r for t in tables for r in t["rows"]]
+        this_month = timezone.localdate().strftime("%Y-%m")
         out.append({"part_type_id": tid, "name": (node.name if node else "") or tid,
                     "url": _rev(request, "explore:production_status", args=[tid]),
-                    "tables": tables})
+                    "tables": tables, "n": len(rows),
+                    "read_at": max((t["read_at"] for t in tables), default=None),
+                    "needed_by": min((r.get("needed_by") for r in rows if r.get("needed_by")), default=""),
+                    "due": sum(1 for r in rows if r.get("completed_by") and r["completed_by"] <= this_month)})
     return out
 
 
@@ -432,6 +455,14 @@ def explore_production_status_view(request, part_type_id):
                            if isinstance(r, dict) and r.get("part_id")})
         except requests.RequestException as e:
             logger.info("production status: items of %s failed: %s", part_type_id, e)
+    # Hajime 2026-10-08: ``?rev=N&pid=…`` shows the N-th newest submission of
+    # that item instead of the latest (the fill page's Submission picker, #184);
+    # the caches keep the latest regardless
+    try:
+        want_rev = int(request.GET.get("rev") or 0)
+    except ValueError:
+        want_rev = 0
+    rev_pid = (request.GET.get("pid") or "").strip().upper()
     cards = []
     for pid in pids:
         try:
@@ -444,9 +475,19 @@ def explore_production_status_view(request, part_type_id):
         for c in checklists_:
             card = production.card(c["name"], c["schema"], data, as_of)
             production.refresh(inst, part_type_id, pid, serial, card, checklist=c["name"])
-            if card is not None:
-                cards.append({**card, "part_id": pid, "serial": serial,
-                              "edit_url": _rev(request, "explore:checklist", args=[pid, c["name"]])})
+            if card is None:
+                continue
+            history = _checklist_history(api, pid, c["schema"]["test_type_name"])
+            rev = want_rev if (rev_pid in ("", pid) and 0 < want_rev < len(history)) else 0
+            if rev:
+                old = (history[rev].get("test_data") or {}).get("DATA")
+                card = production.card(c["name"], c["schema"], old, str(history[rev].get("created") or "")) or card
+            cards.append({**card, "part_id": pid, "serial": serial, "rev": rev,
+                          "revs": [{"i": i, "when": str(r.get("created") or "")[:16].replace("T", " "),
+                                    "who": (r.get("creator") or {}).get("username") or ""}
+                                   for i, r in enumerate(history)],
+                          "edit_url": _rev(request, "explore:checklist", args=[pid, c["name"]])
+                                      + (f"?rev={rev}" if rev else "")})
     return render(request, "explore/production_status.html", {
         "active_nav": "detector",
         "sidebar": navigation.sidebar_tree(inst, {}),

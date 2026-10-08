@@ -11,7 +11,8 @@ urlpatterns = [
     path("browse/", views.explore_view, name="browse"),
     path("hierarchy/", views.explore_hierarchy_view, name="hierarchy"),
     path("hierarchy/summary/", views.explore_type_summary_view, name="type_summary"),
-    path("status/<str:part_type_id>/", views.explore_production_status_view, name="production_status"),   # #199
+    path("status/", views.explore_production_overview_view, name="production_overview"),   # #199: every consortium, as last read
+    path("status/<str:part_type_id>/", views.explore_production_status_view, name="production_status"),   # #199: one consortium, live
     path("type-positions/<str:part_type_id>/", views.explore_type_positions_view,
          name="type_positions"),
     path("type-locations/<str:part_type_id>/", views.explore_type_locations_view,

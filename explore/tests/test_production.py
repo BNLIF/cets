@@ -227,6 +227,34 @@ class StatusPageTest(TestCase):
         self.assertEqual(api.get_component.call_args_list, [mock.call(PID)] * 2)   # one read per visit
         api.get_component_types.assert_not_called()   # the mirror knew the item
 
+    def test_older_submission_via_the_picker(self):
+        # Hajime 2026-10-08: the Submission list on the rendered page too
+        api = _api()
+        old = json.loads(json.dumps(DATA)); old["Table"]["Components"]["Rails and cables"]["Needed"] = 1400
+        api.get_tests.return_value = {"data": [
+            {"created": "2026-10-08T10:00:00", "creator": {"username": "chaoz"}, "test_data": {"DATA": DATA}},
+            {"created": "2026-10-01T09:00:00", "creator": {"username": "hajime3"}, "test_data": {"DATA": old}}]}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(self.URL).content.decode()
+            self.assertIn('<select class="ps-rev" data-pid="Z00100600001-00001"', html)
+            self.assertIn('<option value="0" selected>2026-10-08 10:00 · chaoz (latest)</option>', html)
+            self.assertIn('<option value="1">2026-10-01 09:00 · hajime3</option>', html)
+            self.assertIn("<p>1,500</p>", html)
+            self.assertNotIn("an older submission —", html)
+            html = self.client.get(self.URL + "?rev=1&pid=Z00100600001-00001").content.decode()
+        self.assertIn("<p>1,400</p>", html)                        # the old table, read off the test record
+        self.assertIn('<option value="1" selected>', html)
+        self.assertIn("an older submission — the Detector tab and the plan lines keep the latest", html)
+        self.assertIn("as of 2026-10-01", html)
+        self.assertIn(f'href="/hw/dev/part/{PID}/checklist/Production%20status/?rev=1"', html)
+        self.assertEqual(ProductionPlan.for_instance("dev").get(part_type_id="D05800100001").needed, 1500)   # cache = latest
+        api.get_tests.assert_called_with(PID, test_type_id="Production status", history=True)
+        api.get_tests.return_value = {"data": [{"created": "2026-10-08T10:00:00", "test_data": {"DATA": DATA}}]}
+        with m1, m2:
+            html = self.client.get(self.URL).content.decode()
+        self.assertNotIn('class="ps-rev"', html)                   # one submission: nothing to pick
+
     def test_unsynced_type_asks_hwdb_for_its_items(self):
         HwdbComponentEvent.objects.all().delete()
         api = _api(items=[PID])
@@ -250,31 +278,41 @@ class DetectorListTest(TestCase):
     def setUp(self):
         self.client.force_login(get_user_model().objects.create_user("d", "d@d.io", "pw"))
 
-    def test_dev_tabs_the_chart_and_the_cached_tables(self):
+    def test_detector_pages_link_each_other(self):
+        html = self.client.get("/hw/dev/hierarchy/").content.decode()
+        self.assertIn('<a class="hc-tab" aria-selected="true" href="/hw/dev/hierarchy/">Hierarchy chart</a>', html)
+        self.assertIn('<a class="hc-tab" aria-selected="false" href="/hw/dev/status/">Production status</a>', html)
+        self.assertNotIn("hc-cons", html)
+        r = self.client.get("/hw/dev/hierarchy/?tab=status")   # the old tab link
+        self.assertEqual(r["Location"], "/hw/dev/status/")
+
+    def test_overview_indexes_and_shows_one_consortium_at_a_time(self):
         _node(PTID, instance="dev", system_id=1, system_name="Sandbox", subsystem_id=6,
               subsystem_name="x", component_type_name="Test Production Status",
               full_name="Z.Sandbox.x.Test Production Status")
-        html = self.client.get("/hw/dev/hierarchy/").content.decode()
-        self.assertIn('data-tab="chart" aria-selected="true">Hierarchy chart</button>', html)
-        self.assertIn('data-tab="status" aria-selected="false">Production status</button>', html)
-        self.assertIn('<h2>Test Production Status <span class="mono">Z00100600001</span>', html)
-        self.assertIn(f'href="/hw/dev/status/{PTID}/" title="Read it from HWDB now">Refresh from HWDB', html)
+        html = self.client.get("/hw/dev/status/").content.decode()
+        self.assertIn('<a class="hc-tab" aria-selected="true" href="/hw/dev/status/">Production status</a>', html)
+        self.assertIn('<a href="?c=Z00100600001" class="hc-pick" data-c="Z00100600001">Test Production Status</a>', html)
+        self.assertIn('<td class="num">—</td>', html)   # not read yet: no numbers in the index
         self.assertIn(f'Not read yet — <a href="/hw/dev/status/{PTID}/">open its status page</a>', html)
-        self.assertIn("window.hcFit = fit;", html)
         s = checklistforms.normalize(STATUS, "x")
         production.refresh("dev", PTID, PID, "PDS", production.card("Production status", s, DATA, "2026-10-08"))
-        html = self.client.get("/hw/dev/hierarchy/").content.decode()
+        html = self.client.get("/hw/dev/status/").content.decode()
         self.assertNotIn("Not read yet", html)
+        due = sum(1 for m in ("2027-03", "2026-12") if m <= timezone.localdate().strftime("%Y-%m"))   # completed-by months already passed
+        self.assertIn(f'<td class="num">3</td>\n        <td>2028-05</td>\n        <td class="num">{due}</td>', html)
+        self.assertIn('<button type="button" class="hc-pill" role="tab" data-c="Z00100600001" aria-selected="true">Test Production Status</button>', html)
+        self.assertIn('<div class="hc-cons" data-c="Z00100600001">', html)
         self.assertIn('<th scope="row" class="cl-rowlab">Rails and cables</th>', html)   # the cached table, no HWDB call
         self.assertIn('<td class="cl-const ps-past">Oct 2022</td>', html)
         self.assertIn(f'href="/hw/dev/part/{PID}/checklist/Production%20status/"', html)
         self.assertIn("· as of 2026-10-08 · read ", html)
+        self.assertIn('localStorage.setItem("hcCons", id)', html)
 
-    def test_prod_has_no_tabs_yet(self):
-        html = self.client.get("/hw/hierarchy/").content.decode()
-        self.assertNotIn('class="hc-tabs"', html)
-        self.assertIn('id="hc-pane-chart"', html)
-
+    def test_prod_overview_is_empty_for_now(self):
+        html = self.client.get("/hw/status/").content.decode()
+        self.assertIn("No consortium type yet", html)
+        self.assertNotIn("hc-pill", html.split("<h1>")[1])
 
 class PlanFeedTest(TestCase):
     def setUp(self):
@@ -320,8 +358,9 @@ class ConsortiumTypeTest(TestCase):
         ConsortiumTypeOverride.objects.create(instance="dev", part_type_id=PTID)   # yaml wins, no duplicate
         self.assertEqual(curation.consortium_types("dev"), [PTID])
         self.assertEqual(curation.consortium_types("prod"), [self.OTHER])
-        html = self.client.get("/hw/hierarchy/").content.decode()
+        html = self.client.get("/hw/status/").content.decode()
         self.assertIn('<h2>Other consortium <span class="mono">D05700200099</span>', html)
+        self.assertIn('<td class="num">—</td>', html)   # not read yet: no numbers in the index
 
     def test_type_page_class_dropdown(self):
         from explore.models import ActivityEvent, ConsortiumTypeOverride, ShippingTypeOverride
@@ -337,7 +376,6 @@ class ConsortiumTypeTest(TestCase):
             html = self.client.get(self.leaf_url).content.decode()
             self.assertIn('<option value="consortium" selected>consortium type</option>', html)
             self.assertIn('<dt>Status</dt><dd class="span"><a href="/hw/status/D05700200099/"', html)   # its own line
-            self.assertNotIn('href="/hw/hierarchy/?tab=status"', html)   # Chao: the Detector link is not needed here
             self.client.post(url, {"next": self.leaf_url, "class": "shipping"})   # switching clears the other mark
             self.assertFalse(ConsortiumTypeOverride.objects.exists())
             self.assertTrue(ShippingTypeOverride.objects.filter(instance="prod", part_type_id=self.OTHER).exists())

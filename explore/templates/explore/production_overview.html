@@ -1,0 +1,96 @@
+{% extends 'explore/base.html' %}
+{% load checklist %}
+{% block title %}Production status · HWDB Explorer{% endblock %}
+
+{% block content %}
+{# #199 / Chao 2026-10-08: the consortia's production-status tables as last read (the cache, no HWDB call) — an index table, then one consortium at a time; each consortium's live page is /status/<type>/ #}
+<style>
+  .hc-page { padding: 26px 30px 56px; }
+  .hc-page h1 { font-size: 1.5rem; color: var(--ink); margin: 0 0 14px; letter-spacing: -0.01em; }
+  .mono { font-family: var(--font-mono); }
+  /* #199: tabs — the hierarchy chart, and the consortia's production-status tables */
+  .hc-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--rule); margin: 0 0 16px; }
+  .hc-tab { font: inherit; font-size: 14px; font-weight: 600; color: var(--dim); background: none; border: none;
+    border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 6px 14px 8px; cursor: pointer; text-decoration: none; }
+  .hc-tab:hover { color: var(--ink); }
+  .hc-tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent-ink); }
+  .hc-cons { margin: 0 0 30px; }
+  .hc-cons h2 { font-size: 1.2rem; color: var(--ink); margin: 0 0 4px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .hc-cons h2 .mono { font-family: var(--font-mono); font-size: 12px; font-weight: 400; color: var(--faint); }
+  .hc-cons h2 a.hc-cons-open { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--accent-ink); text-decoration: none; }
+  .hc-cons h2 a.hc-cons-open:hover { text-decoration: underline; }
+  .hc-cons .ps-empty { color: var(--dim); font-size: 13.5px; margin: 6px 0 0; }
+  .hc-index { border-collapse: collapse; font-size: 13px; margin: 0 0 18px; }
+  .hc-index th { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; text-align: left; padding: 2px 14px 4px 0; border-bottom: 1px solid var(--rule); }
+  .hc-index td { padding: 5px 14px 5px 0; border-bottom: 1px solid var(--rule); color: var(--ink); }
+  .hc-index td.num { text-align: right; font-family: var(--font-mono); }
+  .hc-index a { color: var(--accent-ink); text-decoration: none; }
+  .hc-index a:hover { text-decoration: underline; }
+  .hc-index .hc-dim { color: var(--faint); }
+  .hc-pills { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 14px; }
+  .hc-pill { font: inherit; font-size: 13px; padding: 3px 12px; cursor: pointer; color: var(--dim); background: var(--page);
+    border: 1px solid var(--rule); border-radius: 999px; }
+  .hc-pill:hover { border-color: var(--rule-hard); color: var(--ink); }
+  .hc-pill[aria-selected="true"] { color: var(--accent-ink); border-color: var(--accent-ink); background: var(--surface); }
+  .mono { font-family: var(--font-mono); }
+  .hc-none { color: var(--dim); font-size: 13.5px; }
+</style>
+{% include "explore/_checklist_style.html" %}
+
+<div class="hc-page">
+  <div class="hc-tabs">
+    <a class="hc-tab" aria-selected="false" href="{% url 'explore:hierarchy' %}">Hierarchy chart</a>
+    <a class="hc-tab" aria-selected="true" href="{% url 'explore:production_overview' %}">Production status</a>
+  </div>
+  <h1>Production status</h1>
+  {% if status_types %}
+    <table class="hc-index">
+      <thead><tr><th>Consortium</th><th>Components</th><th>Earliest needed by</th><th>Completed-by passed</th><th>Last read</th><th></th></tr></thead>
+      <tbody>
+      {% for c in status_types %}
+      <tr><td><a href="?c={{ c.part_type_id }}" class="hc-pick" data-c="{{ c.part_type_id }}">{{ c.name }}</a> <span class="mono">{{ c.part_type_id }}</span></td>
+        <td class="num">{% if c.tables %}{{ c.n }}{% else %}—{% endif %}</td>
+        <td>{{ c.needed_by|default:"—" }}</td>
+        <td class="num">{% if c.tables %}{{ c.due }}{% else %}—{% endif %}</td>
+        <td>{% if c.read_at %}{{ c.read_at|date:"Y-m-d H:i" }}{% else %}<span class="hc-dim">not read yet</span>{% endif %}</td>
+        <td><a href="{{ c.url }}" title="Read it from HWDB now">refresh &rarr;</a></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="hc-pills" role="tablist">
+      {% for c in status_types %}<button type="button" class="hc-pill" role="tab" data-c="{{ c.part_type_id }}" aria-selected="{% if forloop.first %}true{% else %}false{% endif %}">{{ c.name }}</button>{% endfor %}
+    </div>
+    {% for c in status_types %}
+    <div class="hc-cons" data-c="{{ c.part_type_id }}"{% if not forloop.first %} hidden{% endif %}>
+      <h2>{{ c.name }} <span class="mono">{{ c.part_type_id }}</span>
+        <a class="hc-cons-open" href="{{ c.url }}" title="Read it from HWDB now">Refresh from HWDB &rarr;</a></h2>
+      {% for t in c.tables %}{% include "explore/_production_table.html" %}{% empty %}
+      <p class="ps-empty">Not read yet — <a href="{{ c.url }}">open its status page</a> once; it is remembered here from then on.</p>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  {% else %}
+  <p class="hc-none">No consortium type yet — a type becomes one when a production-status checklist is saved onto it (or from its type page's Category dropdown).</p>
+  {% endif %}
+</div>
+{% if status_types %}
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  // one consortium at a time: the pills (and the index's names) pick it; ?c=<type> or the last choice
+  var pills = document.querySelectorAll(".hc-pill"), cons = document.querySelectorAll(".hc-cons");
+  function pick(id) {
+    var ok = Array.prototype.some.call(cons, function (d) { return d.dataset.c === id; });
+    if (!ok) return;
+    pills.forEach(function (p) { p.setAttribute("aria-selected", p.dataset.c === id ? "true" : "false"); });
+    cons.forEach(function (d) { d.hidden = d.dataset.c !== id; });
+    try { localStorage.setItem("hcCons", id); } catch (e) {}
+  }
+  pills.forEach(function (p) { p.addEventListener("click", function () { pick(p.dataset.c); }); });
+  document.querySelectorAll(".hc-pick").forEach(function (a) { a.addEventListener("click", function (e) { e.preventDefault(); pick(a.dataset.c); }); });
+  var c = q.get("c"); if (!c) { try { c = localStorage.getItem("hcCons"); } catch (e) {} }
+  if (c) pick(c);
+})();
+</script>
+{% endif %}
+{% endblock %}

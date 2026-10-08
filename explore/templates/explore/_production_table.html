@@ -5,6 +5,11 @@
     <span class="ps-asof">{{ t.part_id }}{% if t.as_of %} · as of {{ t.as_of|slice:":10" }}{% endif %}{% if t.read_at %} · read {{ t.read_at|date:"Y-m-d H:i" }}{% endif %}</span>
     <a class="ps-edit" href="{{ t.edit_url }}" title="Fill in or change the table">&#9998; Edit table</a></h2>
   {# the checklist's instructions are for the fill page, not the rendered table (Chao 2026-10-08) #}
+  {% if t.revs|length > 1 %}{# Hajime 2026-10-08: an older submission, as on the fill page (#184) #}
+  <p class="es-sub"><label>Submission <select class="ps-rev" data-pid="{{ t.part_id }}" onchange="location.search='?rev='+this.value+'&amp;pid='+this.dataset.pid">
+    {% for r in t.revs %}<option value="{{ r.i }}"{% if r.i == t.rev %} selected{% endif %}>{{ r.when }}{% if r.who %} · {{ r.who }}{% endif %}{% if r.i == 0 %} (latest){% endif %}</option>{% endfor %}
+  </select></label>{% if t.rev %} <span class="ps-oldnote">an older submission — the Detector tab and the plan lines keep the latest</span>{% endif %}</p>
+  {% endif %}
   <div class="tbl-scroll"><table class="cl-table cl-gridlines ps-table">
     <thead><tr><th></th>{% for c in t.columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
     <tbody>
