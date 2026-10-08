@@ -382,6 +382,16 @@ class TextPreviewTest(TestCase):
             html = self.client.get(PAGE).content.decode()
         self.assertIn('<div class="cl-td-panes"><textarea></textarea><div class="cl-td-prev cl-md"></div></div>', html)
         self.assertIn('fetch("/hw/dev/text-preview/", { method: "POST"', html)
+        self.assertNotIn(">Production status</a>", html)   # a plain checklist has no status page
+
+    def test_status_checklist_fill_page_links_its_rendered_table(self):
+        self.client.force_login(get_user_model().objects.create_user("v", "v@v.io", "pw"))
+        from explore.tests.test_checklist_forms import PAGE, PTID as FORMS_PTID, _api as _forms_api, _mocked as _forms_mocked
+        api = _forms_api(schema=STATUS); m1, m2 = _forms_mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn(f'href="/hw/dev/status/{FORMS_PTID}/" title="The table as last submitted, rendered', html)
+        self.assertIn(">Production status</a>", html)
 
 
 class EditorRowsTest(TestCase):
