@@ -22,8 +22,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from hwdb.api_client import FnalDbApiClient
 
 from .shipments import (
-    _is_image, _is_pdf, _spec_block, current_manifest, fold_entries,
-    shipment_details, spec_field,
+    _DETAIL_SECTIONS, _is_image, _is_pdf, _spec_block, current_manifest,
+    fold_entries, shipment_details, spec_field,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,22 @@ def _safe_data(label, fn) -> list:
     except Exception as e:
         logger.warning("part detail: %s fetch failed: %s", label, e)
         return []
+
+
+def _beyond_checklists(spec_block):
+    """The spec block minus the three shipping checklists inside ``DATA``
+    (an emptied DATA drops out); a DATA of any other shape stays as is."""
+    if not isinstance(spec_block, dict):
+        return spec_block
+    out = dict(spec_block)
+    data = out.get("DATA")
+    if isinstance(data, dict):
+        rest = {k: v for k, v in data.items() if k not in {k for k, _ in _DETAIL_SECTIONS}}
+        if rest:
+            out["DATA"] = rest
+        else:
+            del out["DATA"]
+    return out
 
 
 def spec_sections(spec_block: dict | None) -> list[dict]:
@@ -79,7 +95,7 @@ def spec_sections(spec_block: dict | None) -> list[dict]:
                 out_data = {"title": "DATA", "fields": fields, "attachments": attachments,
                             "json": json.dumps(val, indent=2, ensure_ascii=False)}
                 items.append(("DATA", out_data))
-        elif key == "DATA":  # bare-list DATA blobs keep their old card title
+        elif key == "DATA" and isinstance(val, list):  # bare-list DATA blobs keep their old card title
             items.append(("Specifications", val))
         else:
             items.append((key, val))
@@ -475,7 +491,13 @@ def part_detail(api, part_id: str, is_shipping: bool) -> dict:
 
     images = [i for i in _safe_data("images", lambda: api.get_images(part_id)) if i.get("image_id")]
     name_by_id = {str(i["image_id"]): i.get("image_name") for i in images}
-    sections = shipment_details(data_blob) if is_shipping else spec_sections(spec_block)
+    if is_shipping:
+        # The three lifecycle cards first; whatever else the record holds
+        # (other datasheet keys, a DATA that is not the checklist dict) renders
+        # through the generic cards after them, so nothing stays hidden.
+        sections = shipment_details(data_blob) + spec_sections(_beyond_checklists(spec_block))
+    else:
+        sections = spec_sections(spec_block)
     for sec in sections:
         for a in sec["attachments"]:
             a["filename"] = name_by_id.get(a["image_id"]) or a["label"]

@@ -541,6 +541,31 @@ class PartDetailEngineTest(TestCase):
         self.assertEqual(_sec(d["sections"], "Info @ Warehouse")["fields"][0]["label"], "SKU")
         self.assertEqual([a["image_id"] for a in d["attachments"]], ["img-1"])
 
+    def test_shipping_box_shows_other_specs_after_the_checklists(self):
+        # Datasheet keys beyond the checklists, and a DATA that is not the
+        # checklist dict (a sheet upload wrote a string on Z00100300005-05044),
+        # render through the generic cards after the three lifecycle cards.
+        api = self._api(component={"data": {"specifications": [
+            {"DATA": "free text", "Box type": "crate", "_meta": {"x": 1}}]}})
+        d = parts.part_detail(api, "B1", is_shipping=True)
+        self.assertEqual([s["title"] for s in d["sections"]],
+                         ["Pre-shipping", "Shipping", "Info @ Warehouse", "Specifications"])
+        self.assertEqual({f["label"]: f["value"] for f in d["sections"][3]["fields"]},
+                         {"DATA": "free text", "Box type": "crate"})
+        # Extra DATA keys next to the checklists show in a DATA card; the
+        # checklists themselves are not repeated there.
+        api = self._api(component=_component(
+            {"Warehouse": [{"SKU": "SKU-1"}], "Notes": {"Packed by": "AB"}}))
+        d = parts.part_detail(api, "B1", is_shipping=True)
+        self.assertEqual([s["title"] for s in d["sections"]],
+                         ["Pre-shipping", "Shipping", "Info @ Warehouse", "DATA"])
+        self.assertEqual([(f["label"], f["value"]) for f in d["sections"][3]["fields"]],
+                         [("Notes › Packed by", "AB")])
+        # Only the checklists → just the three cards, as before.
+        d = parts.part_detail(self._api(component=_component({"Warehouse": [{"SKU": "SKU-1"}]})),
+                              "B1", is_shipping=True)
+        self.assertEqual(len(d["sections"]), 3)
+
     def test_flags_image_attachments_for_thumbnailing(self):
         api = self._api(
             component=_component({"Shipping Checklist": [
