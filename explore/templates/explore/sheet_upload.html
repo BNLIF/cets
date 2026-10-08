@@ -70,8 +70,8 @@
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
   {% include "explore/_role_gate.html" %}
 
-  <h1>Upload a sheet of <span class="mono">{{ part_type_id }}</span> items</h1>
-  <p class="es-sub">{% if type_name %}{{ type_name }} · {% endif %}A CSV or Excel tab in the HWDB Python upload tool’s layout: the standard columns (External ID, Serial Number, Status, Manufacturer, Institution, Comments, Location), <span class="su-mono">S:</span>&lt;spec key&gt; and <span class="su-mono">C:</span>&lt;position&gt; for items, or <span class="su-mono">T:</span>&lt;key&gt; for one test record per row (a cell may hold JSON for a nested value). Rows are matched by External ID, else by serial number; an unknown serial becomes a new item. Nothing is written before Upload.</p>
+  <h1>Sheet upload · <span class="mono">{{ part_type_id }}</span></h1>
+  <p class="es-sub">{% if type_name %}{{ type_name }} · {% endif %}A CSV, or every tab of an Excel file, in the HWDB Python upload tool’s layout: the standard columns (External ID, Serial Number, Status, Manufacturer, Institution, Comments, Location), <span class="su-mono">S:</span>&lt;spec key&gt; and <span class="su-mono">C:</span>&lt;position&gt; for items, or <span class="su-mono">T:</span>&lt;key&gt; for one test record per row (a cell may hold JSON for a nested value). Rows are matched by External ID, else by serial number; an unknown serial becomes a new item. Nothing is written before Upload.</p>
 
   {% if not job %}
   <form method="post" class="es-card" id="su-file" enctype="multipart/form-data">
