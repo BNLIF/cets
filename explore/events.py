@@ -334,10 +334,26 @@ def refresh_component_row(api, instance: str, part_id: str) -> None:
     place (#110 review: a checklist's Item card and the part page's ✎ Edit
     change status, QC flags, serial, manufacturer and location, and the
     mirror must not wait for a type re-sync to show them). Best-effort: a
-    failure just leaves the row stale until the next sync."""
+    failure just leaves the row stale until the next sync. #197: the two
+    halves are callable apart — the sheet uploader fetches in worker
+    threads and stores from the request thread."""
+    d = fetch_component_row(api, part_id)
+    if d is not None:
+        store_component_row(instance, part_id, d)
+
+
+def fetch_component_row(api, part_id: str) -> dict | None:
+    """The ``components/{pid}`` half of ``refresh_component_row``; None on failure."""
     try:
-        d = _fetch_component(api, part_id, None, {},
-                             need_detail=True, need_tests=False)
+        return _fetch_component(api, part_id, None, {}, need_detail=True, need_tests=False)
+    except Exception as e:
+        logger.warning("component row refresh for %s failed: %s", part_id, e)
+        return None
+
+
+def store_component_row(instance: str, part_id: str, d: dict) -> None:
+    """The mirror-write half of ``refresh_component_row``."""
+    try:
         HwdbComponentEvent.objects.update_or_create(
             instance=instance, part_type_id=part_id.rsplit("-", 1)[0],
             part_id=part_id,

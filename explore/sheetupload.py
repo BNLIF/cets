@@ -27,6 +27,9 @@ UPLOAD_MAX = 20 * 1024 * 1024
 RETENTION_DAYS = 3      # a job goes this long after its last change; users rarely delete (Chao 2026-09-24)
 ROWS_MAX = 5000
 APPLY_SECONDS = 12      # one apply request works this long, then hands back (gunicorn's 30 s)
+APPLY_ROWS = 100        # …or after this many rows, so the page's progress moves (Chao 2026-10-08)
+APPLY_WORKERS = 12      # #197: item and test rows go through this many threads per request (the Python tool runs 25)
+RETRY_WAIT = 5          # #197: a row that hit a server-side timeout / 5xx is tried once more after this many seconds
 NEW_ITEM_STATUS = 110   # Waiting on QA/QC Tests — what New item mints with
 NULL = "<null>"         # the utility's "clear this" cell value
 
@@ -862,10 +865,20 @@ def apply_test_row(api, ptid: str, row: dict, test_type_id) -> tuple[str, list[s
     return pid, ["test posted"]
 
 
-def apply_image_row(api, row: dict, fileobj, content_type: str, test_type_id) -> tuple[str, list[str]]:
+def _image_id(body) -> str:
+    """The ``image_id`` of an attachment POST's reply (top level, or under ``data``)."""
+    v = body.get("image_id") if isinstance(body, dict) else None
+    if v is None and isinstance(body, dict) and isinstance(body.get("data"), dict):
+        v = body["data"].get("image_id")
+    return "" if v is None else str(v)
+
+
+def apply_image_row(api, row: dict, fileobj, content_type: str, test_type_id) -> tuple[str, list[str], str]:
     """#179: attach the picked file to the row's item, or to one of its
     test records (``test_name`` + ``hist_order``, 0 = latest), unless an
-    attachment of that name is already there. Returns (pid, what happened)."""
+    attachment of that name is already there. Returns (pid, what happened,
+    the attachment's HWDB image_id — #198, Hajime 2026-10-07: the id of
+    the one just posted, or of the one already there)."""
     r, pid = row["rec"], row["pid"]
     name = r["save_as"] or r["file"]
     comments = r["comments"] or "Sheet upload via HWDB Explorer"
@@ -878,17 +891,17 @@ def apply_image_row(api, row: dict, fileobj, content_type: str, test_type_id) ->
             raise SheetError(f"{pid} has {len(tests)} “{r['test_name']}” record{'s' if len(tests) != 1 else ''}, "
                              f"no #{r['hist_order']}")
         try:
-            have = {i.get("image_name") for i in (api.get_test_images(pid, tid).get("data") or []) if isinstance(i, dict)}
+            have = {i.get("image_name"): _image_id(i) for i in (api.get_test_images(pid, tid).get("data") or []) if isinstance(i, dict)}
         except Exception:
-            have = set()
+            have = {}
         if name in have:
-            return pid, ["already attached"]
+            return pid, ["already attached"], have[name]
         body = api.post_test_image(tests[r["hist_order"]].get("id"), fileobj, name, comments, content_type)
     else:
-        have = {i.get("image_name") for i in (api.get_images(pid).get("data") or []) if isinstance(i, dict)}
+        have = {i.get("image_name"): _image_id(i) for i in (api.get_images(pid).get("data") or []) if isinstance(i, dict)}
         if name in have:
-            return pid, ["already attached"]
+            return pid, ["already attached"], have[name]
         body = api.post_component_image(pid, fileobj, name, comments, content_type)
     if body.get("status", "OK") != "OK":
         raise SheetError(str(body.get("data") or body))
-    return pid, ["attached"]
+    return pid, ["attached"], _image_id(body)

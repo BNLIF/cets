@@ -53,7 +53,11 @@
   #su-test-name { font: inherit; font-size: 13px; color: var(--ink); background: var(--cl-input-bg, var(--surface));
     border: 1px solid var(--cl-input-rule, var(--rule)); border-radius: var(--r-sm); padding: 5px 8px; width: 320px; max-width: 100%; }
   .su-changes { color: var(--dim); }
+  #su-problems td.st { overflow-wrap: anywhere; }
+  #su-problems .es-btn { padding: 1px 8px; font-size: 12px; }
   .su-file { font: inherit; font-size: 13px; }
+  .su-bar { flex: 1 1 160px; max-width: 320px; height: 6px; background: var(--rule); border-radius: 3px; overflow: hidden; }
+  .su-bar i { display: block; height: 100%; width: 0; background: var(--accent-ink); transition: width .2s; }
 </style>
 
 <div class="es-page">
@@ -188,7 +192,7 @@
       {% else %}
       <li><b>{{ counts.create }}</b> new item{{ counts.create|pluralize }}, <b>{{ counts.patch }}</b> to update, {{ counts.skip }} unchanged{% if counts.error %}, <span class="su-warn">{{ counts.error }} with problems (skipped)</span>{% endif %}</li>
       {% endif %}
-      {% if counts.done %}<li>{{ counts.done }} already uploaded{% if counts.pending %}, {{ counts.pending }} pending{% endif %}.</li>{% endif %}
+      {% if counts.done or counts.failed %}<li>{{ counts.done }} already uploaded{% if counts.failed %}, <span class="su-warn">{{ counts.failed }} failed</span>{% endif %}{% if counts.pending %}, {{ counts.pending }} pending{% endif %}.</li>{% endif %}
       {% if is_test %}<li class="su-more">A row whose item already holds a “{{ job.test_name }}” record with the same values is left alone.</li>{% endif %}
       {% if is_image %}<li class="su-more">A file already attached under the same name is left alone. Each file goes straight from your computer to HWDB; the Explorer keeps no copy.</li>{% endif %}
     </ul>
@@ -203,89 +207,179 @@
           <td class="k su-mono pid">{% if r.pid %}<a href="{% url 'explore:part' part_id=r.pid %}" target="_blank" rel="noopener">{{ r.pid }}</a>{% endif %}</td>
           <td class="k">{% if r.action == 'create' %}create{% elif r.action == 'patch' %}update{% elif r.action == 'test' %}post test{% elif r.action == 'image' %}attach{% elif r.action == 'skip' %}nothing to do{% else %}—{% endif %}</td>
           <td class="su-changes">{{ r.changes|join:" · "|truncatechars:200 }}</td>
-          <td class="st">{% if r.state == 'error' %}{{ r.error }}{% elif r.state == 'done' and r.action != 'skip' %}{{ r.done|join:", "|default:"done" }}{% endif %}</td>
+          <td class="st">{% if r.state == 'error' %}{{ r.error }}{% elif r.state == 'done' and r.action != 'skip' %}{{ r.done|join:", "|default:"done" }}{% if r.image_id %} · image_id {{ r.image_id }}{% endif %}{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
     </div>
+    <div class="su-actions" style="margin-top: 6px"><a href="?csv=1">Download results (CSV)</a></div>
+    {# #198 (Hajime 2026-10-07): the rows with problems once more, apart from the long list — a failed upload gets a Retry #}
+    <div id="su-problems-wrap"{% if not counts.error and not counts.failed %} hidden{% endif %}>
+      <h2 style="margin-top: 14px">Problems <span class="cl-hint" id="su-problems-n">— {{ counts.failed }} failed upload{{ counts.failed|pluralize }}{% if counts.error %}, {{ counts.error }} in the sheet{% endif %}</span></h2>
+      <table class="su-table" id="su-problems">
+        <thead><tr><th>Row</th><th>Item</th><th>PID</th><th>Problem</th><th></th></tr></thead>
+        <tbody>
+        {% for r in job.rows %}{% if r.state == 'error' %}
+          <tr data-n="{{ r.n }}" class="err">
+            <td class="k">{{ r.rows|join:", " }}</td>
+            <td class="k su-mono">{{ r.key }}</td>
+            <td class="k su-mono pid">{% if r.pid %}<a href="{% url 'explore:part' part_id=r.pid %}" target="_blank" rel="noopener">{{ r.pid }}</a>{% endif %}</td>
+            <td class="st">{{ r.error }}</td>
+            <td class="k">{% if r.action != 'error' %}<button type="button" class="es-btn quiet su-retry-row" data-n="{{ r.n }}">Retry</button>{% else %}<span class="cl-hint">fix the sheet</span>{% endif %}</td>
+          </tr>
+        {% endif %}{% endfor %}
+        </tbody>
+      </table>
+    </div>
     {% if is_image %}
     <div class="cl-field">
-      <label class="cl-lab" for="su-files">Files <span class="cl-hint">(pick the files the sheet names — several at once, or a whole folder; matched by file name)</span></label>
+      <label class="cl-lab" for="su-files">Files <span class="cl-hint">(the files the sheet names, matched by file name)</span></label>
       <input type="file" id="su-files" class="su-file" multiple>
+      <label class="cl-hint" for="su-folder" style="margin-left: 14px">or a folder</label>
+      <input type="file" id="su-folder" class="su-file" webkitdirectory multiple>
       <span id="su-files-n" class="su-more"></span>
     </div>
     {% endif %}
     <div class="su-actions">
       <button type="submit" class="es-btn" id="su-apply"{% if not counts.pending %} disabled{% endif %}>{% if counts.done %}Continue — {% else %}Upload — {% endif %}<span id="su-n">{{ counts.pending }}</span> row{{ counts.pending|pluralize }} to HWDB</button>
+      <button type="{% if is_image %}submit{% else %}button{% endif %}" class="es-btn quiet" id="su-retry-all"{% if is_image %} form="su-retry"{% endif %}{% if not counts.failed %} hidden{% endif %} title="The failed uploads go back to pending and are sent again. Rows with problems in the sheet need a corrected sheet.">Retry all failed</button>
+      <span class="su-bar" id="su-bar" hidden><i></i></span>
       <span id="su-prog" class="su-more"></span>
     </div>
   </form>
+  <form method="post" id="su-retry">{% csrf_token %}<input type="hidden" name="step" value="retry"></form>
   <script>
   (function () {
     var form = document.getElementById("su-plan"), btn = document.getElementById("su-apply"), prog = document.getElementById("su-prog");
     var nEl = document.getElementById("su-n"), left = +nEl.textContent, done = 0;
-    var files = document.getElementById("su-files"), pending = JSON.parse(document.getElementById("su-pending").textContent || "[]");
-    if (files) files.addEventListener("change", function () {
-      var have = {}; [].forEach.call(files.files, function (f) { have[f.name.toLowerCase()] = 1; });
+    var bar = document.getElementById("su-bar"), total = 0;
+    function progress(text) {   // the bar spans this run: what was pending when it started
+      prog.textContent = text; bar.hidden = false;
+      bar.firstElementChild.style.width = (total ? Math.min(100, 100 * done / total) : 0) + "%";
+    }
+    var files = document.getElementById("su-files"), folder = document.getElementById("su-folder"),
+        pending = JSON.parse(document.getElementById("su-pending").textContent || "[]");
+    var probWrap = document.getElementById("su-problems-wrap"), probBody = document.querySelector("#su-problems tbody"),
+        probN = document.getElementById("su-problems-n"), retryAll = document.getElementById("su-retry-all");
+    // #198: files from either picker — several files, or a folder (webkitdirectory) — by base name
+    function picked() { return [].slice.call(files.files).concat([].slice.call(folder.files)); }
+    if (files) [files, folder].forEach(function (inp) { inp.addEventListener("change", function () {
+      var have = {}; picked().forEach(function (f) { have[f.name.toLowerCase()] = 1; });
       var n = pending.filter(function (p) { return have[p.file.toLowerCase()]; }).length;
-      document.getElementById("su-files-n").textContent = files.files.length + " picked, " + n + " of " + pending.length + " pending rows matched";
-    });
+      document.getElementById("su-files-n").textContent = picked().length + " picked, " + n + " of " + pending.length + " pending rows matched";
+    }); });
     function part(pid) { return "{% url 'explore:part' part_id='PID0' %}".replace("PID0", pid); }
+    function pidCell(td, pid) { td.innerHTML = '<a href="' + part(pid) + '" target="_blank" rel="noopener"></a>'; td.querySelector("a").textContent = pid; }
+    function post(fd) {
+      return fetch(location.href, { method: "POST", body: fd, credentials: "same-origin", headers: { "X-CSRFToken": fd.get("csrfmiddlewaretoken") } })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); });
+    }
+    function problems() {   // the Problems list follows the main table
+      var failed = probBody.querySelectorAll("tr .su-retry-row").length, sheet = probBody.querySelectorAll("tr").length - failed;
+      probWrap.hidden = !(failed + sheet);
+      probN.textContent = "— " + failed + " failed upload" + (failed === 1 ? "" : "s") + (sheet ? ", " + sheet + " in the sheet" : "");
+      retryAll.hidden = !failed;
+    }
     function show(r) {
-      var tr = form.querySelector('tr[data-n="' + r.n + '"]'); if (!tr) return;
+      var tr = form.querySelector('#su-rows tr[data-n="' + r.n + '"]'); if (!tr) return;
       tr.className = r.state === "error" ? "err" : "ok";
-      if (r.pid) tr.querySelector(".pid").innerHTML = '<a href="' + part(r.pid) + '" target="_blank" rel="noopener"></a>', tr.querySelector(".pid a").textContent = r.pid;
-      tr.querySelector(".st").textContent = r.state === "error" ? r.error : (r.done.length ? r.done.join(", ") : "done");
+      if (r.pid) pidCell(tr.querySelector(".pid"), r.pid);
+      tr.querySelector(".st").textContent = r.state === "error" ? r.error
+        : (r.done.length ? r.done.join(", ") : "done") + (r.image_id ? " · image_id " + r.image_id : "");
+      var pr = probBody.querySelector('tr[data-n="' + r.n + '"]');
+      if (r.state !== "error") { if (pr) pr.remove(); }
+      else {
+        if (!pr) {
+          pr = document.createElement("tr"); pr.dataset.n = r.n; pr.className = "err";
+          pr.innerHTML = '<td class="k"></td><td class="k su-mono"></td><td class="k su-mono pid"></td><td class="st"></td>' +
+            '<td class="k"><button type="button" class="es-btn quiet su-retry-row" data-n="' + r.n + '">Retry</button></td>';
+          pr.children[0].textContent = tr.children[0].textContent; pr.children[1].textContent = tr.children[1].textContent;
+          probBody.appendChild(pr);
+        }
+        if (r.pid) pidCell(pr.querySelector(".pid"), r.pid);
+        pr.querySelector(".st").textContent = r.error;
+      }
+      problems();
+    }
+    function finish() {
+      progress("Done — " + done + " row" + (done === 1 ? "" : "s") + " uploaded" + (left ? ", " + left + " left" : "") + ".");
+      btn.hidden = true;   // nothing left to press (Hajime 2026-10-01: a "Done" button that did nothing)
+    }
+    function next() {   // items / tests: short requests until nothing is pending
+      progress("Uploading… " + done + " done, " + left + " to go");
+      post(new FormData(form))
+        .then(function (res) {
+          if (!res.ok || res.j.error) { prog.textContent = res.j.error || "Request failed."; btn.disabled = false; return; }
+          res.j.rows.forEach(show); done += res.j.rows.length; left = res.j.left; nEl.textContent = left;
+          if (left > 0 && res.j.rows.length) return next();
+          finish();
+        })
+        .catch(function (e) { prog.textContent = "Request failed: " + e + " — press Continue."; btn.textContent = "Continue"; btn.disabled = false; });
+    }
+    // #179: one request per row, carrying that row's file from the picker; unmatched rows stay pending
+    function uploadFiles() {
+      var byName = {}; picked().forEach(function (f) { byName[f.name.toLowerCase()] = f; });
+      var todo = pending.filter(function (p) { return byName[p.file.toLowerCase()]; });
+      pending.forEach(function (p) { if (!byName[p.file.toLowerCase()]) { var tr = form.querySelector('#su-rows tr[data-n="' + p.n + '"]'); if (tr) tr.querySelector(".st").textContent = "file not picked"; } });
+      if (!todo.length) { prog.textContent = "None of the pending rows’ files are picked."; btn.disabled = false; return; }
+      var i = 0;
+      done = 0; total = todo.length;
+      function one() {
+        if (i >= todo.length) {
+          prog.textContent = "Done — " + done + " file" + (done === 1 ? "" : "s") + " sent" + (left ? ", " + left + " row" + (left === 1 ? "" : "s") + " still pending" : "") + ".";
+          btn.textContent = "Continue"; btn.disabled = !left; btn.hidden = !left; return;
+        }
+        var p = todo[i++], fd = new FormData(form);
+        progress("Sending " + p.file + "… " + done + " done, " + (todo.length - i + 1) + " to go");
+        fd.set("n", String(p.n)); fd.set("file", byName[p.file.toLowerCase()]); fd.set("last", i === todo.length ? "1" : "0");
+        post(fd)
+          .then(function (res) {
+            if (!res.ok || res.j.error) { prog.textContent = res.j.error || "Request failed."; btn.disabled = false; return; }
+            res.j.rows.forEach(show); done += res.j.rows.length; left = res.j.left; nEl.textContent = left;
+            one();
+          })
+          .catch(function (e) { prog.textContent = "Request failed: " + e + " — press Continue."; btn.textContent = "Continue"; btn.disabled = false; });
+      }
+      one();
     }
     form.addEventListener("submit", function (ev) {
       ev.preventDefault();
       if (btn.disabled) return;
       btn.disabled = true;
-      if (files) return uploadFiles();
-      function next() {
-        prog.textContent = "Uploading… " + done + " done, " + left + " to go";
-        var fd = new FormData(form);
-        fetch(location.href, { method: "POST", body: fd, credentials: "same-origin",
-                               headers: { "X-CSRFToken": fd.get("csrfmiddlewaretoken") } })
-          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
-          .then(function (res) {
-            if (!res.ok || res.j.error) { prog.textContent = res.j.error || "Request failed."; btn.disabled = false; return; }
-            res.j.rows.forEach(show); done += res.j.rows.length; left = res.j.left; nEl.textContent = left;
-            if (left > 0 && res.j.rows.length) return next();
-            prog.textContent = "Done — " + done + " row" + (done === 1 ? "" : "s") + " uploaded" + (left ? ", " + left + " left" : "") + ".";
-            btn.hidden = true;   // nothing left to press (Hajime 2026-10-01: a "Done" button that did nothing)
-          })
-          .catch(function (e) { prog.textContent = "Request failed: " + e + " — press Continue."; btn.textContent = "Continue"; btn.disabled = false; });
-      }
-      next();
-      // #179: one request per row, carrying that row's file from the picker; unmatched rows stay pending
-      function uploadFiles() {
-        var byName = {}; [].forEach.call(files.files, function (f) { byName[f.name.toLowerCase()] = f; });
-        var todo = pending.filter(function (p) { return byName[p.file.toLowerCase()]; });
-        pending.forEach(function (p) { if (!byName[p.file.toLowerCase()]) { var tr = form.querySelector('tr[data-n="' + p.n + '"]'); if (tr) tr.querySelector(".st").textContent = "file not picked"; } });
-        if (!todo.length) { prog.textContent = "None of the pending rows’ files are picked."; btn.disabled = false; return; }
-        var i = 0;
-        function one() {
-          if (i >= todo.length) {
-            prog.textContent = "Done — " + done + " file" + (done === 1 ? "" : "s") + " sent" + (left ? ", " + left + " row" + (left === 1 ? "" : "s") + " still pending" : "") + ".";
-            btn.textContent = "Continue"; btn.disabled = !left; btn.hidden = !left; return;
-          }
-          var p = todo[i++], fd = new FormData(form);
-          prog.textContent = "Sending " + p.file + "… " + done + " done, " + (todo.length - i + 1) + " to go";
-          fd.set("n", String(p.n)); fd.set("file", byName[p.file.toLowerCase()]); fd.set("last", i === todo.length ? "1" : "0");
-          fetch(location.href, { method: "POST", body: fd, credentials: "same-origin",
-                                 headers: { "X-CSRFToken": fd.get("csrfmiddlewaretoken") } })
-            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
-            .then(function (res) {
-              if (!res.ok || res.j.error) { prog.textContent = res.j.error || "Request failed."; btn.disabled = false; return; }
-              res.j.rows.forEach(show); done += res.j.rows.length; left = res.j.left; nEl.textContent = left;
-              one();
-            })
-            .catch(function (e) { prog.textContent = "Request failed: " + e + " — press Continue."; btn.textContent = "Continue"; btn.disabled = false; });
-        }
-        one();
-      }
+      done = 0; total = left;
+      if (files) uploadFiles(); else next();
+    });
+    // #198: Retry — one failed row (sent in the same request), or all of them (back to pending, then the loop);
+    // an attachment job reloads instead, its files have to be picked again
+    function retryForm(n) { var fd = new FormData(form); fd.set("step", "retry"); if (n) fd.set("n", n); return fd; }
+    probBody.addEventListener("click", function (ev) {
+      var b = ev.target.closest(".su-retry-row"); if (!b || files) return;
+      b.disabled = true;
+      post(retryForm(b.dataset.n))
+        .then(function (res) {
+          if (!res.ok || res.j.error) { b.disabled = false; prog.textContent = res.j.error || "Request failed."; return; }
+          res.j.rows.forEach(show); left = res.j.left; nEl.textContent = left;
+        })
+        .catch(function (e) { b.disabled = false; prog.textContent = "Request failed: " + e; });
+    });
+    if (files) probBody.addEventListener("click", function (ev) {
+      var b = ev.target.closest(".su-retry-row"); if (!b) return;
+      var f = document.getElementById("su-retry"), n = document.createElement("input");
+      n.type = "hidden"; n.name = "n"; n.value = b.dataset.n; f.appendChild(n); f.submit();
+    });
+    if (!files) retryAll.addEventListener("click", function () {
+      retryAll.disabled = true;
+      post(retryForm(""))
+        .then(function (res) {
+          if (!res.ok || res.j.error) { retryAll.disabled = false; prog.textContent = res.j.error || "Request failed."; return; }
+          left = res.j.left; nEl.textContent = left; btn.hidden = false; btn.disabled = true; retryAll.disabled = false;
+          done = 0; total = left;
+          probBody.querySelectorAll("tr").forEach(function (pr) { if (pr.querySelector(".su-retry-row")) pr.remove(); });
+          problems();
+          next();
+        })
+        .catch(function (e) { retryAll.disabled = false; prog.textContent = "Request failed: " + e; });
     });
   })();
   </script>

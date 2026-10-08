@@ -1,4 +1,5 @@
 import base64
+import csv
 import io
 import itertools
 import json
@@ -6,7 +7,9 @@ import logging
 import mimetypes
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+from threading import local
 from datetime import timezone as dt_timezone
 from urllib.parse import urlencode
 
@@ -5019,7 +5022,7 @@ def explore_part_attach_view(request, part_id):
                                        "test_name": name, "hist_order": 0}}
         ctype = mimetypes.guess_type(f.name)[0] or f.content_type or "application/octet-stream"
         try:
-            _, done = sheetupload.apply_image_row(api, row, f, ctype, lookup)
+            _, done, _ = sheetupload.apply_image_row(api, row, f, ctype, lookup)
         except sheetupload.SheetError as e:
             messages.error(request, f"{f.name}: {e}")
             continue
@@ -6969,12 +6972,22 @@ def _test_keys(api, part_type_id, name: str) -> list[str]:
     return []
 
 
-def _sheet_apply(request, api, inst, part_type_id, job, post) -> JsonResponse:
-    """One apply request: the pending plan rows in order, one row at a
-    time, for ``APPLY_SECONDS`` — then the page asks again. Each row's
-    outcome is saved as it lands, so a reload or a lost connection
-    continues rather than repeats (a create re-checks the serial, a test
-    row checks for an identical record)."""
+def _sheet_apply(request, api, inst, part_type_id, job, post, make_api, only: str = "") -> JsonResponse:
+    """One apply request: the pending plan rows in order for
+    ``APPLY_SECONDS`` or ``APPLY_ROWS`` rows, whichever comes first — then
+    the page asks again (and moves its progress bar). #197 (Hajime 2026-10-07:
+    5000 new items took 21 min, the Python tool 5): item and test rows run
+    through ``APPLY_WORKERS`` threads, each with its own client
+    (``make_api``), in slices of plan order; HWDB calls happen in the
+    workers, the mirror rows and the job are written from this thread, and
+    the job is saved once per request rather than per row. A row that hit
+    an outage-shaped error (timeout, connection drop, 5xx — the Python
+    tool's "timeout on the server side", which its second try always
+    cured) waits ``RETRY_WAIT`` and goes once more. A request lost mid-way
+    redoes its rows: a create re-checks the serial, a test row checks for
+    an identical record, a patch is idempotent. An attachment row (#179)
+    is one request carrying its file, as before. ``only`` = one row's
+    ``n`` (#198: the per-row Retry)."""
     try:
         type_record = api.get_component_type(part_type_id)
     except requests.RequestException as e:
@@ -6986,43 +6999,85 @@ def _sheet_apply(request, api, inst, part_type_id, job, post) -> JsonResponse:
     # #178: the test type, created on first use like the checklists' (#95); attachments only look one up
     test_type_id = _test_type_lookup(api, part_type_id, None if job.kind == SheetJob.KIND_IMAGE
                                      else "Created by a sheet upload via HWDB Explorer")
-    started = time.monotonic()
-    out, rows = [], job.rows
-    for row in rows:
-        if row.get("state") != "pending":
-            continue
-        if time.monotonic() - started > sheetupload.APPLY_SECONDS:
-            break
-        try:
-            if job.kind == SheetJob.KIND_IMAGE:   # #179: one row per request, the file comes with it
-                if str(row["n"]) != post.get("n"):
-                    continue
-                f = request.FILES.get("file")
-                if not f:
-                    return JsonResponse({"error": "no file"}, status=400)
-                pid, done = sheetupload.apply_image_row(
+    rows = job.rows
+    pending = [row for row in rows if row.get("state") == "pending" and (not only or str(row["n"]) == only)]
+    out: list[dict] = []
+
+    def record(row):
+        out.append({"n": row["n"], "pid": row.get("pid") or "", "state": row["state"],
+                    "error": row.get("error") or "", "done": row.get("done") or [],
+                    "image_id": row.get("image_id") or ""})
+
+    if job.kind == SheetJob.KIND_IMAGE:   # #179: one row per request, the file comes with it
+        row = next((r for r in pending if str(r["n"]) == post.get("n")), None)
+        if row is not None:
+            f = request.FILES.get("file")
+            if not f:
+                return JsonResponse({"error": "no file"}, status=400)
+            try:
+                pid, done, image_id = sheetupload.apply_image_row(
                     api, row, f, mimetypes.guess_type(f.name)[0] or f.content_type or "application/octet-stream",
                     test_type_id)
-                row.update(pid=pid, state="done", error="", done=done)
-            elif job.kind == SheetJob.KIND_TEST:
-                pid, done = sheetupload.apply_test_row(api, part_type_id, row, test_type_id)
-                row.update(pid=pid, state="done", error="", done=done)
-            else:
-                pid, done = sheetupload.apply_row(
-                    api, part_type_id, row, template, connectors, manufacturers,
-                    lambda tid, sn: _serial_pids(api, inst, tid, sn), timezone.localtime().isoformat())
-                row.update(pid=pid, state="done", error="", done=done)
-                refresh_component_row(api, inst, pid)
+                row.update(pid=pid, state="done", error="", done=done, image_id=image_id)
+            except sheetupload.SheetError as e:
+                row.update(state="error", error=str(e))
+            except requests.RequestException as e:
+                row.update(state="error", error=_hwdb_error_detail(e))
+            record(row)
+    else:
+        # the test types once, here, so the workers only read the lookup's cache
+        try:
+            for name in sorted({r["rec"].get("test_name") or "" for r in pending}):
+                if job.kind == SheetJob.KIND_TEST and name:
+                    test_type_id(name)
         except sheetupload.SheetError as e:
-            row.update(state="error", error=str(e))
-        except requests.RequestException as e:
-            row.update(state="error", error=_hwdb_error_detail(e))
-        out.append({"n": row["n"], "pid": row.get("pid") or "", "state": row["state"],
-                    "error": row.get("error") or "", "done": row.get("done") or []})
+            return JsonResponse({"error": str(e)}, status=502)
+        tls = local()
+        arrived = timezone.localtime().isoformat()
+
+        def _init():
+            tls.client = make_api()
+
+        def work(row):
+            """HWDB only — no database from a worker thread. Returns the row,
+            its outcome fields, and the mirror detail to store."""
+            w = tls.client
+            for attempt in (1, 2):
+                try:
+                    if job.kind == SheetJob.KIND_TEST:
+                        pid, done = sheetupload.apply_test_row(w, part_type_id, row, test_type_id)
+                        return row, dict(pid=pid, state="done", error="", done=done), None
+                    pid, done = sheetupload.apply_row(
+                        w, part_type_id, row, template, connectors, manufacturers,
+                        lambda tid, sn: _hwdb_serials(w, tid, sn), arrived)
+                    return row, dict(pid=pid, state="done", error="", done=done), events.fetch_component_row(w, pid)
+                except sheetupload.SheetError as e:
+                    return row, dict(state="error", error=str(e)), None
+                except requests.RequestException as e:
+                    msg = _hwdb_error_detail(e)
+                    if attempt == 1 and isinstance(msg, _HwdbDown):
+                        time.sleep(sheetupload.RETRY_WAIT)
+                        continue
+                    return row, dict(state="error", error=str(msg)), None
+
+        started = time.monotonic()
+        slice_ = 2 * sheetupload.APPLY_WORKERS
+        with ThreadPoolExecutor(max_workers=sheetupload.APPLY_WORKERS, initializer=_init) as pool:
+            for i in range(0, len(pending), slice_):
+                if time.monotonic() - started > sheetupload.APPLY_SECONDS or len(out) >= sheetupload.APPLY_ROWS:
+                    break
+                for row, fields, detail in pool.map(work, pending[i:i + slice_]):
+                    row.update(fields)
+                    if detail is not None:
+                        events.store_component_row(inst, row["pid"], detail)
+                    record(row)
+    if out:
         job.rows = rows
         job.save(update_fields=["rows", "updated_at"])
-        if job.kind == SheetJob.KIND_IMAGE:
-            break
+    if any("created" in r["done"] for r in out):   # the sidebar / Type View count is the node's, synced rarely (Chao 2026-10-08)
+        n = HwdbComponentEvent.for_instance(inst).filter(part_type_id=part_type_id).count()
+        (HierarchyNode.for_instance(inst).filter(level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id, n_components__lt=n)
+         .update(n_components=n))
     left = sum(1 for r in rows if r.get("state") == "pending")
     if (not left or post.get("last") == "1") and out:
         c = job.counts()
@@ -7112,8 +7167,35 @@ def explore_sheet_upload_view(request, part_type_id, job_id=None):
     if step == "delete":
         job.delete()
         return redirect(page_url)
+    if step == "retry":   # #198: the rows HWDB refused or lost go back to pending; sheet problems need a new sheet
+        only = post.get("n") or ""
+        for r in job.rows:
+            if r.get("state") == "error" and r.get("action") != "error" and (not only or str(r["n"]) == only):
+                r.update(state="pending", error="")
+        job.save(update_fields=["rows", "updated_at"])
+        if job.kind == SheetJob.KIND_IMAGE:   # the files have to be picked again
+            return redirect(request.path)
+        if only:                               # one row: back to pending and sent in the same request
+            return _sheet_apply(request, api, inst, part_type_id, job, post,
+                                lambda: FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer), only=only)
+        return JsonResponse({"rows": [], "left": sum(1 for r in job.rows if r.get("state") == "pending")})
+    if request.method == "GET" and request.GET.get("csv") and job.rows:   # #198: the result list, for the record
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["Row", "Item", "PID", "Action", "Changes", "Result", "Image id"])
+        for r in job.rows:
+            w.writerow([", ".join(str(x) for x in r.get("rows") or []), r.get("key") or "", r.get("pid") or "",
+                        r.get("action") or "", " · ".join(r.get("changes") or []),
+                        r.get("error") if r.get("state") == "error" else
+                        ", ".join(r.get("done") or []) if r.get("state") == "done" and r.get("action") != "skip"
+                        else r.get("state") or "", r.get("image_id") or ""])
+        resp = HttpResponse(buf.getvalue(), content_type="text/csv; charset=utf-8")
+        stem = "".join(c for c in job.name.rsplit(".", 1)[0] if c.isalnum() or c in " ._-").strip() or "sheet"
+        resp["Content-Disposition"] = f'attachment; filename="{stem}-results.csv"'
+        return resp
     if step == "apply":
-        return _sheet_apply(request, api, inst, part_type_id, job, post)
+        return _sheet_apply(request, api, inst, part_type_id, job, post,
+                            lambda: FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer))
     try:
         type_record = api.get_component_type(part_type_id)
     except requests.RequestException as e:

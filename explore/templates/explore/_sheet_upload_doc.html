@@ -36,7 +36,7 @@ External ID,Serial Number,Status,S:Drawing Number,C:A1,Comments
     <tr><td><code>S:</code>&lt;key&gt;</td><td>An Item Specs key of the type’s datasheet; dots reach into a nested object (<code>S:DATA.received</code>). <code>&lt;null&gt;</code> clears it. A bare column named exactly like a spec key maps too.</td></tr>
     <tr><td><code>C:</code>&lt;position&gt;</td><td>The item to put in that sub-component position: a PID, or a serial number of the position’s type. <code>&lt;null&gt;</code> empties the position.</td></tr>
   </table>
-  <p>Rows naming the same item merge into one record (later cells win). Check plans every row against the type’s live listing: <i>create</i>, <i>update</i> with the fields that differ, <i>nothing to do</i>, or a problem. Upload writes one item at a time: a create re-checks the serial first, so a retry never creates twice; an update is one PATCH of the standard fields and specs only when something differs; then the location and the positions.</p>
+  <p>Rows naming the same item merge into one record (later cells win). Check plans every row against the type’s live listing: <i>create</i>, <i>update</i> with the fields that differ, <i>nothing to do</i>, or a problem. Upload writes several items at a time: a create re-checks the serial first, so a retry never creates twice; an update is one PATCH of the standard fields and specs only when something differs; then the location and the positions. A row that hit a server-side timeout is tried once more after a few seconds on its own. A row HWDB refuses stays in the list in red with the reason and is listed again under <i>Problems</i>, where <i>Retry</i> sends that row again and <i>Retry all failed</i> every one; <i>Download results (CSV)</i> keeps the list.</p>
 
   <h3>Test records — one per row</h3>
   <p>A sheet is a Test sheet when the block says <code>Record Type,Test</code> or any column starts with <code>T:</code>; switch it by hand on the job page. Every row posts one record of the <b>Test name</b> on the page (the block’s <code>Test Name</code> fills it in). The test type is created on the component type on first use.</p>
@@ -65,7 +65,7 @@ External ID,Serial Number,Status,S:Drawing Number,C:A1,Comments
   <p>Keys are matched regardless of case, spaces or underscores (<code>External ID</code>, <code>Serial Number</code>, <code>Test Name</code>, <code>DATA</code> work too). Without <code>data</code>, every other key is the test data. A file that is not such an object shows as a problem row.</p>
 
   <h3>Files to attach — one per row</h3>
-  <p>A sheet is an attachment sheet when the block says <code>Record Type,Item Image</code> or <code>Test Image</code>, or it has an <code>Image File</code> column. The files themselves are picked in the browser after Check and matched to rows by name; each goes straight from your computer to HWDB.</p>
+  <p>A sheet is an attachment sheet when the block says <code>Record Type,Item Image</code> or <code>Test Image</code>, or it has an <code>Image File</code> column. The files themselves are picked in the browser after Check — several files, or a folder — and matched to rows by name; each goes straight from your computer to HWDB. The result list shows each attachment’s HWDB image_id.</p>
   <table>
     <tr><th>Column</th><th>Value</th></tr>
     <tr><td>External ID / Serial Number</td><td>The item, which must exist.</td></tr>

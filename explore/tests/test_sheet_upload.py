@@ -15,7 +15,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
 from explore import sheetupload as su
-from explore.models import ActivityEvent, HwdbComponentEvent, SheetJob
+from explore.models import HierarchyNode, ActivityEvent, HwdbComponentEvent, SheetJob
 from hwdb.fnal.bearer import FnalLinkRequired
 
 T = "D00400300001"
@@ -355,18 +355,18 @@ class ImageTest(TestCase):
 
     def test_apply_item_and_test_attachments(self):
         api = mock.MagicMock()
-        api.get_images.return_value = {"data": [{"image_name": "old.png"}]}
-        api.post_component_image.return_value = _ok()
+        api.get_images.return_value = {"data": [{"image_name": "old.png", "image_id": 41}]}
+        api.post_component_image.return_value = _ok(image_id=42)
         row = {"pid": f"{T}-00001", "rec": {"file": "a.png", "save_as": "a.png", "comments": "", "test_name": "", "hist_order": 0}}
-        self.assertEqual(su.apply_image_row(api, row, b"x", "image/png", lambda n: None), (f"{T}-00001", ["attached"]))
+        self.assertEqual(su.apply_image_row(api, row, b"x", "image/png", lambda n: None), (f"{T}-00001", ["attached"], "42"))
         self.assertEqual(api.post_component_image.call_args.args, (f"{T}-00001", b"x", "a.png", "Sheet upload via HWDB Explorer", "image/png"))
         row["rec"]["save_as"] = "old.png"
-        self.assertEqual(su.apply_image_row(api, row, b"x", "image/png", lambda n: None)[1], ["already attached"])
+        self.assertEqual(su.apply_image_row(api, row, b"x", "image/png", lambda n: None)[1:], (["already attached"], "41"))   # #198: the id of the one there
         api.get_tests.return_value = {"data": [{"id": 71}, {"id": 70}]}
         api.get_test_images.return_value = {"data": []}
-        api.post_test_image.return_value = _ok()
+        api.post_test_image.return_value = _ok(data={"image_id": 43})
         row["rec"].update(test_name="QC", hist_order=1, save_as="a.png", comments="c")
-        self.assertEqual(su.apply_image_row(api, row, b"x", "image/png", lambda n: 5)[1], ["attached"])
+        self.assertEqual(su.apply_image_row(api, row, b"x", "image/png", lambda n: 5)[1:], (["attached"], "43"))
         self.assertEqual(api.post_test_image.call_args.args, (70, b"x", "a.png", "c", "image/png"))
         row["rec"]["hist_order"] = 2
         with self.assertRaises(su.SheetError):
@@ -518,6 +518,8 @@ class ViewTest(TestCase):
     def setUp(self):
         HwdbComponentEvent.objects.create(instance="dev", part_type_id=T, part_id=f"{T}-00001",
                                           serial_number="HPK-1", status="Unknown", status_id=0, manufacturer="HPK")
+        HierarchyNode.objects.create(instance="dev", level=HierarchyNode.LEVEL_TYPE, system_id=1, system_name="S",
+                                     name="Type", part_type_id=T, n_components=1)
         self.client.force_login(get_user_model().objects.create_user("w", "w@w.io", "pw"))
 
     def upload(self, api, name="items.csv", body=CSV, **extra):
@@ -620,6 +622,7 @@ class ViewTest(TestCase):
         job.refresh_from_db()
         self.assertEqual(job.counts()["pending"], 0)
         self.assertIn("1 D00400300001 items created, 1 updated, 0 failed", ActivityEvent.objects.get().summary)
+        self.assertEqual(HierarchyNode.objects.get(part_type_id=T).n_components, 2)   # the sidebar count follows the mirror (Chao 2026-10-08)
         p1, p2 = _mocked(api)
         with p1, p2:
             r = self.client.get(url)
@@ -642,12 +645,72 @@ class ViewTest(TestCase):
         api.create_component.return_value = {"status": "ERROR", "data": "roles"}
         api.get_component.side_effect = requests.ConnectionError("down")
         p1, p2 = _mocked(api)
-        with p1, p2:
+        with p1, p2, mock.patch("explore.sheetupload.RETRY_WAIT", 0):
             j = self.client.post(f"{URL}{job.pk}/", {"step": "apply"}).json()
         self.assertEqual([(x["state"], x["error"]) for x in j["rows"]], [("error", "roles"), ("error", "down")])
+        self.assertEqual(api.get_component.call_count, 2)   # the outage-shaped one was tried twice
         job.refresh_from_db()
         self.assertEqual((job.counts()["error"], job.counts()["failed"]), (0, 2))   # plan problems vs apply failures
         self.assertEqual([x["state"] for x in job.rows], ["error", "error"])
+        # #198: the failed rows are counted, listed apart, downloadable and retried without a re-plan
+        url = f"{URL}{job.pk}/"
+        p1, p2 = _mocked(api)
+        with p1, p2:
+            r = self.client.get(url)
+            self.assertContains(r, "2 failed")
+            self.assertContains(r, "2 failed uploads")
+            self.assertContains(r, 'class="es-btn quiet su-retry-row" data-n="6"')
+            self.assertContains(r, "Retry all failed")
+            r = self.client.get(f"{url}?csv=1")
+            self.assertEqual(r.content.decode().splitlines()[1], "6,HPK-9,,create,,roles,")
+            api.create_component.return_value = _ok(part_id=f"{T}-00009")
+            j = self.client.post(url, {"step": "retry", "n": "6"}).json()   # one row: pending and sent at once
+            self.assertEqual([(x["n"], x["state"], x["pid"]) for x in j["rows"]], [(6, "done", f"{T}-00009")])
+            self.assertEqual(j["left"], 0)
+            j = self.client.post(url, {"step": "retry"}).json()             # the rest: pending, the page then uploads
+            self.assertEqual((j["rows"], j["left"]), ([], 1))
+        job.refresh_from_db()
+        self.assertEqual([(x["state"], x["error"]) for x in job.rows], [("done", ""), ("pending", "")])
+        api.get_component.side_effect = None
+        p1, p2 = _mocked(api)
+        with p1, p2:
+            j = self.client.post(url, {"step": "apply"}).json()
+        self.assertEqual([(x["state"], x["pid"]) for x in j["rows"]], [("done", f"{T}-00001")])
+        job.refresh_from_db()
+        self.assertEqual(job.counts()["failed"], 0)
+
+    def test_a_request_hands_back_after_apply_rows(self):
+        # Chao 2026-10-08: the page's progress moves every APPLY_ROWS rows, not every APPLY_SECONDS
+        api = _api()
+        self.upload(api)
+        job = SheetJob.objects.get()
+        job.rows = [{"n": n, "rows": [n], "key": f"{T}-00001", "pid": f"{T}-00001", "action": "patch", "changes": [], "error": "",
+                     "state": "pending", "rec": {"serial_number": "", "status_id": 120, "specs": {}, "positions": {}}} for n in (5, 6, 7)]
+        job.save()
+        p1, p2 = _mocked(api)
+        with p1, p2, mock.patch("explore.sheetupload.APPLY_ROWS", 1), mock.patch("explore.sheetupload.APPLY_WORKERS", 1):
+            j = self.client.post(f"{URL}{job.pk}/", {"step": "apply"}).json()
+            self.assertEqual(([x["n"] for x in j["rows"]], j["left"]), ([5, 6], 1))   # one slice of 2 × workers, then back
+            j = self.client.post(f"{URL}{job.pk}/", {"step": "apply"}).json()
+            self.assertEqual(([x["n"] for x in j["rows"]], j["left"]), ([7], 0))
+
+    def test_an_outage_shaped_error_is_tried_once_more(self):
+        # #197 (Hajime 2026-10-07): the Python tool's "timeout on the server side" that a second try cures
+        api = _api()
+        self.upload(api)
+        job = SheetJob.objects.get()
+        job.rows = [{"n": 7, "rows": [7], "key": f"{T}-00001", "pid": f"{T}-00001", "action": "patch", "changes": [], "error": "",
+                     "state": "pending", "rec": {"serial_number": "", "status_id": 120, "specs": {}, "positions": {}}},
+                    {"n": 8, "rows": [8], "key": f"{T}-00002", "pid": f"{T}-00002", "action": "patch", "changes": [], "error": "",
+                     "state": "pending", "rec": {"serial_number": "", "status_id": 120, "specs": {}, "positions": {}}}]
+        job.save()
+        bad = requests.HTTPError("403 Forbidden", response=mock.Mock(status_code=403, json=lambda: {"data": "roles"}))
+        api.get_component.side_effect = [requests.ConnectionError("down"), _detail(1), bad, bad]
+        p1, p2 = _mocked(api)
+        with p1, p2, mock.patch("explore.sheetupload.RETRY_WAIT", 0), mock.patch("explore.sheetupload.APPLY_WORKERS", 1):
+            j = self.client.post(f"{URL}{job.pk}/", {"step": "apply"}).json()
+        self.assertEqual([(x["n"], x["state"], x["error"]) for x in j["rows"]], [(7, "done", ""), (8, "error", "roles")])
+        self.assertEqual(api.get_component.call_count, 3)   # a refusal is not tried again
 
     def test_old_jobs_expire(self):
         from datetime import timedelta
@@ -713,7 +776,7 @@ class ViewTest(TestCase):
     def test_image_sheet_end_to_end(self):
         api = _api()
         api.get_images.return_value = {"data": []}
-        api.post_component_image.return_value = _ok()
+        api.post_component_image.return_value = _ok(image_id=77)
         body = b"External ID,Image File,Comments\r\nD00400300001-00001,front.png,front\r\nD00400300001-00002,back.png,\r\n"
         self.upload(api, "photos.csv", body)
         job = SheetJob.objects.get()
@@ -725,11 +788,13 @@ class ViewTest(TestCase):
             self.assertEqual(self.client.post(url, {"step": "map", "col0": "part_id", "col1": "image_file", "col2": "comments"}).status_code, 302)
             r = self.client.get(url)
             self.assertContains(r, 'id="su-files"')
+            self.assertContains(r, 'id="su-folder"')   # #198: a folder picker beside the file picker
+            self.assertContains(r, 'form="su-retry"')  # an attachment job's Retry all reloads the page
             self.assertContains(r, "<b>2</b> files to attach")
             self.assertContains(r, '"file": "front.png"')
             r = self.client.post(url, {"step": "apply", "n": "3", "last": "1", "file": _file("back.png", b"\x89PNG")})
         j = r.json()
-        self.assertEqual([(x["n"], x["state"], x["done"]) for x in j["rows"]], [(3, "done", ["attached"])])
+        self.assertEqual([(x["n"], x["state"], x["done"], x["image_id"]) for x in j["rows"]], [(3, "done", ["attached"], "77")])
         self.assertEqual(j["left"], 1)
         a = api.post_component_image.call_args
         self.assertEqual((a.args[0], a.args[2], a.args[3], a.args[4]), (f"{T}-00002", "back.png", "Sheet upload via HWDB Explorer", "image/png"))
@@ -737,6 +802,23 @@ class ViewTest(TestCase):
         p1, p2 = _mocked(api)
         with p1, p2:
             self.assertEqual(self.client.post(url, {"step": "apply", "n": "2"}).status_code, 400)   # no file
+            r = self.client.get(url)
+            self.assertContains(r, "image_id 77")
+            api.post_component_image.return_value = {"status": "ERROR", "data": "too big"}
+            j = self.client.post(url, {"step": "apply", "n": "2", "last": "1", "file": _file("front.png", b"\x89PNG")}).json()
+            self.assertEqual([(x["state"], x["error"]) for x in j["rows"]], [("error", "too big")])
+            r = self.client.get(url)
+            self.assertContains(r, "1 failed upload")
+            self.assertEqual(self.client.post(url, {"step": "retry", "n": "2"}).status_code, 302)   # files are picked again
+        job.refresh_from_db()
+        self.assertEqual([x["state"] for x in job.rows], [("pending"), ("done")])
+        p1, p2 = _mocked(api)
+        with p1, p2:
+            r = self.client.get(f"{url}?csv=1")
+        self.assertEqual(r["Content-Disposition"], 'attachment; filename="photos-results.csv"')
+        lines = r.content.decode().splitlines()
+        self.assertEqual(lines[0], "Row,Item,PID,Action,Changes,Result,Image id")
+        self.assertEqual(lines[2], f"3,{T}-00002,{T}-00002,image,back.png → item,attached,77")
 
     def test_zip_upload_end_to_end(self):
         import zipfile
