@@ -442,14 +442,20 @@ def _norm_field(f: dict) -> dict | None:
         count_keys = {}   # #190: label → column naming the batch-size specification key
         lookups, lookup_paths = {}, {}   # #195: label → column holding the PID, and the key read off it
         months = []   # #199: month columns (a date picker, stored YYYY-MM)
+        dates = []    # Chao 2026-10-08: date columns (a day picker, stored YYYY-MM-DD)
         for c in f.get("columns") or []:
             if isinstance(c, dict):
                 label = str(c.get("label") or "").strip()
                 # #199: ``month: true`` — a month picker (PRR date, Completed
                 # by, Needed by); the value is a plain "YYYY-MM" string, so
-                # no formula, range or text applies to it
+                # no formula, range or text applies to it. ``date: true`` is
+                # the same with a day (YYYY-MM-DD).
                 if label and c.get("month") is True:
                     months.append(label)
+                    cols.append(label)
+                    continue
+                if label and c.get("date") is True:
+                    dates.append(label)
                     cols.append(label)
                     continue
                 # Anselmo 2026-09-28 ("the received column should be filled
@@ -583,6 +589,8 @@ def _norm_field(f: dict) -> dict | None:
             out["col_color"] = col_color
         if months:
             out["months"] = months
+        if dates:
+            out["dates"] = dates
         # #119: named rows sharing the columns; each may carry its own
         # constants (an Expected column differs per row) and tint, which
         # override the table-wide ones. No rows = the single implicit row,
@@ -1053,8 +1061,9 @@ def _table_cells(f: dict, cells: dict, tx: dict, prefix: str, rr: dict | None = 
                         "value": "", "formula": "", "text": "", "min": None, "max": None, "range": "",
                         "color": cc.get(c, "")})
             continue
-        if c in (f.get("months") or []):   # #199: a month picker
-            out.append({"column": c, "name": f"{prefix}-c{i}", "month": True,
+        if c in (f.get("months") or []) or c in (f.get("dates") or []):   # #199: a month / day picker
+            out.append({"column": c, "name": f"{prefix}-c{i}",
+                        **({"month": True} if c in (f.get("months") or []) else {"date": True}),
                         "value": _fmt("" if isinstance(v, dict) else v),
                         "formula": "", "text": "", "min": None, "max": None, "range": "",
                         "color": cc.get(c, "")})

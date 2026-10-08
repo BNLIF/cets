@@ -404,7 +404,7 @@
       <label class="ec-inline ff-grid-w" title="draw cell borders like a real table"><input type="checkbox" class="ff-grid" checked> borders</label>
       <button type="button" class="ec-del ff-tbl" title="named rows, each with its own fixed cells and tint">&#9636; rows&hellip;</button>
       <input type="hidden" class="ff-rows">
-      <textarea class="ff-columns" rows="2" style="flex:1 1 100%;" placeholder="columns — comma- or line-separated; computed: Total = C1 + C2*(C3/C4) [11 ± 1]; fixed: Expected = &quot;3.1+-0.1&quot;; pass/fail: OK = check; over the type's items: Received = sum(C4); month picker: PRR date = month" title="label = formula makes a computed column (C1 = first column's value, formula/fixed cells count too); label = &quot;text&quot; makes a fixed non-editable cell (no commas in the text); label = sum(C4) totals that column's value in the row over every item of the type (sum(C4 in Received | Unknown) counts only those statuses); label = month makes a month picker (stored YYYY-MM); label = count(C1) shows how many items the type whose ID is in column 1 has (count(C1 * C2): each item weighted by the number in its specifications under the key named in column 2 — a batch registered as one item counts its pieces); label = lookup(Side of C1) shows the value stored under Side on the item whose PID is in column 1; [nominal ± tol] or [min..max] gives that column its own accepted range"></textarea>
+      <textarea class="ff-columns" rows="2" style="flex:1 1 100%;" placeholder="columns — comma- or line-separated; computed: Total = C1 + C2*(C3/C4) [11 ± 1]; fixed: Expected = &quot;3.1+-0.1&quot;; pass/fail: OK = check; over the type's items: Received = sum(C4); month picker: PRR date = month; day picker: Received = date" title="label = formula makes a computed column (C1 = first column's value, formula/fixed cells count too); label = &quot;text&quot; makes a fixed non-editable cell (no commas in the text); label = sum(C4) totals that column's value in the row over every item of the type (sum(C4 in Received | Unknown) counts only those statuses); label = month makes a month picker (stored YYYY-MM), label = date a day picker (YYYY-MM-DD); label = count(C1) shows how many items the type whose ID is in column 1 has (count(C1 * C2): each item weighted by the number in its specifications under the key named in column 2 — a batch registered as one item counts its pieces); label = lookup(Side of C1) shows the value stored under Side on the item whose PID is in column 1; [nominal ± tol] or [min..max] gives that column its own accepted range"></textarea>
     </div>
     <div class="ec-row g-desc">
       <input class="ff-desc" placeholder="description — a sentence on what this field is for, shown after the label" style="flex:1 1 100%;">
@@ -1254,6 +1254,7 @@
       if (q) out.text = q[1];
       else if (rhs.toLowerCase() === "check") out.check = true;   // #116: pass/fail column
       else if (rhs.toLowerCase() === "month") out.month = true;   // #199: a month picker (production-status dates)
+      else if (rhs.toLowerCase() === "date") out.date = true;     // a day picker (Chao 2026-10-08)
       else if (lk) { out.lookup = lk[2]; out.path = lk[1]; }
       else if (sm) { out[sm[1].toLowerCase()] = sm[2]; if (sm[3]) out.status = sm[3].split("|").map(function (x) { return x.trim(); }).filter(Boolean); }
       else out.formula = rhs;
@@ -1269,6 +1270,7 @@
     return c.label + (c.text ? ' = "' + c.text + '"'
                       : c.check ? " = check"
                       : c.month ? " = month"
+                      : c.date ? " = date"
                       : c.sum || c.count ? " = " + (c.sum ? "sum(" + c.sum : "count(" + c.count) + (c.status && c.status.length ? " in " + c.status.join(" | ") : "") + ")"
                       : c.lookup ? " = lookup(" + (c.path || "") + " of " + c.lookup + ")"
                       : (c.formula ? " = " + c.formula : ""))

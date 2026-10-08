@@ -30,7 +30,7 @@ from .models import ProductionPlan, ProductionTable
 
 logger = logging.getLogger(__name__)
 
-_MONTH_RX = re.compile(r"^(\d{4})-(\d{2})$")
+_MONTH_RX = re.compile(r"^(\d{4})-(\d{2})(?:-\d{2})?$")   # a month, or a full date read by its month
 _PTID_RX = re.compile(r"[A-Z]\d{11}")
 _MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -167,7 +167,11 @@ def rows(f: dict, value: dict, today: date | None = None) -> dict:
         cells, type_ids = [], []
         for c in cols:
             v = merged.get(c)
-            if c in months:
+            if c in (f.get("dates") or []):
+                ym = _ym(v)
+                cells.append({"kind": "month", "text": str(v or "").strip(),
+                              "past": bool(ym) and ym <= (today.year, today.month)})
+            elif c in months:
                 ym = _ym(v)
                 cells.append({"kind": "month", "text": month_label(v),
                               "past": bool(ym) and ym <= (today.year, today.month)})
@@ -183,8 +187,9 @@ def rows(f: dict, value: dict, today: date | None = None) -> dict:
             cells.append({"kind": "text", "text": "" if fl is None else str(fl)})
         out.append({"label": rw["label"], "cells": cells, "type_ids": type_ids,
                     "needed": _int(merged.get(needed_col)) if needed_col else None,
-                    "completed_by": str(done or "").strip() if _ym(done) else "",
-                    "needed_by": str(need or "").strip() if _ym(need) else ""})
+                    # the plan is in months: a full date is cut to its month
+                    "completed_by": str(done or "").strip()[:7] if _ym(done) else "",
+                    "needed_by": str(need or "").strip()[:7] if _ym(need) else ""})
     return {"columns": out_cols, "rows": out}
 
 

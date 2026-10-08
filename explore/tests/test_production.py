@@ -76,6 +76,31 @@ class SchemaTest(TestCase):
         self.assertTrue(f["to_spec"])
         self.assertFalse(checklistforms.normalize({"name": "x", "sections": []}, "x")["status"])
 
+    def test_date_column_kind(self):
+        # Chao 2026-10-08: `label = date` — a day picker beside the month one
+        cfg = json.loads(json.dumps(STATUS))
+        cfg["sections"][0]["fields"][0]["columns"].append({"label": "Received", "date": True})
+        s = checklistforms.normalize(cfg, "x")
+        f = s["sections"][0]["fields"][0]
+        self.assertEqual(f["dates"], ["Received"])
+        self.assertNotIn("Received", f["months"])
+        data = json.loads(json.dumps(DATA))
+        data["Table"]["Components"]["Rails and cables"]["Received"] = "2026-09-15"
+        b = checklistforms.bind(s, {"DATA": data})["sections"][0]["fields"][0]
+        c = b["trows"][0]["cells"][7]
+        self.assertTrue(c["date"]); self.assertNotIn("month", c)
+        from django.template.loader import render_to_string
+        html = render_to_string("explore/_checklist_cell.html", {"c": c, "f": b, "forloop": {"counter0": 7}})
+        self.assertIn('<input type="date" name="f0-0-r0-c7" value="2026-09-15" placeholder="YYYY-MM-DD"', html)
+        parsed = checklistforms.parse(s, {"f0-0-r0-c7": "2026-09-15"})
+        self.assertEqual(parsed["Table"]["Components"]["Rails and cables"]["Received"], "2026-09-15")
+        shaped = production.shape(s, data)
+        self.assertEqual(shaped["rows"][0]["cells"][7], {"kind": "month", "text": "2026-09-15", "past": True})
+        # a full date in a month-role column still feeds the plan by its month
+        data["Table"]["Components"]["Rails and cables"]["Completed by"] = "2027-03-20"
+        self.assertEqual(production.shape(s, data)["rows"][0]["completed_by"], "2027-03")   # the plan is monthly
+        self.assertEqual(production.months_between("2027-03-20", "2029-01"), 22)
+
     def test_status_forces_specs_on_the_table(self):
         cfg = json.loads(json.dumps(STATUS))
         cfg["sections"][0]["fields"][0].pop("to_spec")

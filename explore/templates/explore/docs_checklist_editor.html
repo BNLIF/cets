@@ -136,6 +136,7 @@
     <tr><td><code>Expected = "3.1 +- 0.1"</code></td><td>fixed text, not editable; no commas in the text. A formula reads it as a number when it is one or a <code>value ± tolerance</code> string</td></tr>
     <tr><td><code>OK = check</code></td><td>a pass/fail cell (— / ✓ / ✗)</td></tr>
     <tr><td><code>Completed by = month</code></td><td>a month picker, stored as <code>YYYY-MM</code> — the dates of a <a href="#status">production status</a> table</td></tr>
+    <tr><td><code>Received = date</code></td><td>a day picker, stored as <code>YYYY-MM-DD</code></td></tr>
     <tr><td><code>Received = sum(C4)</code>, <code>sum(C4 in Received | Unknown)</code></td><td>the total of column 4's value <i>in this row</i> over every item of the type
       (their latest specifications, so the table needs <span class="dd-ui">→ Specs</span>; statuses narrow the items counted — a status name or part of one, <code>Passed All</code> for <code>QA/QC Tests - Passed All</code>) — the inventory of a type whose items are receiving batches:
       one row per part, a fixed quantity-per-module column, a received column, its sum, and <code>Buildable = C6 / C3</code> over the sum. Read-only, blank offline;
