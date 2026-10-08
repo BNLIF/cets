@@ -300,6 +300,7 @@
                     <input type="month" class="chart-plan-done" title="Completed by (month)" placeholder="YYYY-MM" pattern="\d{4}-\d{2}" style="font: inherit; color: var(--ink); padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff);">
                     <span>needed by</span>
                     <input type="month" class="chart-plan-need" title="Needed by (month, at SURF)" placeholder="YYYY-MM" pattern="\d{4}-\d{2}" style="font: inherit; color: var(--ink); padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff);">
+                    {% if c.plan %}{# Hajime 2026-10-08: the HWDB plan is a default, not a lock — untick to type your own dates for a plot, as before #}<label style="display: inline-flex; align-items: center; gap: 4px; cursor: pointer; margin-left: 4px;" title="Ticked: the type’s production plan in HWDB sets these. Untick to set your own in this browser, as before."><input type="checkbox" class="chart-plan-use" checked> production plan</label>{% endif %}
                 </div>
                 {% if c.filters %}
                 <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--faint);">
@@ -840,25 +841,40 @@
             try { plan = JSON.parse(localStorage.getItem(planKey) || '{}') || {}; } catch (e) { plan = {}; }
             var planIn = { total: panel.querySelector('.chart-plan-total'), done: panel.querySelector('.chart-plan-done'), need: panel.querySelector('.chart-plan-need') };
             var planNote = document.querySelector('.chart-plan-note[data-kind="' + kind + '"]');
-            var planFixed = false;   // #200: true when the type's production plan in HWDB sets the plan — never stored here
+            var planFixed = false;   // #200: true while the type's production plan in HWDB sets the plan — never stored here
+            var manual = plan;       // the browser-stored plan (#174), kept while the HWDB plan is in use
             function savePlan() {
                 var ym = function (v) { return /^\d{4}-\d{2}/.test(v || '') ? v.slice(0, 7) : ''; };   // months; a typed fallback or an old day value is cut to one
                 plan = { total: parseInt(planIn.total.value, 10) > 0 ? parseInt(planIn.total.value, 10) : 0, done: ym(planIn.done.value), need: ym(planIn.need.value) };
+                if (!planFixed) manual = plan;
                 try { if (planFixed) {} else if (plan.total || plan.done || plan.need) localStorage.setItem(planKey, JSON.stringify(plan)); else localStorage.removeItem(planKey); } catch (e) {}
                 if (planNote) planNote.textContent = (plan.total ? ' · of ' + plan.total.toLocaleString() + ' to produce' : '')
                     + (plan.done ? ' · completed by ' + plan.done : '') + (plan.need ? ' · needed by ' + plan.need : '');
             }
-            // #200: the type's production plan in HWDB — its values win, read-only here (the plan page edits them)
-            var planEl = panel.querySelector('.chart-plan');
-            if (planEl && planEl.dataset.planUrl) {
-                planFixed = true;
-                plan = { total: parseInt(planEl.dataset.planTotal, 10) > 0 ? parseInt(planEl.dataset.planTotal, 10) : 0, done: planEl.dataset.planDone || '', need: planEl.dataset.planNeed || '' };
-                Object.keys(planIn).forEach(function (k) { planIn[k].readOnly = true; planIn[k].tabIndex = -1; planIn[k].title = 'From the type’s production plan in HWDB'; });
+            // #200: the type's production plan in HWDB sets the values by default, read-only here (the plan
+            // page edits them); the "production plan" box unticked (Hajime 2026-10-08: nobody should need a
+            // role to draw a plot) gives the inputs back with the browser-stored plan, remembered per chart
+            var planEl = panel.querySelector('.chart-plan'), planUse = panel.querySelector('.chart-plan-use');
+            var planUseKey = 'chartPlanUse:' + location.pathname + '#' + kind;
+            Object.keys(planIn).forEach(function (k) { planIn[k].dataset.title = planIn[k].title; });
+            function setPlanInputs() { planIn.total.value = plan.total > 0 ? plan.total : ''; planIn.done.value = (plan.done || '').slice(0, 7); planIn.need.value = (plan.need || '').slice(0, 7); }
+            function usePlan(on) {
+                planFixed = on;
+                plan = on ? { total: parseInt(planEl.dataset.planTotal, 10) > 0 ? parseInt(planEl.dataset.planTotal, 10) : 0, done: planEl.dataset.planDone || '', need: planEl.dataset.planNeed || '' } : manual;
+                Object.keys(planIn).forEach(function (k) { planIn[k].readOnly = on; planIn[k].tabIndex = on ? -1 : 0; planIn[k].title = on ? 'From the type’s production plan in HWDB — untick “production plan” to set your own' : planIn[k].dataset.title; });
+                setPlanInputs(); savePlan();
+                try { localStorage.setItem(planUseKey, on ? 'plan' : 'manual'); } catch (e) {}
+            }
+            if (planEl && planEl.dataset.planUrl && planUse) {
                 var src = document.createElement('a'); src.href = planEl.dataset.planUrl; src.textContent = 'from the production plan'; src.title = 'The plan and its history'; src.style.color = 'var(--accent-ink)';
                 planEl.appendChild(src);
+                var pref = ''; try { pref = localStorage.getItem(planUseKey) || ''; } catch (e) {}
+                planUse.checked = pref !== 'manual';
+                planUse.addEventListener('change', function () { usePlan(planUse.checked); apply(currentRange()); });
+                usePlan(planUse.checked);
+            } else {
+                setPlanInputs();
             }
-            planIn.total.value = plan.total > 0 ? plan.total : ''; planIn.done.value = (plan.done || '').slice(0, 7); planIn.need.value = (plan.need || '').slice(0, 7);
-            if (planEl && planEl.dataset.planUrl) savePlan();   // the note under Items in HWDB, nothing stored
             Object.keys(planIn).forEach(function (k) { planIn[k].addEventListener('change', function () { savePlan(); apply(currentRange()); }); });
             // Projected points (#141): [{d: 'YYYY-MM-DD', n: count, s: series
             // label}], this browser only (localStorage per page + chart).

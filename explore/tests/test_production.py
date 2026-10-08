@@ -473,12 +473,14 @@ class TypePageTest(TestCase):
     def test_plan_line_and_dashboard_feed(self):
         html = self.client.get(self.url).content.decode()
         self.assertNotIn("data-plan-url", html)
+        self.assertNotIn('class="chart-plan-use"', html)   # no HWDB plan: the browser-stored plan as before, no box
         self.assertNotIn("<dt>Plan</dt>", html)   # no plan, not an architect: no line
         production.cache_plan("prod", SIPM, production.normalize_plan(PLAN))
         html = self.client.get(self.url).content.decode()
         self.assertIn('data-plan-total="48000" data-plan-done="2026-12" data-plan-need="2028-05" '
                       f'data-plan-url="/hw/plan/{SIPM}/"', html)
-        self.assertIn("planFixed = true", html)
+        self.assertIn('<input type="checkbox" class="chart-plan-use" checked> production plan</label>', html)   # Hajime: a default, not a lock
+        self.assertIn("untick “production plan” to set your own", html)
         self.assertIn("from the production plan", html)
         self.assertIn('<dt>Plan</dt><dd class="span">needed 48000<span class="sep">·</span>completed by 2026-12<span class="sep">·</span>needed by 2028-05\n', html)
         self.assertIn(f'<a href="/hw/plan/{SIPM}/?next=', html)
