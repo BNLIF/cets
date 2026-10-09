@@ -399,7 +399,7 @@ def _fetch_component(api, part_id: str, date_spec: dict | None,
                 if dt is None:
                     continue
                 name = ((t.get("test_type") or {}).get("name") or "").strip() or "(unnamed)"
-                tests.append((name, dt))
+                tests.append((name, dt, _ref_name(t.get("creator"))))
         else:
             for name, ttid in test_type_ids.items():
                 records = api.get_tests(part_id, test_type_id=ttid).get("data") or []
@@ -409,7 +409,7 @@ def _fetch_component(api, part_id: str, date_spec: dict | None,
                         fallbacks += 1
                         dt = _parse_created(t.get("created"))
                     if dt is not None:
-                        tests.append((name, dt))
+                        tests.append((name, dt, _ref_name(t.get("creator"))))
                 # #143: the same records feed the plotting mirror — keep the
                 # latest per test type (no extra call).
                 latest = _latest_record(records)
@@ -692,9 +692,10 @@ def sync_test_events(
                        fetched_test_pids + (gone if mode == "full" else []))
         new_test_rows = [
             HwdbTestEvent(instance=instance, part_type_id=part_type_id,
-                          part_id=r["part_id"], test_type_name=name, created=dt)
+                          part_id=r["part_id"], test_type_name=name, created=dt,
+                          created_by=by)
             for r in results if r["has_tests"]
-            for name, dt in r["tests"]
+            for name, dt, by in r["tests"]
         ]
         if new_test_rows:
             HwdbTestEvent.objects.bulk_create(new_test_rows, batch_size=1000)

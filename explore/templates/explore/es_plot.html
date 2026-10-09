@@ -43,6 +43,8 @@
     vertical-align: middle; }
   .es-fields td.lab { width: 38%; color: var(--dim); }
   .es-auto-val { font-family: var(--font-mono); font-size: 12.5px; }
+  .es-yes { color: var(--good); font-weight: 600; }
+  .es-no { color: var(--bad, #a33); font-weight: 600; }
 </style>
 
 <div class="es-page">
@@ -106,7 +108,7 @@
             <td class="lab">{{ f.label }}</td>
             <td>
               {% if f.auto %}
-                {% if f.value is not None %}<span class="es-auto-val">{{ f.value }}</span>{% endif %}
+                {% if f.value is not None %}<span class="es-auto-val{% if f.tri == "pass" %} es-yes{% elif f.tri == "fail" %} es-no{% endif %}">{{ f.value }}</span>{% endif %}
                 {% if f.error %}<div class="es-err">&#9888; {{ f.error }}</div>{% endif %}
                 {% if f.data_path %}<div class="es-hint">auto — <span class="mono">{{ f.data_path }}</span> from the latest <span class="mono">{{ b.test_type_name }}</span> record</div>
                 {% else %}<div class="es-hint">auto — <span class="mono">{{ f.item_path }}</span> from the Item Specifications</div>{% endif %}

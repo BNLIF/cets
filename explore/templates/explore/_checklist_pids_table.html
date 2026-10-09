@@ -12,20 +12,21 @@ open the PID's own checklist page. {% endcomment %}
     {% endif %}
 <div class="tbl-scroll">
     <table class="ship-table">
-        <thead><tr><th>Part ID</th><th>Serial number</th><th>Last checklist</th><th>Updated</th></tr></thead>
+        <thead><tr><th>Part ID</th><th>Serial number</th><th>Last checklist</th><th>By</th><th>Updated</th></tr></thead>
         <tbody>
         {% for p in parts_page %}
             <tr class="ship-row" onclick="if(!getSelection().toString())location.href='{% url 'explore:checklist' part_id=p.part_id name=cl_name %}'" title="Open the “{{ schema.name }}” checklist on {{ p.part_id }}">
                 <td class="mono"><a href="{% url 'explore:checklist' part_id=p.part_id name=cl_name %}" onclick="event.stopPropagation()">{{ p.part_id }}</a></td>
                 <td class="mono">{{ p.serial_number|default:"—" }}</td>
                 <td class="mono">{% if p.filled %}&#10003; {{ p.filled|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+                <td>{{ p.filled_by|default:"—" }}</td>
                 <td class="mono">{% if p.updated %}{{ p.updated|date:"Y-m-d" }}{% else %}—{% endif %}</td>
             </tr>
         {% empty %}
-            <tr><td colspan="4" class="cell-muted">No items mirrored — sync the type first, or scan a PID above.</td></tr>
+            <tr><td colspan="5" class="cell-muted">No items mirrored — sync the type first, or scan a PID above.</td></tr>
         {% endfor %}
         </tbody>
     </table>
 </div>
-    <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">“Last checklist” — this checklist's most recent submission on the item.</p>
+    <p class="cell-muted" style="margin-top: 10px; font-size: 12px;">“Last checklist” — this checklist's most recent submission on the item, and who submitted it.</p>
 </div>

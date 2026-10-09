@@ -1,0 +1,12 @@
+{% comment %}#202: the item's own comments and the latest record's per test type, as
+the generated summary lists them; the sub-components' comments sit under the
+sub-component table (loaded with it). Hidden when there is nothing.{% endcomment %}
+{% if item_comments.item or item_comments.tests %}
+<div class="es-card">
+  <h2>Comments</h2>
+  <table class="es-plot-fields">
+    {% if item_comments.item %}<tr><td class="lab">Item</td><td>{{ item_comments.item }}</td></tr>{% endif %}
+    {% for t in item_comments.tests %}<tr><td class="lab">Test · {{ t.0 }}</td><td>{{ t.1 }}</td></tr>{% endfor %}
+  </table>
+</div>
+{% endif %}

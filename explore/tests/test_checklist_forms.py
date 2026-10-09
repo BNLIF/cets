@@ -1640,7 +1640,11 @@ class TypeChecklistTest(TestCase):
         HwdbTestEvent.objects.create(               # PART has this checklist
             instance="dev", part_type_id=PTID, part_id=PART,
             test_type_name=SCHEMA["test_type_name"],
-            created=tz.make_aware(tz.datetime(2026, 8, 20)))
+            created=tz.make_aware(tz.datetime(2026, 8, 20)), created_by="Hajime M")
+        HwdbTestEvent.objects.create(               # an older one by someone else
+            instance="dev", part_type_id=PTID, part_id=PART,
+            test_type_name=SCHEMA["test_type_name"],
+            created=tz.make_aware(tz.datetime(2026, 8, 1)), created_by="Old Hand")
         m1, m2 = _mocked(_api())
         with m1, m2:
             html = self.client.get(self.TYPE_PAGE).content.decode()
@@ -1650,6 +1654,8 @@ class TypeChecklistTest(TestCase):
         self.assertIn(f"/hw/dev/part/{PTID}-00151/checklist/{NAME}/", html)
         self.assertNotIn("X001-00001", html)
         self.assertIn("&#10003; 2026-08-20", html)                # submitted col
+        self.assertIn("<td>Hajime M</td>", html)                   # #203: By = the newest record's creator
+        self.assertNotIn("Old Hand", html)
         self.assertIn(f"/hw/dev/part-new/{PTID}/?checklist={NAME}", html)
 
     def test_valid_pid_redirects_to_that_items_checklist(self):
@@ -1690,6 +1696,7 @@ class TypeChecklistTest(TestCase):
         row = HwdbTestEvent.objects.get(instance="dev", part_id=PART)
         self.assertEqual(row.part_type_id, PTID)
         self.assertEqual(row.test_type_name, SCHEMA["test_type_name"])
+        self.assertTrue(row.created_by)                       # #203: the submitter
 
     def test_submit_refreshes_the_items_mirror_row(self):
         # the Item card can change status/flags/serial — the mirrored

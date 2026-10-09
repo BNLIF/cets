@@ -608,7 +608,10 @@ def resolve_plot_fields(api, plot, pid: str, saved: dict) -> list[dict]:
     pid's LATEST test record of the plot's test type; item_path fields (#94)
     the pid's latest Item Specifications entry (both live — never stored,
     same rule as numeric plots); manual fields read the values typed on the
-    plot page (``saved``, the ES record's ``plot_fields[slug]``)."""
+    plot page (``saved``, the ES record's ``plot_fields[slug]``). An auto
+    value that is a boolean or a Passed/Failed word also carries ``tri``
+    (``pass`` / ``fail``) so the page and the PDF colour it (#201)."""
+    from .checklistforms import _tri   # the checklist's own pass/fail reading
     rows = []
     rec, err = (None, None)
     if any(f["data_path"] for f in plot["fields"]):
@@ -619,20 +622,70 @@ def resolve_plot_fields(api, plot, pid: str, saved: dict) -> list[dict]:
         spec, spec_err = _item_spec_at(api, pid)
     for f in plot["fields"]:
         if f["data_path"]:
-            value = None if err else _fmt_field_value(_get_by_path(td, f["data_path"]))
-            rows.append({**f, "auto": True, "value": value,
+            raw = None if err else _get_by_path(td, f["data_path"])
+            value = _fmt_field_value(raw)
+            rows.append({**f, "auto": True, "value": value, "tri": _tri(raw),
                          "error": err or (None if value is not None else
                                           f"No value at data_path '{f['data_path']}'.")})
         elif f["item_path"]:
-            value = (None if spec_err else
-                     _fmt_field_value(_get_by_path(spec, f["item_path"])))
-            rows.append({**f, "auto": True, "value": value,
+            raw = None if spec_err else _get_by_path(spec, f["item_path"])
+            value = _fmt_field_value(raw)
+            rows.append({**f, "auto": True, "value": value, "tri": _tri(raw),
                          "error": spec_err or (None if value is not None else
                                                f"No value at item_path '{f['item_path']}'.")})
         else:
             rows.append({**f, "auto": False,
                          "value": str(saved.get(f["label"]) or ""), "error": None})
     return rows
+
+
+# Comments the tools write by themselves — ours, the FNAL Dashboard's
+# "[ExecSum] …" item patch — carry no information for the summary (Chao
+# 2026-10-09). A line matching one of these is dropped; what is left is the
+# comment. Keep in step with the strings in views.py / itemsedit.py.
+_BOILERPLATE = tuple(re.compile(p, re.I) for p in (
+    r"HWDB Explorer",                 # "Checklist “X” submitted via HWDB Explorer", "… uploaded by HWDB Explorer (…)"
+    r"\(Explorer( editor)?\)$",       # "Production plan (Explorer)", "… (Explorer editor)"
+    r"^\[ExecSum\]",                  # the Dashboard's and our own sign-off item patch
+    r"^signed by .+$",                # the DEFAULT sign-off's item comment
+    r"^Sub-component of \S+, position .+$",   # auto-minted children (#167)
+    r"^Patched by the Explorer$",     # bulk Edit items (#166)
+))
+
+
+def _real_comment(text) -> str:
+    """``text`` without its boilerplate lines (see ``_BOILERPLATE``)."""
+    lines = [ln.strip() for ln in str(text or "").splitlines()]
+    return "\n".join(ln for ln in lines
+                     if ln and not any(p.search(ln) for p in _BOILERPLATE))
+
+
+def collect_comments(api, part_id: str, comp: dict, children: list[dict]) -> dict:
+    """The item's comments for the summary (#202, HVS via Hajime 2026-10-08):
+    ``item`` — the component record's own ``comments``; ``tests`` — the
+    comments of the LATEST record of each test type on the item (no
+    histories; the ``ES`` record's are the sign-off log, already in the
+    PDF); ``children`` — each direct sub-component's own comments
+    (``subtree_rows`` rows). Tool-written boilerplate is dropped
+    (``_real_comment``) and only non-empty comments are kept; ``empty``
+    says whether there is anything at all."""
+    from . import parts
+    try:
+        tests = parts.test_summary(api.get_tests(part_id).get("data") or [])
+    except Exception as e:
+        logger.warning("ES comments: tests listing for %s failed: %s", part_id, e)
+        tests = []
+    tests = [(t["test_type"], _real_comment(t.get("comments"))) for t in tests
+             if t["test_type"] != "ES"]
+    children = [(r["part_id"], r.get("functional_position") or "",
+                 _real_comment(r.get("comments"))) for r in children]
+    out = {
+        "item": _real_comment(comp.get("comments")),
+        "tests": [t for t in tests if t[1]],
+        "children": [c for c in children if c[2]],
+    }
+    out["empty"] = not (out["item"] or out["tests"] or out["children"])
+    return out
 
 
 def resolve_plots(api, cfg, part_id: str, children_of, item_images,
@@ -863,6 +916,19 @@ def _yesno(flag, style) -> Paragraph:
     return Paragraph(f'<font color="{color}"><b>{text}</b></font>', style)
 
 
+_TRI_COLOR = {"pass": "#19b478", "fail": "#dc3c3c"}   # the _yesno greens/reds
+
+
+def _field_markup(f: dict) -> str:
+    """A field-group value as paragraph markup: a boolean / Passed / Failed
+    value keeps its word, coloured green or red (#201); blank → a grey dash."""
+    text = escape(f.get("value") or "")
+    if not text:
+        return f'<font color="{_GREY}">—</font>'
+    color = _TRI_COLOR.get(f.get("tri") or "")
+    return f'<font color="{color}"><b>{text}</b></font>' if color else text
+
+
 def _gate_grid(status_label, certified, uploaded) -> Table:
     key = _ds("g-k", fontSize=6.8, leading=9, textColor=colors.HexColor(_GREY))
     val = _ds("g-v", fontSize=9, leading=11.5)
@@ -972,6 +1038,29 @@ def _reference_flowables(refs: list[dict]) -> list:
     return out
 
 
+def _comments_flowables(c: dict) -> list:
+    """The Comments section (#202) as one label/text grid: the item's own
+    comments first, then one row per test type, then one per direct
+    sub-component (PID · position). Rows with nothing to say were dropped
+    by ``collect_comments``."""
+    lab = _ds("cm-l", fontSize=7.5, leading=10, textColor=colors.HexColor(_GREY))
+    val = _ds("cm-v", fontSize=8.5, leading=11)
+    rows = []
+    if c.get("item"):
+        rows.append([Paragraph("Item", lab), Paragraph(escape(c["item"]), val)])
+    for name, text in c.get("tests") or []:
+        rows.append([Paragraph(f"Test · {escape(name)}", lab), Paragraph(escape(text), val)])
+    for pid, pos, text in c.get("children") or []:
+        label = f'<font face="Courier">{escape(pid)}</font>'
+        if pos:
+            label += f" · {escape(pos)}"
+        rows.append([Paragraph(label, lab), Paragraph(escape(text), val)])
+    t = Table(rows, colWidths=[160, 308])
+    t.setStyle(TableStyle([("LINEBELOW", (0, 0), (-1, -1), 0.4, _HAIRLINE),
+                           ("VALIGN", (0, 0), (-1, -1), "TOP"), *_flush()]))
+    return [t]
+
+
 def append_pdf(base: bytes, extra: bytes) -> bytes:
     """The generated summary with the supplemental-material PDF appended.
     Raises ``ValueError`` on an unreadable supplemental file (the summary is
@@ -1050,6 +1139,13 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
         story += _section("References")
         story += _reference_flowables(refs)
 
+    # Item Specs, per-test-type and sub-component comments (#202) — only
+    # when there is at least one; usually short, often none.
+    cm = form.get("comments") or {}
+    if cm and not cm.get("empty"):
+        story += _section("Comments", "item · latest record per test type · direct sub-components")
+        story += _comments_flowables(cm)
+
     # The full append-only comments log (Hajime 2026-07-30) on its own page —
     # the sign-off table only carries each signee's LATEST comment.
     log = [e for e in form.get("comments_log") or [] if isinstance(e, dict)]
@@ -1096,8 +1192,7 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
                 f_val = _ds("pf-v", fontSize=8.5, leading=11)
                 ft = Table(
                     [[Paragraph(escape(f["label"]), f_lab),
-                      Paragraph(escape(f.get("value") or "")
-                                or f'<font color="{_GREY}">—</font>', f_val)]
+                      Paragraph(_field_markup(f), f_val)]
                      for f in flds],
                     colWidths=[160, 308])
                 ft.setStyle(TableStyle([
@@ -1124,11 +1219,13 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
 
 
 def build_default_pdf(part_id: str, signinfo: dict,
-                      subtree: tuple[list[dict], bool], log=None) -> bytes:
+                      subtree: tuple[list[dict], bool], log=None,
+                      comments=None) -> bytes:
     """The configless DEFAULT summary in the same datasheet layout: header
     block, the status/QA-QC row, the single whoami sign-off row, and the
     sub-components table — no checklist, no references. ``log`` (#86) adds
-    the comments-log page, same as the DETAIL layout."""
+    the comments-log page, ``comments`` (#202, ``collect_comments``) the
+    Comments section, same as the DETAIL layout."""
     buf = io.BytesIO()
     facts = []
     if signinfo.get("instance"):
@@ -1157,6 +1254,9 @@ def build_default_pdf(part_id: str, signinfo: dict,
     story += _section("Sub-components",
                       f"{n_sub} direct sub-component{'s' if n_sub != 1 else ''}")
     story += subtree_flowables(*subtree)
+    if comments and not comments.get("empty"):
+        story += _section("Comments", "item · latest record per test type · direct sub-components")
+        story += _comments_flowables(comments)
     log = [e for e in log or [] if isinstance(e, dict)]
     if log:
         story.append(PageBreak())

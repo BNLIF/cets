@@ -35,4 +35,11 @@ responses.{% endcomment %}
   statuses live from HWDB; items that already have an executive summary link to
   it, here and in the generated summary PDF.
   {% if truncated %}<span class="es-no">&#9888; List truncated — too many sub-components to list them all.</span>{% endif %}</p>
+{% if comments %}
+{# #202: each child's own comments, as the generated summary's Comments section lists them #}
+<p class="es-hint" style="margin-top:12px;color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.04em;">Sub-component comments</p>
+<table class="es-plot-fields">
+  {% for r in comments %}<tr><td class="lab"><span class="mono">{{ r.part_id }}</span>{% if r.functional_position %} · {{ r.functional_position }}{% endif %}</td><td>{{ r.comments }}</td></tr>{% endfor %}
+</table>
+{% endif %}
 {% endif %}

@@ -81,11 +81,15 @@ class SyncTestEventsTest(TestCase):
                 {"created": "2025-03-11T10:00:00+00:00", "test_type": {"name": "amc_dataquality_test"}},
             ],
             "P2": [
-                {"created": "2025-04-01T10:00:00+00:00", "test_type": {"name": "amc_bandwidth_test"}},
+                {"created": "2025-04-01T10:00:00+00:00", "test_type": {"name": "amc_bandwidth_test"},
+                 "creator": {"id": 7, "name": "Hajime M", "username": "hm"}},
             ],
         }
         self._run(["P1", "P2"], tests_by_part)
         self.assertEqual(HwdbTestEvent.objects.filter(part_type_id="D05700200001").count(), 3)
+        # #203: the record's creator rides along (display name; "" when absent)
+        self.assertEqual(HwdbTestEvent.objects.get(part_id="P2").created_by, "Hajime M")
+        self.assertEqual(HwdbTestEvent.objects.filter(part_id="P1").first().created_by, "")
         # registration events: one per listed component
         self.assertEqual(HwdbComponentEvent.objects.filter(part_type_id="D05700200001").count(), 2)
         node = H.objects.get(level=H.LEVEL_TYPE, part_type_id="D05700200001")

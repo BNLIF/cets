@@ -173,7 +173,7 @@
         {% for f in b.fields %}
         <tr>
           <td class="lab">{{ f.label }}</td>
-          <td>{% if f.value %}{% if f.auto %}<span class="mono">{{ f.value }}</span>{% else %}{{ f.value }}{% endif %}{% else %}<span class="es-hint">—</span>{% endif %}</td>
+          <td>{% if f.value %}{% if f.auto %}<span class="mono{% if f.tri == "pass" %} es-yes{% elif f.tri == "fail" %} es-no{% endif %}">{{ f.value }}</span>{% else %}{{ f.value }}{% endif %}{% else %}<span class="es-hint">—</span>{% endif %}</td>
         </tr>
         {% endfor %}
       </table>
@@ -234,6 +234,8 @@
       <p class="es-hint">Every check must be confirmed before signing; the state is saved with each signature.</p>
     </div>
     {% endif %}
+
+    {% include "explore/_es_comments.html" %}
 
     <div class="es-card">
       <h2>Sub-components</h2>
@@ -356,6 +358,7 @@
   {% endif %}
 
   {% if not cfg %}
+  {% include "explore/_es_comments.html" %}
   <div class="es-card">
     <h2>Sub-components</h2>
     <div class="es-subtree-pane" hx-get="{% url 'explore:es_subtree' part_id=part_id %}" hx-trigger="load" hx-swap="outerHTML">

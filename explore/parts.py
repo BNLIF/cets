@@ -329,6 +329,8 @@ def subtree_rows(api, root_pid: str, *, max_nodes: int = _SUBTREE_NODE_CAP
             status=normalize_status(comp.get("status")) if comp is not None else None,
             uploaded=comp.get("qaqc_uploaded") if comp is not None else None,
             certified=comp.get("certified_qaqc") if comp is not None else None,
+            # the child's Item Specs comments — the ES Comments section (#202)
+            comments=(comp.get("comments") or "") if comp is not None else "",
             # HWDB's internal numeric id — the web UI's images page is
             # addressed by it, not by the part id
             component_id=comp.get("component_id") if comp is not None else None)

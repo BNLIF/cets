@@ -19,7 +19,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_not_required
 from django.core.cache import cache
 from django.core.paginator import Paginator
-from django.db.models import Count, F, Max, Q
+from django.db.models import Count, F, Q
 from django.http import (
     Http404, HttpResponse, HttpResponseBadRequest, HttpResponseForbidden,
     JsonResponse,
@@ -4146,7 +4146,8 @@ def explore_checklist_view(request, part_id, name):
                 HwdbTestEvent.objects.create(
                     instance=inst, part_type_id=ptid, part_id=part_id,
                     test_type_name=schema["test_type_name"],
-                    created=timezone.now())
+                    created=timezone.now(),
+                    created_by=actor)   # #203: the next sync replaces it with HWDB's display name
             except Exception as e:
                 logger.warning("mirror append for %s failed: %s", part_id, e)
             # the Item card may have changed status/flags/serial/location —
@@ -4339,17 +4340,17 @@ def explore_type_checklist_view(request, part_type_id, name):
             .order_by(F("updated").desc(nulls_last=True),
                       F("created").desc(nulls_last=True), "part_id"))
     parts_page = Paginator(rows, 50).get_page(request.GET.get("page"))
-    filled = {}
+    filled = {}   # part_id → (when, by) of this checklist's newest record (#203: by)
     if schema["test_type_name"]:
-        filled = dict(
-            HwdbTestEvent.for_instance(inst)
-            .filter(part_type_id=part_type_id,
-                    test_type_name=schema["test_type_name"],
-                    part_id__in=[p.part_id for p in parts_page])
-            .values("part_id").annotate(last=Max("created"))
-            .values_list("part_id", "last"))
+        for pid, when, by in (
+                HwdbTestEvent.for_instance(inst)
+                .filter(part_type_id=part_type_id,
+                        test_type_name=schema["test_type_name"],
+                        part_id__in=[p.part_id for p in parts_page])
+                .order_by("created").values_list("part_id", "created", "created_by")):
+            filled[pid] = (when, by)
     for p in parts_page:
-        p.filled = filled.get(p.part_id)
+        p.filled, p.filled_by = filled.get(p.part_id, (None, ""))
 
     ctx = {
         "active_nav": "hardware",
@@ -5796,6 +5797,9 @@ def explore_exec_summary_view(request, part_id):
         "status_current_id": execsummary.STATUS_ID_BY_LABEL.get(status_name),
         "certified": bool(comp.get("certified_qaqc")),
         "uploaded": bool(comp.get("qaqc_uploaded")),
+        # #202: the item's and per-test-type comments as the PDF shows them;
+        # the sub-components' ride in with the lazily loaded subtree pane
+        "item_comments": execsummary.collect_comments(api, part_id, comp, []),
         "summaries": summaries,
         "plot_blocks": plot_blocks,
         "ptid": ptid,
@@ -5982,9 +5986,14 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
                                  f"/edit/component/{part_id}")}
         # The comments log rides into the DEFAULT PDF too (#86).
         _es, _td, def_log, _se, _pf = execsummary.fetch_es_state(api, part_id)
+        subtree = _es_link_subtree(request, api, part_id)
+        try:
+            comp = api.get_component(part_id).get("data") or {}
+        except requests.RequestException:
+            comp = {}
         pdf_bytes = execsummary.build_default_pdf(
-            part_id, signinfo, _es_link_subtree(request, api, part_id),
-            log=def_log)
+            part_id, signinfo, subtree, log=def_log,
+            comments=execsummary.collect_comments(api, part_id, comp, subtree[0]))   # #202
         name = f"ExecutiveSummary_{part_id}_{timezone.now():{execsummary.FILENAME_TS_FMT}}.pdf"
         err = _upload_summary_pdf(api, part_id, io.BytesIO(pdf_bytes), name)
         if err:
@@ -6194,6 +6203,7 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
         type_path = (" / ".join(x for x in (
             curation.project_label(inst, leaf.project).rsplit(" (", 1)[0],
             leaf.system_name, leaf.subsystem_name) if x) if leaf else "")
+        subtree = _es_link_subtree(request, api, part_id)
         pdf_bytes = execsummary.build_detail_pdf(part_id, {
             "type_name": leaf.name if leaf else "",
             "type_path": type_path,
@@ -6214,7 +6224,8 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             # shows each signee's latest comment.
             "comments_log": comments_log,
             "references": cfg["references"],
-            "subtree": _es_link_subtree(request, api, part_id),
+            "subtree": subtree,
+            "comments": execsummary.collect_comments(api, part_id, comp, subtree[0]),
             "plot_blocks": plot_blocks,
         })
         if supp:
@@ -6995,6 +7006,11 @@ def explore_es_subtree_view(request, part_id):
         api = FnalDbApiClient(settings.HWDB_PROFILES[instance_of(request)]["api"], bearer)
         try:
             ctx["rows"], ctx["truncated"] = subtree_rows(api, part_id)
+            # #202: each child's real comments (tool boilerplate dropped, as
+            # in the PDF), for the list under the table
+            ctx["comments"] = [
+                {**r, "comments": c} for r in ctx["rows"]
+                if (c := execsummary._real_comment(r.get("comments")))]
         except Exception:
             logger.exception("explore_es_subtree_view(%s) crashed", part_id)
             ctx["error"] = "fetch_failed"

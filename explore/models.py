@@ -115,6 +115,9 @@ class HwdbTestEvent(InstanceScoped):
     part_id = models.CharField(max_length=50)
     test_type_name = models.CharField(max_length=100)
     created = models.DateTimeField()
+    # #203: the record's HWDB creator (display name) — the checklist PID
+    # chooser's "By" column; "" on rows mirrored before the column existed
+    created_by = models.CharField(max_length=120, blank=True, default="")
 
     class Meta:
         indexes = [models.Index(fields=["part_type_id", "created"])]

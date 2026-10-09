@@ -686,6 +686,125 @@ class PageTest(TestCase):
         self.assertNotIn('/hw/dev/part/D05700300001-00013/exec-summary/', html)
         self.assertNotIn("none yet", html)
 
+    def test_comments_card_lists_item_and_test_comments(self):
+        # #202 (HVS via Hajime 2026-10-08): the item's own comments and the
+        # latest record's per test type (ES excluded) — as the PDF lists them
+        api = _api(es=[])
+        api.get_component.return_value = {"data": {
+            "status": {"id": 120, "name": "QA/QC Tests - Passed All"},
+            "certified_qaqc": True, "qaqc_uploaded": False,
+            "comments": "scratch on the lid"}}
+        api.get_tests.side_effect = lambda pid, test_type_id=None, history=False: (
+            {"data": []} if test_type_id else {"data": [
+                {"test_type": {"name": "RoomT QC"}, "created": "2026-09-01T00:00:00",
+                 "comments": "channel 3 noisy"},
+                {"test_type": {"name": "RoomT QC"}, "created": "2026-08-01T00:00:00",
+                 "comments": "older, not shown"},
+                {"test_type": {"name": "ES"}, "created": "2026-09-02T00:00:00",
+                 "comments": "sign-off chatter"},
+                {"test_type": {"name": "Burn-in"}, "created": "2026-09-03T00:00:00",
+                 "comments": ""}]})
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn("<h2>Comments</h2>", html)
+        self.assertIn("scratch on the lid", html)
+        self.assertIn("Test · RoomT QC", html)
+        self.assertIn("channel 3 noisy", html)
+        self.assertNotIn("older, not shown", html)
+        self.assertNotIn("sign-off chatter", html)
+        self.assertNotIn("Burn-in", html)
+
+    def test_collect_comments_drops_tool_boilerplate(self):
+        # Chao 2026-10-09: comments the tools write by themselves say nothing
+        api = mock.Mock(get_tests=lambda pid: {"data": [
+            {"test_type": {"name": "GUI_Test"}, "created": "2026-09-01",
+             "comments": "Checklist “GUI_Test” submitted via HWDB Explorer"},
+            {"test_type": {"name": "Burn-in"}, "created": "2026-09-01",
+             "comments": "ch 3 noisy"}]})
+        cm = execsummary.collect_comments(
+            api, BOX,
+            {"comments": "[ExecSum] signature 'QA' uploaded, also Status, QAQC "
+                         "Certified, and Uploaded flags updated.\n"
+                         "[2026-09-01 10:00:00] Repaired (#1): C12 replaced\n"
+                         "signed by Chao Zhang"},
+            [{"part_id": "D05700300001-00012", "functional_position": "FEB1",
+              "comments": "Sub-component of D05700300001-00001, position FEB1"},
+             {"part_id": "D05700300001-00013", "functional_position": "FEB2",
+              "comments": "Patched by the Explorer"}])
+        self.assertEqual(cm["item"], "[2026-09-01 10:00:00] Repaired (#1): C12 replaced")
+        self.assertEqual(cm["tests"], [("Burn-in", "ch 3 noisy")])
+        self.assertEqual(cm["children"], [])
+        only_noise = execsummary.collect_comments(
+            mock.Mock(get_tests=lambda pid: {"data": []}), BOX,
+            {"comments": "Executive Summary config (Explorer editor)"}, [])
+        self.assertTrue(only_noise["empty"])
+
+    def test_comments_card_hidden_when_nothing_to_say(self):
+        api = _api(es=[])
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertNotIn("<h2>Comments</h2>", html)
+
+    def test_subtree_pane_lists_child_comments(self):
+        api = _api(es=[])
+        api.get_subcomponents.return_value = {"data": [
+            {"part_id": "D05700300001-00012", "type_name": "FEB",
+             "functional_position": "FEB1", "operation": "mount"},
+            {"part_id": "D05700300001-00013", "type_name": "FEB",
+             "functional_position": "FEB2", "operation": "mount"}]}
+        api.get_component.side_effect = lambda pid: {"data": {
+            "status": {"name": "In Fabrication"},
+            "comments": ("bent pin, reflowed\nsigned by Chao Zhang" if pid.endswith("12")
+                         else "signed by Chao Zhang")}}   # Chao 2026-10-09: boilerplate only
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(f"/hw/dev/part/{BOX}/es-subtree/").content.decode()
+        self.assertIn("Sub-component comments", html)
+        self.assertIn("D05700300001-00012</span> · FEB1", html)
+        self.assertIn("bent pin, reflowed", html)
+        self.assertNotIn("signed by", html)
+        self.assertEqual(html.count("FEB2"), 1)        # the table row only — no comment row
+
+    def test_pdf_comments_section(self):
+        import io
+        from pypdf import PdfReader
+        base = {"status_label": "OK", "certified_flag": True, "uploaded_flag": True,
+                "signee_rows": [], "subtree": ([], False)}
+        cm = execsummary.collect_comments(
+            mock.Mock(get_tests=lambda pid: {"data": [
+                {"test_type": {"name": "RoomT QC"}, "created": "2026-09-01",
+                 "comments": "channel 3 noisy"},
+                {"test_type": {"name": "ES"}, "created": "2026-09-02",
+                 "comments": "sign-off chatter"}]}),
+            BOX, {"comments": "scratch on the lid"},
+            [{"part_id": "D05700300001-00012", "functional_position": "FEB1",
+              "comments": "bent pin"},
+             {"part_id": "D05700300001-00013", "functional_position": "FEB2",
+              "comments": ""}])
+        self.assertFalse(cm["empty"])
+        self.assertEqual(cm["tests"], [("RoomT QC", "channel 3 noisy")])
+        self.assertEqual(cm["children"], [("D05700300001-00012", "FEB1", "bent pin")])
+        pdf = execsummary.build_detail_pdf(BOX, {**base, "comments": cm})
+        text = "".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages)
+        self.assertIn("COMMENTS", text)
+        self.assertIn("scratch on the lid", text)
+        self.assertIn("channel 3 noisy", text)
+        self.assertIn("bent pin", text)
+        self.assertNotIn("sign-off chatter", text)
+        # the DEFAULT layout carries the same section
+        pdf = execsummary.build_default_pdf(BOX, {"signature": "C"}, ([], False), comments=cm)
+        text = "".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages)
+        self.assertIn("scratch on the lid", text)
+        # nothing to say → no section at all
+        empty = execsummary.collect_comments(
+            mock.Mock(get_tests=lambda pid: {"data": []}), BOX, {}, [])
+        self.assertTrue(empty["empty"])
+        pdf = execsummary.build_detail_pdf(BOX, {**base, "comments": empty})
+        text = "".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages)
+        self.assertNotIn("COMMENTS", text)
+
     def test_comments_log_card_renders_entries(self):
         api = _api(es=[], log=[
             {"name": "Chao Zhang", "timestamp": "2026-07-30 09:00",
@@ -1337,6 +1456,34 @@ class PlotFieldsTest(TestCase):
         self.assertIsNone(rows[0]["error"])
         self.assertEqual(rows[1]["value"], "looks fine")
         self.assertFalse(rows[1]["auto"])
+
+    def test_resolve_fields_marks_booleans_and_pass_fail_words(self):
+        # #201 (HVS via Hajime 2026-10-08): a boolean / Passed / Failed value
+        # keeps its word and carries tri=pass|fail for green/red rendering
+        api = _fields_api()
+        api.get_tests.side_effect = lambda pid, test_type_id=None, history=False: {
+            "data": [{"test_data": {"DATA": {"ok": True, "bad": False,
+                                             "word": "Failed", "n": 3}}}]}
+        plot = execsummary._normalize(
+            {**CFG_FIELDS, "plots": [{**CFG_FIELDS["plots"][0], "fields": [
+                {"label": "Ok", "data_path": "DATA.ok"},
+                {"label": "Bad", "data_path": "DATA.bad"},
+                {"label": "Word", "data_path": "DATA.word"},
+                {"label": "N", "data_path": "DATA.n"},
+                {"label": "Note"}]}]})["plots"][0]
+        rows = execsummary.resolve_plot_fields(api, plot, BOX, {})
+        self.assertEqual([(r["value"], r.get("tri")) for r in rows],
+                         [("True", "pass"), ("False", "fail"), ("Failed", "fail"),
+                          ("3", ""), ("", None)])
+
+    def test_pdf_colours_pass_fail_field_values(self):
+        green = execsummary._field_markup({"value": "Passed", "tri": "pass"})
+        red = execsummary._field_markup({"value": "False", "tri": "fail"})
+        self.assertIn("#19b478", green)
+        self.assertIn("Passed", green)
+        self.assertIn("#dc3c3c", red)
+        self.assertNotIn("<font", execsummary._field_markup({"value": "3", "tri": ""}))
+        self.assertIn("—", execsummary._field_markup({"value": None}))
 
     def test_resolve_fields_reports_a_data_path_miss(self):
         api = _fields_api()

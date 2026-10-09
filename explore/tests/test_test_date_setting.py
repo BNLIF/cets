@@ -87,7 +87,7 @@ class SpecOverrideTest(TestCase):
         spec = TestDateSetting(path=["Test Date"], style="ymd").spec()
         r = events._fetch_component(api, "P1", spec, {"QC": 7}, need_detail=False, need_tests=True)
         self.assertEqual(r["date_fallbacks"], 2)
-        self.assertEqual([dt.day for _n, dt in r["tests"]], [5, 30, 31])
+        self.assertEqual([dt.day for _n, dt, _by in r["tests"]], [5, 30, 31])
 
 
 class TypeViewTest(TestCase):
