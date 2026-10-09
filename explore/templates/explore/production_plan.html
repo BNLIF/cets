@@ -51,7 +51,7 @@
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
   <h1>Production plan <span class="mono" style="font-size:.75em; font-weight:400; color:var(--dim);">{{ part_type_id }}</span></h1>
   <p class="es-sub">{{ type_name }} · how many are needed and when; drawn on the type’s dashboard and in its consortium’s production-status table.</p>
-  {% if role_gate %}<div class="banner banner-warn" style="margin: 0 0 14px;">&#9888; {% if role_gate.required %}Saving onto this type needs one of its HWDB roles <b>{{ role_gate.required|join:", " }}</b>. Your account holds {% if role_gate.mine %}<b>{{ role_gate.mine|join:", " }}</b>{% else %}no roles{% endif %}, so HWDB will refuse the save.{% else %}This type lists no HWDB roles, so HWDB refuses every write onto it. An HWDB administrator must add roles to the type first.{% endif %}</div>{% endif %}
+  {% if role_gate %}<div class="banner banner-warn" style="margin: 0 0 14px;">&#9888; {% if role_gate.required %}Saving onto this type needs one of its HWDB roles <b>{{ role_gate.required|join:", " }}</b>. Your account holds {% if role_gate.mine %}<b>{{ role_gate.mine|join:", " }}</b>{% else %}no roles{% endif %}, so the plan cannot be edited here.{% else %}This type lists no HWDB roles, so HWDB refuses every write onto it. An HWDB administrator must add roles to the type first.{% endif %}</div>{% endif %}
 
   <div class="es-card">
   {% if can_edit %}

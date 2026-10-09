@@ -463,7 +463,7 @@ def explore_production_status_view(request, part_type_id):
         "rows": production.table(rows, plans, production.counts(inst, ids),
                                  production.names(inst, ids), timezone.localdate()),
         "list_url": _rev(request, "explore:production_list", args=[part_type_id]),
-        "can_edit": inst in settings.HWDB_WRITE_INSTANCES and _is_architect(request, inst, api),
+        "can_edit": inst in settings.HWDB_WRITE_INSTANCES,   # the plan pages apply the type's roles themselves
     })
 
 
@@ -493,14 +493,18 @@ def explore_production_plan_view(request, part_type_id):
         messages.error(request, FNAL_UNAVAILABLE)
         return redirect(nxt or _rev(request, "explore:home"))
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
-    can_edit = inst in settings.HWDB_WRITE_INSTANCES and _is_architect(request, inst, api)
+    # Chao 2026-10-09: the gate is HWDB's own — one of the type's roles (a type
+    # image is refused otherwise, flags or not); the banner says which when the
+    # account holds none, and the form stays off
+    role_gate = _type_role_gate(request, inst, api, part_type_id) if inst in settings.HWDB_WRITE_INSTANCES else None
+    can_edit = inst in settings.HWDB_WRITE_INSTANCES and role_gate is None
     node = HierarchyNode.for_instance(inst).filter(
         level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
     current, vs = production.read_plan(api, part_type_id)
 
     if request.method == "POST":
         if not can_edit:
-            return HttpResponseForbidden("Editing a production plan needs the HWDB architect role on a write instance.")
+            return HttpResponseForbidden("Editing a production plan needs one of the type’s HWDB roles, on a write instance.")
         g = lambda k: (request.POST.get(k) or "").strip()   # noqa: E731
         errors = []
         needed = None
@@ -550,9 +554,7 @@ def explore_production_plan_view(request, part_type_id):
         "history": [{**h, "version": len(vs) - i} for i, h in enumerate(production.plan_history(api, vs))],
         "n_versions": len(vs),
         "can_edit": can_edit,
-        # a type image is gated by the type's HWDB roles like its items (#173),
-        # whatever the architect flag — say so before HWDB refuses the save
-        "role_gate": _type_role_gate(request, inst, api, part_type_id) if can_edit else None,
+        "role_gate": role_gate,
         "next": nxt,
         "file_name": production.plan_name(part_type_id),
     })
@@ -580,14 +582,15 @@ def explore_production_list_view(request, part_type_id):
         messages.error(request, FNAL_UNAVAILABLE)
         return redirect(nxt or _rev(request, "explore:home"))
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
-    can_edit = inst in settings.HWDB_WRITE_INSTANCES and _is_architect(request, inst, api)
+    role_gate = _type_role_gate(request, inst, api, part_type_id) if inst in settings.HWDB_WRITE_INSTANCES else None
+    can_edit = inst in settings.HWDB_WRITE_INSTANCES and role_gate is None   # the type's roles, as HWDB applies them
     node = HierarchyNode.for_instance(inst).filter(
         level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
     rows, vs = production.read_list(api, part_type_id)
 
     if request.method == "POST":
         if not can_edit:
-            return HttpResponseForbidden("Editing a component list needs the HWDB architect role on a write instance.")
+            return HttpResponseForbidden("Editing a component list needs one of the type’s HWDB roles, on a write instance.")
         new, bad = [], []
         for line in (request.POST.get("rows") or "").splitlines():
             line = line.strip()
@@ -635,7 +638,7 @@ def explore_production_list_view(request, part_type_id):
         "n_versions": len(vs),
         "last": vs[0] if vs else None,
         "can_edit": can_edit,
-        "role_gate": _type_role_gate(request, inst, api, part_type_id) if can_edit else None,
+        "role_gate": role_gate,
         "next": nxt,
         "status_url": _rev(request, "explore:production_status", args=[part_type_id]),
         "file_name": production.list_name(part_type_id),
@@ -7167,6 +7170,20 @@ def explore_docs_plots_view(request):
 
 @login_not_required
 @fnal_login_required
+def explore_docs_permissions_view(request):
+    """Who may write what in HWDB, as far as this project has verified it
+    (Chao 2026-10-09: the training site names the flags but not what gates
+    each write). Static prose in the template; each rule says how it was
+    established — a probe, Hajime, or the training site — so a reader can
+    tell a verified rule from a reported one."""
+    inst = instance_of(request)
+    return render(request, "explore/docs_permissions.html", {
+        "active_nav": "docs",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "hwdb_ui_base": settings.HWDB_PROFILES[inst]["ui"],
+    })
+
+
 def explore_docs_checklist_editor_view(request):
     """The checklist editor, at length: the checklist card, sections and
     rules, placement and the grid, every field type with its controls, the

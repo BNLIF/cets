@@ -30,6 +30,7 @@ urlpatterns = [
     path("docs/", views.explore_docs_view, name="docs"),
     path("docs/plots/", views.explore_docs_plots_view, name="docs_plots"),
     path("docs/checklist-editor/", views.explore_docs_checklist_editor_view, name="docs_checklist_editor"),
+    path("docs/permissions/", views.explore_docs_permissions_view, name="docs_permissions"),   # who may write what in HWDB (Chao 2026-10-09)
     path("institutions/", views.explore_institutions_view, name="institutions"),
     path("lookup/<str:part_id>/", views.explore_lookup_view, name="lookup"),
     path("checklist-map/<str:part_id>/", views.explore_checklist_map_view, name="checklist_map"),

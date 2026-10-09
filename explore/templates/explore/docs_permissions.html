@@ -1,0 +1,78 @@
+{% extends 'explore/base.html' %}
+{% block title %}Who may write what · Docs · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .dd-page { padding: 26px 30px 56px; max-width: 880px; font-size: 14px; color: var(--dim); line-height: 1.5; }
+  .dd-page h1 { font-size: 1.5rem; color: var(--ink); margin: 0 0 4px; letter-spacing: -0.01em; }
+  .dd-sub { color: var(--dim); font-size: 13.5px; margin: 0 0 18px; }
+  .dd-page a { color: var(--accent); text-decoration: none; }
+  .dd-page h2 { font-size: 15px; color: var(--ink); margin: 30px 0 6px; padding-top: 14px; border-top: 1px solid var(--rule); }
+  .dd-page p { margin: 6px 0; }
+  .dd-page code { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  .dd-page table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 13px; }
+  .dd-page th, .dd-page td { text-align: left; vertical-align: top; padding: 6px 10px; border-top: 1px solid var(--rule); }
+  .dd-page th { font-size: 11.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; border-top: none; font-weight: 600; }
+  .dd-page td:first-child { white-space: nowrap; }
+  .dd-page ul { margin: 6px 0; padding-left: 22px; }
+  .dd-page li { margin: 2px 0; }
+  .dd-ui { font-weight: 600; color: var(--ink); }
+  @media (max-width: 600px) { .dd-page { padding: 18px 16px 40px; } .dd-page td:first-child { white-space: normal; } }
+</style>
+{# Chao 2026-10-09: the training site names the privileges but not what gates each write; this page keeps what the project has established, and says how. Update it whenever a probe or an answer from the HWDB team changes a row. #}
+
+<div class="dd-page">
+  <h1>Who may write what</h1>
+  <p class="dd-sub">HWDB decides every write; the Explorer only warns before one it expects to be refused. An account has three
+    things that matter: it is <b>active</b> (everyone who can sign in), it may hold the <b>administrator</b> and <b>architect</b> flags,
+    and it holds zero or more <b>roles</b>. A component type lists the roles that may write to it. The
+    <a href="https://dune.github.io/computing-HWDB/02-Introduction-HWDB/index.html" target="_blank" rel="noopener">training site</a>
+    introduces the flags; the rules below are what the database applies.</p>
+
+  <h2 id="rules">The rules</h2>
+  {% comment %}Provenance, kept here rather than on the page (Chao 2026-10-09): items/tests/specs = type role — verified dev 2026-09-29 (specs PATCH refused on a role-less type, accepted on types listing a held role) + Hajime 2026-09-29 (empty roles = nobody; Roles and Manufacturers each need an entry). Type attachments = type role, flags don't substitute — verified dev 2026-10-08 (chaoz with administrator+architect and roles builder/tester/type-manager refused on D00400300001 [SiPM_test] and Z10401100002 [no roles], accepted on Z10400100001 [builder] and Z00100600001 [tester]); OPEN: Hajime believes administrator suffices, prod unprobed. Test-type creation = type role — verified dev 2026-07-17. Edit a type = administrator, create a type/subsystem = architect, grants in the web UI — training site.{% endcomment %}
+  <table>
+    <tr><th>Write</th><th>Needs</th></tr>
+    <tr><td>Read anything</td><td>an active account</td></tr>
+    <tr><td>Create, edit or link an item<br>Submit a test (a checklist)<br>Change an item’s specifications</td>
+      <td><b>one of the type’s roles</b>. A type whose role list is empty accepts nobody. The flags do not substitute.</td></tr>
+    <tr><td>Attach a file to a type<br>(checklist schema, ES config, production plan, component list, a drawing)</td>
+      <td><b>one of the type’s roles</b>. The administrator and architect flags do not substitute.</td></tr>
+    <tr><td>Create a test type on a type</td><td>one of the type’s roles</td></tr>
+    <tr><td>Edit a type (positions, connectors, roles, manufacturers)</td><td>the <b>administrator</b> flag</td></tr>
+    <tr><td>Create a type or a subsystem</td><td>the <b>architect</b> flag</td></tr>
+    <tr><td>Grant a role, a flag, or add roles to a type</td><td>an HWDB administrator, in the <a href="{{ hwdb_ui_base }}" target="_blank" rel="noopener">HWDB web UI</a>; the Explorer cannot do it</td></tr>
+  </table>
+  <p>Roles are per instance: the development and production databases keep separate accounts, roles and flags. Holding the
+    architect flag on dev says nothing about prod.</p>
+
+  <h2 id="who">The same, by account</h2>
+  <p>Flags and roles add up: an administrator who also holds a type’s role may do everything in both rows.</p>
+  <table>
+    <tr><th>Account</th><th>May</th><th>May not</th></tr>
+    <tr><td>Active user, no roles</td><td>read everything; hold the Explorer’s own bookmarks, drafts and plan lines in the browser</td><td>write anything to HWDB</td></tr>
+    <tr><td>Holder of a type’s role</td><td>on that type: create, edit and link items, submit tests and checklists, change specifications, attach files to the type (checklist schemas, ES configs, production plans, component lists, drawings), create test types</td><td>the same on a type whose roles it does not hold; edit or create types</td></tr>
+    <tr><td>Administrator</td><td>edit a type: positions, connectors, roles, manufacturers; add users to roles; in the Explorer, the Positions page</td><td>write items or attach files to a type whose roles it does not hold; create types</td></tr>
+    <tr><td>Architect</td><td>create subsystems and types; in the Explorer, clone a type on the Positions page and set a type’s category (shipping container, consortium type)</td><td>write items or attach files to a type whose roles it does not hold; edit an existing type without the administrator flag</td></tr>
+  </table>
+
+  <h2 id="explorer">What the Explorer gates itself</h2>
+  <p>On top of HWDB’s own checks, some Explorer pages open only for certain accounts, so that a type-level change is not made by
+    accident. These are the Explorer’s rules, not HWDB’s:</p>
+  <table>
+    <tr><th>Page</th><th>Opens for</th></tr>
+    <tr><td>Checklist editor, ES config, New item, Edit items, Upload sheet</td><td>anyone on a write instance; HWDB applies the type’s roles on save</td></tr>
+    <tr><td>Positions page</td><td>administrator or architect; editing needs administrator, cloning the type needs architect</td></tr>
+    <tr><td>Category dropdown on a type page (shipping container, consortium type)</td><td>architect</td></tr>
+    <tr><td>Production plan and Component list forms</td><td>one of the type’s roles, as HWDB applies them; the page says which roles when you hold none</td></tr>
+    <tr><td>Checklists that name their own roles</td><td>as the schema says; the fill page names the roles up front</td></tr>
+  </table>
+
+  <h2 id="see">Seeing what you hold</h2>
+  <ul>
+    <li>The pages that write to a type show a warning naming the type’s roles and yours when you hold none of them, and say so when the type lists none at all.</li>
+    <li>Your roles and flags are read from HWDB once per session. After a grant, sign out and in again.</li>
+    <li>The type’s roles are on its page in the <a href="{{ hwdb_ui_base }}" target="_blank" rel="noopener">HWDB web UI</a>; ask a consortium liaison with the administrator flag to add you to one.</li>
+  </ul>
+</div>
+{% endblock %}

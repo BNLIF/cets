@@ -266,11 +266,9 @@ class StatusPageTest(TestCase):
             self.client.get("/hw/status/D05700200099/")
         self.assertFalse(ProductionList.objects.exists())
         self.assertTrue(ConsortiumTypeOverride.objects.exists())   # Chao: only the type page sets or unsets the mark
-        api.whoami.return_value = {"data": {"architect": False}}
-        _forget_role(self.client)
-        with m1, m2:
+        with self.settings(HWDB_WRITE_INSTANCES=["prod"]), m1, m2:
             html = self.client.get(self.URL).content.decode()
-        self.assertIn("No component list on this type yet.", html)   # no link for a non-architect
+        self.assertIn("No component list on this type yet.", html)   # a read-only instance: no link
 
 
 class PlanPageTest(TestCase):
@@ -298,12 +296,14 @@ class PlanPageTest(TestCase):
         self.assertIn('<td class="pl-dim">schedule moved</td>', html)
         self.assertIn('<td class="pl-dim">initial</td>', html)
         self.assertNotIn("banner-warn", html)
-        # the type's HWDB roles gate the save, architect or not (dev 2026-10-08: "Not authorized")
+        # the type's HWDB roles gate the edit, flags or not (dev 2026-10-08: "Not authorized"; Chao 2026-10-09: no architect gate)
         api.get_component_type.return_value = {"data": {"roles": [{"id": 34, "name": "SiPM_test"}]}}
         with mock.patch("explore.views._my_roles", return_value=[{"id": 9, "name": "builder"}]), m1, m2:
             html = self.client.get(self.URL).content.decode()
-        self.assertIn("Saving onto this type needs one of its HWDB roles <b>SiPM_test</b>. Your account holds <b>builder</b>, so HWDB will refuse the save.", html)
-        self.assertIn('<form method="post">', html)   # the form stays: HWDB has the last word
+            self.assertEqual(self.client.post(self.URL, {"needed": "1"}).status_code, 403)
+        self.assertIn("Saving onto this type needs one of its HWDB roles <b>SiPM_test</b>. Your account holds <b>builder</b>, so the plan cannot be edited here.", html)
+        self.assertNotIn('<form method="post">', html)
+        self.assertIn("<dt>Needed</dt><dd>48000</dd>", html)   # the values and the history stay readable
 
     def test_save_posts_a_version_caches_and_logs(self):
         from explore.models import ActivityEvent
@@ -340,25 +340,18 @@ class PlanPageTest(TestCase):
             r = self.client.post(self.URL, {})
             self.assertEqual(json.loads(api.post_component_type_image.call_args.args[1].getvalue())["needed"], None)
             self.assertIsNone(ProductionPlan.for_instance("dev").get(part_type_id=SIPM).needed)
-            # not an architect: the values and the history, no form, a POST refused
-            api.whoami.return_value = {"data": {"architect": False}}
-            _forget_role(self.client)
-            html = self.client.get(self.URL).content.decode()
-            self.assertNotIn('<form method="post">', html)
-            self.assertIn("<dt>Needed</dt><dd>48000</dd>", html)
-            self.assertIn("<h2", html)   # History
-            self.assertEqual(self.client.post(self.URL, {"needed": "1"}).status_code, 403)
             # a type without a plan
             html = self.client.get(f"/hw/dev/plan/{PDS}/").content.decode()
-            self.assertIn("No plan on this type yet.", html)
+            self.assertIn('<form method="post">', html)   # roles unreadable in the mock = no gate; HWDB has the last word
+            self.assertIn('name="needed" min="0" step="1" value=""', html)
             self.assertNotIn("History", html.split("</style>")[1])
-        # not a write instance: no form even for an architect
-        api.whoami.return_value = {"data": {"architect": True}}
-        _forget_role(self.client)
+            self.assertIn(f"Production_plan_{PDS}.json</span> on the type in HWDB</p>", html)   # no versions yet
+        # not a write instance: no form, no roles asked
         with self.settings(HWDB_WRITE_INSTANCES=["prod"]), m1, m2:
             html = self.client.get(self.URL).content.decode()
         self.assertNotIn('<form method="post">', html)
         self.assertIn("<dt>Needed</dt>", html)
+        self.assertIn("<h2", html)   # History
 
 
 class ListPageTest(TestCase):
@@ -377,9 +370,6 @@ class ListPageTest(TestCase):
             self.assertIn('<textarea class="pl-rows" name="rows" spellcheck="false" placeholder="', html)
             self.assertIn(f">{SIPM}  SiPM boards (6 SiPMs)\n{PDS}</textarea>", html)
             self.assertIn(f"Production_list_{PTID}.json</span> on the type in HWDB · 1 version · last saved 2026-10-08 10:00", html)
-            api.get_component_type.return_value = {"data": {"roles": []}}
-            with mock.patch("explore.views._my_roles", return_value=[{"id": 9, "name": "builder"}]):
-                self.assertIn("This type lists no HWDB roles, so HWDB refuses every write onto it.", self.client.get(self.URL).content.decode())
             r = self.client.post(self.URL, {"rows": f"{PDS}  PDS modules\n\n{SIPM.lower()} SiPM boards\n", "reason": "reordered"})
             self.assertEqual(r["Location"], f"/hw/dev/status/{PTID}/")
         a = api.post_component_type_image.call_args
@@ -395,13 +385,14 @@ class ListPageTest(TestCase):
             html = self.client.get(r["Location"]).content.decode()
             self.assertIn("Each line starts with a type id (a letter and 11 digits): SiPM boards without an id", html)
             api.post_component_type_image.assert_not_called()
-            api.whoami.return_value = {"data": {"architect": False}}
-            _forget_role(self.client)
-            html = self.client.get(self.URL).content.decode()
+            api.get_component_type.return_value = {"data": {"roles": []}}   # a role-less consortium type: nobody may write
+            with mock.patch("explore.views._my_roles", return_value=[{"id": 9, "name": "builder"}]):
+                html = self.client.get(self.URL).content.decode()
+                self.assertEqual(self.client.post(self.URL, {"rows": SIPM}).status_code, 403)
+            self.assertIn("This type lists no HWDB roles, so HWDB refuses every write onto it.", html)
             self.assertNotIn('<form method="post">', html)
             self.assertIn(f'<tr><td class="mono">{SIPM}</td><td>SiPM boards (6 SiPMs)</td><td class="">SiPM board</td></tr>', html)
             self.assertIn(f'<tr><td class="mono">{PDS}</td><td>—</td><td class="pl-dim">not in the mirror</td></tr>', html)
-            self.assertEqual(self.client.post(self.URL, {"rows": SIPM}).status_code, 403)
 
     def test_saving_a_list_does_not_mark_the_type(self):
         # Chao 2026-10-08: the consortium mark (type page) shows the list link, not the other way round
@@ -474,7 +465,7 @@ class TypePageTest(TestCase):
         html = self.client.get(self.url).content.decode()
         self.assertNotIn("data-plan-url", html)
         self.assertNotIn('class="chart-plan-use"', html)   # no HWDB plan: the browser-stored plan as before, no box
-        self.assertNotIn("<dt>Plan</dt>", html)   # no plan, not an architect: no line
+        self.assertIn(">Set plan</a></dd>", html)   # no plan yet: anyone on a write instance may set one
         production.cache_plan("prod", SIPM, production.normalize_plan(PLAN))
         html = self.client.get(self.url).content.decode()
         self.assertIn('data-plan-total="48000" data-plan-done="2026-12" data-plan-need="2028-05" '
@@ -484,15 +475,17 @@ class TypePageTest(TestCase):
         self.assertIn("from the production plan", html)
         self.assertIn('<dt>Plan</dt><dd class="span">needed 48000<span class="sep">·</span>completed by 2026-12<span class="sep">·</span>needed by 2028-05\n', html)
         self.assertIn(f'<a href="/hw/plan/{SIPM}/?next=', html)
-        self.assertIn('title="The plan and its history — last set 2026-10-08 by chaoz">History</a></dd>', html)
-        with mock.patch("explore.views._is_architect", return_value=True):
+        self.assertIn('title="The plan and its history — last set 2026-10-08 by chaoz">Edit</a></dd>', html)   # anyone on a write instance; the plan page applies the roles
+        production.cache_plan("prod", SIPM, None)
+        html = self.client.get(self.url).content.decode()
+        self.assertIn(f'<dt>Plan</dt><dd class="span"><a href="/hw/plan/{SIPM}/?next=', html)
+        self.assertIn(">Set plan</a></dd>", html)
+        self.assertNotIn("data-plan-url", html)
+        with self.settings(HWDB_WRITE_INSTANCES=["dev"]):
             html = self.client.get(self.url).content.decode()
-            self.assertIn('by chaoz">Edit</a></dd>', html)
-            production.cache_plan("prod", SIPM, None)
-            html = self.client.get(self.url).content.decode()
-            self.assertIn(f'<dt>Plan</dt><dd class="span"><a href="/hw/plan/{SIPM}/?next=', html)
-            self.assertIn(">Set plan</a></dd>", html)
-            self.assertNotIn("data-plan-url", html)
+            self.assertNotIn("<dt>Plan</dt>", html)   # read-only instance, no plan: no line
+            production.cache_plan("prod", SIPM, production.normalize_plan(PLAN))
+            self.assertIn('by chaoz">History</a></dd>', self.client.get(self.url).content.decode())
 
 
 class ConsortiumTypeTest(TestCase):
