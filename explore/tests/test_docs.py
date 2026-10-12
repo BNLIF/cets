@@ -119,10 +119,16 @@ class PermissionsDocTest(TestCase):
         self.client.force_login(get_user_model().objects.create_user("w", "w@w.io", "pw"))
         html = self.client.get(reverse("explore:docs_permissions")).content.decode()
         self.assertIn("<h1>Who may write what</h1>", html)
-        self.assertIn("The administrator and architect flags do not substitute.", html)
+        self.assertIn("The flag without the role is refused.", html)
         self.assertNotIn("How we know", html)        # provenance stays in a template comment (Chao 2026-10-09)
         self.assertNotIn("2026-10-08", html)
         self.assertIn("one of the type’s roles, as HWDB applies them", html)
+        # Hajime 2026-10-12: linking also needs one of the four statuses; the
+        # type-attachment row says what is unverified without a date on the page
+        self.assertIn("<td>Link an item as a sub-component</td>", html)
+        self.assertIn("<b>QA/QC Tests – Use As Is</b>", html)
+        self.assertIn("one of the type’s roles and the administrator flag</b>, both", html)
+        self.assertIn("Each warning links here.", html)
         self.assertIn("<th>Account</th><th>May</th><th>May not</th>", html)   # the reverse table (Chao 2026-10-09)
         self.assertIn("<td>Holder of a type’s role</td>", html)
         index = self.client.get(reverse("explore:docs")).content.decode()

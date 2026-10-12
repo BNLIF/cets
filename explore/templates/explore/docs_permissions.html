@@ -14,6 +14,7 @@
   .dd-page th, .dd-page td { text-align: left; vertical-align: top; padding: 6px 10px; border-top: 1px solid var(--rule); }
   .dd-page th { font-size: 11.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; border-top: none; font-weight: 600; }
   .dd-page td:first-child { white-space: nowrap; }
+  .dd-page td.dd-wrap { white-space: normal; max-width: 260px; }
   .dd-page ul { margin: 6px 0; padding-left: 22px; }
   .dd-page li { margin: 2px 0; }
   .dd-ui { font-weight: 600; color: var(--ink); }
@@ -30,14 +31,18 @@
     introduces the flags; the rules below are what the database applies.</p>
 
   <h2 id="rules">The rules</h2>
-  {% comment %}Provenance, kept here rather than on the page (Chao 2026-10-09): items/tests/specs = type role — verified dev 2026-09-29 (specs PATCH refused on a role-less type, accepted on types listing a held role) + Hajime 2026-09-29 (empty roles = nobody; Roles and Manufacturers each need an entry). Type attachments = type role, flags don't substitute — verified dev 2026-10-08 (chaoz with administrator+architect and roles builder/tester/type-manager refused on D00400300001 [SiPM_test] and Z10401100002 [no roles], accepted on Z10400100001 [builder] and Z00100600001 [tester]); OPEN: Hajime believes administrator suffices, prod unprobed. Test-type creation = type role — verified dev 2026-07-17. Edit a type = administrator, create a type/subsystem = architect, grants in the web UI — training site.{% endcomment %}
+  {% comment %}Provenance, kept here rather than on the page (Chao 2026-10-09): items/tests/specs = type role — verified dev 2026-09-29 (specs PATCH refused on a role-less type, accepted on types listing a held role) + Hajime 2026-09-29 (empty roles = nobody; Roles and Manufacturers each need an entry). Type attachments = type role, flags don't substitute — verified dev 2026-10-08 (chaoz with administrator+architect and roles builder/tester/type-manager refused on D00400300001 [SiPM_test] and Z10401100002 [no roles], accepted on Z10400100001 [builder] and Z00100600001 [tester]); Whether the role WITHOUT the administrator flag is enough is unprobed (every test account holds the flag); Hajime believes the flag is needed (2026-09, 2026-10-12), so the page states role + flag as the rule (Chao 2026-10-12: a user page, no hedging; correct it if a probe says otherwise), prod unprobed. Sub-component status precondition = Hajime 2026-10-12 (the Shipping Procedure's four statuses, #84). Test-type creation = type role — verified dev 2026-07-17. Edit a type = administrator, create a type/subsystem = architect, grants in the web UI — training site.{% endcomment %}
   <table>
     <tr><th>Write</th><th>Needs</th></tr>
     <tr><td>Read anything</td><td>an active account</td></tr>
-    <tr><td>Create, edit or link an item<br>Submit a test (a checklist)<br>Change an item’s specifications</td>
+    <tr><td>Create or edit an item<br>Submit a test (a checklist)<br>Change an item’s specifications</td>
       <td><b>one of the type’s roles</b>. A type whose role list is empty accepts nobody. The flags do not substitute.</td></tr>
-    <tr><td>Attach a file to a type<br>(checklist schema, ES config, production plan, component list, a drawing)</td>
-      <td><b>one of the type’s roles</b>. The administrator and architect flags do not substitute.</td></tr>
+    <tr><td>Link an item as a sub-component</td>
+      <td>one of the parent type’s roles, and the sub-component must be in one of four statuses: <b>In Fabrication</b>,
+        <b>Waiting on QA/QC Tests</b>, <b>QA/QC Tests – Passed All</b> or <b>QA/QC Tests – Use As Is</b>. Any other status is refused
+        whatever you hold; the Explorer’s pickers offer only those four.</td></tr>
+    <tr><td class="dd-wrap">Attach a file to a type<br>(checklist schema, ES config, production plan, component list, a drawing)</td>
+      <td><b>one of the type’s roles and the administrator flag</b>, both. The flag without the role is refused.</td></tr>
     <tr><td>Create a test type on a type</td><td>one of the type’s roles</td></tr>
     <tr><td>Edit a type (positions, connectors, roles, manufacturers)</td><td>the <b>administrator</b> flag</td></tr>
     <tr><td>Create a type or a subsystem</td><td>the <b>architect</b> flag</td></tr>
@@ -51,8 +56,8 @@
   <table>
     <tr><th>Account</th><th>May</th><th>May not</th></tr>
     <tr><td>Active user, no roles</td><td>read everything; hold the Explorer’s own bookmarks, drafts and plan lines in the browser</td><td>write anything to HWDB</td></tr>
-    <tr><td>Holder of a type’s role</td><td>on that type: create, edit and link items, submit tests and checklists, change specifications, attach files to the type (checklist schemas, ES configs, production plans, component lists, drawings), create test types</td><td>the same on a type whose roles it does not hold; edit or create types</td></tr>
-    <tr><td>Administrator</td><td>edit a type: positions, connectors, roles, manufacturers; add users to roles; in the Explorer, the Positions page</td><td>write items or attach files to a type whose roles it does not hold; create types</td></tr>
+    <tr><td>Holder of a type’s role</td><td>on that type: create, edit and link items, submit tests and checklists, change specifications, create test types</td><td>the same on a type whose roles it does not hold; attach files to the type without the administrator flag; edit or create types</td></tr>
+    <tr><td>Administrator</td><td>edit a type: positions, connectors, roles, manufacturers; add users to roles; attach files to a type whose role it also holds (checklist schemas, ES configs, production plans, component lists, drawings); in the Explorer, the Positions page</td><td>write items or attach files to a type whose roles it does not hold; create types</td></tr>
     <tr><td>Architect</td><td>create subsystems and types; in the Explorer, clone a type on the Positions page and set a type’s category (shipping container, consortium type)</td><td>write items or attach files to a type whose roles it does not hold; edit an existing type without the administrator flag</td></tr>
   </table>
 
@@ -70,7 +75,7 @@
 
   <h2 id="see">Seeing what you hold</h2>
   <ul>
-    <li>The pages that write to a type show a warning naming the type’s roles and yours when you hold none of them, and say so when the type lists none at all.</li>
+    <li>The pages that write to a type show a warning naming the type’s roles and yours when you hold none of them, and say so when the type lists none at all. Each warning links here.</li>
     <li>Your roles and flags are read from HWDB once per session. After a grant, sign out and in again.</li>
     <li>The type’s roles are on its page in the <a href="{{ hwdb_ui_base }}" target="_blank" rel="noopener">HWDB web UI</a>; ask a consortium liaison with the administrator flag to add you to one.</li>
   </ul>

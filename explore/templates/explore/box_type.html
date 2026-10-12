@@ -58,7 +58,7 @@
   {% for m in messages %}<div class="pk-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
 
   <h1>{{ type_name }} — <span class="mono">{{ part_type_id }}</span></h1>
-  {% if not can_edit or not can_clone %}<div class="banner banner-warn" style="margin: 0 0 14px;">&#9888; Type-level change. Editing positions needs the HWDB administrator flag{% if not can_edit %} — your account lacks it{% endif %}; cloning into a new type needs the architect flag{% if not can_clone %} — your account lacks it{% endif %}.</div>{% endif %}
+  {% if not can_edit or not can_clone %}<div class="banner banner-warn" style="margin: 0 0 14px;">&#9888; Type-level change. Editing positions needs the HWDB administrator flag{% if not can_edit %} — your account lacks it{% endif %}; cloning into a new type needs the architect flag{% if not can_clone %} — your account lacks it{% endif %}. <a href="{% url 'explore:docs_permissions' %}" target="_blank" rel="noopener">Who may write what &#x2197;</a></div>{% endif %}
   <p class="pk-sub">The named positions every box of this type has, and which component type each accepts.
     Changes apply to the type — every existing and future box of it.</p>
 
