@@ -42,4 +42,13 @@ responses.{% endcomment %}
   {% for r in comments %}<tr><td class="lab"><span class="mono">{{ r.part_id }}</span>{% if r.functional_position %} · {{ r.functional_position }}{% endif %}</td><td>{{ r.comments }}</td></tr>{% endfor %}
 </table>
 {% endif %}
+{% if sub_logs %}
+{# the sub-components' own ES comments logs (Hajime 2026-10-12) — swapped into the Comments log card, under the item's own log #}
+<div id="es-sub-logs" hx-swap-oob="true">
+  {% for s in sub_logs %}
+  <p class="es-hint" style="margin-top:14px;color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.04em;">Comments log · <span class="mono">{{ s.0 }}</span>{% if s.1 %} · {{ s.1 }}{% endif %} <span style="text-transform:none;letter-spacing:0;">— its executive summary</span></p>
+  {% include "explore/_es_log_table.html" with log=s.2 %}
+  {% endfor %}
+</div>
+{% endif %}
 {% endif %}

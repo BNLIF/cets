@@ -5993,7 +5993,8 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             comp = {}
         pdf_bytes = execsummary.build_default_pdf(
             part_id, signinfo, subtree, log=def_log,
-            comments=execsummary.collect_comments(api, part_id, comp, subtree[0]))   # #202
+            comments=execsummary.collect_comments(api, part_id, comp, subtree[0]),   # #202
+            sub_logs=execsummary.collect_sub_logs(api, subtree[0]))
         name = f"ExecutiveSummary_{part_id}_{timezone.now():{execsummary.FILENAME_TS_FMT}}.pdf"
         err = _upload_summary_pdf(api, part_id, io.BytesIO(pdf_bytes), name)
         if err:
@@ -6226,6 +6227,8 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
             "references": cfg["references"],
             "subtree": subtree,
             "comments": execsummary.collect_comments(api, part_id, comp, subtree[0]),
+            # the sub-components' own ES logs (Hajime 2026-10-12)
+            "sub_logs": execsummary.collect_sub_logs(api, subtree[0]),
             "plot_blocks": plot_blocks,
         })
         if supp:
@@ -7011,6 +7014,9 @@ def explore_es_subtree_view(request, part_id):
             ctx["comments"] = [
                 {**r, "comments": c} for r in ctx["rows"]
                 if (c := execsummary._real_comment(r.get("comments")))]
+            # each child's own ES comments log (Hajime 2026-10-12), swapped
+            # out-of-band into the Comments log card below the item's own
+            ctx["sub_logs"] = execsummary.collect_sub_logs(api, ctx["rows"])
         except Exception:
             logger.exception("explore_es_subtree_view(%s) crashed", part_id)
             ctx["error"] = "fetch_failed"

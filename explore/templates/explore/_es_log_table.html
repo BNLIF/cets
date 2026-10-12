@@ -1,0 +1,22 @@
+{% comment %}One ES comments log, newest first, same as the generated PDF — the item's own
+(``log`` = comments_log) and each direct sub-component's (the sub-components pane).{% endcomment %}
+<div class="tbl-scroll">
+    <table class="es-log-table">
+      <thead><tr><th>Time</th><th>Who</th><th>QA/QC status</th><th>Comment</th></tr></thead>
+      <tbody>
+        {% for e in log reversed %}
+        {% if e.event == "reset" %}
+        <tr><td colspan="4" class="es-log-reset"><i>— signatures reset · {{ e.timestamp }}{% if e.name %} · {{ e.name }}{% endif %} —</i></td></tr>
+        {% else %}
+        <tr>
+          <td class="mono es-log-time">{{ e.timestamp }}</td>
+          {# sign-flow entries: name is the POSITION, signature the person — the person gets the bold #}
+          <td>{% if e.signature %}<b>{{ e.signature }}</b> · {{ e.name }}{% else %}<b>{{ e.name }}</b>{% endif %}</td>
+          <td class="es-log-status">{{ e.status|default:"—" }}</td>
+          <td class="es-log-text">{{ e.text }}</td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+</div>

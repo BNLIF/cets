@@ -688,6 +688,23 @@ def collect_comments(api, part_id: str, comp: dict, children: list[dict]) -> dic
     return out
 
 
+def collect_sub_logs(api, children: list[dict]) -> list[tuple[str, str, list]]:
+    """Each direct sub-component's own ES comments log (Hajime 2026-10-12:
+    the linked summaries' whole logs, not just the children's item
+    comments) as ``(part_id, "type · position", log)`` — children without
+    a log are left out, the fetches run in parallel, a failed one just
+    drops that child."""
+    from . import parts
+    logs = parts.fetch_map(api, lambda cli, pid: fetch_es_state(cli, pid)[2],
+                           [r["part_id"] for r in children])
+    return [(r["part_id"],
+             " · ".join(x for x in (r.get("type_name"), r.get("functional_position")) if x),
+             log)
+            for r in children
+            if (log := [e for e in logs.get(r["part_id"]) or []
+                        if isinstance(e, dict)])]
+
+
 def resolve_plots(api, cfg, part_id: str, children_of, item_images,
                   plot_fields=None) -> list[dict]:
     """Resolve every config plot slot. Image slots resolve to an HWDB
@@ -1061,6 +1078,28 @@ def _comments_flowables(c: dict) -> list:
     return [t]
 
 
+def _comments_story(comments, log, sub_logs) -> list:
+    """Every comment on one continuous run of pages (Chao 2026-10-12): the
+    Comments section (item · latest record per test type · direct
+    sub-components), the item's append-only log, then each direct
+    sub-component's own ES log (Hajime 2026-10-12, ``collect_sub_logs``) —
+    one page break before the lot, none between; nothing at all when
+    there is nothing to say."""
+    out = []
+    if comments and not comments.get("empty"):
+        out += _section("Comments", "item · latest record per test type · direct sub-components")
+        out += _comments_flowables(comments)
+    log = [e for e in log or [] if isinstance(e, dict)]
+    if log:
+        out += _section("Comments log", "newest first · append-only; survives resets")
+        out += _log_flowables(log)
+    for pid, what, sub in sub_logs or []:
+        out += _section(f"Comments log · {pid}",
+                        f"{what + ' · ' if what else ''}sub-component's executive summary · newest first")
+        out += _log_flowables(sub)
+    return [PageBreak(), *out] if out else []
+
+
 def append_pdf(base: bytes, extra: bytes) -> bytes:
     """The generated summary with the supplemental-material PDF appended.
     Raises ``ValueError`` on an unreadable supplemental file (the summary is
@@ -1083,9 +1122,9 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
     the status/QA-QC section (flags + QC checklist as one gate), the
     sign-off table, the sub-components table with per-child "Exe.Sum."
     links to each generated summary PDF, and clickable references; the
-    full append-only comments log gets its own page (newest first — it
-    outgrows the sign-off table's latest-comment column); then the config
-    plots."""
+    comments, the full append-only log (newest first — it outgrows the
+    sign-off table's latest-comment column) and the sub-components' logs
+    share one run of pages; then the config plots."""
     buf = io.BytesIO()
     facts = []
     if form.get("type_name"):
@@ -1139,20 +1178,12 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
         story += _section("References")
         story += _reference_flowables(refs)
 
-    # Item Specs, per-test-type and sub-component comments (#202) — only
-    # when there is at least one; usually short, often none.
-    cm = form.get("comments") or {}
-    if cm and not cm.get("empty"):
-        story += _section("Comments", "item · latest record per test type · direct sub-components")
-        story += _comments_flowables(cm)
-
-    # The full append-only comments log (Hajime 2026-07-30) on its own page —
-    # the sign-off table only carries each signee's LATEST comment.
-    log = [e for e in form.get("comments_log") or [] if isinstance(e, dict)]
-    if log:
-        story.append(PageBreak())
-        story += _section("Comments log", "newest first · append-only; survives resets")
-        story += _log_flowables(log)
+    # Item Specs, per-test-type and sub-component comments (#202), the full
+    # append-only log (Hajime 2026-07-30 — the sign-off table only carries
+    # each signee's LATEST comment) and the sub-components' own logs, as
+    # one run of pages.
+    story += _comments_story(form.get("comments"), form.get("comments_log"),
+                             form.get("sub_logs"))
 
     plot_blocks = form.get("plot_blocks") or []
     if plot_blocks:
@@ -1220,12 +1251,13 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
 
 def build_default_pdf(part_id: str, signinfo: dict,
                       subtree: tuple[list[dict], bool], log=None,
-                      comments=None) -> bytes:
+                      comments=None, sub_logs=None) -> bytes:
     """The configless DEFAULT summary in the same datasheet layout: header
     block, the status/QA-QC row, the single whoami sign-off row, and the
     sub-components table — no checklist, no references. ``log`` (#86) adds
     the comments-log page, ``comments`` (#202, ``collect_comments``) the
-    Comments section, same as the DETAIL layout."""
+    Comments section, ``sub_logs`` (``collect_sub_logs``) the
+    sub-components' logs, same as the DETAIL layout."""
     buf = io.BytesIO()
     facts = []
     if signinfo.get("instance"):
@@ -1254,14 +1286,7 @@ def build_default_pdf(part_id: str, signinfo: dict,
     story += _section("Sub-components",
                       f"{n_sub} direct sub-component{'s' if n_sub != 1 else ''}")
     story += subtree_flowables(*subtree)
-    if comments and not comments.get("empty"):
-        story += _section("Comments", "item · latest record per test type · direct sub-components")
-        story += _comments_flowables(comments)
-    log = [e for e in log or [] if isinstance(e, dict)]
-    if log:
-        story.append(PageBreak())
-        story += _section("Comments log", "newest first · append-only; survives resets")
-        story += _log_flowables(log)
+    story += _comments_story(comments, log, sub_logs)
     SimpleDocTemplate(buf, pagesize=letter,
                       title=f"Executive Summary (default): {part_id}").build(story)
     return buf.getvalue()

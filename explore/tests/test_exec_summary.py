@@ -805,6 +805,75 @@ class PageTest(TestCase):
         text = "".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages)
         self.assertNotIn("COMMENTS", text)
 
+    def test_collect_sub_logs_reads_each_childs_es_record(self):
+        # Hajime 2026-10-12: the linked summaries' whole comments logs
+        def _tests(pid, test_type_id=None):
+            if pid.endswith("12"):
+                return {"data": [{"test_data": {"ES": [], "comments_log": [
+                    {"name": "QA", "signature": "Alice", "timestamp": "2026-10-01 09:00",
+                     "status": "In Fabrication", "text": "child note"}]}}]}
+            return {"data": []}
+        api = mock.Mock(get_tests=_tests)
+        subs = execsummary.collect_sub_logs(api, [
+            {"part_id": "D05700300001-00012", "type_name": "Top Half CRP",
+             "functional_position": "Top CRU 1"},
+            {"part_id": "D05700300001-00013", "functional_position": "FEB2"}])
+        self.assertEqual(len(subs), 1)
+        pid, what, log = subs[0]
+        # the type with the position (Hajime 2026-10-12)
+        self.assertEqual((pid, what), ("D05700300001-00012", "Top Half CRP · Top CRU 1"))
+        self.assertEqual(log[0]["text"], "child note")
+        self.assertEqual(execsummary.collect_sub_logs(api, []), [])
+
+    def test_pdf_comments_share_one_page_run(self):
+        # Chao 2026-10-12: item comments, the item's log and the
+        # sub-components' logs follow one page break, none between
+        import io
+        from pypdf import PdfReader
+        cm = execsummary.collect_comments(
+            mock.Mock(get_tests=lambda pid: {"data": []}), BOX,
+            {"comments": "scratch on the lid"}, [])
+        form = {"status_label": "OK", "certified_flag": True, "uploaded_flag": True,
+                "signee_rows": [], "subtree": ([], False), "comments": cm,
+                "comments_log": [{"name": "Chao Zhang", "timestamp": "2026-10-02 09:00",
+                                  "status": "OK", "text": "parent note"}],
+                "sub_logs": [("D05700300001-00012", "Top Half CRP · Top CRU 1", [
+                    {"name": "QA", "signature": "Alice", "timestamp": "2026-10-01 09:00",
+                     "status": "In Fabrication", "text": "child note"}])]}
+        for pdf in (execsummary.build_detail_pdf(BOX, form),
+                    execsummary.build_default_pdf(
+                        BOX, {"signature": "C"}, ([], False), log=form["comments_log"],
+                        comments=cm, sub_logs=form["sub_logs"])):
+            pages = [p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages]
+            self.assertEqual(len(pages), 2)
+            self.assertNotIn("COMMENTS", pages[0])
+            page = pages[1]
+            for needle in ("COMMENTS", "scratch on the lid", "COMMENTS LOG", "parent note",
+                           "COMMENTS LOG · D05700300001-00012", "Top Half CRP · Top CRU 1",
+                           "Alice", "child note"):
+                self.assertIn(needle, page)
+            self.assertLess(page.index("scratch on the lid"), page.index("parent note"))
+            self.assertLess(page.index("parent note"), page.index("child note"))
+
+    def test_subtree_pane_carries_child_logs_out_of_band(self):
+        api = _api(es=[])
+        def _tests(pid, test_type_id=None):
+            if pid.endswith("12"):
+                return {"data": [{"test_data": {"ES": [], "comments_log": [
+                    {"name": "QA", "signature": "Alice", "timestamp": "2026-10-01 09:00",
+                     "status": "In Fabrication", "text": "child note"}]}}]}
+            return {"data": []}
+        api.get_tests.side_effect = _tests
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(f"/hw/dev/part/{BOX}/es-subtree/").content.decode()
+            page = self.client.get(PAGE).content.decode()
+        self.assertIn('id="es-sub-logs" hx-swap-oob="true"', html)
+        self.assertIn("D05700300001-00012</span> · FEB · FEB1", html)   # type · position
+        self.assertIn("child note", html)
+        self.assertIn("<b>Alice</b> · QA", html)
+        self.assertIn('<div id="es-sub-logs"></div>', page)   # the slot it lands in
+
     def test_comments_log_card_renders_entries(self):
         api = _api(es=[], log=[
             {"name": "Chao Zhang", "timestamp": "2026-07-30 09:00",
