@@ -1899,7 +1899,7 @@ class FormulaCellsTest(TestCase):
         f = schema["sections"][0]["fields"][0]
         self.assertEqual(f["col_tol"], {
             "A": {"min": 1.0, "max": 2.0, "range": "1 – 2"},
-            "Total": {"min": 10.0, "max": 12.0, "range": "10 – 12"}})
+            "Total": {"min": 10.0, "max": 12.0, "range": "10 – 12", "nominal": 11.0}})
         # bind: own tolerance replaces the table-wide one wholesale; plain
         # columns keep the table's
         f["min"], f["max"] = 0.0, 5.0
@@ -1910,6 +1910,24 @@ class FormulaCellsTest(TestCase):
         self.assertEqual((cells["Total"]["min"], cells["Total"]["max"]),
                          (10.0, 12.0))
         self.assertEqual(cells["Total"]["range"], "10 – 12")
+
+    def test_nominal_shows_as_the_boxs_placeholder(self):
+        # Hajime 2026-10-12: the nominal in grey where nothing is entered yet
+        from django.template.loader import render_to_string
+        s = checklistforms.normalize({"sections": [{"title": "S", "fields": [
+            {"label": "L", "type": "number", "nominal": 1.6, "tol": 0.1},
+            {"label": "M", "type": "number", "min": 1, "max": 2},
+            {"label": "T", "type": "table", "columns": [
+                {"label": "A", "nominal": 3, "tol": 1}, "B",
+                {"label": "Sum", "formula": "C1 + C2", "nominal": 5, "tol": 1}]}]}]}, "x")
+        b = checklistforms.bind(s, {})["sections"][0]["fields"]
+        html = render_to_string("explore/_checklist_field.html", {"f": b[0]})
+        self.assertIn('placeholder="1.6"', html)
+        self.assertNotIn("placeholder", render_to_string("explore/_checklist_field.html", {"f": b[1]}))
+        html = render_to_string("explore/_checklist_field.html", {"f": b[2]})
+        self.assertIn('placeholder="3"', html)
+        self.assertNotIn('placeholder="5"', html)   # a computed cell is read-only, no hint
+        self.assertEqual(html.count("placeholder"), 1)
 
     def test_strict_limit_excludes_its_value(self):
         # Hajime 2026-10-05: "< 30 mm" — a limit with a leading < or > is
@@ -3463,20 +3481,20 @@ class LegacyTableGoldenTest(TestCase):
     NORM = {"col_tol": {"Diff": {"max": 0.1, "min": -0.1, "range": "-0.1 – 0.1"}},
             "color": "#fff2cc", "columns": ["P1", "Expected", "Diff"],
             "formulas": {"Diff": "C1 - C2"}, "grid": True, "key": "f1-0", "label": "Thickness",
-            "max": 1.7, "min": 1.5, "range": "1.5 – 1.7", "texts": {"Expected": "1.6"},
+            "max": 1.7, "min": 1.5, "nominal": 1.6, "range": "1.5 – 1.7", "texts": {"Expected": "1.6"},
             "to_spec": False, "type": "table", "units": "mm"}
-    BIND = [{"column": "P1", "formula": "", "max": 1.7, "min": 1.5, "name": "f1-0-c0",
+    BIND = [{"column": "P1", "formula": "", "max": 1.7, "min": 1.5, "nominal": 1.6, "name": "f1-0-c0",
              "range": "", "text": "", "value": "1.7", "color": "", "min_open": False, "max_open": False},
-            {"column": "Expected", "formula": "", "max": None, "min": None,
+            {"column": "Expected", "formula": "", "max": None, "min": None, "nominal": None,
              "name": "f1-0-c1", "range": "", "text": "1.6", "value": "1.6", "color": "", "min_open": False, "max_open": False},
-            {"column": "Diff", "formula": "C1 - C2", "max": 0.1, "min": -0.1,
+            {"column": "Diff", "formula": "C1 - C2", "max": 0.1, "min": -0.1, "nominal": None,
              "name": "f1-0-c2", "range": "-0.1 – 0.1", "text": "", "value": "0.1", "color": "", "min_open": False, "max_open": False}]
     HTML = ('<table class="cl-table cl-gridlines cl-tint" style="--cl-tint: #fff2cc;"> <thead><tr>'
             '<th title="">P1</th><th title="">Expected</th>'
             '<th title="= C1 - C2 · allowed -0.1 – 0.1">Diff <span aria-hidden="true">&fnof;</span> '
             '<span class="cl-hint">-0.1 – 0.1</span></th></tr></thead> <tbody><tr>'
             '<td><input name="f1-0-c0" value="1.7" inputmode="decimal" autocomplete="off" data-ci="0" '
-            'data-min="1.5" data-max="1.7"></td>'
+            'placeholder="1.6" data-min="1.5" data-max="1.7"></td>'
             '<td class="cl-const"><span data-ci="1" data-const>1.6</span></td>'
             '<td><input name="f1-0-c2" value="0.1" inputmode="decimal" autocomplete="off" data-ci="2" '
             'readonly tabindex="-1" data-formula="C1 - C2" title="= C1 - C2" data-min="-0.1" data-max="0.1">'
@@ -3575,7 +3593,7 @@ class MultiRowTableTest(TestCase):
         rows = s["sections"][0]["fields"][0]["rows"]
         self.assertNotIn("ranges", rows[0])
         self.assertEqual(rows[1]["ranges"], {
-            "Diff": {"min": -0.01, "max": 0.01, "range": "-0.01 – 0.01"},
+            "Diff": {"min": -0.01, "max": 0.01, "range": "-0.01 – 0.01", "nominal": 0.0},
             "Measured": {"min": 0.4, "max": None, "range": "≥ 0.4"}})
         b = checklistforms.bind(s, None)
         tr = b["sections"][0]["fields"][0]["trows"]

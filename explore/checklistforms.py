@@ -135,6 +135,10 @@ def _tol_range(f: dict) -> dict:
     else:
         rng = ""
     out = {"min": lo, "max": hi, "range": rng}
+    if nominal is not None:
+        # Hajime 2026-10-12: the nominal shows grey in the empty box (an
+        # HTML placeholder — visible, never a value)
+        out["nominal"] = nominal
     if lo_open:
         out["min_open"] = True
     if hi_open:
@@ -1086,7 +1090,7 @@ def _table_cells(f: dict, cells: dict, tx: dict, prefix: str, rr: dict | None = 
                     **({"multiline": True} if c not in tx and isinstance(v, str) and "\n" in v else {}),
                     "formula": "" if c in tx else fx.get(c, ""),
                     "text": tx.get(c, ""),
-                    "min": tr.get("min"), "max": tr.get("max"),
+                    "min": tr.get("min"), "max": tr.get("max"), "nominal": tr.get("nominal"),
                     "min_open": tr.get("min_open", False), "max_open": tr.get("max_open", False),
                     "range": ct[c]["range"] if c in ct and c not in tx else ""})
         # Chao 2026-09-28: a fixed Type ID a count column reads links to the type's page

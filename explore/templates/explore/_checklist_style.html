@@ -56,6 +56,9 @@
     border: 1px solid var(--cl-input-rule, var(--rule));
     border-radius: var(--r-sm); padding: 7px 9px; width: 100%; max-width: 360px; }
   #cl-rev { width: auto; padding: 4px 8px; margin-left: 4px; }   /* #184: the submission picker, sized to its dates */
+  /* a nominal shown in an empty box (Hajime 2026-10-12) must not read as an
+     entry: italic and faint — entered values are upright, full ink */
+  .cl-field input[inputmode=decimal]::placeholder { color: var(--faint); font-style: italic; opacity: 1; }
   .cl-field textarea { max-width: 100%; }
   .cl-qr input, .cl-link input { font-family: var(--font-mono); max-width: 260px; }
   .cl-ok { border-color: var(--good) !important; background: var(--good-bg) !important; }

@@ -14,6 +14,7 @@
 {% elif f.type == "number" %}
   <label class="cl-lab" for="{{ f.key }}">{{ f.label|clmd }}{% if f.units %} <span class="cl-units">({{ f.units }})</span>{% endif %}{% if f.description %} <span class="cl-desc">{{ f.description|clmd }}</span>{% endif %}{% if f.range %} <span class="cl-hint">allowed {{ f.range }}</span>{% endif %}</label>
   <input id="{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}" inputmode="decimal" autocomplete="off"
+    {% if f.nominal != None %}placeholder="{{ f.nominal|stringformat:"g" }}"{% endif %}
     {% if f.min != None %}data-min="{{ f.min|stringformat:"g" }}"{% if f.min_open %} data-min-open="1"{% endif %}{% endif %}
     {% if f.max != None %}data-max="{{ f.max|stringformat:"g" }}"{% if f.max_open %} data-max-open="1"{% endif %}{% endif %}>
 {% elif f.type == "table" %}
