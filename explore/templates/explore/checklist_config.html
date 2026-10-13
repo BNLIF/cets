@@ -405,7 +405,7 @@
       <label class="ec-inline ff-grid-w" title="draw cell borders like a real table"><input type="checkbox" class="ff-grid" checked> borders</label>
       <button type="button" class="ec-del ff-tbl" title="named rows, each with its own fixed cells and tint">&#9636; rows&hellip;</button>
       <input type="hidden" class="ff-rows">
-      <textarea class="ff-columns" rows="2" style="flex:1 1 100%;" placeholder="columns — comma- or line-separated; computed: Total = C1 + C2*(C3/C4) [11 ± 1]; fixed: Expected = &quot;3.1+-0.1&quot;; pass/fail: OK = check; over the type's items: Received = sum(C4); month picker: PRR date = month; day picker: Received = date" title="label = formula makes a computed column (C1 = first column's value, formula/fixed cells count too); label = &quot;text&quot; makes a fixed non-editable cell (no commas in the text); label = sum(C4) totals that column's value in the row over every item of the type (sum(C4 in Received | Unknown) counts only those statuses); label = month makes a month picker (stored YYYY-MM), label = date a day picker (YYYY-MM-DD); label = count(C1) shows how many items the type whose ID is in column 1 has (count(C1 * C2): each item weighted by the number in its specifications under the key named in column 2 — a batch registered as one item counts its pieces); label = lookup(Side of C1) shows the value stored under Side on the item whose PID is in column 1; [nominal ± tol] or [min..max] gives that column its own accepted range"></textarea>
+      <textarea class="ff-columns" rows="2" style="flex:1 1 100%;" placeholder="columns — comma- or line-separated; computed: Total = C1 + C2*(C3/C4) [11 ± 1], Angle = atan2(C2, C1) * 180 / pi, Diff = C1 - R1C1; fixed: Expected = &quot;3.1+-0.1&quot;; pass/fail: OK = check; over the type's items: Received = sum(C4); month picker: PRR date = month; day picker: Received = date" title="label = formula makes a computed column (C1 = first column's value, formula/fixed cells count too; R2C1 = row 2's first cell; sin cos tan asin acos atan atan2 sqrt abs and pi, radians); label = &quot;text&quot; makes a fixed non-editable cell (no commas in the text); label = sum(C4) totals that column's value in the row over every item of the type (sum(C4 in Received | Unknown) counts only those statuses); label = month makes a month picker (stored YYYY-MM), label = date a day picker (YYYY-MM-DD); label = count(C1) shows how many items the type whose ID is in column 1 has (count(C1 * C2): each item weighted by the number in its specifications under the key named in column 2 — a batch registered as one item counts its pieces); label = lookup(Side of C1) shows the value stored under Side on the item whose PID is in column 1; [nominal ± tol] or [min..max] gives that column its own accepted range"></textarea>
     </div>
     <div class="ec-row g-desc">
       <input class="ff-desc" placeholder="description — a sentence on what this field is for, shown after the label" style="flex:1 1 100%;">
@@ -981,13 +981,14 @@
       h += '<tr' + (rw.color ? ' class="tinted" style="--tc-tint:' + esc(rw.color) + '"' : '') + '><th><span class="tc-lab">' +
            '<input type="color" class="tc-color" data-i="' + i + '" list="clc-tints" value="' + esc(rw.color || "#ffffff") + '" title="row tint">' +
            (rw.color ? '<button type="button" class="ec-del tc-nocolor" data-i="' + i + '" title="Remove the tint">&#x2715;</button>' : '') +
-           '<input class="tc-label" data-i="' + i + '" value="' + esc(rw.label || "") + '" placeholder="row label"></span></th>';
+           '<input class="tc-label" data-i="' + i + '" value="' + esc((rw.label || "") + (rw.formula ? " = " + rw.formula : "")) + '" placeholder="row label" title="a label, or label = formula for the whole row: Total = R1 + R2 (R1 = row 1\u2019s cell in the same column)"></span></th>';
       tblM.cols.forEach(function (c, j) {
         var rg = (rw.ranges || {})[c.label], v = (rw.texts || {})[c.label] || "";
+        if (!v && (rw.formulas || {})[c.label]) v = "= " + rw.formulas[c.label];   // the row's own formula (Hajime 2026-10-13)
         if (rg) v += (v ? " " : "") + "[" + specText(rg) + "]";
         h += '<td><input class="tc-cell" data-i="' + i + '" data-j="' + j + '" value="' + esc(v) +
-             '" placeholder="' + esc(c.check ? "✓ ✗" : c.sum ? "Σ" : c.count ? "#" : c.lookup ? "↗" : c.formula ? "ƒ [range]" : c.text || "") + '"' +
-             (c.check || c.sum || c.count || c.lookup ? " disabled" : "") + ' title="fixed text and/or an accepted range in brackets, e.g. 3.1 [3.0..3.2] or [0 ± 0.01]"></td>';
+             '" placeholder="' + esc(c.check ? "✓ ✗" : c.sum ? "Σ" : c.count ? "#" : c.lookup ? "↗" : c.month || c.date ? "" : rw.formula ? "= " + rw.formula : c.formula ? "ƒ [range]" : c.text || "") + '"' +
+             (c.check || c.sum || c.count || c.lookup ? " disabled" : "") + ' title="fixed text, or = formula (a Total row: = R1C1 + R2C1), and/or an accepted range in brackets, e.g. 3.1 [3.0..3.2] or [0 ± 0.01]"></td>';
       });
       h += '<td class="tc-ops"><button type="button" class="ec-del tc-up" data-i="' + i + '" title="Move up">&#8593;</button>' +
            '<button type="button" class="ec-del tc-down" data-i="' + i + '" title="Move down">&#8595;</button>' +
@@ -1004,6 +1005,8 @@
         if ((rw.texts[k] || "").trim()) tx[k] = rw.texts[k].trim();
       });
       if (Object.keys(tx).length) o.texts = tx;
+      if (rw.formula) o.formula = rw.formula;
+      if (rw.formulas && Object.keys(rw.formulas).length) o.formulas = rw.formulas;
       if (rw.ranges && Object.keys(rw.ranges).length) o.ranges = rw.ranges;
       if (rw.color) o.color = rw.color;
       return o;
@@ -1019,7 +1022,7 @@
       tblM.cols[j] = now;
       if (was && now.label && was !== now.label)      // keep the rows' texts with the column
         tblM.rows.forEach(function (rw) {
-          ["texts", "ranges"].forEach(function (k) {
+          ["texts", "formulas", "ranges"].forEach(function (k) {
             if (rw[k] && was in rw[k]) { rw[k][now.label] = rw[k][was]; delete rw[k][was]; }
           });
         });
@@ -1028,11 +1031,18 @@
       $('.tc-col[data-j="' + j + '"]', tbl).value = colText(tblM.cols[j]);
       if (!$('.tc-nocolcolor[data-j="' + j + '"]', tbl)) t.insertAdjacentHTML("afterend",
         '<button type="button" class="ec-del tc-nocolcolor" data-j="' + j + '" title="Remove the tint">&#x2715;</button>');
-    } else if (t.classList.contains("tc-label")) tblM.rows[i].label = t.value;
+    } else if (t.classList.contains("tc-label")) {   // "Total = R1 + R2": the row's formula for every column
+      var eq = t.value.indexOf("=");
+      tblM.rows[i].label = eq === -1 ? t.value : t.value.slice(0, eq);
+      if (eq === -1 || !t.value.slice(eq + 1).trim()) delete tblM.rows[i].formula;
+      else tblM.rows[i].formula = t.value.slice(eq + 1).trim();
+    }
     else if (t.classList.contains("tc-cell")) {
       var rw = tblM.rows[i], lab = tblM.cols[j].label, pc = parseCell(t.value);
-      rw.texts = rw.texts || {}; rw.ranges = rw.ranges || {};
-      rw.texts[lab] = tblM.cols[j].formula || tblM.cols[j].sum || tblM.cols[j].count || tblM.cols[j].lookup ? "" : pc.text;   // a formula / sum / count column takes only a range
+      rw.texts = rw.texts || {}; rw.ranges = rw.ranges || {}; rw.formulas = rw.formulas || {};
+      var fixed = tblM.cols[j].sum || tblM.cols[j].count || tblM.cols[j].lookup;   // a sum / count / lookup column takes only a range
+      rw.texts[lab] = fixed || pc.formula || tblM.cols[j].formula ? "" : pc.text;
+      if (pc.formula && !fixed) rw.formulas[lab] = pc.formula; else delete rw.formulas[lab];   // "= …" is the row's own formula (Hajime 2026-10-13)
       if (pc.range) rw.ranges[lab] = pc.range; else delete rw.ranges[lab];
     } else if (t.classList.contains("tc-color")) {
       tblM.rows[i].color = t.value;
@@ -1236,10 +1246,11 @@
            ? (o.min != null ? o.min : "") + ".." + (o.max != null ? o.max : "")
            : "";
   }
-  // a row cell (#119): "text [range]" — either part optional
+  // a row cell (#119): "text [range]" — either part optional; "= formula [range]" is the row's own formula
   function parseCell(v) {
     var m = /^(.*?)\s*\[([^\]]*)\]\s*$/.exec(v), out = { text: (m ? m[1] : v).trim() };
     if (m) { var sp = parseSpec(m[2].trim()); if (Object.keys(sp).length) out.range = sp; }
+    if (out.text.charAt(0) === "=") { out.formula = out.text.slice(1).trim(); out.text = ""; }
     return out;
   }
   function parseCol(c) {

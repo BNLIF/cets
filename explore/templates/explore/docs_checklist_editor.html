@@ -132,7 +132,8 @@
   <table>
     <tr><th>Write</th><th>Cell</th></tr>
     <tr><td><code>P1</code></td><td>an input</td></tr>
-    <tr><td><code>Total = C1 + C2*(C3/C4)</code></td><td>computed from the row's other cells, read-only; <code>C&lt;n&gt;</code> is the n-th column counting every column; only <code>+ - * / ( )</code> and numbers; unresolvable = empty</td></tr>
+    <tr><td><code>Total = C1 + C2*(C3/C4)</code></td><td>computed, read-only; <code>C&lt;n&gt;</code> is the n-th column of the same row counting every column, <code>R&lt;n&gt;C&lt;m&gt;</code> the m-th column of the n-th row;
+      <code>+ - * / ( )</code>, numbers, <code>pi</code> and <code>sin cos tan asin acos atan atan2 sqrt abs</code> (radians: <code>atan2(C2, C1) * 180 / pi</code> is in degrees); unresolvable = empty</td></tr>
     <tr><td><code>Expected = "3.1 +- 0.1"</code></td><td>fixed text, not editable; no commas in the text. A formula reads it as a number when it is one or a <code>value ± tolerance</code> string</td></tr>
     <tr><td><code>OK = check</code></td><td>a pass/fail cell (— / ✓ / ✗)</td></tr>
     <tr><td><code>Completed by = month</code></td><td>a month picker, stored as <code>YYYY-MM</code></td></tr>
@@ -160,8 +161,11 @@ OK = check</pre>
   <h3>Rows</h3>
   <p>Without rows a table is one unnamed row. <span class="dd-ui">rows…</span> opens a grid: the header cells hold the column syntax above,
     each body row has a label (unique, shown in a left cell) and one cell per column — blank means an input, text is that row's fixed text,
+    <code>= R1C2 + R2C2</code> is that row's own formula on that column (it beats the column's). A row label written <code>Total = R1 + R2</code>
+    gives the whole row a formula, applied to every column: <code>R1</code> is row 1's cell in the same column (<code>R4 = R1 + R2 - R3</code>);
+    sum, count, lookup, check and date columns are skipped, a cell's text or own formula beats it,
     and a range in brackets (<code>[0 ± 0.01]</code>, <code>[-0.01..0.01]</code>, or <code>3.1 [3.0..3.2]</code> after the text) beats the column's for that row.
-    Formula, sum, count and check columns take no row text. Untouched rows are left out of the record.</p>
+    Sum, count and check columns take no row text. Untouched rows are left out of the record, except a row whose cross-row formula computed.</p>
   <p><span class="dd-ui">Import…</span> fills the grid from cells pasted out of a spreadsheet or a <code>.csv</code> file: the first line is the headers,
     a chosen column labels the rows (else the row number), non-empty cells become fixed text and empty ones inputs; ticking a column under
     <i>User fills in</i> blanks it. It replaces the existing columns and rows.</p>

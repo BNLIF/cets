@@ -108,10 +108,13 @@
   applyWhen();
 
   // #109: computed table cells — the JS twin of checklistforms._eval_formula
-  // (+ - * / parens, C<n> = the row's 1-based column value; NaN on any
-  // problem). The server recomputes authoritatively at submit.
+  // (+ - * / parens, C<n> = the row's 1-based column value, R<n>C<m> =
+  // row n's (Hajime 2026-10-13), sin cos tan asin acos atan atan2 sqrt abs
+  // and pi; NaN on any problem). The server recomputes authoritatively at submit.
+  var FX_FUNCS = { sin: Math.sin, cos: Math.cos, tan: Math.tan, asin: Math.asin, acos: Math.acos,
+                   atan: Math.atan, atan2: Math.atan2, sqrt: Math.sqrt, abs: Math.abs };
   function evalFormula(expr, get) {
-    var tokens = expr.match(/[Cc]\d+|\d+\.?\d*|\.\d+|[()+\-*/]|\S/g) || [];
+    var tokens = expr.match(/[Rr]\d+[Cc]\d+|[Cc]\d+|[A-Za-z_][A-Za-z_0-9]*|\d+\.?\d*|\.\d+|[()+\-*\/,]|\S/g) || [];
     var pos = 0;
     function factor() {
       var t = tokens[pos];
@@ -124,7 +127,20 @@
       }
       pos++;
       if (t === undefined) return NaN;
-      if (/^[Cc]/.test(t)) return get(parseInt(t.slice(1), 10) - 1);
+      var rc = /^[Rr](\d+)[Cc](\d+)$/.exec(t);
+      if (rc) return get(parseInt(rc[2], 10) - 1, parseInt(rc[1], 10) - 1);
+      if (/^[Cc]\d+$/.test(t)) return get(parseInt(t.slice(1), 10) - 1);
+      if (t.toLowerCase() === "pi") return Math.PI;
+      var fn = FX_FUNCS[t.toLowerCase()];
+      if (fn) {
+        if (tokens[pos] !== "(") return NaN;
+        pos++;
+        var args = [e()];
+        while (tokens[pos] === ",") { pos++; args.push(e()); }
+        if (tokens[pos] !== ")") return NaN;
+        pos++;
+        return args.length === fn.length ? fn.apply(null, args) : NaN;
+      }
       return /^[\d.]/.test(t) ? parseFloat(t) : NaN;
     }
     function term() {
@@ -146,21 +162,35 @@
     return pos === tokens.length ? out : NaN;
   }
   function recomputeTable(tbl) {
-    tbl.querySelectorAll("input[data-formula]").forEach(function (inp) {
-      var row = inp.closest("tr");   // #119: C<n> addresses the cell's OWN row
-      var v = evalFormula(inp.getAttribute("data-formula"), function (i) {
-        var el = row.querySelector('[data-ci="' + i + '"]');   // an input, or a constant's span (#139)
-        var val = el ? (el.value !== undefined ? el.value : el.textContent) : "";
-        if (val.trim() === "") return NaN;
-        // like the server: a plain number, or the value of "3 +- 1" /
-        // "3.1±0.1" / "3 +/- 1"; anything else ("abc", "3 mm") is NaN
-        var tol = /^\s*(-?\d+(?:\.\d+)?|-?\.\d+)\s*(?:±|\+-|\+\/-)\s*\d*\.?\d+\s*$/.exec(val);
-        return tol ? Number(tol[1]) : Number(val);
+    var inputs = tbl.querySelectorAll("input[data-formula]"), rows = tbl.querySelectorAll("tbody > tr");
+    function cellVal(row, i) {
+      var el = row.querySelector('[data-ci="' + i + '"]');   // an input, or a constant's span (#139)
+      var val = el ? (el.value !== undefined ? el.value : el.textContent) : "";
+      if (val.trim() === "") return NaN;
+      // like the server: a plain number, or the value of "3 +- 1" /
+      // "3.1±0.1" / "3 +/- 1"; anything else ("abc", "3 mm") is NaN
+      var tol = /^\s*(-?\d+(?:\.\d+)?|-?\.\d+)\s*(?:±|\+-|\+\/-)\s*\d*\.?\d+\s*$/.exec(val);
+      return tol ? Number(tol[1]) : Number(val);
+    }
+    // passes until nothing changes: a formula may read a computed cell
+    // anywhere in the table; a circular reference just stays empty
+    for (var pass = 0; pass <= inputs.length; pass++) {
+      var changed = false;
+      inputs.forEach(function (inp) {
+        var row = inp.closest("tr");   // #119: C<n> addresses the cell's OWN row
+        var v = evalFormula(inp.getAttribute("data-formula"), function (i, r) {
+          var tr = r === undefined ? row : rows[r];
+          return tr ? cellVal(tr, i) : NaN;
+        });
+        var s = isFinite(v) ? String(+v.toFixed(6)) : "";
+        if (inp.value === s && pass) return;
+        changed = changed || inp.value !== s;
+        inp.value = s;
+        // re-fires the tolerance coloring on the computed value
+        inp.dispatchEvent(new Event("input", { bubbles: true }));
       });
-      inp.value = isFinite(v) ? String(+v.toFixed(6)) : "";
-      // re-fires the tolerance coloring on the computed value
-      inp.dispatchEvent(new Event("input", { bubbles: true }));
-    });
+      if (!changed) break;
+    }
   }
   document.addEventListener("input", function (e) {
     if (!e.target.matches || !e.target.matches("input[data-ci], textarea[data-ci]")

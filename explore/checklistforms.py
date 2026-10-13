@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 
 logger = logging.getLogger(__name__)
@@ -146,10 +147,34 @@ def _tol_range(f: dict) -> dict:
     return out
 
 
-# #109: computed table cells — only digits, cell refs and + - * / ( ) ever
-# reach the evaluator.
-_FORMULA_CHARS = re.compile(r"^[0-9.\s()+\-*/Cc]+$")
-_FORMULA_TOKEN = re.compile(r"[Cc]\d+|\d+\.?\d*|\.\d+|[()+\-*/]|\S")
+# #109: computed table cells — only cell refs, numbers, + - * / ( ) and
+# the few functions below ever reach the evaluator. Hajime 2026-10-13
+# (Minnesota, HD field cages): ``R<n>C<m>`` reads row n's cell (``C<m>``
+# stays the cell's own row), and arc-tangent & co. with ``pi`` join the
+# arithmetic — radians, like every calculator.
+_FORMULA_TOKEN = re.compile(r"[Rr]\d+[Cc]\d+|[Cc]\d+|[A-Za-z_][A-Za-z_0-9]*|\d+\.?\d*|\.\d+|[()+\-*/,]|\S")
+_FORMULA_FUNCS = {"sin": math.sin, "cos": math.cos, "tan": math.tan,
+                  "asin": math.asin, "acos": math.acos, "atan": math.atan,
+                  "atan2": math.atan2, "sqrt": math.sqrt, "abs": abs}
+_FORMULA_CONSTS = {"pi": math.pi}
+_CROSS_ROW = re.compile(r"[Rr]\d+[Cc]\d+")
+
+
+def _expand_row_formula(expr: str, m: int) -> str:
+    """A row formula (Chao 2026-10-13: ``Total = R1 + R2``, applied to every
+    column) for column m: a bare ``R<n>`` becomes ``R<n>C<m>``."""
+    return re.sub(r"\b[Rr](\d+)\b", lambda x: f"R{x.group(1)}C{m}", expr)
+
+
+def _formula_ok(expr: str) -> bool:
+    """Whether every token of ``expr`` is one the evaluator knows."""
+    for t in _FORMULA_TOKEN.findall(expr):
+        if not (re.fullmatch(r"[Rr]\d+[Cc]\d+|[Cc]\d+|\d+\.?\d*|\.\d+|[()+\-*/,]", t)
+                or t.lower() in _FORMULA_FUNCS or t.lower() in _FORMULA_CONSTS):
+            return False
+    return True
+
+
 # a cell written as "value ± tolerance" ("3 +- 1", "3.1±0.1", "3 +/- 1"):
 # formulas read the value, the record keeps the whole string
 _TOLERANCED = re.compile(r"^\s*(-?\d+(?:\.\d+)?|-?\.\d+)\s*(?:±|\+-|\+/-)\s*\d*\.?\d+\s*$")
@@ -164,17 +189,25 @@ def _cell_num(v):
     return float(m.group(1)) if m else None
 
 
-def _eval_formula(expr: str, values: list) -> float | None:
+def _eval_formula(expr: str, values: list, grid: list | None = None) -> float | None:
     """Hajime's cell arithmetic (#109): ``C1 + C2*(C3/C4)`` over one table
-    row, ``C<n>`` = the 1-based column's value. A tiny recursive-descent
-    parser over + - * / ( ) and numbers — deliberately NOT a general
+    row, ``C<n>`` = the 1-based column's value; ``R<n>C<m>`` = that column
+    in row n of ``grid`` (the table's rows, the same lists). Functions
+    ``sin cos tan asin acos atan atan2 sqrt abs`` and the constant ``pi``.
+    A tiny recursive-descent parser — deliberately NOT a general
     evaluator. None on any problem: bad syntax, a missing or non-numeric
-    referenced cell, division by zero."""
+    referenced cell, division by zero, a domain error."""
     tokens = _FORMULA_TOKEN.findall(expr)
     pos = 0
 
     def peek():
         return tokens[pos] if pos < len(tokens) else None
+
+    def cell(row: list | None, i: int) -> float:
+        n = _cell_num(row[i]) if row is not None and 0 <= i < len(row) else None
+        if n is None:
+            raise ValueError
+        return n
 
     def factor():
         nonlocal pos
@@ -191,13 +224,31 @@ def _eval_formula(expr: str, values: list) -> float | None:
                 raise ValueError
             pos += 1
             return v
-        if t[0] in "Cc":
+        m = re.fullmatch(r"[Rr](\d+)[Cc](\d+)", t)
+        if m:
             pos += 1
-            i = int(t[1:]) - 1
-            n = _cell_num(values[i]) if 0 <= i < len(values) else None
-            if n is None:
+            r = int(m.group(1)) - 1
+            return cell(grid[r] if grid is not None and 0 <= r < len(grid) else None, int(m.group(2)) - 1)
+        if t[0] in "Cc" and t[1:].isdigit():
+            pos += 1
+            return cell(values, int(t[1:]) - 1)
+        if t.lower() in _FORMULA_CONSTS:
+            pos += 1
+            return _FORMULA_CONSTS[t.lower()]
+        if t.lower() in _FORMULA_FUNCS:
+            fn = _FORMULA_FUNCS[t.lower()]
+            pos += 1
+            if peek() != "(":
                 raise ValueError
-            return n
+            pos += 1
+            args = [exprn()]
+            while peek() == ",":
+                pos += 1
+                args.append(exprn())
+            if peek() != ")":
+                raise ValueError
+            pos += 1
+            return float(fn(*args))   # TypeError on the wrong arity
         pos += 1
         return float(t)   # ValueError on anything else
 
@@ -227,10 +278,10 @@ def _eval_formula(expr: str, values: list) -> float | None:
 
     try:
         result = exprn()
-        if pos != len(tokens):
+        if pos != len(tokens) or not math.isfinite(result):
             return None
         return result
-    except (ValueError, ZeroDivisionError, RecursionError):
+    except (ValueError, TypeError, ZeroDivisionError, OverflowError, RecursionError):
         return None
 
 
@@ -548,7 +599,7 @@ def _norm_field(f: dict) -> dict | None:
                 tx = str(c.get("text") or "").strip()
                 if label and tx:
                     texts[label] = tx
-                elif label and fx and _FORMULA_CHARS.match(fx):
+                elif label and fx and _formula_ok(fx):
                     formulas[label] = fx
                 tr = _tol_range(c)
                 if label and (tr["min"] is not None or tr["max"] is not None):
@@ -627,6 +678,24 @@ def _norm_field(f: dict) -> dict | None:
                    and str(v).strip()}
             if rtx:
                 row["texts"] = rtx
+            # Hajime 2026-10-13: a row's own formula on a column (a Total
+            # row summing the rows above with R<n>C<m>) — beats the column's
+            # formula; the row's text beats both. Only on input columns.
+            taken = set(rtx) | set(checks) | set(texts) | set(sums) | set(counts) \
+                | set(lookups) | set(months) | set(dates)
+            rfx = rw.get("formulas") if isinstance(rw.get("formulas"), dict) else {}
+            rfx = {str(k).strip(): str(v).strip() for k, v in rfx.items()
+                   if str(k).strip() in cols and str(k).strip() not in taken
+                   and str(v).strip() and _formula_ok(str(v).strip())}
+            if rfx:
+                row["formulas"] = rfx
+            # Chao 2026-10-13: the row's formula for every column at once —
+            # ``R3 = R1 + R2``, ``R<n>`` = row n's cell in the same column.
+            # Applied to each column that isn't fixed-kind, a row text or a
+            # per-cell row formula beating it (_row_formulas).
+            rf = str(rw.get("formula") or "").strip()
+            if rf and _formula_ok(_expand_row_formula(rf, 1)):
+                row["formula"] = rf
             # per-row accepted range on a column (Hajime: ±0.1 on one row,
             # ±0.01 on the others) — beats the column's own and the table's
             rr = rw.get("ranges") if isinstance(rw.get("ranges"), dict) else {}
@@ -1032,13 +1101,30 @@ def leaf_fields(schema: dict):
                 yield sec["title"], leaf
 
 
-def _table_cells(f: dict, cells: dict, tx: dict, prefix: str, rr: dict | None = None) -> list:
+def _row_formulas(f: dict, rw: dict) -> dict:
+    """The formulas that apply to one named row, by column: the column's,
+    beaten by the row's formula on every column it can take, beaten by the
+    row's per-cell formulas; a text (the table's or the row's) takes none."""
+    out = dict(f.get("formulas") or {})
+    if rw.get("formula"):
+        fixed = set(f.get("checks") or []) | set(f.get("sums") or {}) | set(f.get("counts") or {}) \
+            | set(f.get("lookups") or {}) | set(f.get("months") or []) | set(f.get("dates") or [])
+        for i, c in enumerate(f["columns"]):
+            if c not in fixed:
+                out[c] = _expand_row_formula(rw["formula"], i + 1)
+    out.update(rw.get("formulas") or {})
+    tx = {**(f.get("texts") or {}), **(rw.get("texts") or {})}
+    return {c: fx for c, fx in out.items() if c not in tx}
+
+
+def _table_cells(f: dict, cells: dict, tx: dict, prefix: str, rr: dict | None = None,
+                 rfx: dict | None = None) -> list:
     """The display cells of one table row. A row's range (#119 review) beats
     the column's own, which replaces the table-wide one wholesale; a constant
     cell (#114) always shows its fixed text, never paints, and beats a
-    formula on the same column."""
+    formula on the same column; a row's formula beats the column's."""
     ct = {**(f.get("col_tol") or {}), **(rr or {})}
-    fx = f.get("formulas") or {}
+    fx = {**(f.get("formulas") or {}), **(rfx or {})}
     checks = f.get("checks") or []
     cc = f.get("col_color") or {}
     sums = f.get("sums") or {}
@@ -1176,7 +1262,7 @@ def _bind_leaf(f: dict, v) -> None:
                     "color": rw.get("color") or f.get("color", ""),
                     "cells": _table_cells(f, rv if isinstance(rv, dict) else {},
                                           {**tx, **rw.get("texts", {})},
-                                          f"{f['key']}-r{i}", rw.get("ranges"))})
+                                          f"{f['key']}-r{i}", rw.get("ranges"), _row_formulas(f, rw))})
     elif t == "steps":
         done = v if isinstance(v, dict) else {}
         f["items"] = [{"label": s.strip(), "name": f"{f['key']}-s{i}",
@@ -1204,11 +1290,13 @@ def _num_or_str(raw: str):
 
 
 def _parse_table_row(f: dict, post, prefix: str, texts: dict, resolve=None):
-    """One table row's posted cells as ``{column: value}``, or None when
-    nothing was typed (constants alone, and what they'd compute, aren't a
-    submission). On a linking table (#153) a plain cell keeps only a PID of
-    the required type — a serial number is resolved to one (#149), anything
-    else is dropped like a type-guarded box's mismatch."""
+    """One table row's posted cells as ``({column: value}, typed)`` — the
+    constants and what was typed, formulas not yet computed (that takes the
+    whole table, ``_compute_formulas``). ``typed`` is False when nothing was
+    (constants alone, and what they'd compute, aren't a submission). On a
+    linking table (#153) a plain cell keeps only a PID of the required type —
+    a serial number is resolved to one (#149), anything else is dropped like
+    a type-guarded box's mismatch."""
     formulas = f.get("formulas") or {}
     checks = f.get("checks") or []
     sums = {**(f.get("sums") or {}), **(f.get("counts") or {})}
@@ -1239,17 +1327,61 @@ def _parse_table_row(f: dict, post, prefix: str, texts: dict, resolve=None):
         elif raw:
             cells[c] = _num_or_str(raw)
             typed = True
-    if not typed:
-        return None
-    # #109: computed columns, left to right — a formula may reference plain
-    # cells and computed ones to its LEFT; anything unresolvable leaves the
-    # cell out. A row's constant (#119) beats the column's formula.
-    for c in f["columns"]:
-        if c in formulas and c not in texts:
-            v = _eval_formula(formulas[c], [cells.get(col) for col in f["columns"]])
-            if v is not None:
-                cells[c] = round(v, 9)
-    return cells
+    return cells, typed
+
+
+def _compute_formulas(f: dict, grid: list[dict], row_fx: list[dict]) -> list[set]:
+    """#109: the computed cells of a whole table, in place. ``grid`` is one
+    ``{column: value}`` per row (constants and typed cells), ``row_fx`` the
+    formulas that apply to each (the column's, a row's own beating it; a
+    constant beats both). A formula may reference any cell of the table —
+    passes repeat until nothing new resolves, so order doesn't matter and
+    a circular reference just stays empty. Returns, per row, the columns a
+    cross-row (``R<n>C<m>``) formula resolved on — those make an untyped
+    row (a Total) worth keeping."""
+    cols = f["columns"]
+    todo = [(ri, cols.index(c), c, fx) for ri, fxs in enumerate(row_fx) for c, fx in fxs.items()]
+    cross = [set() for _ in grid]
+    rows = [[r.get(col) for col in cols] for r in grid]
+    for _ in range(len(todo) + 1):
+        changed = False
+        for ri, ci, c, fx in todo:
+            v = _eval_formula(fx, rows[ri], rows)
+            if v is None:
+                continue
+            v = round(v, 9)
+            if grid[ri].get(c) != v:
+                grid[ri][c] = rows[ri][ci] = v
+                changed = True
+            if _CROSS_ROW.search(fx):
+                cross[ri].add(c)
+        if not changed:
+            break
+    return cross
+
+
+def _parse_table(f: dict, post, key: str, resolve=None):
+    """A table field's posted value: ``{column: value}``, or with named rows
+    (#119) ``{row: {column: value}}`` — untouched rows omitted, an
+    all-untouched table None."""
+    texts = f.get("texts") or {}
+    formulas = f.get("formulas") or {}
+    if not f.get("rows"):
+        cells, typed = _parse_table_row(f, post, key, texts, resolve)
+        if not typed:
+            return None
+        _compute_formulas(f, [cells], [{c: fx for c, fx in formulas.items() if c not in texts}])
+        return cells
+    grid, typed, row_fx = [], [], []
+    for i, rw in enumerate(f["rows"]):
+        tx = {**texts, **rw.get("texts", {})}
+        cells, t = _parse_table_row(f, post, f"{key}-r{i}", tx, resolve)
+        grid.append(cells)
+        typed.append(t)
+        row_fx.append(_row_formulas(f, rw))
+    cross = _compute_formulas(f, grid, row_fx)
+    value = {rw["label"]: cells for rw, cells, t, x in zip(f["rows"], grid, typed, cross) if t or x}
+    return value or None
 
 
 _PID_SHAPE = re.compile(r"[A-Za-z]\d{11}-\d{5}")
@@ -1306,22 +1438,9 @@ def parse(schema: dict, post, resolve=None) -> dict:
                 continue
             value = _num_or_str(raw)
         elif t == "table":
-            texts = f.get("texts") or {}
-            if f.get("rows"):
-                # #119: {row: {column: value}}; untouched rows are omitted
-                # and an all-untouched table stays omitted like before
-                value = {}
-                for i, rw in enumerate(f["rows"]):
-                    cells = _parse_table_row(f, post, f"{key}-r{i}",
-                                             {**texts, **rw.get("texts", {})}, resolve)
-                    if cells is not None:
-                        value[rw["label"]] = cells
-                if not value:
-                    continue
-            else:
-                value = _parse_table_row(f, post, key, texts, resolve)
-                if value is None:
-                    continue
+            value = _parse_table(f, post, key, resolve)
+            if value is None:
+                continue
         elif t == "steps":
             value = {s.strip(): bool(post.get(f"{key}-s{i}"))
                      for i, s in enumerate(f["steps"])}

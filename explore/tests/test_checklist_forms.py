@@ -5,6 +5,7 @@ the fill-out page, prefill (revive) and the submit flow.
 """
 
 import json
+import math
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -1876,6 +1877,42 @@ class FormulaCellsTest(TestCase):
         self.assertIsNone(ev("C1", ["3 mm"]))
         self.assertIsNone(ev("C1", ["3 +- "]))
 
+    def test_eval_functions_and_pi(self):
+        # Hajime 2026-10-13 (Minnesota, HD field cages): arc-tangent and pi
+        ev = checklistforms._eval_formula
+        self.assertAlmostEqual(ev("atan2(C2, C1) * 180 / pi", [1, 1]), 45.0)
+        self.assertAlmostEqual(ev("atan(C1) * 180 / PI", [1]), 45.0)
+        self.assertAlmostEqual(ev("sin(pi / 2) + cos(0) + tan(0)", []), 2.0)
+        self.assertAlmostEqual(ev("sqrt(C1) + abs(-C2)", [16, 3]), 7.0)
+        self.assertAlmostEqual(ev("asin(1) + acos(1)", []), math.pi / 2)
+        self.assertIsNone(ev("sqrt(-1)", []))            # domain error
+        self.assertIsNone(ev("atan2(1)", []))            # wrong arity
+        self.assertIsNone(ev("abs(1, 2)", []))
+        self.assertIsNone(ev("atan 1", []))              # no parens
+        self.assertIsNone(ev("pi(1)", []))               # pi is not a function
+        self.assertIsNone(ev("foo(1)", []))              # unknown name
+        self.assertIsNone(ev("2pi", []))                 # no implicit multiplication
+        self.assertTrue(checklistforms._formula_ok("atan2(C2, C1) * 180 / pi"))
+        self.assertFalse(checklistforms._formula_ok("os.x"))
+        self.assertFalse(checklistforms._formula_ok("__import__('os')"))
+
+    def test_eval_reads_other_rows(self):
+        ev = checklistforms._eval_formula
+        grid = [[1.0, 2.0], [10.0, "3 +- 1"], [None, None]]
+        self.assertEqual(ev("R1C1 + R2C2", grid[2], grid), 4.0)
+        self.assertEqual(ev("C1 - R1C1", grid[1], grid), 9.0)
+        self.assertIsNone(ev("R3C1", grid[0], grid))     # empty cell
+        self.assertIsNone(ev("R9C1", grid[0], grid))     # no such row
+        self.assertIsNone(ev("R1C1", [1.0]))             # no grid at all
+
+    def test_parse_a_formula_may_read_a_computed_cell_to_its_right(self):
+        schema = self._schema(["A", {"label": "Twice", "formula": "C3 * 2"},
+                               {"label": "Plus", "formula": "C1 + 1"},
+                               {"label": "Loop", "formula": "C5"}, {"label": "Back", "formula": "C4"}])
+        key = schema["sections"][0]["fields"][0]["key"]
+        data = checklistforms.parse(schema, {f"{key}-c0": "1"})
+        self.assertEqual(data["S"]["M"], {"A": 1, "Twice": 4.0, "Plus": 2.0})   # the cycle stays empty
+
     def test_parse_computes_the_cell_and_ignores_posted_overrides(self):
         schema = self._schema(["A", "B", {"label": "Sum", "formula": "C1 + C2"},
                                {"label": "Double", "formula": "C3 * 2"}])
@@ -3566,6 +3603,76 @@ class MultiRowTableTest(TestCase):
             "Length": {"Expected": 3.1, "Measured": 3.2, "Diff": 0.1},
             "Hole 3": {"Measured": 2.5}})            # no constant → no Diff
         self.assertEqual(checklistforms.parse(s, {}), {})   # untouched → omitted
+
+    def test_rows_own_formulas(self):
+        # Hajime 2026-10-13 (Minnesota): a Total row adds the rows above,
+        # a column formula may read another row
+        tbl = {"type": "table", "label": "T",
+               "columns": ["Expected", "Measured", {"label": "Diff", "formula": "C2 - R1C2"}],
+               "rows": [{"label": "Ref"}, {"label": "A"},
+                        {"label": "Total", "formulas": {"Measured": "R1C2 + R2C2", "Diff": "atan(1)*4/pi",
+                                                        "Expected": "C2", "Nope": "C1"},
+                         "texts": {"Expected": "x"}},
+                        {"label": "Bad", "formulas": {"Measured": "os.x"}}]}
+        s = checklistforms.normalize(
+            {**SCHEMA, "sections": [{"title": "S", "fields": [tbl]}]}, NAME)
+        f = s["sections"][0]["fields"][0]
+        self.assertNotIn("formulas", f["rows"][0])
+        self.assertEqual(f["rows"][2]["formulas"], {"Measured": "R1C2 + R2C2", "Diff": "atan(1)*4/pi"})   # text beats, unknown column dropped
+        self.assertNotIn("formulas", f["rows"][3])                         # unknown name dropped
+        b = checklistforms.bind(s, None)
+        tr = b["sections"][0]["fields"][0]["trows"]
+        self.assertEqual(tr[1]["cells"][1]["formula"], "")
+        self.assertEqual(tr[2]["cells"][1]["formula"], "R1C2 + R2C2")        # the row's own
+        self.assertEqual(tr[2]["cells"][2]["formula"], "atan(1)*4/pi")       # beats the column's
+        self.assertEqual(tr[2]["cells"][0]["text"], "x")
+        key = f["key"]
+        data = checklistforms.parse(s, {f"{key}-r0-c1": "2", f"{key}-r1-c1": "3.5", f"{key}-r2-c1": "999"})
+        self.assertEqual(data["S"]["T"], {
+            "Ref": {"Measured": 2, "Diff": 0.0},
+            "A": {"Measured": 3.5, "Diff": 1.5},
+            "Total": {"Expected": "x", "Measured": 5.5, "Diff": 1.0}})   # kept: its cross-row formula computed
+        # nothing typed anywhere → the Total's formulas don't resolve → nothing stored
+        self.assertEqual(checklistforms.parse(s, {}), {})
+        # only the Ref row typed → Total's R2C2 is empty → Total left out
+        data = checklistforms.parse(s, {f"{key}-r0-c1": "2"})
+        self.assertEqual(set(data["S"]["T"]), {"Ref"})
+
+    def test_whole_row_formula(self):
+        # Chao 2026-10-13: "R3 = R1 + R2" — one formula for the row, every column
+        tbl = {"type": "table", "label": "T",
+               "columns": ["Expected", "Measured", {"label": "Diff", "formula": "C2 - C1"},
+                           {"label": "OK", "check": True}, {"label": "When", "date": True}],
+               "rows": [{"label": "A"}, {"label": "B"},
+                        {"label": "Sum", "formula": "R1 + R2", "texts": {"Expected": "n/a"},
+                         "formulas": {"Diff": "abs(R1C3)"}},
+                        {"label": "Net", "formula": "R1 - R2 + R1C2"},
+                        {"label": "Bad", "formula": "R1 + C"}]}
+        s = checklistforms.normalize(
+            {**SCHEMA, "sections": [{"title": "S", "fields": [tbl]}]}, NAME)
+        f = s["sections"][0]["fields"][0]
+        self.assertEqual(f["rows"][2]["formula"], "R1 + R2")
+        self.assertEqual(f["rows"][3]["formula"], "R1 - R2 + R1C2")
+        self.assertNotIn("formula", f["rows"][4])                           # bad token dropped
+        self.assertEqual(checklistforms._row_formulas(f, f["rows"][2]), {
+            "Measured": "R1C2 + R2C2", "Diff": "abs(R1C3)"})                 # text beats, cell formula beats, check/date skipped
+        self.assertEqual(checklistforms._row_formulas(f, f["rows"][0]), {"Diff": "C2 - C1"})
+        b = checklistforms.bind(s, None)
+        tr = b["sections"][0]["fields"][0]["trows"]
+        self.assertEqual(tr[2]["cells"][1]["formula"], "R1C2 + R2C2")
+        self.assertEqual(tr[3]["cells"][0]["formula"], "R1C1 - R2C1 + R1C2")
+        key = f["key"]
+        data = checklistforms.parse(s, {f"{key}-r0-c0": "1", f"{key}-r0-c1": "3",
+                                        f"{key}-r1-c0": "2", f"{key}-r1-c1": "5"})
+        self.assertEqual(data["S"]["T"], {
+            "A": {"Expected": 1, "Measured": 3, "Diff": 2.0},
+            "B": {"Expected": 2, "Measured": 5, "Diff": 3.0},
+            "Sum": {"Expected": "n/a", "Measured": 8.0, "Diff": 2.0},
+            "Net": {"Expected": 2.0, "Measured": 1.0, "Diff": 2.0}})
+        # only Expected typed: every Sum / Net formula reads an empty
+        # Measured cell → nothing computed → those rows aren't kept
+        data = checklistforms.parse(s, {f"{key}-r0-c0": "1", f"{key}-r1-c0": "2"})
+        self.assertEqual(set(data["S"]["T"]), {"A", "B"})
 
     def test_form_renders_rows(self):
         user = get_user_model().objects.create_user("n", "n@n.io", "pw")
