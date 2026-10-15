@@ -562,6 +562,18 @@ def sync_test_data(
            + (f" · {failed} item(s) failed" if failed else "") + "\n")
 
 
+def _short_error(e: Exception) -> str:
+    """A failed fetch as one line for the Type View: an HTTP error keeps its
+    status, reason and URL and drops the body (nginx's 502 page is a whole
+    HTML document — Chao 2026-10-15); anything else is cut at 200 chars.
+    The full text still goes to the log."""
+    resp = getattr(e, "response", None)
+    if resp is not None and getattr(resp, "status_code", None):
+        return f"{resp.status_code} {resp.reason} for {resp.url}"
+    text = " ".join(str(e).split())
+    return text if len(text) <= 200 else text[:197] + "…"
+
+
 def sync_test_events(
     api_base_url: str,
     bearer: str,
@@ -659,7 +671,7 @@ def sync_test_events(
                     try:
                         results.append(fut.result())
                     except Exception as e:
-                        failed[futs[fut]] = str(e)
+                        failed[futs[fut]] = _short_error(e)
                         logger.warning("sync tests: %s failed: %s", futs[fut], e)
                     done += 1
                     if done % 200 == 0 or done == len(process):

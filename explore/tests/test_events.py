@@ -213,6 +213,14 @@ class SyncTestEventsTest(TestCase):
                          {("P1", "x"), ("P3", "y")})   # P1's tests kept, P2's dropped
         node = H.objects.get(part_type_id="D05700200001")
         self.assertIn("1 of 2 item(s) could not be fetched", node.tests_sync_error)
+        # an HTTP error keeps status + URL and drops the body (nginx's 502
+        # page is a whole HTML document — Chao 2026-10-15)
+        resp = mock.Mock(status_code=502, reason="Bad Gateway",
+                         url="https://x/api/v1/components/P1/tests")
+        err = requests.exceptions.HTTPError("502 Bad Gateway for …: <!DOCTYPE html>…", response=resp)
+        self.assertEqual(events._short_error(err),
+                         "502 Bad Gateway for https://x/api/v1/components/P1/tests")
+        self.assertEqual(len(events._short_error(RuntimeError("x" * 500))), 198)
         # a clean run afterwards clears the note and rewrites wholesale
         self._run(["P1", "P3"], {}, mode="full")
         self.assertEqual(H.objects.get(part_type_id="D05700200001").tests_sync_error, "")
