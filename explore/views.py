@@ -5760,8 +5760,10 @@ def explore_exec_summary_view(request, part_id):
         plot_fields=saved_plot_fields)
         if cfg and cfg["plots"] else [])
     full_name, role_ids, role_names = _whoami_context(api)
-    signing = (execsummary.compute_status(cfg, es_list, role_ids, role_names)
-               if cfg else None)
+    signing = (execsummary.compute_status(
+        cfg, es_list, role_ids, role_names,
+        recorded=execsummary.recorded_signoffs(api, part_id, cfg))
+        if cfg else None)
     try:
         comp = api.get_component(part_id).get("data") or {}
     except requests.RequestException:
@@ -6162,7 +6164,9 @@ def _exec_summary_action(request, api, part_id, ptid, cfg, page_url):
         return redirect(page_url)
 
     if action == "generate":
-        status = execsummary.compute_status(cfg, es_list, role_ids, role_names)
+        status = execsummary.compute_status(
+            cfg, es_list, role_ids, role_names,
+            recorded=execsummary.recorded_signoffs(api, part_id, cfg))
         if not status["all_signed"]:
             messages.error(request, "Every configured signee must sign before generating.")
             return redirect(page_url)

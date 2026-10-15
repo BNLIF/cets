@@ -164,8 +164,12 @@ def _normalize(cfg: dict) -> dict:
         if isinstance(emails, str):
             emails = emails.split(",")
         emails = [str(e).strip() for e in (emails or []) if str(e).strip()]
+        # A recorded sign-off (APA, Hajime 2026-10-15): the signature lives
+        # in the item's Item Specifications at ``item_path`` instead of
+        # being typed on the page — see ``recorded_signoffs``.
         signees.append({"name": str(s["name"]), "rank": rank, "roles": roles,
-                        "emails": emails})
+                        "emails": emails,
+                        "item_path": str(s.get("item_path") or "").strip()})
     refs = []
     for r in cfg.get("references") or []:
         if isinstance(r, str):
@@ -602,6 +606,27 @@ def _fmt_field_value(v):
     return json.dumps(v)   # a list/object at the path — shown verbatim
 
 
+def _col_label(key: str) -> str:
+    """A record key as a column heading: camelCase and underscores become
+    words (``coldElectronicsChannel`` → "Cold electronics channel")."""
+    words = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(key)).replace("_", " ").split()
+    text = " ".join(w if w.isupper() else w.lower() for w in words)   # keep acronyms
+    return text[:1].upper() + text[1:]
+
+
+def _records_table(value) -> dict | None:
+    """A list of records at a path (the APA's ``brokenWires``) as a table —
+    ``{columns, rows}``, columns in order of first appearance; None for
+    anything else so the value shows as text."""
+    if not (isinstance(value, list) and value and all(isinstance(r, dict) for r in value)):
+        return None
+    keys = []
+    for r in value:
+        keys += [k for k in r if k not in keys]
+    return {"columns": [_col_label(k) for k in keys],
+            "rows": [[_fmt_field_value(r.get(k)) or "" for k in keys] for r in value]}
+
+
 def resolve_plot_fields(api, plot, pid: str, saved: dict) -> list[dict]:
     """The plot's field group (#85) as display rows ``{label, data_path,
     item_path, auto, value, error}``: data_path fields read the resolved
@@ -620,19 +645,21 @@ def resolve_plot_fields(api, plot, pid: str, saved: dict) -> list[dict]:
     spec, spec_err = (None, None)
     if any(f["item_path"] for f in plot["fields"]):
         spec, spec_err = _item_spec_at(api, pid)
+    def _auto(f, raw, fetch_err, where):
+        # a list of records at the path shows as a table, not as JSON text
+        table = _records_table(raw)
+        value = (f"{len(table['rows'])} rows" if table else _fmt_field_value(raw))
+        return {**f, "auto": True, "value": value, "tri": _tri(raw), "table": table,
+                "error": fetch_err or (None if value is not None else
+                                       f"No value at {where}.")}
+
     for f in plot["fields"]:
         if f["data_path"]:
-            raw = None if err else _get_by_path(td, f["data_path"])
-            value = _fmt_field_value(raw)
-            rows.append({**f, "auto": True, "value": value, "tri": _tri(raw),
-                         "error": err or (None if value is not None else
-                                          f"No value at data_path '{f['data_path']}'.")})
+            rows.append(_auto(f, None if err else _get_by_path(td, f["data_path"]),
+                              err, f"data_path '{f['data_path']}'"))
         elif f["item_path"]:
-            raw = None if spec_err else _get_by_path(spec, f["item_path"])
-            value = _fmt_field_value(raw)
-            rows.append({**f, "auto": True, "value": value, "tri": _tri(raw),
-                         "error": spec_err or (None if value is not None else
-                                               f"No value at item_path '{f['item_path']}'.")})
+            rows.append(_auto(f, None if spec_err else _get_by_path(spec, f["item_path"]),
+                              spec_err, f"item_path '{f['item_path']}'"))
         else:
             rows.append({**f, "auto": False,
                          "value": str(saved.get(f["label"]) or ""), "error": None})
@@ -802,28 +829,84 @@ def download_plot_images(api, blocks) -> None:
             b["error"] = f"Failed to download image (image_id={b['image_id']}): {e}"
 
 
+# ---- Recorded sign-offs ----------------------------------------------------
+
+def _short_date(value) -> str:
+    """An ISO timestamp trimmed to the minute in the log's format; anything
+    else verbatim."""
+    text = str(value or "").strip()
+    if re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", text):
+        return text[:16].replace("T", " ")
+    return text
+
+
+def _recorded_entry(value) -> dict | None:
+    """A sign-off read from the Item Specifications as a sign-off table
+    entry. A dict carries ``name`` (the signature) and ``date``; every other
+    http value in it becomes a link (the APA DB's ``apaDB_signoff`` and
+    friends). A bare string is the signature alone. No name → not signed."""
+    if isinstance(value, str):
+        value = {"name": value}
+    if not isinstance(value, dict) or not str(value.get("name") or "").strip():
+        return None
+    links = [{"label": str(k).replace("_", " "), "url": v}
+             for k, v in value.items()
+             if isinstance(v, str) and v.startswith("http")]
+    return {"signature": str(value["name"]).strip(),
+            "timestamp": _short_date(value.get("date")), "comments": "",
+            "links": links}
+
+
+def recorded_signoffs(api, part_id: str, cfg) -> dict:
+    """``{signee name: entry | None}`` for every config signee with an
+    item_path, read from the item's latest Item Specifications entry (one
+    fetch; a failed fetch leaves them all unsigned)."""
+    names = [s for s in cfg["signees"] if s["item_path"]]
+    if not names:
+        return {}
+    spec, err = _item_spec_at(api, part_id)
+    if err:
+        logger.warning("ES recorded sign-offs for %s: %s", part_id, err)
+        spec = {}
+    return {s["name"]: _recorded_entry(_get_by_path(spec, s["item_path"]))
+            for s in names}
+
+
 # ---- Signing order / gating -----------------------------------------------
 
 def _sort_key(signee):
-    """Display + PDF row order: negative ranks first (stable by name), then
+    """Display + PDF row order: recorded sign-offs first in config order
+    (the production sequence), then negative ranks (stable by name), then
     rank descending — the actual signing order."""
     rank = signee["rank"]
-    return (0, signee["name"]) if rank < 0 else (1, -rank, signee["name"])
+    if signee.get("item_path"):
+        return (-1, 0, "")
+    return (0, 0, signee["name"]) if rank < 0 else (1, -rank, signee["name"])
 
 
-def compute_status(cfg, es_list, user_role_ids, role_names=None) -> dict:
+def compute_status(cfg, es_list, user_role_ids, role_names=None,
+                   recorded=None) -> dict:
     """Per-signee signing state, the Dashboard's rules: all negative-rank
     signees before any non-negative; non-negatives highest-rank-first; each
-    row role-gated against the caller's roles."""
+    row role-gated against the caller's roles. Signees with an item_path
+    take their entry from ``recorded`` (``recorded_signoffs``) instead: they
+    are never signed on the page and take no part in the turn order, but
+    the summary needs them all present like any other signee."""
     signed = {e.get("name"): e for e in es_list or []
               if isinstance(e, dict) and (e.get("signature") or "").strip()}
     signees = sorted(cfg["signees"], key=_sort_key)
-    neg_unsigned = any(s["rank"] < 0 and s["name"] not in signed for s in signees)
-    nonneg_unsigned = [s["rank"] for s in signees
+    typed = [s for s in signees if not s["item_path"]]
+    neg_unsigned = any(s["rank"] < 0 and s["name"] not in signed for s in typed)
+    nonneg_unsigned = [s["rank"] for s in typed
                        if s["rank"] >= 0 and s["name"] not in signed]
     next_rank = max(nonneg_unsigned) if nonneg_unsigned else None
     rows = []
     for s in signees:
+        if s["item_path"]:
+            entry = (recorded or {}).get(s["name"])
+            rows.append({**s, "entry": entry, "allowed": False,
+                         "rank_allowed": False, "role_ok": True, "role_names": []})
+            continue
         already = s["name"] in signed
         if s["rank"] < 0:
             allowed = not already
@@ -839,10 +922,10 @@ def compute_status(cfg, es_list, user_role_ids, role_names=None) -> dict:
             "role_ok": role_ok,
             "role_names": [str((role_names or {}).get(r, r)) for r in s["roles"]],
         })
-    all_signed = bool(signees) and all(s["name"] in signed for s in signees)
+    all_signed = bool(signees) and all(r["entry"] for r in rows)
     # RESET is allowed only for holders of the lowest non-negative-rank
     # signee's roles (the final approver), per the Dashboard.
-    nonneg = [s for s in signees if s["rank"] >= 0]
+    nonneg = [s for s in typed if s["rank"] >= 0]
     reset_roles = min(nonneg, key=lambda s: s["rank"])["roles"] if nonneg else []
     reset_allowed = not reset_roles or bool(set(reset_roles) & set(user_role_ids))
     return {"rows": rows, "all_signed": all_signed, "reset_allowed": reset_allowed}
@@ -988,10 +1071,16 @@ def _signoff_table(rows) -> Table:
              _col_head("DATE"), _col_head("COMMENT (LATEST)")]]
     for r in rows:
         e = r["entry"] or {}
+        # a recorded sign-off's links (the APA DB's actions) stand in for
+        # the comment it never has
+        comment = " · ".join(
+            f'<link href="{escape(ln["url"], {chr(34): "&quot;"})}" color="blue">'
+            f'<u>{escape(ln["label"])}</u></link>' for ln in e.get("links") or []
+        ) or escape(e.get("comments") or "—")
         body.append([Paragraph(escape(r["name"]), cell),
                      Paragraph(escape(e.get("signature") or "—"), cell),
                      Paragraph(escape(e.get("timestamp") or "—"), cell),
-                     Paragraph(escape(e.get("comments") or "—"), cell)])
+                     Paragraph(comment, cell)])
     t = Table(body, colWidths=[100, 100, 90, 178], repeatRows=1)
     t.setStyle(TableStyle([
         ("LINEBELOW", (0, 0), (-1, 0), 0.9, _INK),
@@ -1207,8 +1296,9 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
                        f"(history_order={pb['history_order']}) · {pb['pid']}")
             story += [
                 Spacer(1, 10),
-                Paragraph(f"<b>{escape(pb['title'])}</b> — "
-                          f"{escape(pb['test_type_name'])}", title),
+                Paragraph(f"<b>{escape(pb['title'])}</b>"
+                          + (f" — {escape(pb['test_type_name'])}"
+                             if pb.get('test_type_name') else ""), title),
             ]
             if src:
                 story.append(Paragraph(escape(src), src_style))
@@ -1230,6 +1320,21 @@ def build_detail_pdf(part_id: str, form: dict) -> bytes:
                     ("LINEBELOW", (0, 0), (-1, -1), 0.4, _HAIRLINE),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"), *_flush()]))
                 story += [Spacer(1, 4), ft]
+                # record lists (the APA's broken wires) as their own tables
+                for f in flds:
+                    if not f.get("table"):
+                        continue
+                    t = f["table"]
+                    rc = _ds("pf-r", fontSize=7.5, leading=9.5)
+                    rt = Table([[_col_head(c) for c in t["columns"]]]
+                               + [[Paragraph(escape(v), rc) for v in r] for r in t["rows"]],
+                               colWidths=[468 / len(t["columns"])] * len(t["columns"]),
+                               repeatRows=1)
+                    rt.setStyle(TableStyle([
+                        ("LINEBELOW", (0, 0), (-1, 0), 0.9, _INK),
+                        ("LINEBELOW", (0, 1), (-1, -1), 0.4, _HAIRLINE),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"), *_flush()]))
+                    story += [Spacer(1, 4), rt]
             if pb.get("bytes"):
                 try:
                     img = Image(io.BytesIO(pb["bytes"]))

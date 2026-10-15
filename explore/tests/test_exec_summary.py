@@ -448,6 +448,59 @@ class EngineTest(TestCase):
         self.assertFalse(row["allowed"])        # caller lacks role 41
         self.assertTrue(row["rank_allowed"])    # but it IS this row's turn
 
+    def test_recorded_signoffs_come_from_the_item_specs(self):
+        # APA (Hajime 2026-10-15): a signee with an item_path is read from
+        # the Item Specifications — never signed here, outside the turn
+        # order, but the summary needs it present like any other signee.
+        cfg = execsummary._normalize({**CFG, "signees": [
+            {"name": "Frame Construction", "rank": 0,
+             "item_path": "data.signoffs.frameConstruction"},
+            {"name": "Final", "rank": 0, "roles": []},
+        ]})
+        spec = {"data": {"signoffs": {"frameConstruction": {
+            "name": "Gwenn Mouster", "date": "2025-01-22T11:00:22.508000+00:00",
+            "apaDB_signoff": "https://apa.dunedb.org/action/1",
+            "apaDB_meshInstall": None}}}}
+        api = mock.MagicMock()
+        api.get_component.return_value = {"data": {"specifications": [spec]}}
+        rec = execsummary.recorded_signoffs(api, "X-00001", cfg)
+        self.assertEqual(rec["Frame Construction"]["signature"], "Gwenn Mouster")
+        self.assertEqual(rec["Frame Construction"]["timestamp"], "2025-01-22 11:00")
+        self.assertEqual(rec["Frame Construction"]["links"],
+                         [{"label": "apaDB signoff", "url": "https://apa.dunedb.org/action/1"}])
+        st = execsummary.compute_status(cfg, [], set(), recorded=rec)
+        rows = {r["name"]: r for r in st["rows"]}
+        self.assertFalse(rows["Frame Construction"]["allowed"])
+        self.assertTrue(rows["Frame Construction"]["entry"])
+        self.assertTrue(rows["Final"]["allowed"])     # the recorded row never blocks
+        self.assertFalse(st["all_signed"])
+        st2 = execsummary.compute_status(cfg, [_entry("Final", 0)], set(), recorded=rec)
+        self.assertTrue(st2["all_signed"])
+        # missing in the specs → unsigned, and the summary stays closed
+        st3 = execsummary.compute_status(cfg, [_entry("Final", 0)], set(),
+                                         recorded={"Frame Construction": None})
+        self.assertFalse(st3["all_signed"])
+        self.assertTrue(execsummary.compute_status(cfg, [], set(), recorded=rec)["reset_allowed"])
+
+    def test_record_list_at_a_path_becomes_a_table(self):
+        # APA brokenWires (Chao 2026-10-15): a list of dicts shows as a
+        # table with camelCase keys spelled out, not as JSON text.
+        plot = execsummary._normalize({**CFG, "plots": [{"title": "Broken wires", "fields": [
+            {"label": "Broken wires", "item_path": "data.brokenWires"},
+            {"label": "Site", "item_path": "data.site"}]}]})["plots"][0]
+        api = mock.MagicMock()
+        api.get_component.return_value = {"data": {"specifications": [{"data": {
+            "site": "Daresbury",
+            "brokenWires": [{"sideAndLayer": "AV", "offlineChannel": "1361"},
+                            {"sideAndLayer": "BU", "offlineChannel": "439", "type": "Missing"}]}}]}}
+        rows = {r["label"]: r for r in execsummary.resolve_plot_fields(api, plot, "X-00001", {})}
+        self.assertEqual(rows["Broken wires"]["value"], "2 rows")
+        self.assertEqual(rows["Broken wires"]["table"],
+                         {"columns": ["Side and layer", "Offline channel", "Type"],
+                          "rows": [["AV", "1361", ""], ["BU", "439", "Missing"]]})
+        self.assertIsNone(rows["Site"]["table"])
+        self.assertEqual(rows["Site"]["value"], "Daresbury")
+
     def test_reset_needs_lowest_nonnegative_rank_roles(self):
         cfg = execsummary._normalize(CFG)   # lowest non-negative = Hajime (roles [41])
         self.assertTrue(execsummary.compute_status(cfg, [], {41})["reset_allowed"])

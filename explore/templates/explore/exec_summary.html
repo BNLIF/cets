@@ -72,8 +72,15 @@
     display: block; border: 1px solid var(--rule); border-radius: var(--r-sm); background: #fff; }
   .es-plot-err { font-size: 12.5px; color: var(--bad, #a33); margin-top: 4px; overflow-wrap: anywhere; }
   .es-plot-fields { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 6px; }
-  .es-plot-fields td { padding: 3px 10px 3px 0; border-bottom: 1px solid var(--rule); color: var(--ink); }
+  .es-plot-fields td { padding: 3px 10px 3px 0; border-bottom: 1px solid var(--rule); color: var(--ink);
+    overflow-wrap: anywhere; }
   .es-plot-fields td.lab { width: 45%; color: var(--dim); }
+  /* a list of records at a field's path (broken wires) */
+  .es-rec { width: 100%; border-collapse: collapse; font-size: 11.5px; margin: 4px 0 2px; }
+  .es-rec th { text-align: left; font-weight: 600; color: var(--faint); font-size: 10.5px;
+    padding: 0 8px 2px 0; border-bottom: 1px solid var(--ink); }
+  .es-rec td { padding: 2px 8px 2px 0; border-bottom: 1px solid var(--rule); color: var(--ink);
+    overflow-wrap: anywhere; }
   .es-sum { cursor: pointer; font-size: 12px; color: var(--faint); text-transform: uppercase;
     letter-spacing: .04em; }
   .es-sum:hover { color: var(--dim); }
@@ -175,6 +182,12 @@
           <td class="lab">{{ f.label }}</td>
           <td>{% if f.value %}{% if f.auto %}<span class="mono{% if f.tri == "pass" %} es-yes{% elif f.tri == "fail" %} es-no{% endif %}">{{ f.value }}</span>{% else %}{{ f.value }}{% endif %}{% else %}<span class="es-hint">—</span>{% endif %}</td>
         </tr>
+        {% if f.table %}
+        <tr><td colspan="2" style="padding-right:0;"><table class="es-rec">
+          <thead><tr>{% for c in f.table.columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+          <tbody>{% for r in f.table.rows %}<tr>{% for v in r %}<td>{{ v }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+        </table></td></tr>
+        {% endif %}
         {% endfor %}
       </table>
       {% endif %}
@@ -263,6 +276,17 @@
     <div class="es-card">
       <h2>Sign-off {% if signing.all_signed %}<span class="es-signed">— all signed ✓</span>{% endif %}</h2>
       {% for r in signing.rows %}
+      {% if r.item_path %}
+      {# a sign-off recorded in the item's Item Specifications (APA) — nothing to type #}
+      <div class="es-signee">
+        <div><span class="who">{{ r.name }}</span>
+          <span class="meta">from the Item Specifications</span>
+          {% if r.entry %}<span class="es-signed">{{ r.entry.signature }}{% if r.entry.timestamp %} · {{ r.entry.timestamp }}{% endif %}</span>
+          {% for ln in r.entry.links %} <a class="es-hint" href="{{ ln.url }}" target="_blank" rel="noopener">{{ ln.label }} <span aria-hidden="true">&#x2197;</span></a>{% endfor %}
+          {% else %}<span class="es-waiting">not recorded at <span class="mono">{{ r.item_path }}</span></span>{% endif %}
+        </div>
+      </div>
+      {% else %}
       <div class="es-signee">
         <div><span class="who">{{ r.name }}</span>
           <span class="meta">rank {{ r.rank }}{% if r.role_names %} · requires: {{ r.role_names|join:", " }}{% endif %}</span>
@@ -282,6 +306,7 @@
           <button class="es-btn" name="sign" value="{{ r.name }}" style="margin-top:17px;" {% if not r.allowed %}disabled{% endif %}>Sign &amp; post</button>
         </div>
       </div>
+      {% endif %}
       {% endfor %}
       {% if notify %}
       <div class="es-row" style="margin-top:12px; align-items:center;">
