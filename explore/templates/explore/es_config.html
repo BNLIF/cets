@@ -196,6 +196,15 @@
       <input class="f-ipaths" placeholder="item_paths into the Item Specifications, comma-separated">
       <input class="f-ibins" type="number" placeholder="bins">
     </div>
+    <div class="ec-row g-style" style="display:none;">
+      <select class="f-style" style="flex:0 0 210px;" title="one-path plots only">
+        <option value="hist">histogram</option>
+        <option value="series">values vs #</option>
+        <option value="series+hist">values vs # + histogram</option>
+      </select>
+      <input class="f-limits" placeholder="limit lines, e.g. 4, 8.5">
+      <input class="f-range" placeholder="histogram range, e.g. 3.5, 9.1">
+    </div>
     <div class="ec-row">
       <input class="f-pid" placeholder="part_id (blank = the item itself)">
       <input class="f-layer" type="number" placeholder="sub layer" title="sub_part_id layer: 1 = direct children">
@@ -243,6 +252,7 @@
     $(".g-image", p).style.display = kind === "image" ? "" : "none";
     $(".g-numeric", p).style.display = kind === "numeric" ? "" : "none";
     $(".g-spec", p).style.display = kind === "numeric-spec" ? "" : "none";
+    $(".g-style", p).style.display = (kind === "numeric" || kind === "numeric-spec") ? "" : "none";
     // Item-Specs plots read no test record, so the test type is meaningless
     $(".f-ttn", p).style.display = kind === "numeric-spec" ? "none" : "";
   }
@@ -290,6 +300,9 @@
       $(".f-ipaths", n).value = (p.item_paths || []).join(", ");
       if (p.bins) { $(".f-bins", n).value = p.bins; $(".f-ibins", n).value = p.bins; }
       $(".f-sum", n).checked = !!p.sum;
+      $(".f-style", n).value = p.style || "hist";
+      $(".f-limits", n).value = (p.limits || []).join(", ");
+      $(".f-range", n).value = (p.range || []).join(", ");
       $(".f-pid", n).value = p.part_id || "";
       if (p.sub_part_id) { $(".f-layer", n).value = p.sub_part_id.layer; $(".f-pos", n).value = p.sub_part_id.pos_name || ""; }
       (p.fields || []).forEach(function (f) { addField(n, f); });
@@ -348,6 +361,16 @@
         var ibins = parseInt($(".f-ibins", p).value, 10);
         if (!isNaN(ibins)) o.bins = ibins;
       }   // "fields": no source key at all — the fields list alone defines it
+      if (kind === "numeric" || kind === "numeric-spec") {
+        var nums = function (sel) {
+          return $(sel, p).value.split(",").map(function (x) { return parseFloat(x); })
+                   .filter(function (x) { return !isNaN(x); });
+        };
+        if ($(".f-style", p).value !== "hist") o.style = $(".f-style", p).value;
+        var lim = nums(".f-limits"), rng = nums(".f-range");
+        if (lim.length) o.limits = lim;
+        if (rng.length === 2) o.range = rng;
+      }
       var fields = $$(".g-fields .ec-field", p).map(function (r) {
         var label = $(".f-flabel", r).value.trim();
         if (!label) return null;

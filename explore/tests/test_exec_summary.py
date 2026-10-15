@@ -283,6 +283,27 @@ class NumericPlotRenderTest(TestCase):
         self.assertIsNone(png)
         self.assertIn("length 1", note)
 
+    def test_series_and_limits(self):
+        # APA layer plots (Hajime 2026-10-15): values vs # beside the
+        # histogram, red limit lines, histogram range; the config parses
+        # them and junk falls back to a plain histogram.
+        plot = execsummary._normalize({**CFG, "plots": [
+            {"title": "T", "item_paths": ["t"], "style": "series+hist",
+             "limits": [4, "8.5"], "range": [3.5, 9.1], "bins": 56},
+            {"title": "U", "item_paths": ["t"], "style": "bogus", "limits": "x"}]})["plots"]
+        self.assertEqual((plot[0]["style"], plot[0]["limits"], plot[0]["range"]),
+                         ("series+hist", [4.0, 8.5], [3.5, 9.1]))
+        self.assertEqual((plot[1]["style"], plot[1]["limits"], plot[1]["range"]),
+                         ("hist", [], [None, None]))
+        for p in plot + [{**plot[0], "style": "series"}]:
+            png, note = execsummary.render_numeric_plot({"t": [4.1, 6.5, 7.0, 9.5]}, p, "B1")
+            self.assertIsNone(note)
+            self.assertTrue(png.startswith(b"\x89PNG"))
+
+    def test_scalar_list_reads_as_values(self):
+        self.assertEqual(execsummary._fmt_field_value([6.9, 5.53, 7]), "6.9, 5.53, 7")
+        self.assertEqual(execsummary._fmt_field_value([{"a": 1}]), '[{"a": 1}]')
+
     def test_get_by_path(self):
         self.assertEqual(execsummary._get_by_path({"MRB Resistance": 5},
                                                   "MRB Resistance"), 5)

@@ -228,8 +228,16 @@ def _normalize(cfg: dict) -> dict:
             # data_paths wins when both are given (same rule as fields).
             dps = [str(x) for x in p.get("data_paths") or []]
             ips = [] if dps else [str(x) for x in p.get("item_paths") or []]
+            # APA layer plots (Hajime 2026-10-15): a one-path plot may draw
+            # the values against their position ("series"), or both that and
+            # the histogram side by side; ``limits`` are red limit lines on
+            # either, ``range`` the histogram's x range.
+            style = str(p.get("style") or "hist")
             plots.append({**base, "kind": "numeric", "bins": bins,
-                          "data_paths": dps, "item_paths": ips})
+                          "data_paths": dps, "item_paths": ips,
+                          "style": style if style in ("hist", "series", "series+hist") else "hist",
+                          "limits": _flatten_numeric(p.get("limits")),
+                          "range": (_flatten_numeric(p.get("range")) or [None, None])[:2]})
     # Arbitrary top-level keys (#86, Hajime 2026-08-04): the editor's "Extra
     # fields" card writes them; they are ES-level facts, shown on the page
     # and in the PDF header — not silently carried.
@@ -540,12 +548,20 @@ def render_numeric_plot(test_data: dict, plot: dict, label: str):
         src = "item_path"
     title = f"{plot['title']} — {label}"
 
-    def _png(draw):
+    style = plot.get("style") or "hist"
+    limits = plot.get("limits") or []
+    lo, hi = (plot.get("range") or [None, None])[:2]
+
+    def _png(draw, panels=1):
         # Figure (not pyplot) — no global state, safe under threaded gunicorn.
-        fig = Figure(figsize=(5.2, 3.4), dpi=110)
-        ax = fig.add_subplot()
-        draw(ax)
-        ax.set_title(title, fontsize=10)
+        fig = Figure(figsize=(5.2 * panels, 3.4), dpi=110)
+        axes = fig.subplots(1, panels) if panels > 1 else [fig.add_subplot()]
+        draw(*axes)
+        if panels > 1:
+            fig.suptitle(title, fontsize=10)
+            fig.tight_layout()
+        else:
+            axes[0].set_title(title, fontsize=10)
         buf = io.BytesIO()
         fig.savefig(buf, format="png", bbox_inches="tight")
         return buf.getvalue()
@@ -560,11 +576,32 @@ def render_numeric_plot(test_data: dict, plot: dict, label: str):
             stats = (f"N={len(nums)}  mean={sum(nums) / len(nums):.4g}  "
                      f"min={min(nums):.4g}  max={max(nums):.4g}")
 
-            def draw(ax):
-                ax.hist(nums, bins=plot.get("bins") or 40)
-                ax.set_xlabel(f"{paths[0]}\n{stats}", fontsize=8)
+            def hist(ax, label):
+                bins = plot.get("bins") or 40
+                if lo is not None and hi is not None:
+                    bins = [lo + (hi - lo) * i / bins for i in range(bins + 1)]
+                    ax.set_xlim(lo, hi)
+                ax.hist(nums, bins=bins)
+                for x in limits:
+                    ax.axvline(x, color="red", linewidth=1)
+                ax.set_xlabel(label, fontsize=8)
                 ax.set_ylabel("count", fontsize=8)
-            return _png(draw), None
+
+            def series(ax):
+                # values against their position, counted from 1 (wire #)
+                ax.plot(range(1, len(nums) + 1), nums, ".", markersize=3)
+                for y in limits:
+                    ax.axhline(y, color="red", linewidth=1)
+                span = [min(nums + limits), max(nums + limits)]
+                pad = (span[1] - span[0]) * 0.08 or 1
+                ax.set_ylim(span[0] - pad, span[1] + pad)
+                ax.set_xlabel(f"#  (N={len(nums)})", fontsize=8)
+
+            if style == "series":
+                return _png(series), None
+            if style == "series+hist":
+                return _png(lambda a, b: (series(a), hist(b, stats)), panels=2), None
+            return _png(lambda ax: hist(ax, f"{paths[0]}\n{stats}")), None
         cats = {}
         for x in values:
             k = "True" if x is True else ("False" if x is False else str(x))
@@ -603,6 +640,9 @@ def _fmt_field_value(v):
         return f"{v:g}"
     if isinstance(v, (str, int, bool)):
         return str(v)
+    if isinstance(v, list) and all(isinstance(x, (int, float, str)) and not isinstance(x, bool)
+                                   for x in v):
+        return ", ".join(_fmt_field_value(x) for x in v)   # the data points (APA)
     return json.dumps(v)   # a list/object at the path — shown verbatim
 
 
