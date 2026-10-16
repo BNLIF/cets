@@ -204,6 +204,7 @@
       </select>
       <input class="f-limits" placeholder="limit lines, e.g. 4, 8.5">
       <input class="f-range" placeholder="histogram range, e.g. 3.5, 9.1">
+      <input class="f-start" type="number" placeholder="first #" title="the first # of the values-vs-# plot (default 1)" style="flex:0 0 90px;">
     </div>
     <div class="ec-row">
       <input class="f-pid" placeholder="part_id (blank = the item itself)">
@@ -303,6 +304,7 @@
       $(".f-style", n).value = p.style || "hist";
       $(".f-limits", n).value = (p.limits || []).join(", ");
       $(".f-range", n).value = (p.range || []).join(", ");
+      if (p.start !== undefined) $(".f-start", n).value = p.start;
       $(".f-pid", n).value = p.part_id || "";
       if (p.sub_part_id) { $(".f-layer", n).value = p.sub_part_id.layer; $(".f-pos", n).value = p.sub_part_id.pos_name || ""; }
       (p.fields || []).forEach(function (f) { addField(n, f); });
@@ -370,6 +372,8 @@
         var lim = nums(".f-limits"), rng = nums(".f-range");
         if (lim.length) o.limits = lim;
         if (rng.length === 2) o.range = rng;
+        var start = parseInt($(".f-start", p).value, 10);
+        if (!isNaN(start) && start !== 1) o.start = start;
       }
       var fields = $$(".g-fields .ec-field", p).map(function (r) {
         var label = $(".f-flabel", r).value.trim();

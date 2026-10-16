@@ -237,7 +237,10 @@ def _normalize(cfg: dict) -> dict:
                           "data_paths": dps, "item_paths": ips,
                           "style": style if style in ("hist", "series", "series+hist") else "hist",
                           "limits": _flatten_numeric(p.get("limits")),
-                          "range": (_flatten_numeric(p.get("range")) or [None, None])[:2]})
+                          "range": (_flatten_numeric(p.get("range")) or [None, None])[:2],
+                          # first # of a series: APA wires count from 1 on
+                          # the X and G layers, from 8 on V and U
+                          "start": int(_flatten_numeric([p.get("start")])[0]) if _flatten_numeric([p.get("start")]) else 1})
     # Arbitrary top-level keys (#86, Hajime 2026-08-04): the editor's "Extra
     # fields" card writes them; they are ES-level facts, shown on the page
     # and in the PDF header — not silently carried.
@@ -588,14 +591,15 @@ def render_numeric_plot(test_data: dict, plot: dict, label: str):
                 ax.set_ylabel("count", fontsize=8)
 
             def series(ax):
-                # values against their position, counted from 1 (wire #)
-                ax.plot(range(1, len(nums) + 1), nums, ".", markersize=3)
+                # values against their position (wire #), counted from ``start``
+                start = plot.get("start") or 1
+                ax.plot(range(start, start + len(nums)), nums, ".", markersize=3)
                 for y in limits:
                     ax.axhline(y, color="red", linewidth=1)
                 span = [min(nums + limits), max(nums + limits)]
                 pad = (span[1] - span[0]) * 0.08 or 1
                 ax.set_ylim(span[0] - pad, span[1] + pad)
-                ax.set_xlabel(f"#  (N={len(nums)})", fontsize=8)
+                ax.set_xlabel(f"#  ({start}…{start + len(nums) - 1}, N={len(nums)})", fontsize=8)
 
             if style == "series":
                 return _png(series), None
@@ -658,6 +662,12 @@ def _records_table(value) -> dict | None:
     """A list of records at a path (the APA's ``brokenWires``) as a table —
     ``{columns, rows}``, columns in order of first appearance; None for
     anything else so the value shows as text."""
+    if isinstance(value, dict) and value and not any(isinstance(v, (dict, list))
+                                                     for v in value.values()):
+        # a mapping of scalars (the APA's temperature sensors, whose keys
+        # differ per item) — one row per key
+        return {"columns": ["Name", "Value"],
+                "rows": [[str(k), _fmt_field_value(v) or ""] for k, v in value.items()]}
     if not (isinstance(value, list) and value and all(isinstance(r, dict) for r in value)):
         return None
     keys = []

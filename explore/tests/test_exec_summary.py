@@ -289,12 +289,12 @@ class NumericPlotRenderTest(TestCase):
         # them and junk falls back to a plain histogram.
         plot = execsummary._normalize({**CFG, "plots": [
             {"title": "T", "item_paths": ["t"], "style": "series+hist",
-             "limits": [4, "8.5"], "range": [3.5, 9.1], "bins": 56},
-            {"title": "U", "item_paths": ["t"], "style": "bogus", "limits": "x"}]})["plots"]
-        self.assertEqual((plot[0]["style"], plot[0]["limits"], plot[0]["range"]),
-                         ("series+hist", [4.0, 8.5], [3.5, 9.1]))
-        self.assertEqual((plot[1]["style"], plot[1]["limits"], plot[1]["range"]),
-                         ("hist", [], [None, None]))
+             "limits": [4, "8.5"], "range": [3.5, 9.1], "bins": 56, "start": 8},
+            {"title": "U", "item_paths": ["t"], "style": "bogus", "limits": "x", "start": "x"}]})["plots"]
+        self.assertEqual((plot[0]["style"], plot[0]["limits"], plot[0]["range"], plot[0]["start"]),
+                         ("series+hist", [4.0, 8.5], [3.5, 9.1], 8))
+        self.assertEqual((plot[1]["style"], plot[1]["limits"], plot[1]["range"], plot[1]["start"]),
+                         ("hist", [], [None, None], 1))
         for p in plot + [{**plot[0], "style": "series"}]:
             png, note = execsummary.render_numeric_plot({"t": [4.1, 6.5, 7.0, 9.5]}, p, "B1")
             self.assertIsNone(note)
@@ -521,6 +521,11 @@ class EngineTest(TestCase):
                           "rows": [["AV", "1361", ""], ["BU", "439", "Missing"]]})
         self.assertIsNone(rows["Site"]["table"])
         self.assertEqual(rows["Site"]["value"], "Daresbury")
+        # a mapping of scalars → Name / Value rows (keys differ per item)
+        self.assertEqual(execsummary._records_table({"Sensor 1 (P1)": 110, "Sensor 5": 109}),
+                         {"columns": ["Name", "Value"],
+                          "rows": [["Sensor 1 (P1)", "110"], ["Sensor 5", "109"]]})
+        self.assertIsNone(execsummary._records_table({"a": {"b": 1}}))
 
     def test_reset_needs_lowest_nonnegative_rank_roles(self):
         cfg = execsummary._normalize(CFG)   # lowest non-negative = Hajime (roles [41])
