@@ -136,7 +136,17 @@ def _norm_field(f: dict) -> dict:
     dropped."""
     dp = str(f.get("data_path") or "").strip()
     ip = "" if dp else str(f.get("item_path") or "").strip()
-    return {"label": str(f["label"]).strip(), "data_path": dp, "item_path": ip}
+    # ``columns`` orders (and names) the table drawn from a list of records
+    # at the path (APA 2026-10-17): a list of keys, or {key: heading}.
+    cols = f.get("columns")
+    if isinstance(cols, list):
+        cols = {str(k): _col_label(k) for k in cols}
+    elif isinstance(cols, dict):
+        cols = {str(k): str(v or "").strip() or _col_label(k) for k, v in cols.items()}
+    else:
+        cols = {}
+    return {"label": str(f["label"]).strip(), "data_path": dp, "item_path": ip,
+            "columns": cols}
 
 
 def _normalize(cfg: dict) -> dict:
@@ -233,9 +243,14 @@ def _normalize(cfg: dict) -> dict:
             # the histogram side by side; ``limits`` are red limit lines on
             # either, ``range`` the histogram's x range.
             style = str(p.get("style") or "hist")
+            # ``x_label`` / ``y_label`` name the axes (Chao 2026-10-17). The
+            # histogram's x axis is the measured quantity, so in the
+            # series+hist style it takes y_label; its y axis stays "count".
             plots.append({**base, "kind": "numeric", "bins": bins,
                           "data_paths": dps, "item_paths": ips,
                           "style": style if style in ("hist", "series", "series+hist") else "hist",
+                          "x_label": str(p.get("x_label") or "").strip(),
+                          "y_label": str(p.get("y_label") or "").strip(),
                           "limits": _flatten_numeric(p.get("limits")),
                           "range": (_flatten_numeric(p.get("range")) or [None, None])[:2],
                           # first # of a series: APA wires count from 1 on
@@ -552,6 +567,8 @@ def render_numeric_plot(test_data: dict, plot: dict, label: str):
     title = f"{plot['title']} — {label}"
 
     style = plot.get("style") or "hist"
+    x_label = plot.get("x_label") or ""
+    y_label = plot.get("y_label") or ""
     limits = plot.get("limits") or []
     lo, hi = (plot.get("range") or [None, None])[:2]
 
@@ -588,7 +605,7 @@ def render_numeric_plot(test_data: dict, plot: dict, label: str):
                 for x in limits:
                     ax.axvline(x, color="red", linewidth=1)
                 ax.set_xlabel(label, fontsize=8)
-                ax.set_ylabel("count", fontsize=8)
+                ax.set_ylabel((y_label if style == "hist" else "") or "count", fontsize=8)
 
             def series(ax):
                 # values against their position (wire #), counted from ``start``
@@ -599,13 +616,16 @@ def render_numeric_plot(test_data: dict, plot: dict, label: str):
                 span = [min(nums + limits), max(nums + limits)]
                 pad = (span[1] - span[0]) * 0.08 or 1
                 ax.set_ylim(span[0] - pad, span[1] + pad)
-                ax.set_xlabel(f"#  ({start}…{start + len(nums) - 1}, N={len(nums)})", fontsize=8)
+                ax.set_xlabel(f"{x_label or '#'}  ({start}…{start + len(nums) - 1}, N={len(nums)})",
+                              fontsize=8)
+                ax.set_ylabel(y_label, fontsize=8)
 
             if style == "series":
                 return _png(series), None
             if style == "series+hist":
-                return _png(lambda a, b: (series(a), hist(b, stats)), panels=2), None
-            return _png(lambda ax: hist(ax, f"{paths[0]}\n{stats}")), None
+                return _png(lambda a, b: (series(a), hist(b, f"{y_label}\n{stats}")),
+                            panels=2), None
+            return _png(lambda ax: hist(ax, f"{x_label or paths[0]}\n{stats}")), None
         cats = {}
         for x in values:
             k = "True" if x is True else ("False" if x is False else str(x))
@@ -658,9 +678,10 @@ def _col_label(key: str) -> str:
     return text[:1].upper() + text[1:]
 
 
-def _records_table(value) -> dict | None:
+def _records_table(value, columns=None) -> dict | None:
     """A list of records at a path (the APA's ``brokenWires``) as a table —
-    ``{columns, rows}``, columns in order of first appearance; None for
+    ``{columns, rows}``, columns in order of first appearance, or as the
+    field's ``columns`` ({key: heading}) orders and names them; None for
     anything else so the value shows as text."""
     if isinstance(value, dict) and value and not any(isinstance(v, (dict, list))
                                                      for v in value.values()):
@@ -670,10 +691,14 @@ def _records_table(value) -> dict | None:
                 "rows": [[str(k), _fmt_field_value(v) or ""] for k, v in value.items()]}
     if not (isinstance(value, list) and value and all(isinstance(r, dict) for r in value)):
         return None
-    keys = []
-    for r in value:
-        keys += [k for k in r if k not in keys]
-    return {"columns": [_col_label(k) for k in keys],
+    if columns:
+        keys, heads = list(columns), list(columns.values())
+    else:
+        keys = []
+        for r in value:
+            keys += [k for k in r if k not in keys]
+        heads = [_col_label(k) for k in keys]
+    return {"columns": heads,
             "rows": [[_fmt_field_value(r.get(k)) or "" for k in keys] for r in value]}
 
 
@@ -697,7 +722,7 @@ def resolve_plot_fields(api, plot, pid: str, saved: dict) -> list[dict]:
         spec, spec_err = _item_spec_at(api, pid)
     def _auto(f, raw, fetch_err, where):
         # a list of records at the path shows as a table, not as JSON text
-        table = _records_table(raw)
+        table = _records_table(raw, f.get("columns"))
         value = (f"{len(table['rows'])} rows" if table else _fmt_field_value(raw))
         return {**f, "auto": True, "value": value, "tri": _tri(raw), "table": table,
                 "error": fetch_err or (None if value is not None else
@@ -1075,6 +1100,8 @@ def _field_markup(f: dict) -> str:
     text = escape(f.get("value") or "")
     if not text:
         return f'<font color="{_GREY}">—</font>'
+    if text.startswith(("http://", "https://")):   # a URL reads as a link (APA 2026-10-17)
+        return f'<link href="{escape(f["value"], {chr(34): "&quot;"})}" color="blue"><u>{text}</u></link>'
     color = _TRI_COLOR.get(f.get("tri") or "")
     return f'<font color="{color}"><b>{text}</b></font>' if color else text
 

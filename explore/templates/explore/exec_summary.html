@@ -75,6 +75,7 @@
   .es-plot-fields td { padding: 3px 10px 3px 0; border-bottom: 1px solid var(--rule); color: var(--ink);
     overflow-wrap: anywhere; }
   .es-plot-fields td.lab { width: 45%; color: var(--dim); }
+  .es-plot-fields td a { color: var(--accent-ink); text-decoration: underline; }
   /* a list of records at a field's path (broken wires) */
   .es-rec { width: 100%; border-collapse: collapse; font-size: 11.5px; margin: 4px 0 2px; }
   .es-rec th { text-align: left; font-weight: 600; color: var(--faint); font-size: 10.5px;
@@ -180,7 +181,7 @@
         {% for f in b.fields %}
         <tr>
           <td class="lab">{{ f.label }}</td>
-          <td>{% if f.value %}{% if f.auto %}<span class="mono{% if f.tri == "pass" %} es-yes{% elif f.tri == "fail" %} es-no{% endif %}">{{ f.value }}</span>{% else %}{{ f.value }}{% endif %}{% else %}<span class="es-hint">—</span>{% endif %}</td>
+          <td>{% if f.value|slice:":4" == "http" %}<a href="{{ f.value }}" target="_blank" rel="noopener">{{ f.value }}</a>{% elif f.value %}{% if f.auto %}<span class="mono{% if f.tri == "pass" %} es-yes{% elif f.tri == "fail" %} es-no{% endif %}">{{ f.value }}</span>{% else %}{{ f.value }}{% endif %}{% else %}<span class="es-hint">—</span>{% endif %}</td>
         </tr>
         {% if f.table %}
         <tr><td colspan="2" style="padding-right:0;"><table class="es-rec">

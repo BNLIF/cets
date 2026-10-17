@@ -113,7 +113,7 @@
             <td class="lab">{{ f.label }}</td>
             <td>
               {% if f.auto %}
-                {% if f.value is not None %}<span class="es-auto-val{% if f.tri == "pass" %} es-yes{% elif f.tri == "fail" %} es-no{% endif %}">{{ f.value }}</span>{% endif %}
+                {% if f.value|slice:":4" == "http" %}<a href="{{ f.value }}" target="_blank" rel="noopener" style="text-decoration:underline;">{{ f.value }}</a>{% elif f.value is not None %}<span class="es-auto-val{% if f.tri == "pass" %} es-yes{% elif f.tri == "fail" %} es-no{% endif %}">{{ f.value }}</span>{% endif %}
                 {% if f.table %}<table class="es-rec">
                   <thead><tr>{% for c in f.table.columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
                   <tbody>{% for r in f.table.rows %}<tr>{% for v in r %}<td>{{ v }}</td>{% endfor %}</tr>{% endfor %}</tbody>

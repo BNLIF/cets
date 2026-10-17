@@ -205,6 +205,8 @@
       <input class="f-limits" placeholder="limit lines, e.g. 4, 8.5">
       <input class="f-range" placeholder="histogram range, e.g. 3.5, 9.1">
       <input class="f-start" type="number" placeholder="first #" title="the first # of the values-vs-# plot (default 1)" style="flex:0 0 90px;">
+      <input class="f-xlabel" placeholder="x-axis label, e.g. Wire #" title="values vs #: the x axis (the range and N follow it); histogram alone: the x axis">
+      <input class="f-ylabel" placeholder="y-axis label, e.g. Tension [N]" title="values vs #: the y axis — and the histogram's x axis beside it; histogram alone: the y axis (default count)">
     </div>
     <div class="ec-row">
       <input class="f-pid" placeholder="part_id (blank = the item itself)">
@@ -228,6 +230,7 @@
     <input class="f-flabel" placeholder="field label, e.g. RMS mean (e-)">
     <input class="f-fpath" placeholder="data_path (from the test record)" style="font-family:var(--font-mono); font-size:12px;">
     <input class="f-fipath" placeholder="item_path (from the Item Specs)" style="font-family:var(--font-mono); font-size:12px;">
+    <input class="f-fcols" placeholder="columns: key: Heading, key2: Heading2" title="for a list of records at the path — which keys to show, in this order, with these headings" style="font-family:var(--font-mono); font-size:12px;">
     <button type="button" class="ec-del" title="Remove field">&#x2715;</button></div>
 </template>
 
@@ -264,6 +267,10 @@
     $(".f-flabel", node).value = f.label || "";
     $(".f-fpath", node).value = f.data_path || "";
     $(".f-fipath", node).value = f.item_path || "";
+    var cols = f.columns || {};
+    if (Array.isArray(cols)) cols = cols.reduce(function (o, k) { o[k] = ""; return o; }, {});
+    $(".f-fcols", node).value = Object.keys(cols).map(function (k) {
+      return cols[k] ? k + ": " + cols[k] : k; }).join(", ");
   }
   var adders = {
     todo: function (text) { $(".f-todo", add("t-todo", "ec-todos")).value = text || ""; },
@@ -305,6 +312,8 @@
       $(".f-limits", n).value = (p.limits || []).join(", ");
       $(".f-range", n).value = (p.range || []).join(", ");
       if (p.start !== undefined) $(".f-start", n).value = p.start;
+      $(".f-xlabel", n).value = p.x_label || "";
+      $(".f-ylabel", n).value = p.y_label || "";
       $(".f-pid", n).value = p.part_id || "";
       if (p.sub_part_id) { $(".f-layer", n).value = p.sub_part_id.layer; $(".f-pos", n).value = p.sub_part_id.pos_name || ""; }
       (p.fields || []).forEach(function (f) { addField(n, f); });
@@ -374,6 +383,8 @@
         if (rng.length === 2) o.range = rng;
         var start = parseInt($(".f-start", p).value, 10);
         if (!isNaN(start) && start !== 1) o.start = start;
+        if ($(".f-xlabel", p).value.trim()) o.x_label = $(".f-xlabel", p).value.trim();
+        if ($(".f-ylabel", p).value.trim()) o.y_label = $(".f-ylabel", p).value.trim();
       }
       var fields = $$(".g-fields .ec-field", p).map(function (r) {
         var label = $(".f-flabel", r).value.trim();
@@ -383,6 +394,12 @@
         var ip = $(".f-fipath", r).value.trim();
         if (dp) f.data_path = dp;        // data_path wins over item_path
         else if (ip) f.item_path = ip;
+        var cols = {};
+        $(".f-fcols", r).value.split(",").forEach(function (c) {
+          var kv = c.split(":"), k = (kv.shift() || "").trim();
+          if (k) cols[k] = kv.join(":").trim();
+        });
+        if (Object.keys(cols).length) f.columns = cols;
         return f;
       }).filter(Boolean);
       if (fields.length) o.fields = fields;

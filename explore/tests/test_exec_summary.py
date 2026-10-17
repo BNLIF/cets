@@ -293,12 +293,24 @@ class NumericPlotRenderTest(TestCase):
             {"title": "U", "item_paths": ["t"], "style": "bogus", "limits": "x", "start": "x"}]})["plots"]
         self.assertEqual((plot[0]["style"], plot[0]["limits"], plot[0]["range"], plot[0]["start"]),
                          ("series+hist", [4.0, 8.5], [3.5, 9.1], 8))
+        self.assertEqual((plot[0]["x_label"], plot[0]["y_label"]), ("", ""))
+        lab = execsummary._normalize({**CFG, "plots": [
+            {"title": "T", "item_paths": ["t"], "x_label": " Wire # ", "y_label": "Tension [N]"}]})["plots"][0]
+        self.assertEqual((lab["x_label"], lab["y_label"]), ("Wire #", "Tension [N]"))
+        for st in ("hist", "series", "series+hist"):
+            png, note = execsummary.render_numeric_plot({"t": [4.1, 6.5]}, {**lab, "style": st}, "B1")
+            self.assertIsNone(note)
         self.assertEqual((plot[1]["style"], plot[1]["limits"], plot[1]["range"], plot[1]["start"]),
                          ("hist", [], [None, None], 1))
         for p in plot + [{**plot[0], "style": "series"}]:
             png, note = execsummary.render_numeric_plot({"t": [4.1, 6.5, 7.0, 9.5]}, p, "B1")
             self.assertIsNone(note)
             self.assertTrue(png.startswith(b"\x89PNG"))
+
+    def test_url_value_is_a_link_in_the_pdf(self):
+        self.assertIn('<link href="https://apa.dunedb.org/x"',
+                      execsummary._field_markup({"value": "https://apa.dunedb.org/x"}))
+        self.assertEqual(execsummary._field_markup({"value": "UK 2"}), "UK 2")
 
     def test_scalar_list_reads_as_values(self):
         self.assertEqual(execsummary._fmt_field_value([6.9, 5.53, 7]), "6.9, 5.53, 7")
@@ -521,6 +533,15 @@ class EngineTest(TestCase):
                           "rows": [["AV", "1361", ""], ["BU", "439", "Missing"]]})
         self.assertIsNone(rows["Site"]["table"])
         self.assertEqual(rows["Site"]["value"], "Daresbury")
+        # ``columns`` picks, orders and names the columns (APA 2026-10-17)
+        plot2 = execsummary._normalize({**CFG, "plots": [{"title": "W", "fields": [
+            {"label": "Wires", "item_path": "data.brokenWires",
+             "columns": {"type": "Type", "offlineChannel": "", "sideAndLayer": "Layer & Side"}}]}]})["plots"][0]
+        t = execsummary.resolve_plot_fields(api, plot2, "X-00001", {})[0]["table"]
+        self.assertEqual(t["columns"], ["Type", "Offline channel", "Layer & Side"])
+        self.assertEqual(t["rows"], [["", "1361", "AV"], ["Missing", "439", "BU"]])
+        self.assertEqual(execsummary._norm_field({"label": "L", "columns": ["headBoard", "c"]})["columns"],
+                         {"headBoard": "Head board", "c": "C"})
         # a mapping of scalars → Name / Value rows (keys differ per item)
         self.assertEqual(execsummary._records_table({"Sensor 1 (P1)": 110, "Sensor 5": 109}),
                          {"columns": ["Name", "Value"],
@@ -1573,8 +1594,8 @@ class PlotFieldsTest(TestCase):
     def test_config_parses_fields_and_drops_blank_labels(self):
         plots = execsummary._normalize(CFG_FIELDS)["plots"]
         self.assertEqual(plots[0]["fields"], [
-            {"label": "RMS mean", "data_path": "DATA.rms_mean", "item_path": ""},
-            {"label": "Operator note", "data_path": "", "item_path": ""}])
+            {"label": "RMS mean", "data_path": "DATA.rms_mean", "item_path": "", "columns": {}},
+            {"label": "Operator note", "data_path": "", "item_path": "", "columns": {}}])
 
     def test_payload_carries_plot_fields(self):
         p = execsummary.es_test_payload([], None, "c",
@@ -1781,15 +1802,15 @@ class ItemPathFieldsTest(TestCase):
         plots = execsummary._normalize(CFG_ITEM)["plots"]
         self.assertEqual(plots[0]["kind"], "fields")
         self.assertEqual(plots[0]["fields"], [
-            {"label": "Vendor", "data_path": "", "item_path": "Vendor"},
-            {"label": "Tension", "data_path": "", "item_path": "DATA.Winding Tension"},
-            {"label": "Note", "data_path": "", "item_path": ""}])
+            {"label": "Vendor", "data_path": "", "item_path": "Vendor", "columns": {}},
+            {"label": "Tension", "data_path": "", "item_path": "DATA.Winding Tension", "columns": {}},
+            {"label": "Note", "data_path": "", "item_path": "", "columns": {}}])
         # both set on one field → data_path wins, item_path is dropped
         both = execsummary._normalize({**CFG, "plots": [
             {"title": "P", "test_type_name": "T", "fields": [
                 {"label": "X", "data_path": "DATA.x", "item_path": "DATA.y"}]}]})
         self.assertEqual(both["plots"][0]["fields"][0],
-                         {"label": "X", "data_path": "DATA.x", "item_path": ""})
+                         {"label": "X", "data_path": "DATA.x", "item_path": "", "columns": {}})
 
     def test_resolve_reads_the_latest_spec_entry(self):
         api = _api()
