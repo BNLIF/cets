@@ -53,6 +53,8 @@ urlpatterns = [
          name="box_type"),
     path("es-config/<str:part_type_id>/", views.explore_es_config_view,
          name="es_config"),
+    path("es-config/<str:part_type_id>/preview/", views.explore_es_preview_view,
+         name="es_preview"),
     path("checklist-config/<str:part_type_id>/",
          views.explore_checklist_config_view, name="checklist_config"),
     path("text-preview/", views.explore_text_preview_view, name="text_preview"),   # the cell text editor's live preview (Chao 2026-10-08)

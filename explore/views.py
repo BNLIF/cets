@@ -5901,6 +5901,9 @@ def explore_es_config_view(request, part_type_id):
 
     next_url = request.POST.get("next") or request.GET.get("next") or ""
     back = f"{page_url}?{urlencode({'next': next_url})}" if next_url else page_url
+    wb = (request.POST.get("ui") or request.GET.get("ui")) == "wb"   # #205: the workbench layout
+    if wb:
+        back += ("&" if "?" in back else "?") + "ui=wb"
 
     if request.method == "POST":
         try:
@@ -5942,13 +5945,52 @@ def explore_es_config_view(request, part_type_id):
 
     raw, current_name = execsummary.load_raw_config(api, part_type_id)
     return render(request, "explore/es_config.html", {
-        "sidebar": navigation.sidebar_tree(inst, {}),
+        "sidebar": None if wb else navigation.sidebar_tree(inst, {}),
         "part_type_id": part_type_id,
         "current_name": current_name,
         "initial": (raw if raw is not None else
                     {**execsummary.CONFIG_TEMPLATE, "component_type_id": part_type_id}),
         "is_new": raw is None,
         "next": next_url,
+        "wb": wb,
+    })
+
+
+@login_not_required
+@fnal_login_required
+def explore_es_preview_view(request, part_type_id):
+    """The ES config workbench's preview (#205): the ES page's cards drawn
+    from the posted config alone — sign-off rows, slots with their field
+    labels and a placeholder where each image goes — never touching HWDB.
+    With ``pid`` the same cards resolve against that item (recorded
+    sign-offs, field values, tables, plots), as the ES page would."""
+    inst = instance_of(request)
+    if request.method != "POST" or inst not in settings.HWDB_WRITE_INSTANCES:
+        return HttpResponseForbidden("Preview is POST-only, on the dev instance.")
+    try:
+        raw = json.loads(request.POST.get("config_json") or "")
+    except ValueError as e:
+        return render(request, "explore/_es_preview.html", {"bad_json": str(e)})
+    cfg = execsummary._normalize(raw if isinstance(raw, dict) else {})
+    pid = (request.POST.get("pid") or "").strip()
+    recorded, blocks, item_error = {}, [], None
+    if pid:
+        try:
+            api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], mint_for(request))
+            recorded = execsummary.recorded_signoffs(api, pid, cfg)
+            saved = execsummary.fetch_es_state(api, pid)[4]
+            blocks = execsummary.resolve_plots(api, cfg, pid, _children_of(api),
+                                               _safe_get_data(api.get_images, pid),
+                                               plot_fields=saved)
+        except (FnalLinkRequired, FnalUnavailable) as e:
+            item_error = f"HWDB unavailable ({e.__class__.__name__}) — showing the config alone."
+    if not blocks:   # config alone: every slot, no values
+        blocks = [{**p, "pid": pid, "fields": [{**f, "value": None} for f in p["fields"]]}
+                  for p in cfg["plots"]]
+    return render(request, "explore/_es_preview.html", {
+        "cfg": cfg, "pid": pid, "item_error": item_error,
+        "signing": execsummary.compute_status(cfg, [], set(), {}, recorded=recorded),
+        "plot_blocks": blocks,
     })
 
 

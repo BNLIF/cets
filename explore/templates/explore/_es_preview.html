@@ -1,0 +1,123 @@
+{# The ES config workbench's preview (#205): the ES page's cards from the config — click a card or row to edit it. #}
+{% if bad_json %}
+<p class="es-plot-err">&#9888; The config doesn’t parse: {{ bad_json }}</p>
+{% else %}
+{% if item_error %}<p class="es-plot-err">&#9888; {{ item_error }}</p>{% endif %}
+<div class="es-cols{% if not plot_blocks %} es-one{% endif %}">
+  {% if plot_blocks %}
+  <div class="es-side">
+  <div class="es-card">
+    <h2>Plots ({{ plot_blocks|length }} configured)</h2>
+    <div class="es-plots-grid">
+    {% for b in plot_blocks %}
+    <div class="es-plot" data-sel="plot:{{ forloop.counter0 }}">
+      <div class="es-plot-title">{{ b.title }}{% if b.test_type_name %} — {{ b.test_type_name }}{% endif %}</div>
+      {% if b.kind == "image" %}
+      <div class="es-hint">Image: <span class="mono">{{ b.image_name }}</span> (history_order={{ b.history_order }}){% if b.pid %} · <span class="mono">{{ b.pid }}</span>{% endif %}</div>
+      {% elif b.kind == "numeric" and b.item_paths %}
+      <div class="es-hint">Numeric plot (item_paths: <span class="mono">{{ b.item_paths|join:", " }}</span>) — from the Item Specifications{% if b.style != "hist" %} · {{ b.style }}{% endif %}</div>
+      {% elif b.kind == "numeric" %}
+      <div class="es-hint">Numeric plot (data_paths: <span class="mono">{{ b.data_paths|join:", " }}</span>) — from the latest <span class="mono">{{ b.test_type_name }}</span> record{% if b.style != "hist" %} · {{ b.style }}{% endif %}</div>
+      {% endif %}
+      {% if b.error %}<div class="es-plot-err">&#9888; {{ b.error }}</div>{% endif %}
+      {% if b.png_b64 %}
+      <img src="data:image/png;base64,{{ b.png_b64 }}" alt="{{ b.title }}">
+      {% elif b.image_id and not b.is_pdf %}
+      <img src="{% url 'explore:shipment_image' image_id=b.image_id %}" alt="{{ b.title }}" loading="lazy">
+      {% elif b.kind != "fields" and not b.error %}
+      <div class="es-ph">{% if b.kind == "image" %}image from the test record{% elif b.style == "series+hist" %}values vs # · histogram{% elif b.style == "series" %}values vs #{% else %}histogram{% endif %}{% if not pid %} — pick an item above to render it{% endif %}</div>
+      {% endif %}
+      {% if b.fields %}
+      <table class="es-plot-fields">
+        {% for f in b.fields %}
+        <tr data-sel="field:{{ forloop.parentloop.counter0 }}:{{ forloop.counter0 }}">
+          <td class="lab">{{ f.label }}</td>
+          <td>{% if f.value|slice:":4" == "http" %}<a href="{{ f.value }}" target="_blank" rel="noopener">{{ f.value }}</a>{% elif f.value %}<span class="mono{% if f.tri == "pass" %} es-yes{% elif f.tri == "fail" %} es-no{% endif %}">{{ f.value }}</span>{% elif f.data_path %}<span class="es-hint mono">{{ f.data_path }}</span>{% elif f.item_path %}<span class="es-hint mono">{{ f.item_path }}</span>{% else %}<span class="es-hint">typed on the plot page</span>{% endif %}</td>
+        </tr>
+        {% if f.table %}
+        <tr><td colspan="2" style="padding-right:0;"><table class="es-rec">
+          <thead><tr>{% for c in f.table.columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+          <tbody>{% for r in f.table.rows %}<tr>{% for v in r %}<td>{{ v }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+        </table></td></tr>
+        {% endif %}
+        {% endfor %}
+      </table>
+      {% endif %}
+    </div>
+    {% endfor %}
+    </div>
+  </div>
+  </div>
+  {% endif %}
+
+  <div class="es-main">
+  <div class="es-card" data-sel="setup">
+    <h2>Summary</h2>
+    {% if cfg.consortium_name %}<div class="es-kv"><b>Consortium:</b> {{ cfg.consortium_name }}</div>{% endif %}
+    {% if cfg.test_description %}<div class="es-kv"><b>Description:</b> {{ cfg.test_description }}</div>{% endif %}
+    {% for x in cfg.extras %}<div class="es-kv"><b>{{ x.label }}:</b> {{ x.value }}</div>{% endfor %}
+    {% if not cfg.consortium_name and not cfg.test_description and not cfg.extras %}<p class="es-hint">consortium, description, extra fields</p>{% endif %}
+  </div>
+
+  <div class="es-card" data-sel="refs">
+    <h2>Reference URLs</h2>
+    {% for r in cfg.references %}
+    <div class="es-ref" data-sel="ref:{{ forloop.counter0 }}"><a href="{{ r.url }}" target="_blank" rel="noopener" title="{{ r.url }}">{% if r.comments %}{{ r.comments }}{% else %}{{ r.url }}{% endif %} <span aria-hidden="true">&#x2197;</span></a></div>
+    {% empty %}<p class="es-hint">none — this card is left out of the page</p>{% endfor %}
+  </div>
+
+  <div class="es-card" data-sel="todos">
+    <h2>{{ cfg.todos.title }}</h2>
+    {% for item in cfg.todos.check_list %}
+    <label class="es-todo es-req"><input type="checkbox" disabled> {{ item }}</label>
+    {% empty %}<p class="es-hint">no checks — this card is left out of the page</p>{% endfor %}
+  </div>
+
+  <div class="es-card">
+    <h2>Sub-components</h2>
+    <p class="es-hint">the item’s direct sub-components, from HWDB</p>
+  </div>
+
+  <div class="es-card" data-sel="status">
+    <h2>Item status &amp; QA/QC flags</h2>
+    <div class="es-row">
+      <label>Component status <select disabled><option>Unknown</option></select></label>
+      <label class="es-req" style="flex-direction:row; align-items:center; gap:6px;"><input type="checkbox" disabled> Consortium Certified QA/QC</label>
+      <label class="es-req" style="flex-direction:row; align-items:center; gap:6px;"><input type="checkbox" disabled> All QA/QC Uploaded</label>
+    </div>
+  </div>
+
+  <div class="es-card">
+    <h2>Sign-off</h2>
+    {% for r in signing.rows %}
+    <div class="es-signee" data-sel="signee:{{ forloop.counter0 }}">
+      <div><span class="who">{{ r.name }}</span>
+        {% if r.item_path %}<span class="meta">from the Item Specifications</span>
+          {% if r.entry %}<span class="es-signed">{{ r.entry.signature }}{% if r.entry.timestamp %} · {{ r.entry.timestamp }}{% endif %}</span>
+          {% for ln in r.entry.links %} <a class="es-hint" href="{{ ln.url }}" target="_blank" rel="noopener">{{ ln.label }} <span aria-hidden="true">&#x2197;</span></a>{% endfor %}
+          {% elif pid %}<span class="es-waiting">not recorded at <span class="mono">{{ r.item_path }}</span></span>
+          {% else %}<span class="es-waiting mono">{{ r.item_path }}</span>{% endif %}
+        {% else %}<span class="meta">rank {{ r.rank }}{% if r.roles %} · requires role{{ r.roles|pluralize }} {{ r.roles|join:", " }}{% endif %}{% if r.emails %} · {{ r.emails|join:", " }}{% endif %}</span>
+          {% if r.allowed %}<span class="es-waiting">signs first</span>{% else %}<span class="es-waiting">waiting for earlier signees</span>{% endif %}{% endif %}
+      </div>
+      {% if not r.item_path %}
+      <div class="es-row" style="margin-top:6px; align-items:flex-start;">
+        <label>Signature <input type="text" placeholder="Type signature for {{ r.name }}" disabled></label>
+        <label style="flex:1;">Comments (appended to the log) <textarea rows="2" disabled></textarea></label>
+        <button type="button" class="es-btn" style="margin-top:17px;" disabled>Sign &amp; post</button>
+      </div>
+      {% endif %}
+    </div>
+    {% empty %}<p class="es-hint">no signees — add one in the panel</p>{% endfor %}
+  </div>
+
+  <div class="es-card">
+    <h2>Generate</h2>
+    <div class="es-row">
+      <button type="button" class="es-btn" disabled>Generate PDF &amp; upload to HWDB</button>
+      <button type="button" class="es-btn quiet" disabled>RESET signatures</button>
+    </div>
+  </div>
+  </div>
+</div>
+{% endif %}

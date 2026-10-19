@@ -1495,6 +1495,73 @@ class ConfigEditorTest(TestCase):
             html = self.client.get(CFG_PAGE).content.decode()
         self.assertIn('class="f-emails"', html)
         self.assertIn("email next signee", html)    # hint explains the field
+        # every editor input carries a short label with the long text as its hint (Chao 2026-10-19)
+        for label in ("Position", "Rank", "Roles", "Emails", "Recorded at", "Limit lines", "First #",
+                      "X-axis label", "Columns", "Link text", "Image name"):
+            self.assertIn(f"<span>{label}</span>", html)
+
+    def test_workbench_layout_over_the_same_editor(self):
+        # #205: ?ui=wb renders the SAME editor rows in the workbench layout
+        # (tab strip, panes, preview, no site sidebar); the classic page
+        # offers the switch; both carry every row template.
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            classic = self.client.get(CFG_PAGE).content.decode()
+            wb = self.client.get(CFG_PAGE + "?ui=wb").content.decode()
+        self.assertIn("Try the new editor", classic)
+        self.assertIn('class="ec-page">', classic)
+        self.assertIn('class="ec-page ec-wb"', wb)
+        self.assertIn("Classic editor", wb)
+        self.assertIn('data-pane="setup"', wb)
+        for tab in ("setup", "checks", "outline", "signee", "plot", "field", "json"):
+            self.assertIn(f'data-tab="{tab}"', wb)
+        self.assertIn('id="es-preview"', wb)
+        self.assertIn('name="ui" value="wb"', wb)
+        for tpl in ("t-signee", "t-plot", "t-field", "t-ref", "t-todo", "t-extra"):
+            self.assertIn(f'id="{tpl}"', classic)
+            self.assertIn(f'id="{tpl}"', wb)
+
+    def test_save_keeps_the_workbench_layout(self):
+        api = _api()
+        api.post_component_type_image.return_value = {"status": "OK"}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self.client.post(CFG_PAGE, {"config_json": json.dumps(CFG), "ui": "wb"})
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("ui=wb", resp["Location"])
+
+    def test_preview_renders_the_config_alone_and_with_an_item(self):
+        # #205: the preview is the ES page's cards from the posted config;
+        # no HWDB call without a PID, the item's values with one.
+        api = _api()
+        api.get_component.return_value = {"data": {"specifications": [{"data": {
+            "signoffs": {"frame": {"name": "Gwenn Mouster", "date": "2025-01-22T11:00:00+00:00"}},
+            "winder": "UK Winder 2"}}]}}
+        cfg = {**CFG, "signees": [
+            {"name": "Frame Construction", "rank": 0, "item_path": "data.signoffs.frame"},
+            {"name": "Final", "rank": 0, "roles": []}],
+            "plots": [{"title": "X layer", "fields": [{"label": "Winder", "item_path": "data.winder"}]},
+                      {"title": "Tension", "item_paths": ["data.t"], "style": "series+hist"}]}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            alone = self.client.post(CFG_PAGE + "preview/", {"config_json": json.dumps(cfg)}).content.decode()
+        self.assertIn('data-sel="signee:0"', alone)
+        self.assertIn("Frame Construction", alone)
+        self.assertIn('data-sel="plot:1"', alone)
+        self.assertIn('data-sel="field:0:0"', alone)
+        self.assertIn("values vs # · histogram", alone)      # placeholder, no render
+        self.assertIn("data.winder", alone)                   # the path stands in for the value
+        api.get_component.assert_not_called()
+        with m1, m2:
+            with_item = self.client.post(CFG_PAGE + "preview/",
+                                         {"config_json": json.dumps(cfg), "pid": BOX}).content.decode()
+        self.assertIn("Gwenn Mouster", with_item)
+        self.assertIn("UK Winder 2", with_item)
+        api.get_component.assert_called()
+        with m1, m2:
+            bad = self.client.post(CFG_PAGE + "preview/", {"config_json": "{nope"}).content.decode()
+        self.assertIn("doesn’t parse", bad)
 
     def test_editor_offers_template_when_type_has_none(self):
         api = _api(cfg=None)

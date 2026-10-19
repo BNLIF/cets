@@ -1,7 +1,9 @@
 {% extends 'explore/base.html' %}
+{% load static %}
 {% block title %}ES config · {{ part_type_id }} · HWDB Explorer{% endblock %}
 
 {% block content %}
+{% if wb %}<link rel="stylesheet" href="{% static 'explore/plot.css' %}">{% include "explore/_es_style.html" %}{% endif %}
 <style>
   .ec-page { padding: 22px 30px 56px; max-width: 940px; }
   .ec-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
@@ -27,6 +29,10 @@
   .ec-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 5px 0; }
   .ec-row input { flex: 1 1 120px; min-width: 0; }
   .ec-row input[type=number] { flex: 0 0 88px; }
+  .ec-f { display: flex; flex-direction: column; gap: 2px; flex: 1 1 120px; min-width: 0; }
+  .ec-f.n { flex: 0 0 88px; }
+  .ec-f > span { font-size: 10.5px; color: var(--faint); letter-spacing: .03em; text-transform: uppercase; white-space: nowrap; }
+  .ec-f > input, .ec-f > select { width: 100%; box-sizing: border-box; flex: none !important; }   /* the row's flex basis is the label's, not the input's */
   .ec-row input[type=checkbox] { flex: none; }
   .ec-inline { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--dim); }
   .ec-del { flex: none; font: inherit; font-size: 12px; color: var(--faint); background: none;
@@ -46,29 +52,138 @@
     background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm);
     padding: 6px 13px; cursor: pointer; }
   #ec-preview { width: 100%; min-height: 220px; }
+  .ec-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+  .ec-head .ec-headr { display: flex; gap: 8px; align-items: center; white-space: nowrap; margin-bottom: 12px; }
+  /* #205: the workbench layout, the checklist editor's (#192) — the ES page's
+     cards as the preview, full width; the editor is Plots' tab strip + panel +
+     split on the left, showing one pane of the SAME editor rows at a time
+     (Setup · Outline · Signee · Plot · Field · JSON); a click in the preview
+     or the outline picks what shows */
+  .ec-wb { max-width: none; padding: 0; }
+  .ec-wb .ec-head { padding: 16px 26px 10px; }
+  .ec-wb .ec-head .ec-sub { margin: 0; }
+  .ec-wb .ec-head .ec-headr { margin-bottom: 0; }
+  .ec-wb .ec-flash { margin: 0 26px 10px; }
+  .ec-cols { display: block; }
+  .ec-wb .ec-cols { display: grid; grid-template-columns: 60px var(--pw, 440px) 6px minmax(0, 1fr); gap: 0;
+    border-top: 1px solid var(--rule); align-items: stretch; }
+  .ec-wb .ec-tabs { position: sticky; top: 0; align-self: start; height: 100vh; box-sizing: border-box; }
+  .ec-wb .pl-tab { width: 60px; }
+  .ec-wb #ec-editor { position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+    padding: 12px 14px 20px; box-sizing: border-box; min-width: 0; background: var(--page); }
+  .ec-wb #ec-editor > * { display: none; }
+  .ec-wb #ec-editor > #ec-panehead { display: flex; align-items: center; gap: 8px; min-height: 24px; margin-bottom: 10px;
+    font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+  #ec-panehead .for { font-weight: 400; text-transform: none; letter-spacing: 0; font-size: 11.5px; color: var(--faint);
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #ec-panehead .for b { color: var(--ink); font-weight: 600; }
+  #ec-panehead .acts { margin-left: auto; display: flex; gap: 4px; flex: none; }
+  #ec-panehead .acts[hidden] { display: none; }
+  #ec-panehead .acts .ec-del { text-transform: none; letter-spacing: 0; font-weight: 400; }
+  .ec-wb [data-pane=outline] > #ec-outline,
+  .ec-wb [data-pane=setup] > #ec-card-basics, .ec-wb [data-pane=setup] > #ec-card-refs,
+  .ec-wb [data-pane=setup] > #ec-card-extras,
+  .ec-wb [data-pane=checks] > #ec-card-todos, .ec-wb [data-pane=checks] > #ec-checksnote,
+  .ec-wb [data-pane=signee] > #ec-card-signees,
+  .ec-wb [data-pane=plot] > #ec-card-plots, .ec-wb [data-pane=plot] > #ec-plotfoot,
+  .ec-wb [data-pane=field] > #ec-card-plots, .ec-wb [data-pane=field] > #ec-fldfoot,
+  .ec-wb [data-pane=json] > #ec-card-json { display: block; }
+  .ec-wb #ec-card-signees > .ec-hint, .ec-wb #ec-card-plots > .ec-hint { display: none; }
+  .ec-wb #ec-signees > .ec-row:not(.sel) { display: none; }
+  .ec-wb #ec-plots > .ec-plot:not(.sel) { display: none; }
+  .ec-wb [data-pane=plot] .ec-plot.sel > .g-fields, .ec-wb [data-pane=plot] .ec-plot.sel > .ec-row:last-child { display: none; }
+  .ec-wb [data-pane=field] .ec-plot.sel > :not(.g-fields) { display: none; }
+  .ec-wb [data-pane=field] .ec-field:not(.sel) { display: none; }
+  .ec-wb .ec-card, .ec-wb .ec-plot.sel { border: 0; padding: 0; margin: 0; }
+  .ec-wb .ec-card > h2 { display: none; }   /* the pane header says it */
+  .ec-wb [data-pane=setup] .ec-card > h2, .ec-wb [data-pane=checks] .ec-card > h2 { display: block; margin-top: 16px; }   /* several cards in one pane keep theirs */
+  .ec-wb [data-pane=setup] #ec-card-basics > h2 { margin-top: 0; }
+  /* list rows (checks, references, extras): the ▲ ▼ ✕ on one line above the full-width fields */
+  .ec-wb #ec-todos > .ec-row, .ec-wb #ec-refs > .ec-row, .ec-wb #ec-extras > .ec-row { border-top: 1px solid var(--rule); padding-top: 6px; margin-top: 8px; }
+  .ec-wb .ec-row > .ec-del { order: -1; }
+  .ec-wb .ec-field.sel { margin-left: 0 !important; }
+  .ec-wb .sel > .ec-up, .ec-wb .sel > .ec-dn, .ec-wb .sel > .ec-del:last-child,
+  .ec-wb .ec-plot.sel > .ec-row:first-child > .ec-up, .ec-wb .ec-plot.sel > .ec-row:first-child > .ec-dn,
+  .ec-wb .ec-plot.sel > .ec-row:first-child > .ec-del:last-child { display: none; }   /* the pane header carries them */
+  .ec-wb .ec-row input, .ec-wb .ec-row select { flex: 1 1 100%; }
+  .ec-wb .ec-row input[type=number] { flex: 1 1 100px; }
+  .ec-wb .ec-row .ec-label { flex: 1 1 100%; }
+  .ec-wb .ec-row .ec-f { flex: 1 1 100% !important; }
+  .ec-wb .ec-row .ec-f.n { flex: 1 1 100px !important; }
+  .ec-wb #ec-card-json > summary { display: none; }   /* the JSON pane's header says it */
+  #ec-plotfoot hr, #ec-fldfoot hr { border: 0; border-top: 1px solid var(--rule); margin: 16px 0 6px; }
+  #ec-outline { font-size: 12.5px; color: var(--dim); }
+  .eco-bar { display: flex; gap: 6px; margin-bottom: 8px; }
+  #ec-outline-q { flex: 1; min-width: 0; }
+  .eco-sec { display: flex; gap: 6px; align-items: center; padding: 5px 8px; border-radius: var(--r-sm);
+    color: var(--ink); font-weight: 500; cursor: pointer; }
+  .eco-row { display: flex; gap: 8px; padding: 4px 8px 4px 24px; border-radius: var(--r-sm); cursor: pointer; min-width: 0; }
+  .eco-row.l2 { padding-left: 44px; }
+  .eco-row .t { font-family: var(--font-mono); color: var(--faint); width: 14px; flex: none; text-align: center; }
+  .eco-row span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .eco-sec:hover, .eco-row:hover { background: var(--surface); }
+  .eco-sec.on, .eco-row.on { background: var(--accent-bg); color: var(--ink); font-weight: 600; }
+  .ec-wb .ec-preview-wrap { padding: 18px 26px 40px; max-width: 1280px; box-sizing: border-box; min-width: 0; }
+  .ec-pvhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; font-size: 12.5px; color: var(--dim); }
+  .ec-pvhead input { width: 220px; font-family: var(--font-mono); font-size: 12px; }
+  #es-preview .es-card, #es-preview .es-plot, #es-preview .es-signee, #es-preview .es-plot-fields tr[data-sel], #es-preview .es-ref { cursor: pointer; }
+  #es-preview .ec-sel { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: var(--r-sm); }
+  #es-preview .es-card.ec-sel { outline-offset: -1px; border-radius: var(--r-lg); }
+  #es-preview .es-ph { margin-top: 6px; border: 1px dashed var(--rule); border-radius: var(--r-sm); background: var(--surface);
+    color: var(--faint); font-size: 12px; padding: 28px 10px; text-align: center; }
+  #es-preview .es-btn:disabled, #es-preview input:disabled, #es-preview textarea:disabled, #es-preview select:disabled { opacity: .6; }
 </style>
 
-<div class="ec-page">
+<div class="ec-page{% if wb %} ec-wb{% endif %}">
+  <div class="ec-head"><div style="min-width:0;">
   <div class="ec-crumbs">
     <a href="{% url 'explore:home' %}">Explorer</a>
     {% if next %}<span class="sep">›</span><a href="{{ next }}">Back</a>{% endif %}
     <span class="sep">›</span>ES config
   </div>
 
-  {% for m in messages %}<div class="ec-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+  {% if not wb %}{% for m in messages %}<div class="ec-flash {{ m.tags }}">{{ m }}</div>{% endfor %}{% endif %}
 
   <h1>{% if is_new %}Create{% else %}Edit{% endif %} the ES config — <span class="mono">{{ part_type_id }}</span></h1>
   <p class="ec-sub">{% if is_new %}This type has no config yet — starting from the template. Saving one marks
     the type as carrying an executive summary.{% else %}Editing <span class="mono">{{ current_name }}</span>.{% endif %}
     Saving posts a new <span class="mono">ES_{{ part_type_id }}_&lt;timestamp&gt;.json</span> onto the type —
     newest wins, for every item of the type; HWDB keeps every version.</p>
+  </div>
+  {# #205: the same editor in the other layout — the workbench puts the ES page's cards full width with the editor in a side panel #}
+  <div class="ec-headr">
+    {% if wb %}<a class="ec-quiet" id="ec-switch" href="?next={{ next|urlencode }}">Classic editor</a><button class="ec-save" form="ec-form">Save config to HWDB</button>{% else %}<a class="ec-quiet" id="ec-switch" href="?next={{ next|urlencode }}&amp;ui=wb">Try the new editor</a>{% endif %}
+  </div></div>
+  {% if wb %}{% for m in messages %}<div class="ec-flash {{ m.tags }}">{{ m }}</div>{% endfor %}{% endif %}
 
+  <div class="ec-cols">
+    {% if wb %}
+    <nav class="pl-tabs ec-tabs" aria-label="editor panes">
+      <button type="button" class="pl-tab on" data-tab="setup"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 12h6M9 16h6"/></svg>Setup</button>
+      <button type="button" class="pl-tab" data-tab="checks"><svg viewBox="0 0 24 24"><path d="M4 7l2 2 4-4M4 17l2 2 4-4M13 7h7M13 17h7"/></svg>Checks</button>
+      <button type="button" class="pl-tab" data-tab="outline"><svg viewBox="0 0 24 24"><path d="M4 6h3M10 6h10M6 12h3M12 12h8M6 18h3M12 18h8"/></svg>Outline</button>
+      <button type="button" class="pl-tab" data-tab="signee"><svg viewBox="0 0 24 24"><path d="M4 20c0-4 3-6 8-6s8 2 8 6"/><circle cx="12" cy="8" r="4"/></svg>Signee</button>
+      <button type="button" class="pl-tab" data-tab="plot"><svg viewBox="0 0 24 24"><path d="M4 20V4M4 20h16M7 16l4-5 3 3 5-7"/></svg>Plot</button>
+      <button type="button" class="pl-tab" data-tab="field"><svg viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="8" rx="2"/><path d="M7 12h6"/></svg>Field</button>
+      <button type="button" class="pl-tab" data-tab="json"><svg viewBox="0 0 24 24"><path d="M8 4c-2 0-3 1-3 3v3c0 1-1 2-2 2 1 0 2 1 2 2v3c0 2 1 3 3 3M16 4c2 0 3 1 3 3v3c0 1 1 2 2 2-1 0-2 1-2 2v3c0 2-1 3-3 3"/></svg>JSON</button>
+    </nav>
+    {% endif %}
   <form method="post" id="ec-form">
     {% csrf_token %}
     <input type="hidden" name="config_json" id="ec-json">
     <input type="hidden" name="next" value="{{ next }}">
+    {% if wb %}<input type="hidden" name="ui" value="wb">{% endif %}
+    <div id="ec-editor"{% if wb %} data-pane="setup"{% endif %}>
+    {% if wb %}
+    <div id="ec-panehead"><span class="lbl">Setup</span><span class="for"></span>
+      <span class="acts" hidden><button type="button" class="ec-del" id="ec-paneup" title="Move up">&#9650;</button><button type="button" class="ec-del" id="ec-panedn" title="Move down">&#9660;</button><button type="button" class="ec-del" id="ec-panex" title="Remove">&#x2715; remove</button></span></div>
+    <div id="ec-outline">
+      <div class="eco-bar"><input id="ec-outline-q" placeholder="find a signee, plot or field" autocomplete="off"></div>
+      <div id="ec-outline-rows"></div>
+    </div>
+    {% endif %}
 
-    <div class="ec-card">
+    <div class="ec-card" id="ec-card-basics">
       <h2>Basics</h2>
       <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">Type id</span>
         <span id="f-ctid" class="mono" style="font-size:12.5px; color:var(--dim);"></span>
@@ -79,7 +194,7 @@
         <input id="f-desc" placeholder="e.g. Top CRU Executive summary - …"></div>
     </div>
 
-    <div class="ec-card">
+    <div class="ec-card" id="ec-card-todos">
       <h2>QC checks (todos)</h2>
       <div class="ec-row"><span class="ec-label" style="flex:0 0 90px;">List title</span>
         <input id="f-todos-title" placeholder="QC Checks"></div>
@@ -87,7 +202,11 @@
       <button type="button" class="ec-add" data-add="todo">+ add check</button>
     </div>
 
-    <div class="ec-card">
+    {% if wb %}
+    <p class="ec-hint" id="ec-checksnote">The component status and the two QA/QC flags under the checks are confirmed on the ES page with each signature — nothing to configure.</p>
+    {% endif %}
+
+    <div class="ec-card" id="ec-card-signees">
       <h2>Signees</h2>
       <p class="ec-hint" style="margin:0 0 4px;">Negative ranks sign first (any order), then ranks descending —
         rank 0 signs last (the final approver). Roles are HWDB role ids; empty = anyone.
@@ -98,13 +217,13 @@
       <button type="button" class="ec-add" data-add="signee">+ add signee</button>
     </div>
 
-    <div class="ec-card">
+    <div class="ec-card" id="ec-card-refs">
       <h2>Reference URLs</h2>
       <div id="ec-refs"></div>
       <button type="button" class="ec-add" data-add="ref">+ add reference</button>
     </div>
 
-    <div class="ec-card">
+    <div class="ec-card" id="ec-card-plots">
       <h2>Plots</h2>
       <p class="ec-hint" style="margin:0 0 4px;">An <b>image</b> plot shows an image already attached to a test
         record; a <b>numeric</b> plot is rendered from data_paths (the latest test record) or
@@ -113,8 +232,13 @@
       <div id="ec-plots"></div>
       <button type="button" class="ec-add" data-add="plot">+ add plot</button>
     </div>
+    {% if wb %}
+    <div id="ec-plotfoot"><hr><button type="button" class="ec-add" id="ec-addplot-below">+ add plot below</button>
+      <button type="button" class="ec-add" id="ec-addfld-plot">+ add field to this plot</button></div>
+    <div id="ec-fldfoot"><hr><button type="button" class="ec-add" id="ec-addfld-below">+ add field below</button></div>
+    {% endif %}
 
-    <div class="ec-card">
+    <div class="ec-card" id="ec-card-extras">
       <h2>Extra fields</h2>
       <p class="ec-hint" style="margin:0 0 4px;">Any other top-level key the config should carry. Values are
         JSON — quote strings (<span class="mono">"text"</span>).</p>
@@ -122,7 +246,7 @@
       <button type="button" class="ec-add" data-add="extra">+ add field</button>
     </div>
 
-    <details class="ec-card">
+    <details class="ec-card" id="ec-card-json"{% if wb %} open{% endif %}>
       <summary class="ec-hint" style="cursor:pointer; text-transform:uppercase; letter-spacing:.04em;">Raw JSON</summary>
       <textarea id="ec-preview" rows="12" spellcheck="false" style="margin-top:8px;"></textarea>
       <div class="ec-row">
@@ -131,40 +255,51 @@
           only after “Apply” — the form is what gets saved.</span>
       </div>
     </details>
+    </div>{# /ec-editor #}
 
-    <button type="submit" class="ec-save">Save config to HWDB</button>
-    {% if next %}<a href="{{ next }}" class="ec-quiet" style="text-decoration:none; margin-left:8px; display:inline-block;">Cancel</a>{% endif %}
+    {% if not wb %}<button type="submit" class="ec-save">Save config to HWDB</button>{% endif %}
   </form>
+  {% if wb %}
+  <div class="pl-vsplit" id="ec-vsplit" title="drag to resize the panel"></div>
+  <div class="ec-preview-wrap">
+    <div class="ec-pvhead">What the ES page renders from this config — click a card, a signee or a field to edit it.
+      <label>Preview with item <input id="ec-pid" placeholder="PID, e.g. {{ part_type_id }}-00001" autocomplete="off"></label>
+      <span class="ec-hint" id="ec-pvstate"></span></div>
+    <div id="es-preview"><p class="ec-hint">…</p></div>
+  </div>
+  {% endif %}
+  </div>{# /ec-cols #}
+
 </div>
 
 <template id="t-todo">
   <div class="ec-row"><button type="button" class="ec-del ec-up" title="Move up">&#9650;</button>
     <button type="button" class="ec-del ec-dn" title="Move down">&#9660;</button>
-    <input class="f-todo" placeholder="e.g. Contents match the manifest">
+    <label class="ec-f"><span>Check</span><input class="f-todo" placeholder="e.g. Contents match the manifest" title="one line of the QC checklist — every check must be ticked before anyone signs"></label>
     <button type="button" class="ec-del" title="Remove">&#x2715;</button></div>
 </template>
 <template id="t-signee">
   <div class="ec-row"><button type="button" class="ec-del ec-up" title="Move up">&#9650;</button>
     <button type="button" class="ec-del ec-dn" title="Move down">&#9660;</button>
-    <input class="f-name" placeholder="Full name (as in HWDB)">
-    <input class="f-rank" type="number" value="0" title="rank">
-    <input class="f-roles" placeholder="role ids, e.g. 41, 7" title="HWDB role ids, comma-separated">
-    <input class="f-emails" placeholder="emails, comma-separated" title="notify addresses — a position held by several people can list them all">
-    <input class="f-sipath" placeholder="item_path (recorded sign-off)" title="read the sign-off from the Item Specifications at this path instead of signing on the page" style="font-family:var(--font-mono); font-size:12px;">
+    <label class="ec-f"><span>Position</span><input class="f-name" placeholder="e.g. CE Technical Lead" title="the position as the sign-off table shows it — the person signs with their own name"></label>
+    <label class="ec-f n"><span>Rank</span><input class="f-rank" type="number" value="0" title="negative ranks sign first (any order), then ranks descending — 0 signs last (the final approver)"></label>
+    <label class="ec-f"><span>Roles</span><input class="f-roles" placeholder="e.g. 41, 7" title="HWDB role ids, comma-separated — any one of them may sign this row; empty = anyone"></label>
+    <label class="ec-f"><span>Emails</span><input class="f-emails" placeholder="comma-separated" title="notify addresses for the “email next signee” draft — a position held by several people can list them all"></label>
+    <label class="ec-f"><span>Recorded at</span><input class="f-sipath" placeholder="item_path" title="a sign-off recorded in the Item Specifications: the path to {name, date, links} — shown on the page, never signed there" style="font-family:var(--font-mono); font-size:12px;"></label>
     <button type="button" class="ec-del" title="Remove">&#x2715;</button></div>
 </template>
 <template id="t-ref">
   <div class="ec-row"><button type="button" class="ec-del ec-up" title="Move up">&#9650;</button>
     <button type="button" class="ec-del ec-dn" title="Move down">&#9660;</button>
-    <input class="f-url" placeholder="https://…">
-    <input class="f-comments" placeholder="link text / comment">
+    <label class="ec-f"><span>URL</span><input class="f-url" placeholder="https://…" title="a reference link shown on the page and in the PDF"></label>
+    <label class="ec-f"><span>Link text</span><input class="f-comments" placeholder="shown instead of the URL" title="the link's text; the URL itself when blank"></label>
     <button type="button" class="ec-del" title="Remove">&#x2715;</button></div>
 </template>
 <template id="t-extra">
   <div class="ec-row"><button type="button" class="ec-del ec-up" title="Move up">&#9650;</button>
     <button type="button" class="ec-del ec-dn" title="Move down">&#9660;</button>
-    <input class="f-key" placeholder="field name" style="flex:0 0 160px;">
-    <input class="f-value" placeholder='JSON value, e.g. "text" or {"a": 1}' style="font-family:var(--font-mono); font-size:12px;">
+    <label class="ec-f"><span>Key</span><input class="f-key" placeholder="e.g. Shipping Mode" title="any other top-level key the config carries — shown as a fact in the Summary card and the PDF header"></label>
+    <label class="ec-f"><span>Value (JSON)</span><input class="f-value" placeholder='e.g. "Road"' title="JSON — quote strings"></label>
     <button type="button" class="ec-del" title="Remove">&#x2715;</button></div>
 </template>
 <template id="t-plot">
@@ -172,46 +307,45 @@
     <div class="ec-row">
       <button type="button" class="ec-del ec-up" title="Move up">&#9650;</button>
       <button type="button" class="ec-del ec-dn" title="Move down">&#9660;</button>
-      <select class="f-kind" style="flex:0 0 210px;">
+      <label class="ec-f" style="flex:0 0 210px;"><span>Source</span><select class="f-kind" title="where the slot's picture comes from — or fields only, no picture">
         <option value="image">image (from a test record)</option>
         <option value="numeric">numeric (from a test record)</option>
         <option value="numeric-spec">numeric (from the Item Specs)</option>
         <option value="fields">fields only (no plot)</option>
-      </select>
-      <input class="f-title" placeholder="title">
-      <input class="f-ttn" placeholder="test type name, e.g. RoomT QC Test">
+      </select></label>
+      <label class="ec-f"><span>Title</span><input class="f-title" placeholder="e.g. X layer — side A" title="the slot's heading on the page and in the PDF"></label>
+      <label class="ec-f"><span>Test type</span><input class="f-ttn" placeholder="e.g. RoomT QC Test" title="the HWDB test type whose latest record the image or the data comes from"></label>
       <button type="button" class="ec-del" title="Remove plot">&#x2715;</button>
     </div>
     <div class="ec-row g-image">
-      <input class="f-image-name" placeholder="image_name, e.g. noise.png">
-      <input class="f-ho" type="number" value="0" title="history_order — 0 = latest test record">
-      <span class="ec-hint">history_order (0 = latest)</span>
+      <label class="ec-f"><span>Image name</span><input class="f-image-name" placeholder="e.g. noise.png" title="image_name of an image attached to the test record"></label>
+      <label class="ec-f n"><span>History</span><input class="f-ho" type="number" value="0" title="history_order — 0 = the latest test record, 1 = the one before"></label>
     </div>
     <div class="ec-row g-numeric" style="display:none;">
-      <input class="f-paths" placeholder="data_paths into test_data, comma-separated">
-      <input class="f-bins" type="number" placeholder="bins">
+      <label class="ec-f"><span>data_paths</span><input class="f-paths" placeholder="e.g. DATA.gain" title="paths into the test record's test_data, comma-separated — one path draws a histogram (or values vs #), two a scatter"></label>
+      <label class="ec-f n"><span>Bins</span><input class="f-bins" type="number" placeholder="40" title="histogram bins"></label>
       <label class="ec-inline"><input class="f-sum" type="checkbox"> sum over the whole type</label>
     </div>
     <div class="ec-row g-spec" style="display:none;">
-      <input class="f-ipaths" placeholder="item_paths into the Item Specifications, comma-separated">
-      <input class="f-ibins" type="number" placeholder="bins">
+      <label class="ec-f"><span>item_paths</span><input class="f-ipaths" placeholder="e.g. specifications.component.data.measurements.xLayer.tensions_A" title="paths into the item's latest Item Specifications entry, comma-separated — one path draws a histogram (or values vs #), two a scatter"></label>
+      <label class="ec-f n"><span>Bins</span><input class="f-ibins" type="number" placeholder="40" title="histogram bins"></label>
     </div>
     <div class="ec-row g-style" style="display:none;">
-      <select class="f-style" style="flex:0 0 210px;" title="one-path plots only">
+      <label class="ec-f" style="flex:0 0 210px;"><span>Style</span><select class="f-style" title="one-path plots only: a histogram, the values against their # (position), or both side by side">
         <option value="hist">histogram</option>
         <option value="series">values vs #</option>
         <option value="series+hist">values vs # + histogram</option>
-      </select>
-      <input class="f-limits" placeholder="limit lines, e.g. 4, 8.5">
-      <input class="f-range" placeholder="histogram range, e.g. 3.5, 9.1">
-      <input class="f-start" type="number" placeholder="first #" title="the first # of the values-vs-# plot (default 1)" style="flex:0 0 90px;">
-      <input class="f-xlabel" placeholder="x-axis label, e.g. Wire #" title="values vs #: the x axis (the range and N follow it); histogram alone: the x axis">
-      <input class="f-ylabel" placeholder="y-axis label, e.g. Tension [N]" title="values vs #: the y axis — and the histogram's x axis beside it; histogram alone: the y axis (default count)">
+      </select></label>
+      <label class="ec-f"><span>Limit lines</span><input class="f-limits" placeholder="e.g. 4, 8.5" title="red lines at these values — vertical on the histogram, horizontal on values vs #"></label>
+      <label class="ec-f"><span>Histogram range</span><input class="f-range" placeholder="e.g. 3.5, 9.1" title="the histogram's x axis; the bins are spread over it"></label>
+      <label class="ec-f n"><span>First #</span><input class="f-start" type="number" placeholder="1" title="the # of the first value on the values-vs-# plot (default 1)"></label>
+      <label class="ec-f"><span>X-axis label</span><input class="f-xlabel" placeholder="e.g. Wire #" title="values vs #: the x axis (the range and N follow it); histogram alone: the x axis"></label>
+      <label class="ec-f"><span>Y-axis label</span><input class="f-ylabel" placeholder="e.g. Tension [N]" title="values vs #: the y axis — and the histogram's x axis beside it; histogram alone: the y axis (default count)"></label>
     </div>
     <div class="ec-row">
-      <input class="f-pid" placeholder="part_id (blank = the item itself)">
-      <input class="f-layer" type="number" placeholder="sub layer" title="sub_part_id layer: 1 = direct children">
-      <input class="f-pos" placeholder="sub position name" title="sub_part_id pos_name">
+      <label class="ec-f"><span>Part id</span><input class="f-pid" placeholder="blank = the item itself" title="draw this slot from another item's record"></label>
+      <label class="ec-f n"><span>Sub layer</span><input class="f-layer" type="number" placeholder="1" title="sub_part_id layer: 1 = the item's direct children"></label>
+      <label class="ec-f"><span>Sub position</span><input class="f-pos" placeholder="e.g. Top CRU 1" title="sub_part_id pos_name — the child in this functional position supplies the record"></label>
     </div>
     {# per-plot field group (#85): label/value rows under the plot #}
     <div class="g-fields"></div>
@@ -227,10 +361,10 @@
   <div class="ec-row ec-field" style="margin-left:14px;">
     <button type="button" class="ec-del ec-up" title="Move up">&#9650;</button>
     <button type="button" class="ec-del ec-dn" title="Move down">&#9660;</button>
-    <input class="f-flabel" placeholder="field label, e.g. RMS mean (e-)">
-    <input class="f-fpath" placeholder="data_path (from the test record)" style="font-family:var(--font-mono); font-size:12px;">
-    <input class="f-fipath" placeholder="item_path (from the Item Specs)" style="font-family:var(--font-mono); font-size:12px;">
-    <input class="f-fcols" placeholder="columns: key: Heading, key2: Heading2" title="for a list of records at the path — which keys to show, in this order, with these headings" style="font-family:var(--font-mono); font-size:12px;">
+    <label class="ec-f"><span>Label</span><input class="f-flabel" placeholder="e.g. RMS mean (e-)" title="the row's label on the page and in the PDF"></label>
+    <label class="ec-f"><span>data_path</span><input class="f-fpath" placeholder="from the test record" title="path into the latest test record's test_data — wins over item_path" style="font-family:var(--font-mono); font-size:12px;"></label>
+    <label class="ec-f"><span>item_path</span><input class="f-fipath" placeholder="from the Item Specs" title="path into the item's latest Item Specifications entry; a list of records there renders as a table, a mapping as Name / Value rows" style="font-family:var(--font-mono); font-size:12px;"></label>
+    <label class="ec-f"><span>Columns</span><input class="f-fcols" placeholder="key: Heading, key2: Heading2" title="for a list of records at the path — which keys to show, in this order, under these headings" style="font-family:var(--font-mono); font-size:12px;"></label>
     <button type="button" class="ec-del" title="Remove field">&#x2715;</button></div>
 </template>
 
@@ -258,7 +392,7 @@
     $(".g-spec", p).style.display = kind === "numeric-spec" ? "" : "none";
     $(".g-style", p).style.display = (kind === "numeric" || kind === "numeric-spec") ? "" : "none";
     // Item-Specs plots read no test record, so the test type is meaningless
-    $(".f-ttn", p).style.display = kind === "numeric-spec" ? "none" : "";
+    $(".f-ttn", p).closest(".ec-f").style.display = kind === "numeric-spec" ? "none" : "";
   }
   function addField(plotNode, f) {
     var node = document.getElementById("t-field").content.firstElementChild.cloneNode(true);
@@ -437,7 +571,10 @@
     refresh();
   }
 
-  function refresh() { preview.value = JSON.stringify(collect(), null, 2); }
+  function refresh() {
+    preview.value = JSON.stringify(collect(), null, 2);
+    if (WB) { buildOutline(); paneHead(); schedulePreview(); }
+  }
 
   form.addEventListener("click", function (e) {
     if (e.target.hasAttribute && e.target.hasAttribute("data-add-field")) {
@@ -456,12 +593,17 @@
       } else if (e.target.classList.contains("ec-dn")) {
         if (row.nextElementSibling) row.parentNode.insertBefore(row.nextElementSibling, row);
       } else {
+        var gone = row.classList.contains("sel") || row.querySelector(".sel");
         row.remove();
+        if (WB && gone) select(null);
       }
       refresh();
     }
   });
-  form.addEventListener("input", function (e) { if (e.target !== preview) refresh(); });
+  form.addEventListener("input", function (e) {
+    if (e.target.id === "ec-outline-q") return;   // the outline's filter isn't the config
+    if (e.target !== preview) refresh();
+  });
   form.addEventListener("change", function (e) {
     var p = e.target.closest && e.target.closest(".ec-plot");
     if (p && e.target.classList.contains("f-kind")) syncPlotKind(p);
@@ -475,7 +617,214 @@
     document.getElementById("ec-json").value = JSON.stringify(collect());
   });
 
-  render(JSON.parse(document.getElementById("ec-initial").textContent));
+  // --- #205: the workbench layout — the same editor DOM, one pane at a time
+  // (the checklist editor's #192). Nothing here touches the config: the rows
+  // are the classic ones, shown or hidden by the pane; the outline and the
+  // preview only pick which row shows.
+  var WB = document.querySelector(".ec-wb") !== null;
+  var editor = document.getElementById("ec-editor");
+  var PANE_LABEL = { setup: "Setup", checks: "QC checks", outline: "Outline", signee: "Signee", plot: "Plot", field: "Field", json: "Config JSON" };
+  var esc = function (t) { return String(t).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+  // the rows the preview shows, in the preview's order — collect() skips the
+  // blank ones, so the preview's indices count only these
+  function liveSignees() { return $$("#ec-signees > .ec-row").filter(function (r) { return $(".f-name", r).value.trim(); }); }
+  function liveRefs() { return $$("#ec-refs > .ec-row").filter(function (r) { return $(".f-url", r).value.trim(); }); }
+  function livePlots() {
+    return $$("#ec-plots > .ec-plot").filter(function (p) {
+      return $(".f-title", p).value.trim() || $(".f-ttn", p).value.trim() || $(".f-image-name", p).value.trim()
+        || $(".f-paths", p).value.trim() || $(".f-ipaths", p).value.trim();
+    });
+  }
+  function liveFields(p) { return $$(".g-fields > .ec-field", p).filter(function (r) { return $(".f-flabel", r).value.trim(); }); }
+  function selSignee() { return $("#ec-signees > .ec-row.sel"); }
+  function selPlot() { return $("#ec-plots > .ec-plot.sel"); }
+  function selField() { return $("#ec-plots .ec-field.sel"); }
+  function plotTitle(p) { return $(".f-title", p).value.trim() || "untitled plot"; }
+  function fieldLabel(r) { return $(".f-flabel", r).value.trim() || "unlabelled field"; }
+  function signeeName(r) { return $(".f-name", r).value.trim() || "unnamed signee"; }
+  function setPane(name) {
+    if (!WB) return;
+    editor.dataset.pane = name;
+    $$(".ec-tabs .pl-tab").forEach(function (b) { b.classList.toggle("on", b.dataset.tab === name); });
+    editor.scrollTop = 0;
+    paneHead();
+  }
+  function paneHead() {
+    if (!WB) return;
+    var h = $("#ec-panehead"), pane = editor.dataset.pane, f = "", row = null;
+    if (pane === "signee") { row = selSignee(); f = row ? "<b>" + esc(signeeName(row)) + "</b>" : "pick one in the preview or the outline"; }
+    if (pane === "plot") { row = selPlot(); f = row ? "<b>" + esc(plotTitle(row)) + "</b>" : "pick one in the preview or the outline"; }
+    if (pane === "field") { row = selField(); f = row ? esc(plotTitle(selPlot())) + " \u203A <b>" + esc(fieldLabel(row)) + "</b>" : "click a field in the preview or the outline"; }
+    $(".lbl", h).textContent = PANE_LABEL[pane] || "";
+    $(".for", h).innerHTML = f;
+    $(".acts", h).hidden = !row;
+  }
+  // select a signee / plot / field row: it alone shows in its pane; the
+  // preview marks it (and scrolls to it unless the click came from the preview)
+  function select(node, fromPreview) {
+    if (!WB) return;
+    $$("#ec-editor .sel").forEach(function (n) { n.classList.remove("sel"); });
+    if (node) {
+      node.classList.add("sel");
+      var plot = node.closest(".ec-plot");
+      if (plot) plot.classList.add("sel");
+      setPane(node.classList.contains("ec-field") ? "field" : node.classList.contains("ec-plot") ? "plot" : "signee");
+    } else paneHead();
+    markPreview(!fromPreview);
+    buildOutline();
+  }
+  function selKey() {   // the preview's data-sel of the current selection
+    var f = selField(), p = selPlot(), sg = selSignee();
+    if (f) return "field:" + livePlots().indexOf(p) + ":" + liveFields(p).indexOf(f);
+    if (p) return "plot:" + livePlots().indexOf(p);
+    if (sg) return "signee:" + liveSignees().indexOf(sg);
+    var pane = editor.dataset.pane;
+    return pane === "setup" ? "setup" : pane === "checks" ? "todos" : null;
+  }
+  var lastMark = null;
+  function markPreview(scroll) {
+    if (!WB) return;
+    $$("#es-preview .ec-sel").forEach(function (n) { n.classList.remove("ec-sel"); });
+    var key = selKey(), el = key ? $('#es-preview [data-sel="' + key + '"]') : null;
+    if (!el) { lastMark = key; return; }
+    el.classList.add("ec-sel");
+    var r = el.getBoundingClientRect(), seen = r.bottom > 0 && r.top < window.innerHeight;
+    if (scroll || (key !== lastMark && !seen)) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    lastMark = key;
+  }
+  function buildOutline() {
+    if (!WB) return;
+    var q = $("#ec-outline-q").value.trim().toLowerCase(), html = "";
+    var hit = function (t) { return !q || t.toLowerCase().indexOf(q) !== -1; };
+    var sg = selSignee(), sp = selPlot(), sf = selField(), pane = editor.dataset.pane;
+    html += '<div class="eco-sec' + (pane === "setup" ? " on" : "") + '" data-go="setup">Setup — consortium, references, extras</div>';
+    html += '<div class="eco-sec' + (pane === "checks" ? " on" : "") + '" data-go="todos">QC checks (' + $$("#ec-todos .f-todo").length + ')</div>';
+    var sgs = $$("#ec-signees > .ec-row").map(function (r, i) {
+      var t = signeeName(r); if (!hit(t)) return "";
+      return '<div class="eco-row' + (r === sg ? " on" : "") + '" data-go="signee:' + i + '"><span class="t">' + ($(".f-sipath", r).value.trim() ? "\u2318" : "\u270D") + '</span><span>' + esc(t) + '</span></div>';
+    }).join("");
+    if (sgs || !q) html += '<div class="eco-sec">Signees</div>' + sgs;
+    var pls = $$("#ec-plots > .ec-plot").map(function (p, i) {
+      var t = plotTitle(p);
+      var flds = $$(".g-fields > .ec-field", p).map(function (r, j) {
+        var l = fieldLabel(r); if (!hit(l)) return "";
+        return '<div class="eco-row l2' + (r === sf ? " on" : "") + '" data-go="field:' + i + ':' + j + '"><span class="t">\u00B7</span><span>' + esc(l) + '</span></div>';
+      }).join("");
+      if (!hit(t) && !flds) return "";
+      var glyph = { image: "\u25EB", numeric: "\u223F", "numeric-spec": "\u223F", fields: "\u2261" }[$(".f-kind", p).value] || "\u00B7";
+      return '<div class="eco-row' + (p === sp && !sf ? " on" : "") + '" data-go="plot:' + i + '"><span class="t">' + glyph + '</span><span>' + esc(t) + '</span></div>' + flds;
+    }).join("");
+    if (pls || !q) html += '<div class="eco-sec">Plots</div>' + pls;
+    $("#ec-outline-rows").innerHTML = html;
+  }
+  // the preview: the ES page's cards, re-rendered by the server from the
+  // config on screen (and the item in the PID box, if any)
+  var pvTimer = null, pvSeq = 0;
+  function schedulePreview() { clearTimeout(pvTimer); pvTimer = setTimeout(renderPreview, 350); }
+  function renderPreview() {
+    if (!WB) return;
+    var seq = ++pvSeq, body = new FormData();
+    body.append("config_json", JSON.stringify(collect()));
+    body.append("pid", $("#ec-pid").value.trim());
+    body.append("csrfmiddlewaretoken", $("[name=csrfmiddlewaretoken]", form).value);
+    $("#ec-pvstate").textContent = "rendering…";
+    fetch("{% url 'explore:es_preview' part_type_id=part_type_id %}", { method: "POST", body: body, credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.text() : Promise.reject(new Error("HTTP " + r.status)); })
+      .then(function (html) {
+        if (seq !== pvSeq) return;   // a newer render is on its way
+        $("#es-preview").innerHTML = html;
+        $("#ec-pvstate").textContent = "";
+        markPreview(false);
+      })
+      .catch(function (e) { if (seq === pvSeq) $("#ec-pvstate").textContent = "preview failed (" + e.message + ")"; });
+  }
+  function goTo(key, fromPreview) {   // "setup" | "signee:i" | "plot:i" | "field:i:j" | "refs" | "todos" | "ref:i"
+    var m = key.split(":"), kind = m[0];
+    if (kind === "setup" || kind === "refs" || kind === "ref") { select(null); setPane("setup"); markPreview(!fromPreview); return; }
+    if (kind === "todos" || kind === "status") { select(null); setPane("checks"); markPreview(!fromPreview); return; }
+    var fromOutline = !fromPreview && arguments.length > 2;
+    var plots = fromOutline ? $$("#ec-plots > .ec-plot") : livePlots();
+    if (kind === "signee") select((fromOutline ? $$("#ec-signees > .ec-row") : liveSignees())[+m[1]], fromPreview);
+    if (kind === "plot") select(plots[+m[1]], fromPreview);
+    if (kind === "field") { var p = plots[+m[1]]; if (p) select((fromOutline ? $$(".g-fields > .ec-field", p) : liveFields(p))[+m[2]], fromPreview); }
+  }
+  if (WB) {
+    $("#ec-outline-rows").addEventListener("click", function (e) {
+      var row = e.target.closest("[data-go]");
+      if (row) goTo(row.dataset.go, false, true);
+    });
+    $("#ec-outline-q").addEventListener("input", buildOutline);
+    $("#es-preview").addEventListener("click", function (e) {
+      if (e.target.closest("a")) return;   // links in the preview stay links
+      var el = e.target.closest("[data-sel]");
+      if (el) goTo(el.dataset.sel, true);
+    });
+    $("#ec-pid").addEventListener("change", renderPreview);
+    $("#ec-pid").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); renderPreview(); } });
+    // the pane header carries the selected row's ▲ ▼ ✕
+    function selRow() { return selField() || selPlot() || selSignee(); }
+    $("#ec-panex").addEventListener("click", function () {
+      var r = selRow(); if (!r) return;
+      r.remove(); select(null); refresh();
+    });
+    $("#ec-paneup").addEventListener("click", function () {
+      var r = selRow(); if (r && r.previousElementSibling) { r.parentNode.insertBefore(r, r.previousElementSibling); refresh(); }
+    });
+    $("#ec-panedn").addEventListener("click", function () {
+      var r = selRow(); if (r && r.nextElementSibling) { r.parentNode.insertBefore(r.nextElementSibling, r); refresh(); }
+    });
+    $("#ec-addplot-below").addEventListener("click", function () {   // under the current plot (at the end if none)
+      var cur = selPlot(); adders.plot();
+      var np = $("#ec-plots > .ec-plot:last-child");
+      if (cur && cur.nextSibling) cur.parentNode.insertBefore(np, cur.nextSibling);
+      refresh(); select(np); $(".f-title", np).focus();
+    });
+    $("#ec-addfld-plot").addEventListener("click", function () {   // last field of the current plot
+      var cur = selPlot(); if (!cur) return;
+      addField(cur); var nf = $(".g-fields > .ec-field:last-child", cur);
+      refresh(); select(nf); $(".f-flabel", nf).focus();
+    });
+    $("#ec-addfld-below").addEventListener("click", function () {   // under the current field
+      var cur = selField(), p = selPlot(); if (!p) return;
+      addField(p); var nf = $(".g-fields > .ec-field:last-child", p);
+      if (cur && cur.nextSibling) cur.parentNode.insertBefore(nf, cur.nextSibling);
+      refresh(); select(nf); $(".f-flabel", nf).focus();
+    });
+    $$(".ec-tabs .pl-tab").forEach(function (b) { b.addEventListener("click", function () {
+      setPane(b.dataset.tab);
+      if (b.dataset.tab === "setup" || b.dataset.tab === "checks") { select(null); setPane(b.dataset.tab); markPreview(false); }
+      if (b.dataset.tab === "signee" && !selSignee()) select(liveSignees()[0] || $("#ec-signees > .ec-row"));
+      if (b.dataset.tab === "plot" && !selPlot()) select(livePlots()[0] || $("#ec-plots > .ec-plot"));
+      if (b.dataset.tab === "field" && !selField()) { var p = selPlot() || livePlots()[0]; if (p) select($(".g-fields > .ec-field", p) || p); }
+      buildOutline();
+    }); });
+    // panel width: drag the split; remembered per browser (as on Plots)
+    (function () {
+      var cols = $(".ec-cols"), sp = $("#ec-vsplit"), KEY = "cets-ec-pw";
+      try { var w = +localStorage.getItem(KEY); if (w >= 300 && w <= 760) cols.style.setProperty("--pw", w + "px"); } catch (e) {}
+      sp.addEventListener("mousedown", function (e) {
+        e.preventDefault(); sp.classList.add("on");
+        var x0 = e.clientX, w0 = editor.getBoundingClientRect().width;
+        function move(ev) { cols.style.setProperty("--pw", Math.max(300, Math.min(760, w0 + ev.clientX - x0)) + "px"); }
+        function up() {
+          document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); sp.classList.remove("on");
+          try { localStorage.setItem(KEY, String(Math.round(editor.getBoundingClientRect().width))); } catch (er) {}
+        }
+        document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+      });
+    })();
+  }
+
+  // switching layouts keeps the config on screen — the other page opens with
+  // what this one shows (unsaved edits included), not HWDB's copy
+  var CARRY = "cets-ec-carry";
+  document.getElementById("ec-switch").addEventListener("click", function () {
+    try { sessionStorage.setItem(CARRY, JSON.stringify({ t: PTID, cfg: collect() })); } catch (e) {}
+  });
+  var carried = null;
+  try { carried = JSON.parse(sessionStorage.getItem(CARRY) || "null"); sessionStorage.removeItem(CARRY); } catch (e) {}
+  render(carried && carried.t === PTID && carried.cfg ? carried.cfg
+         : JSON.parse(document.getElementById("ec-initial").textContent));
 })();
 </script>
 {% endblock %}
