@@ -38,7 +38,7 @@ from hwdb.fnal import flow
 from hwdb.fnal import session as fnal_session
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for, verify_link
 
-from . import (activity, charts, checklistforms, checklists, curation, events,
+from . import (activity, charts, checklistforms, checklists, curation, events, p6,
                execsummary, itemsedit, labels, navigation, ops, parts, plotting, production,
                scanning, sheetupload, watches)
 from .auth import fnal_login_required, provision_and_login
@@ -228,7 +228,7 @@ def explore_view(request, trail=None):
     # #200: the type's production plan as last read off HWDB — its Plan line
     # and the dashboard's plan lines (the browser-stored plan of #174 stays
     # the fallback for a type without one)
-    type_plan = ProductionPlan.for_instance(inst).filter(part_type_id=leaf.part_type_id).first() if leaf else None
+    type_plan = production.type_plan(inst, leaf.part_type_id) if leaf else None   # #206: P6 dates applied
     empty_pids = []
     if is_shipping:
         # Shipping extras — boxes are regular components too (charts/breakdown
@@ -272,10 +272,10 @@ def explore_view(request, trail=None):
         # Status / QC-flag overlay menu (#52) — mirror-only, precomputed so the
         # selector swaps series client-side without a reload.
         comp_chart["filters"] = component_update_filters(inst, ptid)
-        if type_plan and (type_plan.needed is not None or type_plan.completed_by or type_plan.needed_by):
+        if type_plan and (type_plan["needed"] is not None or type_plan["completed_by"] or type_plan["needed_by"]):
             comp_chart["plan"] = {
-                "total": type_plan.needed if type_plan.needed is not None else "",
-                "done": type_plan.completed_by, "need": type_plan.needed_by,
+                "total": type_plan["needed"] if type_plan["needed"] is not None else "",
+                "done": type_plan["completed_by"][:7], "need": type_plan["needed_by"][:7],   # the plan lines are months
                 "url": _rev(request, "explore:production_plan", args=[ptid])}
         phys = physics_date_field(inst, ptid)
         test_chart = chart_config(
@@ -395,7 +395,37 @@ def explore_production_overview_view(request):
         "active_nav": "detector",
         "sidebar": navigation.sidebar_tree(inst, {}),
         "status_types": _production_status_list(request, inst),
+        "p6": p6.current(),   # #206
+        "can_upload_p6": _is_architect(request, inst),
     })
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_production_p6_view(request):
+    """#206 (Anselmo 2026-10-20): upload the month's P6 activities
+    spreadsheet — parsed into the project-wide P6 table (every row
+    replaced), the file not kept. Architects."""
+    inst = instance_of(request)
+    back = _rev(request, "explore:production_overview")
+    if not _is_architect(request, inst):
+        return HttpResponseForbidden("Uploading the P6 schedule needs the architect flag.")
+    f = request.FILES.get("file")
+    if f is None:
+        messages.error(request, "Choose the P6 .xlsx file first.")
+        return redirect(back)
+    try:
+        rows = p6.parse(f.name, f.read())
+    except p6.P6Error as e:
+        messages.error(request, f"P6 schedule not read — {e}")
+        return redirect(back)
+    actor = activity.actor_of(request)
+    up = p6.replace(rows, actor, f.name)
+    activity.log(inst, ActivityEvent.KIND_CURATION,
+                 f"P6 schedule uploaded: {f.name}, {up.n_rows} activities", actor=actor)
+    messages.success(request, f"P6 schedule read — {up.n_rows} activities from {f.name}.")
+    return redirect(back)
 
 
 def _production_status_list(request, inst) -> list[dict]:
@@ -410,7 +440,7 @@ def _production_status_list(request, inst) -> list[dict]:
         lst = ProductionList.for_instance(inst).filter(part_type_id=tid).first()
         rows = lst.rows if lst else []
         ids = [r["type"] for r in rows]
-        plans = production.cached_plans(inst, ids)
+        plans = production.apply_p6(production.cached_plans(inst, ids, tid))
         out.append({"part_type_id": tid, "name": (node.name if node else "") or tid,
                     "url": _rev(request, "explore:production_status", args=[tid]),
                     "type_url": navigation.leaf_path_for(inst, tid) or "",
@@ -450,10 +480,18 @@ def explore_production_status_view(request, part_type_id):
     ids = [r["type"] for r in rows]
     plans = {}
     for tid in ids:
-        plan, _v = production.read_plan(api, tid)
+        # #206: this consortium's own plan of the type first (a type two
+        # consortia list), else the type's plain plan — both caches refreshed
+        listing = production._listing(api, tid)
+        own, _v = production.read_plan(api, tid, rows=listing, consortium=part_type_id)
+        production.cache_plan(inst, tid, own, consortium=part_type_id)
+        plan, _v = production.read_plan(api, tid, rows=listing)
         production.cache_plan(inst, tid, plan)
-        if plan is not None:
+        if own is not None:
+            plans[tid] = own
+        elif plan is not None:
             plans[tid] = plan
+    plans = production.apply_p6(plans)
     return render(request, "explore/production_status.html", {
         "active_nav": "detector",
         "sidebar": navigation.sidebar_tree(inst, {}),
@@ -464,6 +502,7 @@ def explore_production_status_view(request, part_type_id):
                                  production.names(inst, ids), timezone.localdate()),
         "list_url": _rev(request, "explore:production_list", args=[part_type_id]),
         "can_edit": inst in settings.HWDB_WRITE_INSTANCES,   # the plan pages apply the type's roles themselves
+        "consortium": part_type_id,   # #206: the plan links carry it
     })
 
 
@@ -500,7 +539,17 @@ def explore_production_plan_view(request, part_type_id):
     can_edit = inst in settings.HWDB_WRITE_INSTANCES and role_gate is None
     node = HierarchyNode.for_instance(inst).filter(
         level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
-    current, vs = production.read_plan(api, part_type_id)
+    # #206: a type two consortia list has one plan per consortium — ?for=<consortium>
+    # (the status table's plan links carry it) names which; ignored otherwise
+    shared = production.shared_by(inst, part_type_id)
+    consortium = request.POST.get("for") or request.GET.get("for") or ""
+    if not (len(shared) > 1 and consortium in shared):
+        consortium = ""
+    listing = production._listing(api, part_type_id)
+    current, vs = production.read_plan(api, part_type_id, rows=listing, consortium=consortium)
+    fallback = None   # the type's plain plan, shown when the consortium has none of its own yet
+    if consortium and current is None:
+        fallback, _v = production.read_plan(api, part_type_id, rows=listing)
 
     if request.method == "POST":
         if not can_edit:
@@ -521,28 +570,34 @@ def explore_production_plan_view(request, part_type_id):
             return redirect(page_url + (f"?{urlencode({'next': nxt})}" if nxt else ""))
         actor = activity.actor_of(request)
         plan = {"needed": needed, "completed_by": g("completed_by"), "needed_by": g("needed_by"),
+                "p6_completed_id": g("p6_completed_id")[:60], "p6_needed_id": g("p6_needed_id")[:60],
                 "comment": g("comment"), "updated_by": actor,
                 "updated": timezone.localdate().isoformat()}
         try:
-            body = production.write_plan(api, part_type_id, plan, g("reason"))
+            body = production.write_plan(api, part_type_id, plan, g("reason"), consortium=consortium)
         except requests.RequestException as e:
             messages.error(request, f"HWDB rejected the plan — {_hwdb_error_detail(e)}")
             return redirect(page_url)
         if body.get("status") != "OK":
             messages.error(request, f"HWDB rejected the plan — {body.get('data') or body}")
             return redirect(page_url)
-        production.cache_plan(inst, part_type_id, plan)
-        old = current or {}
+        production.cache_plan(inst, part_type_id, plan, consortium=consortium)
+        old = current or fallback or {}   # the change log reads against what the form was filled from
         changed = [f"{k.replace('_', ' ')} {old.get(k) if old.get(k) not in (None, '') else '—'} → {plan[k] if plan[k] not in (None, '') else '—'}"
-                   for k in ("needed", "completed_by", "needed_by") if old.get(k) != plan[k]]
+                   for k in ("needed", "completed_by", "needed_by", "p6_completed_id", "p6_needed_id") if (old.get(k) or None) != (plan[k] or None)]
         if (old.get("comment") or "") != plan["comment"]:
             changed.append("comment")
         activity.log(inst, ActivityEvent.KIND_CURATION,
-                     f"Production plan of {part_type_id}: " + (", ".join(changed) or "saved unchanged")
+                     f"Production plan of {part_type_id}{' for ' + consortium if consortium else ''}: " + (", ".join(changed) or "saved unchanged")
                      + (f" — {g('reason')}" if g("reason") else ""),
                      part_type_id=part_type_id, actor=actor)
-        messages.success(request, f"Plan saved — version {len(vs) + 1} of {production.plan_name(part_type_id)}.")
-        return redirect(nxt or page_url)
+        messages.success(request, f"Plan saved — version {len(vs) + 1} of {production.plan_name(part_type_id, consortium)}.")
+        return redirect(nxt or (page_url + (f"?{urlencode({'for': consortium})}" if consortium else "")))
+
+    shown = current if current is not None else fallback
+    resolved = production.apply_p6({part_type_id: shown})[part_type_id] if shown else None
+    cons_node = HierarchyNode.for_instance(inst).filter(
+        level=HierarchyNode.LEVEL_TYPE, part_type_id=consortium).first() if consortium else None
 
     return render(request, "explore/production_plan.html", {
         "active_nav": "explore",
@@ -550,13 +605,19 @@ def explore_production_plan_view(request, part_type_id):
         "part_type_id": part_type_id,
         "type_name": (node.name if node else "") or part_type_id,
         "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
-        "plan": current,
+        "plan": shown,
+        "resolved": resolved,   # #206: the P6 dates behind the ids, what the table shows
+        "is_fallback": current is None and fallback is not None,
         "history": [{**h, "version": len(vs) - i} for i, h in enumerate(production.plan_history(api, vs))],
         "n_versions": len(vs),
         "can_edit": can_edit,
         "role_gate": role_gate,
         "next": nxt,
-        "file_name": production.plan_name(part_type_id),
+        "file_name": production.plan_name(part_type_id, consortium),
+        "consortium": consortium,
+        "consortium_name": (cons_node.name if cons_node else "") or consortium,
+        "p6": p6.current(),
+        "p6_options": p6.options(),
     })
 
 

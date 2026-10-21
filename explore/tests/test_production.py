@@ -149,7 +149,7 @@ class EngineTest(TestCase):
         self.assertEqual(production.normalize_plan({"needed": "1,500", "completed_by": "2027-03-20", "needed_by": "bad",
                                                     "comment": " x ", "updated_by": "c"}),
                          {"needed": 1500, "completed_by": "2027-03", "needed_by": "", "comment": "x",
-                          "updated_by": "c", "updated": ""})
+                          "p6_completed_id": "", "p6_needed_id": "", "updated_by": "c", "updated": ""})
         self.assertEqual(production.normalize_plan(None)["needed"], None)
         self.assertEqual(production.normalize_list({"rows": [SIPM.lower(), {"type": PDS, "label": " PDS "}, {"type": "nope"}, 3]}),
                          [{"type": SIPM, "label": ""}, {"type": PDS, "label": "PDS"}])
@@ -234,7 +234,7 @@ class StatusPageTest(TestCase):
         self.assertIn('<table class="cl-table cl-gridlines ps-table">', html)   # the fill page's table look
         self.assertIn("<th>Component</th><th>Type ID</th><th>Needed</th><th>In HWDB</th><th>Completed by</th><th>Needed by</th><th>Float (months)</th><th>Comment</th>", html)
         self.assertIn(f'<th scope="row" class="cl-rowlab"><a href="/hw/dev/?node={SIPM}" title="the type’s page">SiPM boards (6 SiPMs)</a></th>', html)
-        self.assertIn(f'{SIPM}<a class="ps-plan" href="/hw/dev/plan/{SIPM}/" title="The plan and its history — set 2026-10-08 by chaoz">plan</a>', html)
+        self.assertIn(f'{SIPM}<a class="ps-plan" href="/hw/dev/plan/{SIPM}/?for={PTID}" title="The plan and its history — set 2026-10-08 by chaoz">plan</a>', html)
         self.assertIn('<td class="cl-const ps-num">48,000</td>', html)
         self.assertIn('<td class="cl-const ps-num" title="3 available">3</td>', html)
         self.assertIn('<td class="cl-const">May 2028</td>', html)
@@ -243,7 +243,7 @@ class StatusPageTest(TestCase):
         self.assertIn("<li>HPK all tested</li>", html)
         # the type without a plan: its name, dashes, a "set plan" link for the architect
         self.assertIn('title="the type’s page">PDS module</a></th>', html)
-        self.assertIn(f'<a class="ps-plan" href="/hw/dev/plan/{PDS}/" title="No plan on this type yet">set plan</a>', html)
+        self.assertIn(f'<a class="ps-plan" href="/hw/dev/plan/{PDS}/?for={PTID}" title="No plan on this type yet">set plan</a>', html)
         self.assertIn('<td class="cl-const ps-num ps-none">—</td>', html)
         self.assertIn('<td class="cl-const ps-num" title="no items in the mirror">0</td>', html)
         self.assertIn(f'href="/hw/dev/plan-list/{PTID}/?next=', html)   # ✎ Component list
@@ -318,6 +318,7 @@ class PlanPageTest(TestCase):
         self.assertEqual((a.args[0], a.args[2], a.kwargs["comments"]), (SIPM, f"Production_plan_{SIPM}.json", "FBK batch late"))
         body = json.loads(a.args[1].getvalue())
         self.assertEqual(body, {"needed": 50000, "completed_by": "2027-02", "needed_by": "2028-05", "comment": "orders placed",
+                                "p6_completed_id": "", "p6_needed_id": "",
                                 "updated_by": body["updated_by"], "updated": timezone.localdate().isoformat()})
         p = ProductionPlan.for_instance("dev").get(part_type_id=SIPM)
         self.assertEqual((p.needed, p.completed_by, p.comment), (50000, "2027-02", "orders placed"))

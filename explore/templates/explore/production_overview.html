@@ -35,6 +35,15 @@
   .hc-pill[aria-selected="true"] { color: var(--accent-ink); border-color: var(--accent-ink); background: var(--surface); }
   .mono { font-family: var(--font-mono); }
   .hc-none { color: var(--dim); font-size: 13.5px; }
+  /* #206: the P6 schedule line — what was uploaded, and the architect's upload form */
+  .hc-p6 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--dim); margin: 0 0 16px; }
+  .hc-p6 b { color: var(--ink); font-weight: 600; }
+  .hc-p6 form { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+  .hc-p6 input[type=file] { font: inherit; font-size: 12px; color: var(--dim); max-width: 260px; }
+  .hc-p6 button { font: inherit; font-size: 12px; font-weight: 600; color: var(--ink); background: var(--page); border: 1px solid var(--rule-hard); border-radius: 8px; padding: 4px 11px; cursor: pointer; }
+  .hc-p6 button:hover { background: var(--surface); }
+  .hc-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink); }
+  .hc-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page)); border-color: color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
 </style>
 {% include "explore/_checklist_style.html" %}
 
@@ -44,6 +53,12 @@
     <a class="hc-tab" aria-selected="true" href="{% url 'explore:production_overview' %}">Production status</a>
   </div>
   <h1>Production status</h1>
+  {% for m in messages %}<div class="hc-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+  <div class="hc-p6">
+    <span>P6 schedule:</span>
+    {% if p6 %}<span><b>{{ p6.filename }}</b> · {{ p6.n_rows }} activities · uploaded {{ p6.uploaded|date:"Y-m-d" }}{% if p6.uploaded_by %} by {{ p6.uploaded_by }}{% endif %}</span>{% else %}<span>none uploaded yet — plans show their typed dates</span>{% endif %}
+    {% if can_upload_p6 %}<form method="post" action="{% url 'explore:production_p6' %}" enctype="multipart/form-data">{% csrf_token %}<input type="file" name="file" accept=".xlsx,.xlsm" required title="The month’s P6 activities spreadsheet; replaces the last one"><button type="submit">Upload</button></form>{% endif %}
+  </div>
   {% if status_types %}
     <table class="hc-index">
       <thead><tr><th>Consortium</th><th>Components</th><th>Earliest needed by</th><th>Completed-by passed</th><th>Last read</th><th></th></tr></thead>
@@ -66,7 +81,7 @@
       <h2>{{ c.name }} <span class="mono">{{ c.part_type_id }}</span>
         {% if c.read_at %}<span class="hc-read">read {{ c.read_at|date:"Y-m-d H:i" }}</span>{% endif %}
         <a class="hc-cons-open" href="{{ c.url }}" title="Read it from HWDB now">Refresh from HWDB &rarr;</a></h2>
-      {% if c.rows %}{% include "explore/_production_table.html" with rows=c.rows %}
+      {% if c.rows %}{% include "explore/_production_table.html" with rows=c.rows consortium=c.part_type_id %}
       {% elif c.rows is not None %}<p class="ps-empty">No component list on this type yet — <a href="{{ c.list_url }}">add the component types</a> it reports.</p>
       {% else %}<p class="ps-empty">Not read yet — <a href="{{ c.url }}">open its status page</a> once; it is remembered here from then on.</p>
       {% endif %}

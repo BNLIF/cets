@@ -41,7 +41,7 @@
   {% if not rows %}
   <p class="ps-empty">No component list on this type yet{% if can_edit %} — <a href="{{ list_url }}?next={{ request.get_full_path|urlencode }}">add the component types</a> it reports{% endif %}.</p>
   {% else %}
-  {% include "explore/_production_table.html" %}
+  {% include "explore/_production_table.html" with consortium=part_type_id %}
   {% endif %}
 </div>
 {% endblock %}

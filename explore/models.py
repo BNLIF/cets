@@ -752,9 +752,15 @@ class ProductionPlan(InstanceScoped):
     convention; ``updated_by`` / ``updated`` are the plan's own stamp."""
 
     part_type_id = models.CharField(max_length=20, db_index=True)
+    # #206: "" = the type's own plan; a consortium type id = that consortium's
+    # plan of a type two consortia list (HD and VD FEMBs)
+    consortium = models.CharField(max_length=20, blank=True, default="")
     needed = models.IntegerField(null=True, blank=True)
     completed_by = models.CharField(max_length=7, blank=True, default="")
     needed_by = models.CharField(max_length=7, blank=True, default="")
+    # #206: P6 activity ids the dates come from when set (the typed months are the fallback)
+    p6_completed_id = models.CharField(max_length=60, blank=True, default="")
+    p6_needed_id = models.CharField(max_length=60, blank=True, default="")
     comment = models.TextField(blank=True, default="")
     updated_by = models.CharField(max_length=150, blank=True, default="")
     updated = models.CharField(max_length=40, blank=True, default="")
@@ -763,7 +769,7 @@ class ProductionPlan(InstanceScoped):
     class Meta:
         ordering = ["part_type_id"]
         constraints = [models.UniqueConstraint(
-            fields=["instance", "part_type_id"], name="uniq_production_plan")]
+            fields=["instance", "part_type_id", "consortium"], name="uniq_production_plan")]
 
     def __str__(self):
         return f"{self.instance}:{self.part_type_id} plan"
@@ -787,3 +793,46 @@ class ProductionList(InstanceScoped):
 
     def __str__(self):
         return f"{self.instance}:{self.part_type_id} list"
+
+
+class P6Upload(models.Model):
+    """#206 (Anselmo 2026-10-20): the project's P6 schedule as last
+    uploaded — the monthly ``Float_Chart_Activities_Combined.xlsx`` the
+    project manager exports. One row, project-wide (not per instance): who
+    uploaded which file when. The file itself is not kept; its activities
+    are ``P6Activity`` rows, replaced by every upload."""
+
+    uploaded = models.DateTimeField(auto_now_add=True)
+    uploaded_by = models.CharField(max_length=150, blank=True, default="")
+    filename = models.CharField(max_length=200, blank=True, default="")
+    n_rows = models.IntegerField(default=0)
+
+    def __str__(self):
+        return f"P6 {self.filename} ({self.uploaded:%Y-%m-%d})"
+
+
+class P6Activity(models.Model):
+    """#206: one P6 activity of the last upload — a production activity
+    (its *Production End Date*) or an installation activity (its
+    *Installation Start Date*). A plan names one of each by id; the
+    status table reads the dates here. Rows of the spreadsheet are
+    batches, so an id repeats across rows: one row per (id, kind)."""
+
+    KIND_PROD, KIND_INSTALL = "prod", "install"
+
+    activity_id = models.CharField(max_length=60, db_index=True)
+    kind = models.CharField(max_length=8)
+    name = models.CharField(max_length=300, blank=True, default="")
+    date = models.DateField(null=True, blank=True)
+    source = models.CharField(max_length=40, blank=True, default="")   # Forecast / Not found in P6 / …
+    detector = models.CharField(max_length=8, blank=True, default="")   # HD / VD
+    sheet = models.CharField(max_length=60, blank=True, default="")
+    component = models.CharField(max_length=120, blank=True, default="")
+    notes = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["sheet", "activity_id"]
+        constraints = [models.UniqueConstraint(fields=["activity_id", "kind"], name="uniq_p6_activity")]
+
+    def __str__(self):
+        return f"{self.activity_id} ({self.kind})"

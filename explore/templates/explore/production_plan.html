@@ -39,18 +39,30 @@
   .pl-hist td.pl-cmt { max-width: 380px; overflow-wrap: anywhere; }
   .pl-hist td.pl-cmt > p { margin: 0; }
   .pl-file { color: var(--faint); font-size: 12px; margin-top: 10px; }
+  /* #206: the P6 pickers — a filter bar, then one select per date; the resolved activity under it; the month input as the fallback */
+  .p6-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .p6-bar select, .p6-bar input { font: inherit; font-size: 13px; color: var(--ink); padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff); }
+  .p6-bar input { flex: 1; min-width: 160px; }
+  .p6-field { display: grid; gap: 4px; }
+  .p6-field select { width: 100%; max-width: 100%; font: inherit; font-size: 13px; color: var(--ink); padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff); }
+  .p6-res { font-size: 12.5px; color: var(--dim); min-height: 1.2em; }
+  .p6-res b { color: var(--ink); font-weight: 600; }
+  .p6-res.p6-bad { color: var(--warn, #b26a00); }
+  .p6-or { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--faint); }
+  .pl-grid dd .p6-id { font-family: var(--font-mono); font-size: 12px; color: var(--faint); }
 </style>
-{# #200 (Anselmo): a component type's production plan — kept as Production_plan_<type>.json on the type in HWDB, every version kept; architects edit, everyone sees the values and the history. #}
+{# #200 (Anselmo): a component type's production plan — kept as Production_plan_<type>.json on the type in HWDB, every version kept; architects edit, everyone sees the values and the history. #206: the two dates may name P6 activities (picked from the uploaded schedule) — the typed months are the fallback; a type two consortia list has one plan per consortium (?for=). #}
 
 <div class="es-page">
   <div class="es-crumbs">
     <a href="{% url 'explore:home' %}">Explorer</a>
     {% if type_url %}<span class="sep">›</span><a href="{{ type_url }}">{{ type_name }}</a>{% endif %}
-    <span class="sep">›</span>Production plan
+    <span class="sep">›</span>Production plan{% if consortium %} for {{ consortium_name }}{% endif %}
   </div>
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
-  <h1>Production plan <span class="mono" style="font-size:.75em; font-weight:400; color:var(--dim);">{{ part_type_id }}</span></h1>
+  <h1>Production plan{% if consortium %} for {{ consortium_name }}{% endif %} <span class="mono" style="font-size:.75em; font-weight:400; color:var(--dim);">{{ part_type_id }}</span></h1>
   <p class="es-sub">{{ type_name }} · how many are needed and when; drawn on the type’s dashboard and in its consortium’s production-status table.</p>
+  {% if is_fallback %}<div class="es-flash info">No plan for {{ consortium_name }} on this type yet — shown is the type’s own plan. Saving here makes a plan for {{ consortium_name }} only.</div>{% endif %}
   {% if role_gate %}<div class="banner banner-warn" style="margin: 0 0 14px;">&#9888; {% if role_gate.required %}Saving onto this type needs one of its HWDB roles <b>{{ role_gate.required|join:", " }}</b>. Your account holds {% if role_gate.mine %}<b>{{ role_gate.mine|join:", " }}</b>{% else %}no roles{% endif %}, so the plan cannot be edited here. <a href="{% url 'explore:docs_permissions' %}" target="_blank" rel="noopener">Who may write what &#x2197;</a>{% else %}This type lists no HWDB roles, so HWDB refuses every write onto it. An HWDB administrator must add roles to the type first. <a href="{% url 'explore:docs_permissions' %}" target="_blank" rel="noopener">Who may write what &#x2197;</a>{% endif %}</div>{% endif %}
 
   <div class="es-card">
@@ -58,10 +70,17 @@
     <form method="post">
       {% csrf_token %}
       {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+      {% if consortium %}<input type="hidden" name="for" value="{{ consortium }}">{% endif %}
       <div class="pl-grid">
         <label class="pl-lab" for="pl-needed">Needed</label><div><input type="number" id="pl-needed" name="needed" min="0" step="1" value="{{ plan.needed|default_if_none:'' }}" placeholder="total to produce"></div>
-        <label class="pl-lab" for="pl-done">Completed by</label><div><input type="month" id="pl-done" name="completed_by" value="{{ plan.completed_by|default:'' }}" placeholder="YYYY-MM" pattern="\d{4}-\d{2}"></div>
-        <label class="pl-lab" for="pl-need">Needed by</label><div><input type="month" id="pl-need" name="needed_by" value="{{ plan.needed_by|default:'' }}" placeholder="YYYY-MM" pattern="\d{4}-\d{2}" title="At SURF"></div>
+      {% if p6 %}
+        <span class="pl-lab">P6 schedule</span><div class="p6-bar" title="{{ p6.filename }}, uploaded {{ p6.uploaded|date:'Y-m-d' }}"><select id="p6-det"><option value="">HD and VD</option><option value="HD">HD</option><option value="VD">VD</option></select><select id="p6-sheet"><option value="">every sheet</option></select><input type="search" id="p6-q" placeholder="filter by activity name or id"></div>
+        <label class="pl-lab" for="pl-done-p6" style="align-self:start; padding-top:6px;">Completed by</label><div class="p6-field"><select id="pl-done-p6" name="p6_completed_id" class="p6-pick" data-kind="prod" data-value="{{ plan.p6_completed_id|default:'' }}"></select><span class="p6-res" id="pl-done-res"></span><span class="p6-or">or month <input type="month" id="pl-done" name="completed_by" value="{{ plan.completed_by|default:'' }}" placeholder="YYYY-MM" pattern="\d{4}-\d{2}"></span></div>
+        <label class="pl-lab" for="pl-need-p6" style="align-self:start; padding-top:6px;">Needed by</label><div class="p6-field"><select id="pl-need-p6" name="p6_needed_id" class="p6-pick" data-kind="install" data-value="{{ plan.p6_needed_id|default:'' }}"></select><span class="p6-res" id="pl-need-res"></span><span class="p6-or">or month <input type="month" id="pl-need" name="needed_by" value="{{ plan.needed_by|default:'' }}" placeholder="YYYY-MM" pattern="\d{4}-\d{2}" title="At SURF"></span></div>
+      {% else %}
+        <label class="pl-lab" for="pl-done">Completed by</label><div><input type="month" id="pl-done" name="completed_by" value="{{ plan.completed_by|default:'' }}" placeholder="YYYY-MM" pattern="\d{4}-\d{2}"> <span class="p6-or">or P6 activity <input type="text" name="p6_completed_id" value="{{ plan.p6_completed_id|default:'' }}" placeholder="production activity id" style="width:200px;"></span></div>
+        <label class="pl-lab" for="pl-need">Needed by</label><div><input type="month" id="pl-need" name="needed_by" value="{{ plan.needed_by|default:'' }}" placeholder="YYYY-MM" pattern="\d{4}-\d{2}" title="At SURF"> <span class="p6-or">or P6 activity <input type="text" name="p6_needed_id" value="{{ plan.p6_needed_id|default:'' }}" placeholder="installation activity id" style="width:200px;"></span></div>
+      {% endif %}
         <label class="pl-lab" for="pl-comment" style="align-self:start; padding-top:6px;">Comment</label><div><textarea id="pl-comment" name="comment" placeholder="shown in the production-status table — Markdown, <green>…</green>">{{ plan.comment|default:'' }}</textarea></div>
         <label class="pl-lab" for="pl-reason">Reason</label><div><input type="text" id="pl-reason" name="reason" style="width:100%;" placeholder="why the plan changes — kept with this version"></div>
       </div>
@@ -73,8 +92,9 @@
   {% elif plan %}
     <dl class="pl-grid">
       <dt>Needed</dt><dd>{% if plan.needed is not None %}{{ plan.needed }}{% else %}—{% endif %}</dd>
-      <dt>Completed by</dt><dd>{{ plan.completed_by|default:"—" }}</dd>
-      <dt>Needed by</dt><dd>{{ plan.needed_by|default:"—" }}</dd>
+      <dt>Completed by</dt><dd>{{ resolved.completed_by|default:"—" }}{% if plan.p6_completed_id %} <span class="p6-id" title="{{ resolved.completed_src }}">P6 {{ plan.p6_completed_id }}</span>{% endif %}</dd>
+      <dt>Needed by</dt><dd>{{ resolved.needed_by|default:"—" }}{% if plan.p6_needed_id %} <span class="p6-id" title="{{ resolved.needed_src }}">P6 {{ plan.p6_needed_id }}</span>{% endif %}</dd>
+      {% if resolved.p6_missing %}<dt></dt><dd class="p6-res p6-bad">&#9888; {{ resolved.p6_missing|join:"; " }}</dd>{% endif %}
       <dt>Comment</dt><dd>{{ plan.comment|clmd_block }}</dd>
     </dl>
   {% else %}
@@ -94,8 +114,8 @@
       <td style="white-space:nowrap;">{{ h.when }}</td>
       <td>{{ h.plan.updated_by|default:"—" }}</td>
       <td class="num">{% if h.plan and h.plan.needed is not None %}{{ h.plan.needed }}{% else %}—{% endif %}</td>
-      <td>{{ h.plan.completed_by|default:"—" }}</td>
-      <td>{{ h.plan.needed_by|default:"—" }}</td>
+      <td>{% if h.plan.p6_completed_id %}<span class="p6-id">P6 {{ h.plan.p6_completed_id }}</span>{% else %}{{ h.plan.completed_by|default:"—" }}{% endif %}</td>
+      <td>{% if h.plan.p6_needed_id %}<span class="p6-id">P6 {{ h.plan.p6_needed_id }}</span>{% else %}{{ h.plan.needed_by|default:"—" }}{% endif %}</td>
       <td class="pl-cmt">{{ h.plan.comment|default:""|clmd_block }}</td>
       <td class="pl-dim">{{ h.comments }}</td>
     </tr>
@@ -105,4 +125,55 @@
   {% if n_versions > history|length %}<p class="pl-file">The newest {{ history|length }} of {{ n_versions }} versions.</p>{% endif %}
   {% endif %}
 </div>
+{% if can_edit and p6 %}
+{{ p6_options|json_script:"p6-options" }}
+<script>
+(function () {
+  // #206: each date's select lists the activities of its kind (production → end date, installation → start date),
+  // narrowed by the shared filter bar; the chosen one stays listed whatever the filter; its name and date show under it
+  var all = JSON.parse(document.getElementById("p6-options").textContent);
+  var det = document.getElementById("p6-det"), sheet = document.getElementById("p6-sheet"), q = document.getElementById("p6-q");
+  var sheets = []; all.forEach(function (a) { if (a.sheet && sheets.indexOf(a.sheet) < 0) sheets.push(a.sheet); });
+  sheets.forEach(function (s) { var o = document.createElement("option"); o.value = s; o.textContent = s; sheet.appendChild(o); });
+  var picks = Array.prototype.slice.call(document.querySelectorAll(".p6-pick"));
+  function label(a) { return a.id + " · " + (a.name || "?") + (a.date ? " · " + a.date : " · no date"); }
+  function fill(sel) {
+    var kind = sel.dataset.kind, cur = sel.dataset.value || "", words = (q.value || "").toLowerCase().split(/\s+/).filter(Boolean);
+    sel.innerHTML = "";
+    var none = document.createElement("option"); none.value = ""; none.textContent = "— not from P6 —"; sel.appendChild(none);
+    var found = false;
+    all.forEach(function (a) {
+      if (a.kind !== kind) return;
+      var keep = a.id === cur;
+      if (!keep) {
+        if (det.value && a.detector !== det.value) return;
+        if (sheet.value && a.sheet !== sheet.value) return;
+        var hay = (a.id + " " + a.name + " " + a.component).toLowerCase();
+        if (words.some(function (w) { return hay.indexOf(w) < 0; })) return;
+      }
+      var o = document.createElement("option"); o.value = a.id; o.textContent = label(a); sel.appendChild(o);
+      if (a.id === cur) found = true;
+    });
+    if (cur && !found) { var o = document.createElement("option"); o.value = cur; o.textContent = cur + " · not in the latest P6 schedule"; sel.appendChild(o); }
+    sel.value = cur;
+    show(sel);
+  }
+  function show(sel) {
+    var res = document.getElementById(sel.id.replace("-p6", "-res")), id = sel.value, a = null;
+    all.forEach(function (x) { if (x.id === id && x.kind === sel.dataset.kind) a = x; });
+    res.classList.remove("p6-bad");
+    if (!id) { res.textContent = ""; return; }
+    if (!a) { res.textContent = "\u26a0 not in the latest P6 schedule — the month below is used"; res.classList.add("p6-bad"); return; }
+    res.innerHTML = (a.date ? "<b>" + a.date + "</b>" : "\u26a0 no date in P6") + " · " + a.name + (a.source ? " (" + a.source + ")" : "") + " · " + a.sheet;
+    if (!a.date) res.classList.add("p6-bad");
+  }
+  picks.forEach(function (sel) {
+    fill(sel);
+    sel.addEventListener("change", function () { sel.dataset.value = sel.value; show(sel); });
+  });
+  [det, sheet].forEach(function (el) { el.addEventListener("change", function () { picks.forEach(fill); }); });
+  q.addEventListener("input", function () { picks.forEach(fill); });
+})();
+</script>
+{% endif %}
 {% endblock %}
