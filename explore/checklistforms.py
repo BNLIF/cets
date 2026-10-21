@@ -28,6 +28,8 @@ import re
 
 logger = logging.getLogger(__name__)
 
+PTID_LITERAL_RX = re.compile(r"[A-Za-z]\d{11}")   # a component type id written in a column definition
+
 FIELD_TYPES = {"check", "number", "table", "text", "textarea", "datetime",
                "select", "photo", "qr", "steps", "static", "link", "imagemap",
                "plot", "assembly", "sum"}
@@ -509,6 +511,7 @@ def _norm_field(f: dict) -> dict | None:
         sums, sum_status = {}, {}
         counts, count_status = {}, {}   # #186 round 2: label → column holding a type ID
         count_keys = {}   # #190: label → column naming the batch-size specification key
+        count_has = {}    # Anselmo 2026-10-21: label → column naming a key the counted items must hold
         lookups, lookup_paths = {}, {}   # #195: label → column holding the PID, and the key read off it
         months = []   # #199: month columns (a date picker, stored YYYY-MM)
         dates = []    # Chao 2026-10-08: date columns (a day picker, stored YYYY-MM-DD)
@@ -537,14 +540,24 @@ def _norm_field(f: dict) -> dict | None:
                 # in its specifications under the key named in THIS row's C2
                 # (a batch registered as one item counts its pieces); a row
                 # with a blank key counts items as before.
+                # Anselmo 2026-10-21 (PDS stock, the modules that used a part):
+                # ``count(Z10400100001 has C9)`` — the type's items whose
+                # latest specifications hold a value under the key named in
+                # THIS row's C9 (the assembly checklist's batch cell of that
+                # part, written → Specs), so a stock row knows how many
+                # modules consumed it
                 cn = str(c.get("count") or "").strip()
-                ck = ""
+                ck = ch = ""
                 if "*" in cn:
                     cn, ck = (x.strip() for x in cn.split("*", 1))
+                elif re.search(r"\s+has\s+", cn):
+                    cn, ch = (x.strip() for x in re.split(r"\s+has\s+", cn, maxsplit=1))
                 if label and cn and not str(c.get("text") or "").strip() and c.get("check") is not True:
                     counts[label] = cn
                     if ck:
                         count_keys[label] = ck
+                    if ch:
+                        count_has[label] = ch
                     st = c.get("status")
                     if isinstance(st, str):
                         st = st.split("|")
@@ -613,8 +626,14 @@ def _norm_field(f: dict) -> dict | None:
                                           (counts, count_status, "counts", "count_status"),
                                           (lookups, lookup_paths, "lookups", "lookup_paths")):
             # a C<n> reference becomes the column's label; one that points
-            # nowhere (or at itself) drops the column back to an input
+            # nowhere (or at itself) drops the column back to an input.
+            # Anselmo 2026-10-21 (PDS stock, pieces used by the modules
+            # built): a count may name a Type ID outright —
+            # ``count(Z10400100001 in Passed All)`` — the same for every row
             for label, ref in list(refs.items()):
+                if refs is counts and PTID_LITERAL_RX.fullmatch(ref):
+                    refs[label] = ref.upper()
+                    continue
                 m = re.fullmatch(r"[Cc](\d+)", ref)
                 target = cols[int(m.group(1)) - 1] if m and 0 < int(m.group(1)) <= len(cols) else ref
                 if target in cols and target != label:
@@ -637,6 +656,15 @@ def _norm_field(f: dict) -> dict | None:
                 count_keys.pop(label)
         if count_keys:
             out["count_keys"] = count_keys
+        for label, ref in list(count_has.items()):   # the key column of a presence count: same rule
+            m = re.fullmatch(r"[Cc](\d+)", ref)
+            target = cols[int(m.group(1)) - 1] if m and 0 < int(m.group(1)) <= len(cols) else ref
+            if label in counts and target in cols and target not in (label, counts[label]):
+                count_has[label] = target
+            else:
+                count_has.pop(label)
+        if count_has:
+            out["count_has"] = count_has
         # #115 (HVS): a table-wide background tint keyed to the reference
         # drawing (one iPad row = one Dashboard table). Named colors map to
         # light hexes; anything else must be #rrggbb or it's dropped.
@@ -1142,10 +1170,14 @@ def _table_cells(f: dict, cells: dict, tx: dict, prefix: str, rr: dict | None = 
                         "color": cc.get(c, "")})
             continue
         if c in counts:   # #186: how many items the row's type has — filled by the page
+            literal = bool(PTID_LITERAL_RX.fullmatch(counts[c]))   # a Type ID named outright, not a column
             out.append({"column": c, "name": f"{prefix}-c{i}", "count": counts[c],
-                        "count_ci": f["columns"].index(counts[c]),   # the row's cell holding the Type ID
+                        "count_type": counts[c] if literal else "",
+                        "count_ci": None if literal else f["columns"].index(counts[c]),   # the row's cell holding the Type ID
                         "count_key": (f.get("count_keys") or {}).get(c, ""),   # #190: the row's cell naming the batch-size key
                         "count_kci": f["columns"].index((f.get("count_keys") or {})[c]) if c in (f.get("count_keys") or {}) else None,
+                        "count_has": (f.get("count_has") or {}).get(c, ""),   # the row's cell naming the key the items must hold
+                        "count_hci": f["columns"].index((f.get("count_has") or {})[c]) if c in (f.get("count_has") or {}) else None,
                         "count_status": (f.get("count_status") or {}).get(c, []),
                         "value": "", "formula": "", "text": "", "min": None, "max": None, "range": "",
                         "color": cc.get(c, "")})

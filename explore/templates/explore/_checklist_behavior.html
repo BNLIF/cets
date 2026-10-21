@@ -618,7 +618,7 @@
     var s = String(status || "").toLowerCase();
     return want.some(function (w) { return s.indexOf(w) >= 0; });
   }
-  function specValue(d, key) {   // an item's latest specifications DATA → the number under key (any section holding it, the literal key, or a dotted path), else NaN
+  function specRaw(d, key) {   // an item's latest specifications DATA → the value under key (any section holding it, the literal key, or a dotted path), else null
     var v = null, path = key.split(".").filter(Boolean);
     function at(o) {
       if (o && typeof o === "object" && key in o) return o[key];
@@ -630,6 +630,10 @@
       if (v === null && sv && typeof sv === "object") v = at(sv);
     });
     if (v === null) v = at(d || {});
+    return v;
+  }
+  function specValue(d, key) {   // … as a number, else NaN
+    var v = specRaw(d, key);
     return typeof v === "number" ? v : parseFloat(String(v === null || v === undefined ? "" : v).replace(/,/g, ""));
   }
   // #176: sum fields — one sweep of the type's specifications per field (the
@@ -728,8 +732,8 @@
       var el = cell.closest("tr").querySelector('[data-ci="' + ci + '"]');
       return (el ? (el.value !== undefined ? el.value : el.textContent) : "").trim();
     }
-    function typeIn(cell) {   // the Type ID in this row's referenced column
-      var v = cellText(cell, cell.dataset.countCi).toUpperCase();
+    function typeIn(cell) {   // the Type ID named by the column itself, else the one in this row's referenced column
+      var v = (cell.dataset.countType || cellText(cell, cell.dataset.countCi)).toUpperCase();
       return /^[A-Z]\d{11}$/.test(v) ? v : "";
     }
     // #190 (Anselmo): a cell with a key column whose cell in this row is
@@ -771,6 +775,25 @@
         if (changed && window.clRecomputeTable) window.clRecomputeTable(tbl);
       }).catch(function (e) { cell.textContent = "\u2014"; cell.title = "couldn’t read the type’s items — " + e.message; });
     }
+    // Anselmo 2026-10-21: a cell with a "has" column counts the type's items
+    // whose specifications hold a non-empty value under the key named in this
+    // row's cell — the modules whose assembly record names a batch of this part
+    function present(cell, tbl, tid, key, want) {
+      var wl = want.split("|").filter(Boolean).map(function (x) { return x.toLowerCase(); });
+      return sweep(tbl, tid).then(function (items) {
+        var n = 0, seen = 0;
+        items.forEach(function (it) {
+          if (wl.length && !statusIn(it.status, wl)) return;
+          seen++;
+          var v = specRaw(it.data, key);
+          if (v !== null && v !== undefined && String(v).trim() !== "") n++;
+        });
+        var text = n.toLocaleString(), changed = cell.textContent !== text;
+        cell.textContent = text;
+        cell.title = n + " of " + seen + " item" + (seen === 1 ? "" : "s") + " of " + tid + (wl.length ? " in " + want.split("|").join(" / ") : "") + " hold “" + key + "” · read live";
+        if (changed && window.clRecomputeTable) window.clRecomputeTable(tbl);
+      }).catch(function (e) { cell.textContent = "\u2014"; cell.title = "couldn’t read the type’s items — " + e.message; });
+    }
     function show(cell, d, want) {
       var text = Number(d.n).toLocaleString(), changed = cell.textContent !== text;
       cell.textContent = text;
@@ -786,6 +809,8 @@
         if (!tid) { cell.textContent = "\u2014"; cell.title = "no Type ID in this row"; return; }
         var skey = cell.dataset.countKci !== undefined && tbl.dataset.specUrl ? cellText(cell, cell.dataset.countKci) : "";
         if (skey) { weighted(cell, tbl, tid, skey, want); return; }
+        var hkey = cell.dataset.countHci !== undefined && tbl.dataset.specUrl ? cellText(cell, cell.dataset.countHci) : "";
+        if (hkey) { present(cell, tbl, tid, hkey, want); return; }
         var key = want;
         if (!groups[key]) groups[key] = { tbl: tbl, want: want, cells: [], types: [] };
         groups[key].cells.push({ cell: cell, tid: tid });

@@ -4616,6 +4616,53 @@ class CountColumnTest(TestCase):
             f = checklistforms.normalize(sc, "I")["sections"][0]["fields"][0]
             self.assertEqual((f["counts"], f.get("count_keys")), ({"Items": "Type"}, None), bad)
 
+    def test_a_count_may_name_the_type_outright(self):
+        # Anselmo 2026-10-21 (PDS stock): the modules already built are a
+        # count of the module type, the same in every row — count(Z… in …);
+        # a formula then takes what they used off the pieces received
+        schema = {"name": "Inv", "test_type_name": "Inv", "sections": [{"title": "Parts", "fields": [
+            {"type": "table", "label": "Stock", "columns": [
+                "Type", {"label": "Items", "count": "C1"}, {"label": "Per module", "text": "4"},
+                {"label": "Built", "count": "z10400100001", "status": ["Passed All"]},
+                {"label": "In stock", "formula": "C2 - C3 * C4"}],
+             "rows": [{"label": "Rail", "texts": {"Type": "Z00100300042"}}]}]}]}
+        f = checklistforms.normalize(schema, "I")["sections"][0]["fields"][0]
+        self.assertEqual((f["counts"], f["count_status"]), ({"Items": "Type", "Built": "Z10400100001"}, {"Built": ["Passed All"]}))
+        self.assertEqual(f["formulas"], {"In stock": "C2 - C3 * C4"})
+        api = _api(schema=schema, test_types=("ES", "Inv"))
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('class="cl-countcell" data-count-col="Type" data-count-ci="0" title="items of the type in “Type”">', html)
+        self.assertIn('class="cl-countcell" data-count-col="Z10400100001" data-count-type="Z10400100001" data-count-status="Passed All" title="items of Z10400100001">', html)
+        for i, st in enumerate(("QA/QC Tests - Passed All", "QA/QC Tests - Passed All", "In Fabrication")):
+            HwdbComponentEvent.objects.create(instance="dev", part_type_id="Z10400100001", part_id=f"Z10400100001-0000{i}", status=st)
+        self.assertEqual(self.client.get("/hw/dev/count/", {"types": "Z10400100001", "status": "Passed All"}).json()["counts"]["Z10400100001"]["n"], 2)
+
+    def test_a_presence_count_names_the_key_the_items_must_hold(self):
+        # Anselmo 2026-10-21: count(Z… has C3) — the modules whose assembly
+        # record holds a batch under the key in this row's column 3
+        schema = {"name": "Inv", "test_type_name": "Inv", "sections": [{"title": "Parts", "fields": [
+            {"type": "table", "label": "Stock", "columns": [
+                "Type", {"label": "Items", "count": "C1"}, "Used key",
+                {"label": "Modules", "count": "Z10400100001 has C3", "status": "Passed All"}, {"label": "Per module", "text": "4"},
+                {"label": "In stock", "formula": "C2 - C5 * C4"}],
+             "rows": [{"label": "Rail", "texts": {"Type": "Z00100300042", "Used key": "eee.4.batch_no"}}]}]}]}
+        f = checklistforms.normalize(schema, "I")["sections"][0]["fields"][0]
+        self.assertEqual((f["counts"], f["count_has"], f["count_status"], f.get("count_keys")),
+                         ({"Items": "Type", "Modules": "Z10400100001"}, {"Modules": "Used key"}, {"Modules": ["Passed All"]}, None))
+        api = _api(schema=schema, test_types=("ES", "Inv"))
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('data-count-url="/hw/dev/count/" data-spec-url="/hw/dev/plot/TYPEID/data/"', html)   # the sweep's stream
+        self.assertIn('class="cl-countcell" data-count-col="Z10400100001" data-count-type="Z10400100001" data-count-hci="2" data-count-status="Passed All" title="items of Z10400100001 holding the specification named in “Used key”">', html)
+        for bad in ("C3", "C9", "Nope"):   # the key column must be another column (the Type column is allowed: the type is literal here)
+            sc = {**schema}; sc["sections"] = [{"title": "Parts", "fields": [{**schema["sections"][0]["fields"][0], "columns": [
+                "Type", "Used key", {"label": "Modules", "count": f"Z10400100001 has {bad}"}]}]}]
+            f = checklistforms.normalize(sc, "I")["sections"][0]["fields"][0]
+            self.assertEqual((f["counts"], f.get("count_has")), ({"Modules": "Z10400100001"}, None), bad)
+
     def test_count_endpoint_reads_the_mirror_for_every_type_at_once(self):
         for i, st in enumerate(("Received", "Unknown", "Scrapped", "received", "QA/QC Tests - Passed All")):
             HwdbComponentEvent.objects.create(instance="dev", part_type_id="Z00100300042", part_id=f"Z00100300042-0000{i}", status=st)
