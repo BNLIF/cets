@@ -16,7 +16,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
-from explore import p6, production
+from explore import navigation, p6, production
 from explore.models import ActivityEvent, ConsortiumTypeOverride, P6Activity, P6Upload, ProductionList, ProductionPlan
 from explore.tests.test_events import _node
 from explore.tests.test_production import LIST, PDS, PLAN, PTID, SIPM, _api, _mocked
@@ -127,42 +127,140 @@ class ApplyTest(TestCase):
         self.assertEqual(production.shared_by("dev", PDS), [PTID, "Z00100600002"])
         self.assertEqual(production.shared_by("dev", SIPM), [PTID])
         self.assertEqual(production.plan_name(PDS, PTID), f"Production_plan_{PDS}_{PTID}.json")
+        # Chao 2026-10-22: the type page lists every tracker's plan — its own, else the plain one, else none
+        _node(PTID, instance="dev", component_type_name="HD PDS", full_name="x")
+        _node("Z00100600002", instance="dev", component_type_name="VD PDS", full_name="y")
+        rows = production.type_plans("dev", PDS)
+        self.assertEqual([(r["consortium"], r["name"], r["plan"] and r["plan"]["needed"]) for r in rows],
+                         [(PTID, "HD PDS", 7), ("Z00100600002", "VD PDS", None)])
+        production.cache_plan("dev", PDS, {**production.normalize_plan(PLAN), "p6_completed_id": "13122.A12812"})
+        rows = production.type_plans("dev", PDS)
+        self.assertEqual([(r["consortium"], r["plan"]["needed"], r["plan"]["completed_by"]) for r in rows],
+                         [(PTID, 7, "2026-12"), ("Z00100600002", 48000, "2029-03-08")])   # VD falls back to the plain plan
+        self.assertEqual([r["consortium"] for r in production.type_plans("dev", SIPM)], [""])   # one list: the single row
+
+    def test_type_page_lists_a_plan_per_tracker(self):
+        self.client.force_login(get_user_model().objects.create_user("t", "t@t.io", "pw"))
+        production.cache_list("prod", PTID, production.normalize_list(LIST))
+        production.cache_list("prod", "Z00100600002", [{"type": PDS, "label": ""}])
+        _node(PTID, instance="prod", component_type_name="HD PDS", full_name="x")
+        _node("Z00100600002", instance="prod", component_type_name="VD PDS", full_name="y")
+        leaf = _node(PDS, instance="prod", component_type_name="PDS modules", full_name="z")
+        production.cache_plan("prod", PDS, production.normalize_plan(PLAN))
+        production.cache_plan("prod", PDS, {**production.normalize_plan(PLAN), "needed": 7}, consortium=PTID)
+        url = navigation.leaf_path_for("prod", PDS)
+        html = self.client.get(url).content.decode()
+        self.assertIn(f'<dt>Plan</dt><dd class="span"><a href="/hw/status/{PTID}/" title="This status tracker’s table">HD PDS</a><span class="sep">·</span>needed 7<span class="sep">·</span>completed by 2026-12', html)
+        self.assertIn('<dt>Plan</dt><dd class="span"><a href="/hw/status/Z00100600002/" title="This status tracker’s table">VD PDS</a><span class="sep">·</span>needed 48000<span class="sep">·</span>completed by 2026-12', html)
+        self.assertIn(f'<a href="/hw/plan/{PDS}/?for={PTID}&amp;next=', html)
+        self.assertIn(f'<a href="/hw/plan/{PDS}/?for=Z00100600002&amp;next=', html)
+        self.assertEqual(html.count("<dt>Plan</dt>"), 2)
+        production.cache_plan("prod", PDS, None)
+        html = self.client.get(url).content.decode()
+        self.assertIn('>VD PDS</a><span class="sep">·</span><a href="/hw/plan/' + PDS + '/?for=Z00100600002&amp;next=', html)   # no plan of its own, none plain: Set plan
+        self.assertIn(">Set plan</a></dd>", html)
 
 
 class UploadTest(TestCase):
     def setUp(self):
         self.client.force_login(get_user_model().objects.create_user("u", "u@u.io", "pw"))
 
-    def test_overview_line_and_upload(self):
+    def test_schedule_page_and_upload(self):
         api = _api()
         m1, m2 = _mocked(api)
         with m1, m2:
-            html = self.client.get("/hw/dev/status/").content.decode()
-        self.assertIn("none uploaded yet — plans show their typed dates", html)
-        self.assertIn('<form method="post" action="/hw/dev/status/p6/" enctype="multipart/form-data">', html)   # the architect's form
+            html = self.client.get("/hw/dev/schedule/").content.decode()
+        self.assertIn('<a class="hc-tab" aria-selected="true" href="/hw/dev/schedule/">P6 schedule</a>', html)
+        self.assertIn("None uploaded yet — plans show their typed dates.", html)
+        self.assertIn('<form method="post" action="/hw/dev/schedule/upload/" enctype="multipart/form-data">', html)   # the architect's form
+        self.assertNotIn('<table class="p6-table">', html)
         with m1, m2:
-            r = self.client.post("/hw/dev/status/p6/", {"file": SimpleUploadedFile("Float_Chart_Activities_Combined.xlsx", _xlsx())})
-            self.assertEqual(r["Location"], "/hw/dev/status/")
-            html = self.client.get("/hw/dev/status/").content.decode()
+            r = self.client.post("/hw/dev/schedule/upload/", {"file": SimpleUploadedFile("Float_Chart_Activities_Combined.xlsx", _xlsx())})
+            self.assertEqual(r["Location"], "/hw/dev/schedule/")
+            html = self.client.get("/hw/dev/schedule/").content.decode()
         self.assertIn("P6 schedule read — 7 activities from Float_Chart_Activities_Combined.xlsx.", html)
         self.assertIn("<b>Float_Chart_Activities_Combined.xlsx</b> · 7 activities · uploaded ", html)
         self.assertEqual(ActivityEvent.objects.get(kind="curation").summary, "P6 schedule uploaded: Float_Chart_Activities_Combined.xlsx, 7 activities")
+        # the table: one group row per sheet, the activities in the spreadsheet's order with their kind, date and source
+        self.assertIn('<tr class="p6-sheet" data-sheet="HD-PDS"><td colspan="7">HD-PDS<span class="mono">HD</span></td></tr>', html)
+        self.assertIn('<tr class="p6-sheet" data-sheet="TPC-Elec_BDE-VD"><td colspan="7">TPC-Elec_BDE-VD<span class="mono">VD</span></td></tr>', html)
+        self.assertIn('<tr data-det="HD" data-sheet="HD-PDS" data-kind="prod">\n      <td>HD-PDS</td>\n      <td class="mono">13122.A12812</td>\n'
+                      '      <td class="p6-dim">production end</td>\n      <td>Deliver to Storage (300 modules) (1500 total) #1 - CSU</td>\n'
+                      '      <td class="p6-date">2029-03-08</td>\n      <td class="p6-dim">Forecast</td>', html)
+        self.assertIn('<td class="p6-dim">installation start</td>\n      <td>Install/Checkout Warm Electronics Detector 1 - Colombia</td>\n'
+                      '      <td class="p6-date">—</td>\n      <td class="p6-dim">Not found in P6</td>\n      <td class="p6-dim">no install date</td>', html)
+        self.assertEqual(html.count('<tr data-det='), 7)
+        self.assertIn('<option value="HD-PDS">HD-PDS</option><option value="TPC-Elec_BDE-VD">TPC-Elec_BDE-VD</option>', html)
         with m1, m2:
-            r = self.client.post("/hw/dev/status/p6/", {"file": SimpleUploadedFile("x.xlsx", b"nope")}, follow=True)
+            r = self.client.post("/hw/dev/schedule/upload/", {"file": SimpleUploadedFile("x.xlsx", b"nope")}, follow=True)
         self.assertIn("P6 schedule not read — Not a readable .xlsx file", r.content.decode())
         self.assertEqual(P6Activity.objects.count(), 7)   # the last good upload stays
         with m1, m2:
-            r = self.client.post("/hw/dev/status/p6/", {}, follow=True)
+            r = self.client.post("/hw/dev/schedule/upload/", {}, follow=True)
         self.assertIn("Choose the P6 .xlsx file first.", r.content.decode())
+
+    def test_a_very_different_file_waits_for_confirmation(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post("/hw/dev/schedule/upload/", {"file": SimpleUploadedFile("a.xlsx", _xlsx())})
+        self.assertEqual(P6Activity.objects.count(), 7)
+        # the same ids with other dates: no question asked
+        with m1, m2:
+            r = self.client.post("/hw/dev/schedule/upload/", {"file": SimpleUploadedFile("b.xlsx", _xlsx())}, follow=True)
+        self.assertIn("P6 schedule read — 7 activities from b.xlsx.", r.content.decode())
+        # a file with 2 of the 7: held in the session, the table untouched, the page asks
+        production.cache_plan("dev", PDS, {**production.normalize_plan(PLAN), "p6_completed_id": "13122.A12812"})
+        with m1, m2:
+            r = self.client.post("/hw/dev/schedule/upload/", {"file": SimpleUploadedFile("vd-only.xlsx", _xlsx({"TPC-Elec_BDE-VD": VD_ROWS}))}, follow=True)
+        html = r.content.decode()
+        self.assertEqual(P6Activity.objects.count(), 7)
+        self.assertEqual(P6Upload.objects.get().filename, "b.xlsx")
+        self.assertIn("<b>Not replaced yet.</b> <b>vd-only.xlsx</b> (2 activities) differs a lot from the current schedule:\n    5 of the 7 current activities are not in it, among them 1 that plans name — <span class=\"mono\">13122.A12812</span>.", html)
+        self.assertIn('<button type="submit" name="confirm" value="1">Replace anyway</button>', html)
+        with m1, m2:
+            r = self.client.post("/hw/dev/schedule/upload/", {"discard": "1"}, follow=True)
+        self.assertNotIn("Not replaced yet", r.content.decode())
+        self.assertEqual(P6Activity.objects.count(), 7)
+        with m1, m2:
+            r = self.client.post("/hw/dev/schedule/upload/", {"confirm": "1"}, follow=True)
+        self.assertIn("Nothing waiting to be confirmed", r.content.decode())
+        with m1, m2:
+            self.client.post("/hw/dev/schedule/upload/", {"file": SimpleUploadedFile("vd-only.xlsx", _xlsx({"TPC-Elec_BDE-VD": VD_ROWS}))})
+            r = self.client.post("/hw/dev/schedule/upload/", {"confirm": "1"}, follow=True)
+        self.assertIn("P6 schedule read — 2 activities from vd-only.xlsx.", r.content.decode())
+        self.assertEqual(P6Activity.objects.count(), 2)
+        self.assertNotIn("Not replaced yet", r.content.decode())
+
+    def test_compare(self):
+        self.assertIsNone(p6.compare([]))
+        rows = p6.parse("a.xlsx", _xlsx())
+        p6.replace(rows, "x", "a.xlsx")
+        self.assertEqual(p6.compare(rows), {"n_old": 7, "n_new": 7, "missing": 0, "plan_missing": [], "changed": 0, "warn": False})
+        moved = [{**r, "date": date(2031, 1, 1)} for r in rows[:6]]   # one of seven missing, six dates moved: fine
+        self.assertEqual(p6.compare(moved), {"n_old": 7, "n_new": 6, "missing": 1, "plan_missing": [], "changed": 6, "warn": False})
+        production.cache_plan("dev", PDS, {**production.normalize_plan(PLAN), "p6_needed_id": "13122.A12840"})
+        d = p6.compare([r for r in rows if r["activity_id"] != "13122.A12840"])   # but not one a plan names
+        self.assertEqual((d["missing"], d["plan_missing"], d["warn"]), (1, ["13122.A12840"], True))
+        self.assertTrue(p6.compare(rows[:5])["warn"])   # two of seven = over a fifth
 
     def test_not_an_architect(self):
         api = _api()
         api.whoami.return_value = {"data": {"architect": False}}
         m1, m2 = _mocked(api)
         with m1, m2:
+            html = self.client.get("/hw/dev/schedule/").content.decode()
+            self.assertEqual(self.client.post("/hw/dev/schedule/upload/", {"file": SimpleUploadedFile("a.xlsx", _xlsx())}).status_code, 403)
+        self.assertNotIn('action="/hw/dev/schedule/upload/"', html)
+        self.assertNotIn("Upload the month", html)   # nothing to see, nothing to do
+
+    def test_status_page_no_longer_carries_the_upload(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
             html = self.client.get("/hw/dev/status/").content.decode()
-            self.assertEqual(self.client.post("/hw/dev/status/p6/", {"file": SimpleUploadedFile("a.xlsx", _xlsx())}).status_code, 403)
-        self.assertNotIn('action="/hw/dev/status/p6/"', html)
+        self.assertNotIn("hc-p6", html)
+        self.assertIn('<a class="hc-tab" aria-selected="false" href="/hw/dev/schedule/">P6 schedule</a>', html)
 
 
 class PlanPageTest(TestCase):

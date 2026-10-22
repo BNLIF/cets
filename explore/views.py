@@ -47,7 +47,7 @@ from .hierarchy import sync_hierarchy, sync_system
 from .instances import instance_of, namespace_of
 from .models import (ChildMintSetting, ConsortiumTypeOverride, 
     ActivityEvent, BoxChecklist, ChecklistBookmark, ChecklistDraft, HierarchyNode,
-    InstitutionPref, ProductionList, ProductionPlan, SheetJob, ShippingTypeOverride,
+    InstitutionPref, P6Activity, ProductionList, ProductionPlan, SheetJob, ShippingTypeOverride,
     HierarchySyncState, HwdbComponentEvent, HwdbTestEvent, PackScan, ShipmentItem, TestDateSetting,
 )
 from .queries import (
@@ -227,8 +227,10 @@ def explore_view(request, trail=None):
     consortium_override = bool(leaf) and leaf.part_type_id in curation.consortium_overrides(inst)
     # #200: the type's production plan as last read off HWDB — its Plan line
     # and the dashboard's plan lines (the browser-stored plan of #174 stays
-    # the fallback for a type without one)
-    type_plan = production.type_plan(inst, leaf.part_type_id) if leaf else None   # #206: P6 dates applied
+    # the fallback for a type without one). Chao 2026-10-22: one Plan row per
+    # status tracker when two list the type; the dashboard draws the first.
+    type_plans = production.type_plans(inst, leaf.part_type_id) if leaf else []   # #206: P6 dates applied
+    type_plan = type_plans[0]["plan"] if type_plans else None
     empty_pids = []
     if is_shipping:
         # Shipping extras — boxes are regular components too (charts/breakdown
@@ -272,11 +274,6 @@ def explore_view(request, trail=None):
         # Status / QC-flag overlay menu (#52) — mirror-only, precomputed so the
         # selector swaps series client-side without a reload.
         comp_chart["filters"] = component_update_filters(inst, ptid)
-        if type_plan and (type_plan["needed"] is not None or type_plan["completed_by"] or type_plan["needed_by"]):
-            comp_chart["plan"] = {
-                "total": type_plan["needed"] if type_plan["needed"] is not None else "",
-                "done": type_plan["completed_by"][:7], "need": type_plan["needed_by"][:7],   # the plan lines are months
-                "url": _rev(request, "explore:production_plan", args=[ptid])}
         phys = physics_date_field(inst, ptid)
         test_chart = chart_config(
             slug=f"{ptid}_test",
@@ -291,6 +288,12 @@ def explore_view(request, trail=None):
         )
         test_chart["date_field"] = True    # #146: the card carries the test-date-field control
         charts = [comp_chart, test_chart]
+        if type_plan and (type_plan["needed"] is not None or type_plan["completed_by"] or type_plan["needed_by"]):
+            for c in charts:   # Chao 2026-10-22: the tests chart takes the plan lines too, not the items chart alone
+                c["plan"] = {
+                    "total": type_plan["needed"] if type_plan["needed"] is not None else "",
+                    "done": type_plan["completed_by"][:7], "need": type_plan["needed_by"][:7],   # the plan lines are months
+                    "url": _rev(request, "explore:production_plan", args=[ptid])}
         date_setting = TestDateSetting.for_instance(inst).filter(part_type_id=ptid).first()
         if can_edit_type:
             date_candidates = events.test_date_candidates(inst, ptid)
@@ -355,7 +358,7 @@ def explore_view(request, trail=None):
         "class_locked": (is_shipping and not shipping_override) or (is_consortium and not consortium_override),
         "status_url": _rev(request, "explore:production_status", args=[leaf.part_type_id]) if is_consortium else "",
         "list_url": _rev(request, "explore:production_list", args=[leaf.part_type_id]) if is_consortium else "",
-        "type_plan": type_plan,
+        "type_plans": type_plans,
         "plan_url": _rev(request, "explore:production_plan", args=[leaf.part_type_id]) if leaf else "",
             "empty_pids": empty_pids,
             # Deep-link the part type to this instance's FNAL web UI.
@@ -391,12 +394,35 @@ def explore_production_overview_view(request):
     index table, then one consortium at a time. ``/status/<type>/`` is a
     consortium's own live page."""
     inst = instance_of(request)
+    status_types = _production_status_list(request, inst)
+    # Chao 2026-10-22: HD and VD sub-tabs when the trackers span more than one
+    # detector (an unnamed one lands under "Other"); hidden otherwise
+    present = {c["detector"] for c in status_types}
+    detectors = [d for d in ("HD", "VD", "") if d in present]
     return render(request, "explore/production_overview.html", {
         "active_nav": "detector",
         "sidebar": navigation.sidebar_tree(inst, {}),
-        "status_types": _production_status_list(request, inst),
-        "p6": p6.current(),   # #206
+        "status_types": status_types,
+        "detectors": detectors if len(detectors) > 1 else [],
+    })
+
+
+@login_not_required
+@fnal_login_required
+def explore_production_schedule_view(request):
+    """#206 / Chao 2026-10-22: the Detector area's third page — the P6
+    schedule as last uploaded, every activity in a filterable table
+    (sheet, detector, id, name, date), and the architect's upload form."""
+    inst = instance_of(request)
+    acts = list(P6Activity.objects.order_by("sheet", "pk"))   # pk = the spreadsheet's order within a sheet
+    return render(request, "explore/production_schedule.html", {
+        "active_nav": "detector",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "p6": p6.current(),
+        "activities": acts,
+        "sheets": sorted({a.sheet for a in acts}),
         "can_upload_p6": _is_architect(request, inst),
+        "pending": request.session.get("p6_pending"),   # an upload held back for confirmation
     })
 
 
@@ -406,25 +432,42 @@ def explore_production_overview_view(request):
 def explore_production_p6_view(request):
     """#206 (Anselmo 2026-10-20): upload the month's P6 activities
     spreadsheet — parsed into the project-wide P6 table (every row
-    replaced), the file not kept. Architects."""
+    replaced), the file not kept. Architects, from the schedule page."""
     inst = instance_of(request)
-    back = _rev(request, "explore:production_overview")
+    back = _rev(request, "explore:production_schedule")
     if not _is_architect(request, inst):
         return HttpResponseForbidden("Uploading the P6 schedule needs the architect flag.")
-    f = request.FILES.get("file")
-    if f is None:
-        messages.error(request, "Choose the P6 .xlsx file first.")
+    # Chao 2026-10-22: a file that drops many current activities, or one a plan
+    # names, is held in the session and the page asks before it replaces the table
+    if request.POST.get("discard"):
+        request.session.pop("p6_pending", None)
         return redirect(back)
-    try:
-        rows = p6.parse(f.name, f.read())
-    except p6.P6Error as e:
-        messages.error(request, f"P6 schedule not read — {e}")
-        return redirect(back)
+    if request.POST.get("confirm"):
+        pending = request.session.pop("p6_pending", None)
+        if not pending:
+            messages.error(request, "Nothing waiting to be confirmed — choose the file again.")
+            return redirect(back)
+        rows, name = p6.from_json(pending["rows"]), pending["filename"]
+    else:
+        f = request.FILES.get("file")
+        if f is None:
+            messages.error(request, "Choose the P6 .xlsx file first.")
+            return redirect(back)
+        try:
+            rows = p6.parse(f.name, f.read())
+        except p6.P6Error as e:
+            messages.error(request, f"P6 schedule not read — {e}")
+            return redirect(back)
+        name = f.name
+        diff = p6.compare(rows)
+        if diff and diff["warn"]:
+            request.session["p6_pending"] = {"rows": p6.to_json(rows), "filename": name, "diff": diff}
+            return redirect(back)
     actor = activity.actor_of(request)
-    up = p6.replace(rows, actor, f.name)
+    up = p6.replace(rows, actor, name)
     activity.log(inst, ActivityEvent.KIND_CURATION,
-                 f"P6 schedule uploaded: {f.name}, {up.n_rows} activities", actor=actor)
-    messages.success(request, f"P6 schedule read — {up.n_rows} activities from {f.name}.")
+                 f"P6 schedule uploaded: {name}, {up.n_rows} activities", actor=actor)
+    messages.success(request, f"P6 schedule read — {up.n_rows} activities from {name}.")
     return redirect(back)
 
 
@@ -442,6 +485,7 @@ def _production_status_list(request, inst) -> list[dict]:
         ids = [r["type"] for r in rows]
         plans = production.apply_p6(production.cached_plans(inst, ids, tid))
         out.append({"part_type_id": tid, "name": (node.name if node else "") or tid,
+                    "detector": production.detector_of(node.full_name) if node else "",   # HD / VD sub-tabs on the overview
                     "url": _rev(request, "explore:production_status", args=[tid]),
                     "type_url": navigation.leaf_path_for(inst, tid) or "",
                     "list_url": _rev(request, "explore:production_list", args=[tid]),

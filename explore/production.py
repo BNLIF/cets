@@ -223,6 +223,37 @@ def type_plan(inst: str, part_type_id: str) -> dict | None:
     return apply_p6({part_type_id: _plan_dict(p)})[part_type_id] if p else None
 
 
+def type_plans(inst: str, part_type_id: str) -> list[dict]:
+    """The type page's Plan rows (Chao 2026-10-22: every status tracker's
+    plan, not the first): ``[{consortium, name, plan}]`` — one per
+    consortium type listing the type when two or more do, by name, each
+    with its own plan else the type's plain one (``plan`` None when
+    neither exists); otherwise the single row ``type_plan`` gives."""
+    shared = shared_by(inst, part_type_id)
+    if len(shared) < 2:
+        return [{"consortium": "", "name": "", "plan": type_plan(inst, part_type_id)}]
+    by = {p.consortium: p for p in ProductionPlan.for_instance(inst).filter(part_type_id=part_type_id)}
+    nm = names(inst, shared)
+    out = []
+    for c in sorted(shared, key=lambda c: nm.get(c) or c):
+        p = by.get(c) or by.get("")
+        out.append({"consortium": c, "name": nm.get(c) or c,
+                    "plan": apply_p6({part_type_id: _plan_dict(p)})[part_type_id] if p else None})
+    return out
+
+
+_DETECTOR_RX = re.compile(r"(?<![A-Za-z0-9])(?:FD\d?-?)?(HD|VD)(?![A-Za-z0-9])")
+
+
+def detector_of(full_name: str) -> str:
+    """Chao 2026-10-22: the detector a consortium type belongs to, read off
+    its hierarchy path — ``HD`` / ``VD`` when the path names exactly one
+    (``FD-HD PDS``, ``FDVD CE``, ``FD2-VD …``), else ``""``. The overview
+    groups its trackers by it."""
+    found = set(_DETECTOR_RX.findall(full_name or ""))
+    return found.pop() if len(found) == 1 else ""
+
+
 def shared_by(inst: str, part_type_id: str) -> list[str]:
     """The consortium types whose cached component list names the type —
     two or more = one plan per consortium (#206)."""

@@ -14,6 +14,12 @@
     border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 6px 14px 8px; cursor: pointer; text-decoration: none; }
   .hc-tab:hover { color: var(--ink); }
   .hc-tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent-ink); }
+  /* HD / VD sub-tabs (Chao 2026-10-22) — the index and the pills show one detector's trackers */
+  .hc-sub { display: flex; gap: 2px; margin: 0 0 14px; border-bottom: 1px solid var(--rule); }
+  .hc-sub a { font: inherit; font-size: 13px; font-weight: 600; color: var(--dim); text-decoration: none;
+    border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 4px 12px 6px; cursor: pointer; }
+  .hc-sub a:hover { color: var(--ink); }
+  .hc-sub a[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent-ink); }
   .hc-cons { margin: 0 0 30px; }
   .hc-cons h2 { font-size: 1.2rem; color: var(--ink); margin: 0 0 4px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .hc-cons h2 .mono { font-family: var(--font-mono); font-size: 12px; font-weight: 400; color: var(--faint); }
@@ -30,20 +36,12 @@
   .hc-index .hc-dim { color: var(--faint); }
   .hc-pills { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 14px; }
   .hc-pill { font: inherit; font-size: 13px; padding: 3px 12px; cursor: pointer; color: var(--dim); background: var(--page);
-    border: 1px solid var(--rule); border-radius: 999px; }
+    border: 1px solid var(--rule); border-radius: 999px; text-decoration: none; }
+  .hc-pill[hidden] { display: none; }
   .hc-pill:hover { border-color: var(--rule-hard); color: var(--ink); }
   .hc-pill[aria-selected="true"] { color: var(--accent-ink); border-color: var(--accent-ink); background: var(--surface); }
   .mono { font-family: var(--font-mono); }
   .hc-none { color: var(--dim); font-size: 13.5px; }
-  /* #206: the P6 schedule line — what was uploaded, and the architect's upload form */
-  .hc-p6 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--dim); margin: 0 0 16px; }
-  .hc-p6 b { color: var(--ink); font-weight: 600; }
-  .hc-p6 form { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
-  .hc-p6 input[type=file] { font: inherit; font-size: 12px; color: var(--dim); max-width: 260px; }
-  .hc-p6 button { font: inherit; font-size: 12px; font-weight: 600; color: var(--ink); background: var(--page); border: 1px solid var(--rule-hard); border-radius: 8px; padding: 4px 11px; cursor: pointer; }
-  .hc-p6 button:hover { background: var(--surface); }
-  .hc-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink); }
-  .hc-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page)); border-color: color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
 </style>
 {% include "explore/_checklist_style.html" %}
 
@@ -51,20 +49,17 @@
   <div class="hc-tabs">
     <a class="hc-tab" aria-selected="false" href="{% url 'explore:hierarchy' %}">Hierarchy chart</a>
     <a class="hc-tab" aria-selected="true" href="{% url 'explore:production_overview' %}">Production status</a>
+    <a class="hc-tab" aria-selected="false" href="{% url 'explore:production_schedule' %}">P6 schedule</a>
   </div>
   <h1>Production status</h1>
-  {% for m in messages %}<div class="hc-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
-  <div class="hc-p6">
-    <span>P6 schedule:</span>
-    {% if p6 %}<span><b>{{ p6.filename }}</b> · {{ p6.n_rows }} activities · uploaded {{ p6.uploaded|date:"Y-m-d" }}{% if p6.uploaded_by %} by {{ p6.uploaded_by }}{% endif %}</span>{% else %}<span>none uploaded yet — plans show their typed dates</span>{% endif %}
-    {% if can_upload_p6 %}<form method="post" action="{% url 'explore:production_p6' %}" enctype="multipart/form-data">{% csrf_token %}<input type="file" name="file" accept=".xlsx,.xlsm" required title="The month’s P6 activities spreadsheet; replaces the last one"><button type="submit">Upload</button></form>{% endif %}
-  </div>
   {% if status_types %}
+    {# the sub-tabs and the pills are links (?d=HD, ?c=<type>) — a click filters in place and rewrites the address, so any view has a URL #}
+    {% if detectors %}<div class="hc-sub" role="tablist">{% for d in detectors %}<a role="tab" href="?d={{ d|default:"other" }}" data-d="{{ d|default:"other" }}" aria-selected="{% if forloop.first %}true{% else %}false{% endif %}">{{ d|default:"Other" }}</a>{% endfor %}</div>{% endif %}
     <table class="hc-index">
       <thead><tr><th>Consortium</th><th>Components</th><th>Earliest needed by</th><th>Completed-by passed</th><th>Last read</th><th></th></tr></thead>
       <tbody>
       {% for c in status_types %}
-      <tr><td>{% if c.type_url %}<a href="{{ c.type_url }}" title="the consortium type’s page">{{ c.name }}</a>{% else %}{{ c.name }}{% endif %} <span class="mono">{{ c.part_type_id }}</span></td>
+      <tr data-d="{{ c.detector|default:"other" }}"><td>{% if c.type_url %}<a href="{{ c.type_url }}" title="the consortium type’s page">{{ c.name }}</a>{% else %}{{ c.name }}{% endif %} <span class="mono">{{ c.part_type_id }}</span></td>
         <td class="num">{% if c.rows is not None %}{{ c.n }}{% else %}—{% endif %}</td>
         <td>{{ c.needed_by|default:"—" }}</td>
         <td class="num">{% if c.rows is not None %}{{ c.due }}{% else %}—{% endif %}</td>
@@ -74,7 +69,7 @@
       </tbody>
     </table>
     <div class="hc-pills" role="tablist">
-      {% for c in status_types %}<button type="button" class="hc-pill" role="tab" data-c="{{ c.part_type_id }}" aria-selected="{% if forloop.first %}true{% else %}false{% endif %}">{{ c.name }}</button>{% endfor %}
+      {% for c in status_types %}<a class="hc-pill" role="tab" href="?c={{ c.part_type_id }}" data-c="{{ c.part_type_id }}" data-d="{{ c.detector|default:"other" }}" aria-selected="{% if forloop.first %}true{% else %}false{% endif %}">{{ c.name }}</a>{% endfor %}
     </div>
     {% for c in status_types %}
     <div class="hc-cons" data-c="{{ c.part_type_id }}"{% if not forloop.first %} hidden{% endif %}>
@@ -95,8 +90,18 @@
 <script>
 (function () {
   var q = new URLSearchParams(location.search);
-  // one consortium at a time: the pills (and the index's names) pick it; ?c=<type> or the last choice
+  // one consortium at a time: the pills (and the index's names) pick it; ?c=<type> or the last choice.
+  // HD / VD sub-tabs: the index rows and the pills of one detector; ?d=HD|VD|other or the last choice,
+  // else the detector of the consortium shown. Both are links: a click filters in place and rewrites
+  // the address (?d=…&c=…), so every view can be bookmarked or sent.
   var pills = document.querySelectorAll(".hc-pill"), cons = document.querySelectorAll(".hc-cons");
+  var subs = document.querySelectorAll(".hc-sub a"), idx = document.querySelectorAll(".hc-index tbody tr");
+  function address() {
+    var p = new URLSearchParams(), d = document.querySelector(".hc-sub a[aria-selected=true]"), c = document.querySelector(".hc-pill[aria-selected=true]");
+    if (d) p.set("d", d.dataset.d);
+    if (c) p.set("c", c.dataset.c);
+    history.replaceState(null, "", location.pathname + "?" + p.toString());
+  }
   function pick(id) {
     var ok = Array.prototype.some.call(cons, function (d) { return d.dataset.c === id; });
     if (!ok) return;
@@ -104,9 +109,25 @@
     cons.forEach(function (d) { d.hidden = d.dataset.c !== id; });
     try { localStorage.setItem("hcCons", id); } catch (e) {}
   }
-  pills.forEach(function (p) { p.addEventListener("click", function () { pick(p.dataset.c); }); });
+  function det(d) {
+    if (!Array.prototype.some.call(subs, function (b) { return b.dataset.d === d; })) return;
+    subs.forEach(function (b) { b.setAttribute("aria-selected", b.dataset.d === d ? "true" : "false"); });
+    idx.forEach(function (r) { r.hidden = r.dataset.d !== d; });
+    pills.forEach(function (p) { p.hidden = p.dataset.d !== d; });
+    var cur = document.querySelector(".hc-pill[aria-selected=true]");
+    if (!cur || cur.dataset.d !== d) { var first = document.querySelector(".hc-pill[data-d='" + d + "']"); if (first) pick(first.dataset.c); }
+    try { localStorage.setItem("hcDet", d); } catch (e) {}
+  }
+  pills.forEach(function (p) { p.addEventListener("click", function (e) { e.preventDefault(); pick(p.dataset.c); address(); }); });
+  subs.forEach(function (b) { b.addEventListener("click", function (e) { e.preventDefault(); det(b.dataset.d); address(); }); });
   var c = q.get("c"); if (!c) { try { c = localStorage.getItem("hcCons"); } catch (e) {} }
   if (c) pick(c);
+  if (subs.length) {
+    var d = q.get("d");
+    if (d === null && c) { var cp = document.querySelector(".hc-pill[data-c='" + c + "']"); if (cp) d = cp.dataset.d; }
+    if (d === null) { try { d = localStorage.getItem("hcDet"); } catch (e) {} }
+    det(d === null ? subs[0].dataset.d : d);
+  }
 })();
 </script>
 {% endif %}

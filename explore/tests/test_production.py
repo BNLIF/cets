@@ -417,6 +417,7 @@ class DetectorPagesTest(TestCase):
         html = self.client.get("/hw/dev/hierarchy/").content.decode()
         self.assertIn('<a class="hc-tab" aria-selected="true" href="/hw/dev/hierarchy/">Hierarchy chart</a>', html)
         self.assertIn('<a class="hc-tab" aria-selected="false" href="/hw/dev/status/">Production status</a>', html)
+        self.assertIn('<a class="hc-tab" aria-selected="false" href="/hw/dev/schedule/">P6 schedule</a>', html)
         self.assertNotIn("hc-cons", html)
         r = self.client.get("/hw/dev/hierarchy/?tab=status")   # the old tab link
         self.assertEqual(r["Location"], "/hw/dev/status/")
@@ -438,7 +439,7 @@ class DetectorPagesTest(TestCase):
         self.assertNotIn("Not read yet", html)
         due = 1 if "2026-12" <= timezone.localdate().strftime("%Y-%m") else 0
         self.assertIn(f'<td class="num">2</td>\n        <td>2028-05</td>\n        <td class="num">{due}</td>', html)
-        self.assertIn('<button type="button" class="hc-pill" role="tab" data-c="Z00100600001" aria-selected="true">Test Production Status</button>', html)
+        self.assertIn('<a class="hc-pill" role="tab" href="?c=Z00100600001" data-c="Z00100600001" data-d="other" aria-selected="true">Test Production Status</a>', html)
         self.assertIn('<div class="hc-cons" data-c="Z00100600001">', html)
         self.assertIn('title="the type’s page">SiPM boards (6 SiPMs)</a></th>', html)   # the cached table, no HWDB call
         self.assertIn('<td class="cl-const ps-num">48,000</td>', html)
@@ -447,6 +448,30 @@ class DetectorPagesTest(TestCase):
         production.cache_list("dev", PTID, [])
         html = self.client.get("/hw/dev/status/").content.decode()
         self.assertIn(f'No component list on this type yet — <a href="/hw/dev/plan-list/{PTID}/">add the component types</a>', html)
+
+    def test_overview_hd_vd_sub_tabs(self):
+        # Chao 2026-10-22: trackers grouped by detector off their hierarchy path, sub-tabs only when they span more than one
+        for f, want in (("Z.Sandbox.Test Production Status.FDHD CE", "HD"), ("D.FD-VD PDS.x.VD PDS tracker", "VD"),
+                        ("D.FD2-VD Top CRP.x.y", "VD"), ("D.FD1-HD TPC_Elec. and FD2-VD Bottom_Elec..FEMB.z", ""),
+                        ("Z.Sandbox.Test Production Status.Test Production Status", ""), ("D.HVD.x", ""), ("", "")):
+            self.assertEqual(production.detector_of(f), want, f)
+        _node(PTID, instance="dev", component_type_name="FDHD PDS", full_name="Z.Sandbox.Test Production Status.FDHD PDS")
+        ConsortiumTypeOverride.objects.create(instance="dev", part_type_id=PTID)
+        html = self.client.get("/hw/dev/status/").content.decode()
+        self.assertNotIn('<div class="hc-sub"', html)   # one detector: no sub-tabs
+        self.assertIn(f'<tr data-d="HD"><td><a href="{navigation.leaf_path_for("dev", PTID)}"', html)
+        _node("Z00100600003", instance="dev", component_type_name="FDVD CE", full_name="Z.Sandbox.Test Production Status.FDVD CE")
+        ConsortiumTypeOverride.objects.create(instance="dev", part_type_id="Z00100600003")
+        _node("Z00100600004", instance="dev", component_type_name="Common", full_name="Z.Sandbox.Test Production Status.Common")
+        ConsortiumTypeOverride.objects.create(instance="dev", part_type_id="Z00100600004")
+        html = self.client.get("/hw/dev/status/").content.decode()
+        self.assertIn('<div class="hc-sub" role="tablist"><a role="tab" href="?d=HD" data-d="HD" aria-selected="true">HD</a>'
+                      '<a role="tab" href="?d=VD" data-d="VD" aria-selected="false">VD</a>'
+                      '<a role="tab" href="?d=other" data-d="other" aria-selected="false">Other</a></div>', html)
+        self.assertIn('href="?c=Z00100600003" data-c="Z00100600003" data-d="VD"', html)
+        self.assertIn('href="?c=Z00100600004" data-c="Z00100600004" data-d="other"', html)
+        self.assertIn('history.replaceState(null, "", location.pathname + "?" + p.toString())', html)
+        self.assertIn('localStorage.setItem("hcDet", d)', html)
 
     def test_prod_overview_is_empty_for_now(self):
         html = self.client.get("/hw/status/").content.decode()
@@ -472,6 +497,8 @@ class TypePageTest(TestCase):
         self.assertIn('data-plan-total="48000" data-plan-done="2026-12" data-plan-need="2028-05" '
                       f'data-plan-url="/hw/plan/{SIPM}/"', html)
         self.assertIn('<input type="checkbox" class="chart-plan-use" checked> production plan</label>', html)   # Hajime: a default, not a lock
+        self.assertEqual(html.count('data-plan-total="48000"'), 2)   # Chao 2026-10-22: the tests chart too
+        self.assertEqual(html.count('class="chart-plan-use"'), 2)
         self.assertIn("untick “production plan” to set your own", html)
         self.assertIn("from the production plan", html)
         self.assertIn('<dt>Plan</dt><dd class="span">needed 48000<span class="sep">·</span>completed by 2026-12<span class="sep">·</span>needed by 2028-05\n', html)

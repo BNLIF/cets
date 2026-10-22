@@ -20,7 +20,7 @@ from datetime import date, datetime
 
 from django.db import transaction
 
-from .models import P6Activity, P6Upload
+from .models import P6Activity, P6Upload, ProductionPlan
 
 COL_ID = "Prod Activity ID"
 _COLS = {"detector": "Detector", "component": "Component",
@@ -102,6 +102,38 @@ def replace(rows: list[dict], who: str, filename: str) -> P6Upload:
     P6Activity.objects.bulk_create([P6Activity(**r) for r in rows])
     P6Upload.objects.all().delete()
     return P6Upload.objects.create(uploaded_by=who[:150], filename=(filename or "")[:200], n_rows=len(rows))
+
+
+def compare(rows: list[dict]) -> dict | None:
+    """Chao 2026-10-22: how an upload differs from the current table —
+    guards against the wrong file. ``None`` with no table yet; else
+    ``{n_old, n_new, missing, plan_missing, changed, warn}``: the current
+    activities the file lacks, those of them a plan names, the dates that
+    move; ``warn`` when a plan's id would go or over a fifth are missing."""
+    old = {(a.activity_id, a.kind): a for a in P6Activity.objects.all()}
+    if not old:
+        return None
+    new = {(r["activity_id"], r["kind"]): r for r in rows}
+    missing = [k for k in old if k not in new]
+    changed = sum(1 for k, r in new.items() if k in old and old[k].date != r["date"])
+    used = set()
+    for prod, inst in ProductionPlan.objects.values_list("p6_completed_id", "p6_needed_id"):
+        if prod:
+            used.add((prod, P6Activity.KIND_PROD))
+        if inst:
+            used.add((inst, P6Activity.KIND_INSTALL))
+    plan_missing = sorted(k[0] for k in missing if k in used)
+    return {"n_old": len(old), "n_new": len(new), "missing": len(missing), "plan_missing": plan_missing,
+            "changed": changed, "warn": bool(plan_missing) or len(missing) > len(old) / 5}
+
+
+def to_json(rows: list[dict]) -> list[dict]:
+    """The parsed rows as the session keeps them while a warned upload waits for its confirmation."""
+    return [{**r, "date": r["date"].isoformat() if r["date"] else None} for r in rows]
+
+
+def from_json(rows: list[dict]) -> list[dict]:
+    return [{**r, "date": date.fromisoformat(r["date"]) if r["date"] else None} for r in rows]
 
 
 def current() -> P6Upload | None:

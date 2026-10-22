@@ -51,10 +51,11 @@
 </style>
 
 <div class="hc-page">
-  {# #199: the Detector area has two pages (Chao 2026-10-08: each with its own URL) — this chart, and the consortia's production status #}
+  {# #199: the Detector area has three pages (Chao 2026-10-08: each with its own URL) — this chart, the consortia's production status, and the P6 schedule (#206) #}
   <div class="hc-tabs">
     <a class="hc-tab" aria-selected="true" href="{% url 'explore:hierarchy' %}">Hierarchy chart</a>
     <a class="hc-tab" aria-selected="false" href="{% url 'explore:production_overview' %}">Production status</a>
+    <a class="hc-tab" aria-selected="false" href="{% url 'explore:production_schedule' %}">P6 schedule</a>
   </div>
   <div class="hc-head">
     <h1>{{ chart.title }}</h1>

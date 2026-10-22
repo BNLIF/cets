@@ -1,0 +1,120 @@
+{% extends 'explore/base.html' %}
+{% block title %}P6 schedule · HWDB Explorer{% endblock %}
+
+{% block content %}
+{# #206 / Chao 2026-10-22: the Detector area's third page — the P6 schedule as last uploaded (the monthly activities spreadsheet, parsed into the Explorer's own table), every activity in one filterable table, and the architect's upload form. Plans pick their two activity ids from these rows. #}
+<style>
+  .hc-page { padding: 26px 30px 56px; }
+  .hc-page h1 { font-size: 1.5rem; color: var(--ink); margin: 0 0 14px; letter-spacing: -0.01em; }
+  .mono { font-family: var(--font-mono); }
+  .hc-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--rule); margin: 0 0 16px; }
+  .hc-tab { font: inherit; font-size: 14px; font-weight: 600; color: var(--dim); background: none; border: none;
+    border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 6px 14px 8px; cursor: pointer; text-decoration: none; }
+  .hc-tab:hover { color: var(--ink); }
+  .hc-tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent-ink); }
+  /* the upload line — what was uploaded, and the architect's form */
+  .hc-p6 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--dim); margin: 0 0 16px; }
+  .hc-p6 b { color: var(--ink); font-weight: 600; }
+  .hc-p6 form { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+  .hc-p6 input[type=file] { font: inherit; font-size: 12px; color: var(--dim); max-width: 260px; }
+  .hc-p6 button { font: inherit; font-size: 12px; font-weight: 600; color: var(--ink); background: var(--page); border: 1px solid var(--rule-hard); border-radius: 8px; padding: 4px 11px; cursor: pointer; }
+  .hc-p6 button:hover { background: var(--surface); }
+  .hc-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink); }
+  .hc-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page)); border-color: color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+  /* an upload held back: it drops many current activities, or one a plan names */
+  .hc-pending { border-radius: var(--r-lg); padding: 12px 15px; font-size: 13px; margin-bottom: 14px; color: var(--ink);
+    border: 1px solid color-mix(in oklch, var(--warn, #b26a00) 45%, var(--rule)); background: color-mix(in oklch, var(--warn, #b26a00) 8%, var(--page)); }
+  .hc-pending b { font-weight: 600; }
+  .hc-pending .mono { font-size: 12px; }
+  .hc-pending form { display: inline-flex; gap: 8px; margin: 8px 0 0; }
+  .hc-pending button { font: inherit; font-size: 12px; font-weight: 600; color: var(--ink); background: var(--page); border: 1px solid var(--rule-hard); border-radius: 8px; padding: 4px 11px; cursor: pointer; }
+  .hc-pending button:hover { background: var(--surface); }
+  /* the filter bar, then the table */
+  .p6-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 0 0 12px; }
+  .p6-bar select, .p6-bar input { font: inherit; font-size: 13px; color: var(--ink); padding: 4px 8px; border: 1px solid var(--rule-hard); border-radius: 6px; background: var(--page); }
+  .p6-bar input { flex: 1; min-width: 200px; max-width: 420px; }
+  .p6-bar .p6-n { font-size: 12px; color: var(--faint); margin-left: auto; }
+  .p6-table { border-collapse: collapse; font-size: 13px; width: 100%; }
+  .p6-table th { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; text-align: left; padding: 2px 12px 4px 0; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+  .p6-table td { padding: 5px 12px 5px 0; border-bottom: 1px solid var(--rule); color: var(--ink); vertical-align: top; }
+  .p6-table td.mono { font-size: 12px; white-space: nowrap; }
+  .p6-table td.p6-date { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .p6-table td.p6-dim { color: var(--dim); }
+  .p6-table tr.p6-sheet td { padding-top: 16px; font-weight: 600; color: var(--ink); border-bottom: 1px solid var(--rule-hard); }
+  .p6-table tr.p6-sheet td .mono { font-weight: 400; color: var(--faint); font-size: 12px; margin-left: 8px; }
+  .hc-none { color: var(--dim); font-size: 13.5px; }
+</style>
+
+<div class="hc-page">
+  <div class="hc-tabs">
+    <a class="hc-tab" aria-selected="false" href="{% url 'explore:hierarchy' %}">Hierarchy chart</a>
+    <a class="hc-tab" aria-selected="false" href="{% url 'explore:production_overview' %}">Production status</a>
+    <a class="hc-tab" aria-selected="true" href="{% url 'explore:production_schedule' %}">P6 schedule</a>
+  </div>
+  <h1>P6 schedule</h1>
+  {% for m in messages %}<div class="hc-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+  {% if pending and can_upload_p6 %}
+  <div class="hc-pending">
+    <b>Not replaced yet.</b> <b>{{ pending.filename }}</b> ({{ pending.diff.n_new }} activities) differs a lot from the current schedule:
+    {{ pending.diff.missing }} of the {{ pending.diff.n_old }} current activities are not in it{% if pending.diff.plan_missing %}, among them {{ pending.diff.plan_missing|length }} that plans name — <span class="mono">{{ pending.diff.plan_missing|join:", " }}</span>{% endif %}{% if pending.diff.changed %}; {{ pending.diff.changed }} dates move{% endif %}.
+    Is it the right file?
+    <form method="post" action="{% url 'explore:production_p6' %}">{% csrf_token %}<button type="submit" name="confirm" value="1">Replace anyway</button><button type="submit" name="discard" value="1">Discard</button></form>
+  </div>
+  {% endif %}
+  <div class="hc-p6">
+    {% if p6 %}<span><b>{{ p6.filename }}</b> · {{ p6.n_rows }} activities · uploaded {{ p6.uploaded|date:"Y-m-d" }}{% if p6.uploaded_by %} by {{ p6.uploaded_by }}{% endif %}</span>{% else %}<span>None uploaded yet — plans show their typed dates.</span>{% endif %}
+    {% if can_upload_p6 %}<form method="post" action="{% url 'explore:production_p6' %}" enctype="multipart/form-data">{% csrf_token %}<input type="file" name="file" accept=".xlsx,.xlsm" required title="The month’s P6 activities spreadsheet; replaces the last one"><button type="submit">Upload</button></form>{% endif %}
+  </div>
+  {% if activities %}
+  <div class="p6-bar">
+    <select id="p6-det" title="Detector"><option value="">HD and VD</option><option value="HD">HD</option><option value="VD">VD</option></select>
+    <select id="p6-sheet" title="Sheet"><option value="">every sheet</option>{% for s in sheets %}<option value="{{ s }}">{{ s }}</option>{% endfor %}</select>
+    <select id="p6-kind" title="Kind"><option value="">production and installation</option><option value="prod">production (end date)</option><option value="install">installation (start date)</option></select>
+    <input type="search" id="p6-q" placeholder="filter by activity name, id or component">
+    <span class="p6-n" id="p6-n"></span>
+  </div>
+  <table class="p6-table">
+    <thead><tr><th>Component</th><th>Activity</th><th>Kind</th><th>Name</th><th>Date</th><th>Source</th><th>Notes</th></tr></thead>
+    <tbody>
+    {% for a in activities %}
+    {% ifchanged a.sheet %}<tr class="p6-sheet" data-sheet="{{ a.sheet }}"><td colspan="7">{{ a.sheet }}<span class="mono">{{ a.detector }}</span></td></tr>{% endifchanged %}
+    <tr data-det="{{ a.detector }}" data-sheet="{{ a.sheet }}" data-kind="{{ a.kind }}">
+      <td>{{ a.component }}</td>
+      <td class="mono">{{ a.activity_id }}</td>
+      <td class="p6-dim">{% if a.kind == "prod" %}production end{% else %}installation start{% endif %}</td>
+      <td>{{ a.name }}</td>
+      <td class="p6-date">{% if a.date %}{{ a.date|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+      <td class="p6-dim">{{ a.source }}</td>
+      <td class="p6-dim">{{ a.notes }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% elif can_upload_p6 %}
+  <p class="hc-none">Upload the month’s activities spreadsheet to see it here.</p>
+  {% endif %}
+</div>
+{% if activities %}
+<script>
+(function () {
+  var det = document.getElementById("p6-det"), sheet = document.getElementById("p6-sheet"), kind = document.getElementById("p6-kind"),
+      q = document.getElementById("p6-q"), n = document.getElementById("p6-n");
+  var rows = document.querySelectorAll(".p6-table tbody tr:not(.p6-sheet)"), heads = document.querySelectorAll(".p6-table tr.p6-sheet");
+  function apply() {
+    var d = det.value, s = sheet.value, k = kind.value, t = q.value.trim().toLowerCase(), shown = 0, bySheet = {};
+    rows.forEach(function (r) {
+      var ok = (!d || r.dataset.det === d) && (!s || r.dataset.sheet === s) && (!k || r.dataset.kind === k)
+            && (!t || r.textContent.toLowerCase().indexOf(t) >= 0);
+      r.hidden = !ok;
+      if (ok) { shown++; bySheet[r.dataset.sheet] = true; }
+    });
+    heads.forEach(function (h) { h.hidden = !bySheet[h.dataset.sheet]; });
+    n.textContent = shown === rows.length ? rows.length + " activities" : shown + " of " + rows.length + " activities";
+  }
+  [det, sheet, kind].forEach(function (el) { el.addEventListener("change", apply); });
+  q.addEventListener("input", apply);
+  apply();
+})();
+</script>
+{% endif %}
+{% endblock %}
