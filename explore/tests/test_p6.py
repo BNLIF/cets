@@ -358,8 +358,8 @@ class StatusPageTest(TestCase):
         with m1, m2:
             html = self.client.get(self.URL).content.decode()
         self.assertIn('<td class="cl-const ps-num">9</td>', html)   # the consortium's own plan over the plain one
-        self.assertIn('<td class="cl-const" title="P6 13122.A12812: Deliver to Storage (300 modules) (1500 total) #1 - CSU (Forecast)">8 Mar 2029</td>', html)
-        self.assertIn('<td class="cl-const" title="P6 13122.A12834: Install modules in Detector Slice 21-22 - CSU (Forecast)">30 Jan 2030</td>', html)
+        self.assertIn('<td class="cl-const" title="P6 13122.A12812: Deliver to Storage (300 modules) (1500 total) #1 - CSU (Forecast)">8 Mar 2029 <span class="ps-p6">P6</span></td>', html)   # Anselmo 2026-10-22: a P6 date says so
+        self.assertIn('<td class="cl-const" title="P6 13122.A12834: Install modules in Detector Slice 21-22 - CSU (Forecast)">30 Jan 2030 <span class="ps-p6">P6</span></td>', html)
         self.assertIn('<td class="cl-const ps-num">10</td>', html)   # the float, whole months
         self.assertEqual(ProductionPlan.objects.get(part_type_id=PDS, consortium=PTID).needed, 9)
         self.assertEqual(ProductionPlan.objects.get(part_type_id=PDS, consortium="").needed, 48000)
@@ -368,5 +368,5 @@ class StatusPageTest(TestCase):
         ConsortiumTypeOverride.objects.create(instance="dev", part_type_id=PTID)
         with m1, m2:
             html = self.client.get("/hw/dev/status/").content.decode()
-        self.assertIn('title="P6 13122.A12812: Deliver to Storage (300 modules) (1500 total) #1 - CSU (Forecast)">8 Mar 2029</td>', html)
+        self.assertIn('title="P6 13122.A12812: Deliver to Storage (300 modules) (1500 total) #1 - CSU (Forecast)">8 Mar 2029 <span class="ps-p6">P6</span></td>', html)   # Anselmo 2026-10-22: a P6 date says so
         self.assertIn(f'<a class="ps-plan" href="/hw/dev/plan/{PDS}/?for={PTID}"', html)

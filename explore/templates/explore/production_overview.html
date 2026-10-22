@@ -42,6 +42,7 @@
   .hc-pill[aria-selected="true"] { color: var(--accent-ink); border-color: var(--accent-ink); background: var(--surface); }
   .mono { font-family: var(--font-mono); }
   .hc-none { color: var(--dim); font-size: 13.5px; }
+  .hc-sub-note { color: var(--dim); font-size: 13px; margin: -6px 0 14px; }
 </style>
 {% include "explore/_checklist_style.html" %}
 
@@ -52,6 +53,7 @@
     <a class="hc-tab" aria-selected="false" href="{% url 'explore:production_schedule' %}">P6 schedule</a>
   </div>
   <h1>Production status</h1>
+  <p class="hc-sub-note">Dates and comments come from each type’s plan, counts from the items in HWDB. A date marked <span class="ps-p6" style="font-size:9.5px; font-weight:600; letter-spacing:.04em; color:var(--accent-ink); background:var(--accent-soft); padding:1px 5px; border-radius:999px;">P6</span> is the chosen P6 activity’s, to the day; one without was typed as a month.</p>
   {% if status_types %}
     {# the sub-tabs and the pills are links (?d=HD, ?c=<type>) — a click filters in place and rewrites the address, so any view has a URL #}
     {% if detectors %}<div class="hc-sub" role="tablist">{% for d in detectors %}<a role="tab" href="?d={{ d|default:"other" }}" data-d="{{ d|default:"other" }}" aria-selected="{% if forloop.first %}true{% else %}false{% endif %}">{{ d|default:"Other" }}</a>{% endfor %}</div>{% endif %}

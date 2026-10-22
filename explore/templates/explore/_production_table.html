@@ -1,5 +1,5 @@
 {% load checklist %}
-{# #200: one consortium's generated production-status table, drawn as the fill page draws a named-row table (cl-table) but read-only — shared by the status page (live) and the overview (cached). Context: rows = production.table(...), can_edit, consortium (#206: the plan links carry it; dates from P6 say so in their tooltip). #}
+{# #200: one consortium's generated production-status table, drawn as the fill page draws a named-row table (cl-table) but read-only — shared by the status page (live) and the overview (cached). Context: rows = production.table(...), can_edit, consortium (#206: the plan links carry it; dates from P6 carry a small P6 label, the activity in their tooltip — Anselmo 2026-10-22: the typed ones must be told apart). #}
 <div class="tbl-scroll"><table class="cl-table cl-gridlines ps-table">
   <thead><tr><th>Component</th><th>Type ID</th><th>Needed</th><th>In HWDB</th><th>Completed by</th><th>Needed by</th><th>Float (months)</th><th>Comment</th></tr></thead>
   <tbody>
@@ -8,8 +8,8 @@
     <td class="cl-const ps-types">{{ r.type }}<a class="ps-plan" href="{% url 'explore:production_plan' part_type_id=r.type %}{% if consortium %}?for={{ consortium }}{% endif %}" title="{% if r.has_plan %}The plan and its history{% if r.updated %} — set {{ r.updated }}{% endif %}{% if r.updated_by %} by {{ r.updated_by }}{% endif %}{% else %}No plan on this type yet{% endif %}">{% if r.has_plan %}plan{% elif can_edit %}set plan{% else %}no plan{% endif %}</a></td>
     <td class="cl-const ps-num{% if not r.needed %} ps-none{% endif %}">{{ r.needed|default:"—" }}</td>
     <td class="cl-const ps-num" title="{{ r.by_status|default:'no items in the mirror' }}">{{ r.n }}</td>
-    <td class="cl-const{% if r.completed_past %} ps-past{% endif %}{% if not r.completed_by %} ps-none{% endif %}"{% if r.completed_src %} title="{{ r.completed_src }}"{% endif %}>{{ r.completed_by|default:"—" }}</td>
-    <td class="cl-const{% if r.needed_past %} ps-past{% endif %}{% if not r.needed_by %} ps-none{% endif %}"{% if r.needed_src %} title="{{ r.needed_src }}"{% endif %}>{{ r.needed_by|default:"—" }}{% if r.p6_missing %} <span class="ps-warn" title="{{ r.p6_missing }}">&#9888;</span>{% endif %}</td>
+    <td class="cl-const{% if r.completed_past %} ps-past{% endif %}{% if not r.completed_by %} ps-none{% endif %}"{% if r.completed_src %} title="{{ r.completed_src }}"{% endif %}>{{ r.completed_by|default:"—" }}{% if r.completed_src %} <span class="ps-p6">P6</span>{% endif %}</td>
+    <td class="cl-const{% if r.needed_past %} ps-past{% endif %}{% if not r.needed_by %} ps-none{% endif %}"{% if r.needed_src %} title="{{ r.needed_src }}"{% endif %}>{{ r.needed_by|default:"—" }}{% if r.needed_src %} <span class="ps-p6">P6</span>{% endif %}{% if r.p6_missing %} <span class="ps-warn" title="{{ r.p6_missing }}">&#9888;</span>{% endif %}</td>
     <td class="cl-const ps-num{% if not r.float %} ps-none{% endif %}">{{ r.float|default:"—" }}</td>
     <td class="cl-const{% if r.comment|length > 24 %} cl-wrap ps-long{% endif %}">{{ r.comment|clmd_block }}</td>
   </tr>{% endfor %}
