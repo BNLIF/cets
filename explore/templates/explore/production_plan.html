@@ -51,7 +51,7 @@
   .p6-or { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--faint); }
   .pl-grid dd .p6-id { font-family: var(--font-mono); font-size: 12px; color: var(--faint); }
 </style>
-{# #200 (Anselmo): a component type's production plan — kept as Production_plan_<type>.json on the type in HWDB, every version kept; architects edit, everyone sees the values and the history. #206: the two dates may name P6 activities (picked from the uploaded schedule) — the typed months are the fallback; a type two consortia list has one plan per consortium (?for=). #}
+{# #200 (Anselmo): a component type's production plan — kept as Production_plan_<type>.json on the type in HWDB, every version kept; architects edit, everyone sees the values and the history. #206: the two dates may name P6 activities (picked from the uploaded schedule) — the typed months are the fallback; Anselmo 2026-10-26: the first batch's two dates as well, the same way; a type two consortia list has one plan per consortium (?for=). #}
 
 <div class="es-page">
   <div class="es-crumbs">
@@ -75,11 +75,15 @@
         <label class="pl-lab" for="pl-needed">Needed</label><div><input type="number" id="pl-needed" name="needed" min="0" step="1" value="{{ plan.needed|default_if_none:'' }}" placeholder="total to produce"></div>
       {% if p6 %}
         <span class="pl-lab">P6 schedule</span><div class="p6-bar" title="{{ p6.filename }}, uploaded {{ p6.uploaded|date:'Y-m-d' }}"><select id="p6-det"><option value="">HD and VD</option><option value="HD">HD</option><option value="VD">VD</option></select><select id="p6-sheet"><option value="">every sheet</option></select><input type="search" id="p6-q" placeholder="filter by activity name or id"></div>
-        <label class="pl-lab" for="pl-done-p6" style="align-self:start; padding-top:6px;">Completed by</label><div class="p6-field"><select id="pl-done-p6" name="p6_completed_id" class="p6-pick" data-kind="prod" data-value="{{ plan.p6_completed_id|default:'' }}"></select><span class="p6-res" id="pl-done-res"></span><span class="p6-or">or month <input type="month" id="pl-done" name="completed_by" value="{{ plan.completed_by|default:'' }}" placeholder="YYYY-MM" pattern="\d{4}-\d{2}"></span></div>
-        <label class="pl-lab" for="pl-need-p6" style="align-self:start; padding-top:6px;">Needed by</label><div class="p6-field"><select id="pl-need-p6" name="p6_needed_id" class="p6-pick" data-kind="install" data-value="{{ plan.p6_needed_id|default:'' }}"></select><span class="p6-res" id="pl-need-res"></span><span class="p6-or">or month <input type="month" id="pl-need" name="needed_by" value="{{ plan.needed_by|default:'' }}" placeholder="YYYY-MM" pattern="\d{4}-\d{2}" title="At SURF"></span></div>
+        <label class="pl-lab" for="pl-fdone-p6" style="align-self:start; padding-top:6px;">First completed by</label><div class="p6-field"><select id="pl-fdone-p6" name="p6_first_completed_id" class="p6-pick" data-kind="prod" data-value="{{ plan.p6_first_completed_id|default:'' }}"></select><span class="p6-res" id="pl-fdone-res"></span><span class="p6-or">or month <input type="month" id="pl-fdone" name="first_completed_by" value="{{ plan.first_completed_by|default:'' }}" placeholder="YYYY-MM" pattern="\d{4}-\d{2}"></span></div>
+        <label class="pl-lab" for="pl-fneed-p6" style="align-self:start; padding-top:6px;">First needed by</label><div class="p6-field"><select id="pl-fneed-p6" name="p6_first_needed_id" class="p6-pick" data-kind="install" data-value="{{ plan.p6_first_needed_id|default:'' }}"></select><span class="p6-res" id="pl-fneed-res"></span><span class="p6-or">or month <input type="month" id="pl-fneed" name="first_needed_by" value="{{ plan.first_needed_by|default:'' }}" placeholder="YYYY-MM" pattern="\d{4}-\d{2}"></span></div>
+        <label class="pl-lab" for="pl-done-p6" style="align-self:start; padding-top:6px;">Last completed by</label><div class="p6-field"><select id="pl-done-p6" name="p6_completed_id" class="p6-pick" data-kind="prod" data-value="{{ plan.p6_completed_id|default:'' }}"></select><span class="p6-res" id="pl-done-res"></span><span class="p6-or">or month <input type="month" id="pl-done" name="completed_by" value="{{ plan.completed_by|default:'' }}" placeholder="YYYY-MM" pattern="\d{4}-\d{2}"></span></div>
+        <label class="pl-lab" for="pl-need-p6" style="align-self:start; padding-top:6px;">Last needed by</label><div class="p6-field"><select id="pl-need-p6" name="p6_needed_id" class="p6-pick" data-kind="install" data-value="{{ plan.p6_needed_id|default:'' }}"></select><span class="p6-res" id="pl-need-res"></span><span class="p6-or">or month <input type="month" id="pl-need" name="needed_by" value="{{ plan.needed_by|default:'' }}" placeholder="YYYY-MM" pattern="\d{4}-\d{2}" title="At SURF"></span></div>
       {% else %}
-        <label class="pl-lab" for="pl-done">Completed by</label><div><input type="month" id="pl-done" name="completed_by" value="{{ plan.completed_by|default:'' }}" placeholder="YYYY-MM" pattern="\d{4}-\d{2}"> <span class="p6-or">or P6 activity <input type="text" name="p6_completed_id" value="{{ plan.p6_completed_id|default:'' }}" placeholder="production activity id" style="width:200px;"></span></div>
-        <label class="pl-lab" for="pl-need">Needed by</label><div><input type="month" id="pl-need" name="needed_by" value="{{ plan.needed_by|default:'' }}" placeholder="YYYY-MM" pattern="\d{4}-\d{2}" title="At SURF"> <span class="p6-or">or P6 activity <input type="text" name="p6_needed_id" value="{{ plan.p6_needed_id|default:'' }}" placeholder="installation activity id" style="width:200px;"></span></div>
+        <label class="pl-lab" for="pl-fdone">First completed by</label><div><input type="month" id="pl-fdone" name="first_completed_by" value="{{ plan.first_completed_by|default:'' }}" placeholder="YYYY-MM" pattern="\d{4}-\d{2}"> <span class="p6-or">or P6 activity <input type="text" name="p6_first_completed_id" value="{{ plan.p6_first_completed_id|default:'' }}" placeholder="production activity id" style="width:200px;"></span></div>
+        <label class="pl-lab" for="pl-fneed">First needed by</label><div><input type="month" id="pl-fneed" name="first_needed_by" value="{{ plan.first_needed_by|default:'' }}" placeholder="YYYY-MM" pattern="\d{4}-\d{2}"> <span class="p6-or">or P6 activity <input type="text" name="p6_first_needed_id" value="{{ plan.p6_first_needed_id|default:'' }}" placeholder="installation activity id" style="width:200px;"></span></div>
+        <label class="pl-lab" for="pl-done">Last completed by</label><div><input type="month" id="pl-done" name="completed_by" value="{{ plan.completed_by|default:'' }}" placeholder="YYYY-MM" pattern="\d{4}-\d{2}"> <span class="p6-or">or P6 activity <input type="text" name="p6_completed_id" value="{{ plan.p6_completed_id|default:'' }}" placeholder="production activity id" style="width:200px;"></span></div>
+        <label class="pl-lab" for="pl-need">Last needed by</label><div><input type="month" id="pl-need" name="needed_by" value="{{ plan.needed_by|default:'' }}" placeholder="YYYY-MM" pattern="\d{4}-\d{2}" title="At SURF"> <span class="p6-or">or P6 activity <input type="text" name="p6_needed_id" value="{{ plan.p6_needed_id|default:'' }}" placeholder="installation activity id" style="width:200px;"></span></div>
       {% endif %}
         <label class="pl-lab" for="pl-comment" style="align-self:start; padding-top:6px;">Comment</label><div><textarea id="pl-comment" name="comment" placeholder="shown in the production-status table — Markdown, <green>…</green>">{{ plan.comment|default:'' }}</textarea></div>
         <label class="pl-lab" for="pl-reason">Reason</label><div><input type="text" id="pl-reason" name="reason" style="width:100%;" placeholder="why the plan changes — kept with this version"></div>
@@ -92,8 +96,10 @@
   {% elif plan %}
     <dl class="pl-grid">
       <dt>Needed</dt><dd>{% if plan.needed is not None %}{{ plan.needed }}{% else %}—{% endif %}</dd>
-      <dt>Completed by</dt><dd>{{ resolved.completed_by|default:"—" }}{% if plan.p6_completed_id %} <span class="p6-id" title="{{ resolved.completed_src }}">P6 {{ plan.p6_completed_id }}</span>{% endif %}</dd>
-      <dt>Needed by</dt><dd>{{ resolved.needed_by|default:"—" }}{% if plan.p6_needed_id %} <span class="p6-id" title="{{ resolved.needed_src }}">P6 {{ plan.p6_needed_id }}</span>{% endif %}</dd>
+      <dt>First completed by</dt><dd>{{ resolved.first_completed_by|default:"—" }}{% if plan.p6_first_completed_id %} <span class="p6-id" title="{{ resolved.first_completed_src }}">P6 {{ plan.p6_first_completed_id }}</span>{% endif %}</dd>
+      <dt>First needed by</dt><dd>{{ resolved.first_needed_by|default:"—" }}{% if plan.p6_first_needed_id %} <span class="p6-id" title="{{ resolved.first_needed_src }}">P6 {{ plan.p6_first_needed_id }}</span>{% endif %}</dd>
+      <dt>Last completed by</dt><dd>{{ resolved.completed_by|default:"—" }}{% if plan.p6_completed_id %} <span class="p6-id" title="{{ resolved.completed_src }}">P6 {{ plan.p6_completed_id }}</span>{% endif %}</dd>
+      <dt>Last needed by</dt><dd>{{ resolved.needed_by|default:"—" }}{% if plan.p6_needed_id %} <span class="p6-id" title="{{ resolved.needed_src }}">P6 {{ plan.p6_needed_id }}</span>{% endif %}</dd>
       {% if resolved.p6_missing %}<dt></dt><dd class="p6-res p6-bad">&#9888; {{ resolved.p6_missing|join:"; " }}</dd>{% endif %}
       <dt>Comment</dt><dd>{{ plan.comment|clmd_block }}</dd>
     </dl>
@@ -106,7 +112,7 @@
   {% if history %}
   <h2 style="font-size:1.05rem; margin:0 0 8px;">History</h2>
   <table class="pl-hist">
-    <thead><tr><th>Version</th><th>When</th><th>By</th><th>Needed</th><th>Completed by</th><th>Needed by</th><th>Comment</th><th>Reason</th></tr></thead>
+    <thead><tr><th>Version</th><th>When</th><th>By</th><th>Needed</th><th>First completed by</th><th>First needed by</th><th>Last completed by</th><th>Last needed by</th><th>Comment</th><th>Reason</th></tr></thead>
     <tbody>
     {% for h in history %}
     <tr{% if forloop.first %} class="cur"{% endif %}>
@@ -114,6 +120,8 @@
       <td style="white-space:nowrap;">{{ h.when }}</td>
       <td>{{ h.plan.updated_by|default:"—" }}</td>
       <td class="num">{% if h.plan and h.plan.needed is not None %}{{ h.plan.needed }}{% else %}—{% endif %}</td>
+      <td>{% if h.plan.p6_first_completed_id %}<span class="p6-id">P6 {{ h.plan.p6_first_completed_id }}</span>{% else %}{{ h.plan.first_completed_by|default:"—" }}{% endif %}</td>
+      <td>{% if h.plan.p6_first_needed_id %}<span class="p6-id">P6 {{ h.plan.p6_first_needed_id }}</span>{% else %}{{ h.plan.first_needed_by|default:"—" }}{% endif %}</td>
       <td>{% if h.plan.p6_completed_id %}<span class="p6-id">P6 {{ h.plan.p6_completed_id }}</span>{% else %}{{ h.plan.completed_by|default:"—" }}{% endif %}</td>
       <td>{% if h.plan.p6_needed_id %}<span class="p6-id">P6 {{ h.plan.p6_needed_id }}</span>{% else %}{{ h.plan.needed_by|default:"—" }}{% endif %}</td>
       <td class="pl-cmt">{{ h.plan.comment|default:""|clmd_block }}</td>

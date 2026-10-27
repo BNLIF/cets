@@ -86,6 +86,11 @@
     padding: 0; cursor: pointer; text-decoration: underline; }
   .panel-meta dd.span { grid-column: 2 / -1; }
   .panel-meta .sep { color: var(--faint); margin: 0 6px; }
+  /* the Plan row: a small table, a row per status tracker (Chao 2026-10-27) */
+  .panel-meta table.pl-mini { border-collapse: collapse; font-size: 12px; margin: 1px 0 2px; }
+  .panel-meta .pl-mini th { font-family: var(--font-sans, inherit); font-weight: 600; font-size: 10.5px; letter-spacing: .03em; text-transform: uppercase; color: var(--faint); text-align: left; padding: 0 14px 2px 0; }
+  .panel-meta .pl-mini td { padding: 1px 14px 1px 0; white-space: nowrap; vertical-align: baseline; }
+  .panel-meta .pl-mini td.pl-none { color: var(--faint); }
   #sync-log, #node-sync-log { margin-top: 14px; background: #1c1812; color: #e7dfce; border-radius: 8px;
     padding: 12px; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap;
     max-height: 240px; overflow: auto; display: none; }
@@ -235,11 +240,16 @@
         <dt>Status</dt><dd class="span"><a href="{{ status_url }}" title="This consortium’s production-status table, read from HWDB">Production status</a>
           <span class="sep">·</span><a href="{{ list_url }}?next={{ request.path|urlencode }}" title="The component types the table reports, one per line (Production_list_{{ leaf.part_type_id }}.json in HWDB)">Component list</a></dd>
         {% endif %}
-        {# #200 (Anselmo): the type's production plan, kept on the type in HWDB (Production_plan_<type>.json, every version kept) — the cache here, the plan page to see the history or edit. Chao 2026-10-22: a type on two status trackers' lists has a row per tracker (its own plan, else the plain one). #}
-        {% if not is_consortium %}{% for r in type_plans %}{% if r.plan or can_edit_es %}{% with type_plan=r.plan %}
-        <dt>Plan</dt><dd class="span">{% if r.consortium %}<a href="{% url 'explore:production_status' r.consortium %}" title="This status tracker’s table">{{ r.name }}</a><span class="sep">·</span>{% endif %}{% if type_plan %}{% if type_plan.needed is not None %}needed {{ type_plan.needed }}{% endif %}{% if type_plan.completed_by %}{% if type_plan.needed is not None %}<span class="sep">·</span>{% endif %}completed by {{ type_plan.completed_by }}{% endif %}{% if type_plan.needed_by %}{% if type_plan.needed is not None or type_plan.completed_by %}<span class="sep">·</span>{% endif %}needed by {{ type_plan.needed_by }}{% endif %}{% if type_plan.needed is None and not type_plan.completed_by and not type_plan.needed_by %}no dates{% endif %}
-          <span class="sep">·</span><a href="{{ plan_url }}?{% if r.consortium %}for={{ r.consortium }}&amp;{% endif %}next={{ request.path|urlencode }}" title="The plan and its history{% if type_plan.updated %} — last set {{ type_plan.updated }}{% if type_plan.updated_by %} by {{ type_plan.updated_by }}{% endif %}{% endif %}">{% if can_edit_es %}Edit{% else %}History{% endif %}</a>{% else %}<a href="{{ plan_url }}?{% if r.consortium %}for={{ r.consortium }}&amp;{% endif %}next={{ request.path|urlencode }}" title="How many are needed and when — drawn on the dashboard and in the consortium’s production-status table">Set plan</a>{% endif %}</dd>
-        {% endwith %}{% endif %}{% endfor %}{% endif %}
+        {# #200 (Anselmo): the type's production plan, kept on the type in HWDB (Production_plan_<type>.json, every version kept) — the cache here, the plan page to see the history or edit. Chao 2026-10-27: one small table, a row per status tracker whose list carries the type (its own plan, else the plain one), the first batch's dates then the last batch's. #}
+        {% if not is_consortium and show_plans %}
+        <dt>Plan</dt><dd class="span"><table class="pl-mini">
+          <thead><tr>{% if type_plans|length > 1 %}<th></th>{% endif %}<th>Needed</th><th>First completed</th><th>First needed</th><th>Last completed</th><th>Last needed</th><th></th></tr></thead>
+          <tbody>
+          {% for r in type_plans %}{% if r.plan or can_edit_es %}{% with type_plan=r.plan %}
+          <tr>{% if type_plans|length > 1 %}<td><a href="{% url 'explore:production_status' r.consortium %}" title="This status tracker’s table">{{ r.name }}</a></td>{% endif %}{% if type_plan %}<td>{{ type_plan.needed|default_if_none:"—" }}</td><td>{{ type_plan.first_completed_by|default:"—" }}</td><td>{{ type_plan.first_needed_by|default:"—" }}</td><td>{{ type_plan.completed_by|default:"—" }}</td><td>{{ type_plan.needed_by|default:"—" }}</td><td><a href="{{ plan_url }}?{% if r.consortium %}for={{ r.consortium }}&amp;{% endif %}next={{ request.path|urlencode }}" title="The plan and its history{% if type_plan.updated %} — last set {{ type_plan.updated }}{% if type_plan.updated_by %} by {{ type_plan.updated_by }}{% endif %}{% endif %}">{% if can_edit_es %}Edit{% else %}History{% endif %}</a></td>{% else %}<td colspan="5" class="pl-none">no plan</td><td><a href="{{ plan_url }}?{% if r.consortium %}for={{ r.consortium }}&amp;{% endif %}next={{ request.path|urlencode }}" title="How many are needed and when — drawn on the dashboard and in the consortium’s production-status table">Set plan</a></td>{% endif %}</tr>
+          {% endwith %}{% endif %}{% endfor %}
+          </tbody></table></dd>
+        {% endif %}
     </dl>
     <script>document.querySelectorAll("form.type-class select").forEach(function (s) { s.addEventListener("change", function () { s.form.submit(); }); });</script>
     <pre id="system-sync-log"></pre>

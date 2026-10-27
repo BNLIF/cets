@@ -102,6 +102,14 @@ class ApplyTest(TestCase):
         self.assertEqual((plans[PDS]["completed_by"], plans[PDS]["needed_by"], plans[PDS]["p6_missing"]), ("2029-03-08", "2030-01-30", []))
         self.assertEqual(plans[PDS]["completed_src"], "P6 13122.A12812: Deliver to Storage (300 modules) (1500 total) #1 - CSU (Forecast)")
         self.assertEqual((plans[SIPM]["completed_by"], plans[SIPM]["completed_src"]), ("2026-12", ""))
+        self.assertEqual((plans[PDS]["first_completed_by"], plans[PDS]["first_needed_by"]), ("", ""))   # nothing set: empty
+        f = production.apply_p6({PDS: {**production.normalize_plan(PLAN), "p6_first_completed_id": "13122.A12742", "p6_first_needed_id": "gone",
+                                       "first_needed_by": "2027-01"}})[PDS]
+        self.assertEqual((f["first_completed_by"], f["first_needed_by"], f["p6_missing"]),
+                         ("2027-07-26", "2027-01", ["gone is not in the latest P6 schedule"]))   # the typed month is the fallback, as for the last pair
+        self.assertEqual(f["first_completed_src"], "P6 13122.A12742: Assemble and test 32 DAPHNE modules #1 (32 total) NIU (Forecast)")
+        fr = production.table([{"type": PDS}], {PDS: f}, {}, {}, date(2026, 10, 20))[0]
+        self.assertEqual((fr["first_completed_by"], fr["first_completed_past"], fr["first_needed_by"], fr["first_needed_src"]), ("26 Jul 2027", False, "Jan 2027", ""))
         self.assertEqual((plans["X"]["completed_by"], plans["X"]["needed_by"]), ("2026-12", "2028-05"))   # the typed months stay
         self.assertEqual(plans["X"]["p6_missing"], ["gone is not in the latest P6 schedule", "13122.A28866 has no date in P6 (Not found in P6)"])
         # the table: day precision, the source in the cell, the float still in whole months
@@ -150,15 +158,14 @@ class ApplyTest(TestCase):
         production.cache_plan("prod", PDS, {**production.normalize_plan(PLAN), "needed": 7}, consortium=PTID)
         url = navigation.leaf_path_for("prod", PDS)
         html = self.client.get(url).content.decode()
-        self.assertIn(f'<dt>Plan</dt><dd class="span"><a href="/hw/status/{PTID}/" title="This status tracker’s table">HD PDS</a><span class="sep">·</span>needed 7<span class="sep">·</span>completed by 2026-12', html)
-        self.assertIn('<dt>Plan</dt><dd class="span"><a href="/hw/status/Z00100600002/" title="This status tracker’s table">VD PDS</a><span class="sep">·</span>needed 48000<span class="sep">·</span>completed by 2026-12', html)
-        self.assertIn(f'<a href="/hw/plan/{PDS}/?for={PTID}&amp;next=', html)
-        self.assertIn(f'<a href="/hw/plan/{PDS}/?for=Z00100600002&amp;next=', html)
-        self.assertEqual(html.count("<dt>Plan</dt>"), 2)
+        self.assertIn('<thead><tr><th></th><th>Needed</th><th>First completed</th>', html)   # the tracker column
+        self.assertIn(f'<tr><td><a href="/hw/status/{PTID}/" title="This status tracker’s table">HD PDS</a></td><td>7</td><td>—</td><td>—</td><td>2026-12</td><td>2028-05</td><td><a href="/hw/plan/{PDS}/?for={PTID}&amp;next=', html)
+        self.assertIn(f'<tr><td><a href="/hw/status/Z00100600002/" title="This status tracker’s table">VD PDS</a></td><td>48000</td><td>—</td><td>—</td><td>2026-12</td><td>2028-05</td><td><a href="/hw/plan/{PDS}/?for=Z00100600002&amp;next=', html)
+        self.assertEqual(html.count("<dt>Plan</dt>"), 1)
         production.cache_plan("prod", PDS, None)
         html = self.client.get(url).content.decode()
-        self.assertIn('>VD PDS</a><span class="sep">·</span><a href="/hw/plan/' + PDS + '/?for=Z00100600002&amp;next=', html)   # no plan of its own, none plain: Set plan
-        self.assertIn(">Set plan</a></dd>", html)
+        self.assertIn('>VD PDS</a></td><td colspan="5" class="pl-none">no plan</td><td><a href="/hw/plan/' + PDS + '/?for=Z00100600002&amp;next=', html)   # no plan of its own, none plain: Set plan
+        self.assertIn('>Set plan</a></td></tr>', html)
 
 
 class UploadTest(TestCase):
@@ -282,14 +289,24 @@ class PlanPageTest(TestCase):
         self.assertIn('<select id="pl-done-p6" name="p6_completed_id" class="p6-pick" data-kind="prod" data-value="13122.A12812"></select>', html)
         self.assertIn('<select id="pl-need-p6" name="p6_needed_id" class="p6-pick" data-kind="install" data-value="old-id"></select>', html)
         self.assertIn('<input type="month" id="pl-done" name="completed_by" value="2026-12"', html)   # the fallback stays editable
+        # Anselmo 2026-10-26: the first batch's pair, P6 only — no month input beside them
+        self.assertIn('<label class="pl-lab" for="pl-fdone-p6" style="align-self:start; padding-top:6px;">First completed by</label><div class="p6-field"><select id="pl-fdone-p6" name="p6_first_completed_id" class="p6-pick" data-kind="prod" data-value=""></select><span class="p6-res" id="pl-fdone-res"></span><span class="p6-or">or month <input type="month" id="pl-fdone" name="first_completed_by" value=""', html)   # Chao 2026-10-27: a typed month too
+        self.assertIn('<select id="pl-fneed-p6" name="p6_first_needed_id" class="p6-pick" data-kind="install" data-value=""></select>', html)
+        self.assertIn('>Last completed by</label>', html)
+        self.assertIn('>Last needed by</label>', html)
         self.assertIn('<script id="p6-options" type="application/json">', html)
         self.assertIn('"id": "13122.A12812", "kind": "prod"', html)
         with m1, m2:
             r = self.client.post(self.URL, {"needed": "1500", "completed_by": "", "needed_by": "2029-05",
-                                            "p6_completed_id": "13122.A12812", "p6_needed_id": "13122.A12834", "reason": "from P6"})
+                                            "p6_completed_id": "13122.A12812", "p6_needed_id": "13122.A12834",
+                                            "p6_first_completed_id": "13122.A12742", "p6_first_needed_id": "13122.A12840",
+                                            "first_completed_by": "", "first_needed_by": "2027-01", "reason": "from P6"})
             self.assertEqual(r["Location"], self.URL)
         body = json.loads(api.post_component_type_image.call_args.args[1].getvalue())
         self.assertEqual((body["p6_completed_id"], body["p6_needed_id"], body["completed_by"]), ("13122.A12812", "13122.A12834", ""))
+        self.assertEqual((body["p6_first_completed_id"], body["p6_first_needed_id"], body["first_needed_by"]), ("13122.A12742", "13122.A12840", "2027-01"))
+        self.assertEqual(ProductionPlan.objects.get().p6_first_needed_id, "13122.A12840")
+        self.assertIn("p6 first completed id — → 13122.A12742", ActivityEvent.objects.get(kind="curation").summary)
         self.assertEqual(api.post_component_type_image.call_args.args[2], f"Production_plan_{PDS}.json")
         self.assertEqual(ProductionPlan.objects.get().p6_needed_id, "13122.A12834")
         self.assertIn("p6 needed id old-id → 13122.A12834", ActivityEvent.objects.get(kind="curation").summary)
@@ -297,8 +314,8 @@ class PlanPageTest(TestCase):
         api.get_component_type.return_value = {"data": {"roles": [{"id": 34, "name": "x"}]}}
         with mock.patch("explore.views._my_roles", return_value=[]), m1, m2:
             html = self.client.get(self.URL).content.decode()
-        self.assertIn('<dt>Completed by</dt><dd>2029-03-08 <span class="p6-id" title="P6 13122.A12812: Deliver to Storage (300 modules) (1500 total) #1 - CSU (Forecast)">P6 13122.A12812</span></dd>', html)
-        self.assertIn('<dt>Needed by</dt><dd>2028-05 <span class="p6-id" title="">P6 old-id</span></dd>', html)
+        self.assertIn('<dt>Last completed by</dt><dd>2029-03-08 <span class="p6-id" title="P6 13122.A12812: Deliver to Storage (300 modules) (1500 total) #1 - CSU (Forecast)">P6 13122.A12812</span></dd>', html)
+        self.assertIn('<dt>Last needed by</dt><dd>2028-05 <span class="p6-id" title="">P6 old-id</span></dd>', html)
         self.assertIn("&#9888; old-id is not in the latest P6 schedule", html)
         self.assertIn('<td><span class="p6-id">P6 13122.A12812</span></td>', html)   # the history names the id
 

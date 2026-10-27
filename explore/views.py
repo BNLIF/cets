@@ -231,6 +231,7 @@ def explore_view(request, trail=None):
     # status tracker when two list the type; the dashboard draws the first.
     type_plans = production.type_plans(inst, leaf.part_type_id) if leaf else []   # #206: P6 dates applied
     type_plan = type_plans[0]["plan"] if type_plans else None
+    show_plans = bool(type_plans) and (can_edit_es or any(r["plan"] for r in type_plans))   # Chao 2026-10-27: one small table
     empty_pids = []
     if is_shipping:
         # Shipping extras — boxes are regular components too (charts/breakdown
@@ -359,6 +360,7 @@ def explore_view(request, trail=None):
         "status_url": _rev(request, "explore:production_status", args=[leaf.part_type_id]) if is_consortium else "",
         "list_url": _rev(request, "explore:production_list", args=[leaf.part_type_id]) if is_consortium else "",
         "type_plans": type_plans,
+        "show_plans": show_plans,
         "plan_url": _rev(request, "explore:production_plan", args=[leaf.part_type_id]) if leaf else "",
             "empty_pids": empty_pids,
             # Deep-link the part type to this instance's FNAL web UI.
@@ -605,7 +607,8 @@ def explore_production_plan_view(request, part_type_id):
             needed = production._int(g("needed"))
             if needed is None:
                 errors.append("Needed must be a whole number.")
-        for k, lbl in (("completed_by", "Completed by"), ("needed_by", "Needed by")):
+        for k, lbl in (("completed_by", "Last completed by"), ("needed_by", "Last needed by"),
+                       ("first_completed_by", "First completed by"), ("first_needed_by", "First needed by")):
             if g(k) and not _MONTH_IN_RX.match(g(k)):
                 errors.append(f"{lbl} must be a month (YYYY-MM).")
         if errors:
@@ -615,6 +618,8 @@ def explore_production_plan_view(request, part_type_id):
         actor = activity.actor_of(request)
         plan = {"needed": needed, "completed_by": g("completed_by"), "needed_by": g("needed_by"),
                 "p6_completed_id": g("p6_completed_id")[:60], "p6_needed_id": g("p6_needed_id")[:60],
+                "first_completed_by": g("first_completed_by"), "first_needed_by": g("first_needed_by"),
+                "p6_first_completed_id": g("p6_first_completed_id")[:60], "p6_first_needed_id": g("p6_first_needed_id")[:60],
                 "comment": g("comment"), "updated_by": actor,
                 "updated": timezone.localdate().isoformat()}
         try:
@@ -628,7 +633,9 @@ def explore_production_plan_view(request, part_type_id):
         production.cache_plan(inst, part_type_id, plan, consortium=consortium)
         old = current or fallback or {}   # the change log reads against what the form was filled from
         changed = [f"{k.replace('_', ' ')} {old.get(k) if old.get(k) not in (None, '') else '—'} → {plan[k] if plan[k] not in (None, '') else '—'}"
-                   for k in ("needed", "completed_by", "needed_by", "p6_completed_id", "p6_needed_id") if (old.get(k) or None) != (plan[k] or None)]
+                   for k in ("needed", "completed_by", "needed_by", "p6_completed_id", "p6_needed_id",
+                             "first_completed_by", "first_needed_by", "p6_first_completed_id", "p6_first_needed_id")
+                   if (old.get(k) or None) != (plan[k] or None)]
         if (old.get("comment") or "") != plan["comment"]:
             changed.append("comment")
         activity.log(inst, ActivityEvent.KIND_CURATION,

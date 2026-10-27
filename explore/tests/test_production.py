@@ -149,7 +149,8 @@ class EngineTest(TestCase):
         self.assertEqual(production.normalize_plan({"needed": "1,500", "completed_by": "2027-03-20", "needed_by": "bad",
                                                     "comment": " x ", "updated_by": "c"}),
                          {"needed": 1500, "completed_by": "2027-03", "needed_by": "", "comment": "x",
-                          "p6_completed_id": "", "p6_needed_id": "", "updated_by": "c", "updated": ""})
+                          "p6_completed_id": "", "p6_needed_id": "", "first_completed_by": "", "first_needed_by": "",
+                          "p6_first_completed_id": "", "p6_first_needed_id": "", "updated_by": "c", "updated": ""})
         self.assertEqual(production.normalize_plan(None)["needed"], None)
         self.assertEqual(production.normalize_list({"rows": [SIPM.lower(), {"type": PDS, "label": " PDS "}, {"type": "nope"}, 3]}),
                          [{"type": SIPM, "label": ""}, {"type": PDS, "label": "PDS"}])
@@ -232,9 +233,10 @@ class StatusPageTest(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn("<h1>Test Production Status</h1>", html)
         self.assertIn('<table class="cl-table cl-gridlines ps-table">', html)   # the fill page's table look
-        self.assertIn("<th>Component</th><th>Type ID</th><th>Needed</th><th>In HWDB</th><th>Completed by</th><th>Needed by</th><th>Float (months)</th><th>Comment</th>", html)
-        self.assertIn(f'<th scope="row" class="cl-rowlab"><a href="/hw/dev/?node={SIPM}" title="the type’s page">SiPM boards (6 SiPMs)</a></th>', html)
-        self.assertIn(f'{SIPM}<a class="ps-plan" href="/hw/dev/plan/{SIPM}/?for={PTID}" title="The plan and its history — set 2026-10-08 by chaoz">plan</a>', html)
+        self.assertIn("<th>Component</th><th>Type ID</th><th>Needed</th><th>In HWDB</th><th>First completed by</th><th>First needed by</th><th>Last completed by</th><th>Last needed by</th><th>Float (months)</th><th>Comment</th>", html)
+        self.assertIn(f'<th scope="row" class="cl-rowlab"><a href="/hw/dev/?node={SIPM}" title="the type’s page">SiPM boards (6 SiPMs)</a>'
+                      f'<a class="ps-plan" href="/hw/dev/plan/{SIPM}/?for={PTID}" title="Edit the plan — set 2026-10-08 by chaoz">&#9998;</a></th>', html)   # Chao 2026-10-27: a pencil by the name, the Type ID cell bare
+        self.assertIn(f'<td class="cl-const ps-types">{SIPM}</td>', html)
         self.assertIn('<td class="cl-const ps-num">48,000</td>', html)
         self.assertIn('<td class="cl-const ps-num" title="3 available">3</td>', html)
         self.assertIn('<td class="cl-const">May 2028</td>', html)
@@ -242,8 +244,8 @@ class StatusPageTest(TestCase):
         self.assertIn('<span class="clmd-green"><strong>Near completion</strong></span>', html)   # Markdown + colours
         self.assertIn("<li>HPK all tested</li>", html)
         # the type without a plan: its name, dashes, a "set plan" link for the architect
-        self.assertIn('title="the type’s page">PDS module</a></th>', html)
-        self.assertIn(f'<a class="ps-plan" href="/hw/dev/plan/{PDS}/?for={PTID}" title="No plan on this type yet">set plan</a>', html)
+        self.assertIn('title="the type’s page">PDS module</a><a class="ps-plan"', html)
+        self.assertIn(f'<a class="ps-plan" href="/hw/dev/plan/{PDS}/?for={PTID}" title="No plan on this type yet — set one">&#9998;</a>', html)
         self.assertIn('<td class="cl-const ps-num ps-none">—</td>', html)
         self.assertIn('<td class="cl-const ps-num" title="no items in the mirror">0</td>', html)
         self.assertIn(f'href="/hw/dev/plan-list/{PTID}/?next=', html)   # ✎ Component list
@@ -291,8 +293,8 @@ class PlanPageTest(TestCase):
         self.assertIn('<input type="hidden" name="next" value="/hw/dev/status/Z00100600001/">', html)
         self.assertIn(f'<span class="mono">Production_plan_{SIPM}.json</span> on the type in HWDB · 2 versions · last set 2026-10-08 by chaoz', html)
         # the history: every version, newest first, with its values and the reason
-        self.assertIn('<tr class="cur">\n      <td class="num">2</td>\n      <td style="white-space:nowrap;">2026-10-08 10:00</td>\n      <td>chaoz</td>\n      <td class="num">48000</td>\n      <td>2026-12</td>\n      <td>2028-05</td>', html)
-        self.assertIn('<td class="num">1</td>\n      <td style="white-space:nowrap;">2026-10-01 09:00</td>\n      <td>hajime3</td>\n      <td class="num">48000</td>\n      <td>2026-12</td>\n      <td>2028-01</td>', html)
+        self.assertIn('<tr class="cur">\n      <td class="num">2</td>\n      <td style="white-space:nowrap;">2026-10-08 10:00</td>\n      <td>chaoz</td>\n      <td class="num">48000</td>\n      <td>—</td>\n      <td>—</td>\n      <td>2026-12</td>\n      <td>2028-05</td>', html)
+        self.assertIn('<td class="num">1</td>\n      <td style="white-space:nowrap;">2026-10-01 09:00</td>\n      <td>hajime3</td>\n      <td class="num">48000</td>\n      <td>—</td>\n      <td>—</td>\n      <td>2026-12</td>\n      <td>2028-01</td>', html)
         self.assertIn('<td class="pl-dim">schedule moved</td>', html)
         self.assertIn('<td class="pl-dim">initial</td>', html)
         self.assertNotIn("banner-warn", html)
@@ -318,7 +320,8 @@ class PlanPageTest(TestCase):
         self.assertEqual((a.args[0], a.args[2], a.kwargs["comments"]), (SIPM, f"Production_plan_{SIPM}.json", "FBK batch late"))
         body = json.loads(a.args[1].getvalue())
         self.assertEqual(body, {"needed": 50000, "completed_by": "2027-02", "needed_by": "2028-05", "comment": "orders placed",
-                                "p6_completed_id": "", "p6_needed_id": "",
+                                "p6_completed_id": "", "p6_needed_id": "", "first_completed_by": "", "first_needed_by": "",
+                                "p6_first_completed_id": "", "p6_first_needed_id": "",
                                 "updated_by": body["updated_by"], "updated": timezone.localdate().isoformat()})
         p = ProductionPlan.for_instance("dev").get(part_type_id=SIPM)
         self.assertEqual((p.needed, p.completed_by, p.comment), (50000, "2027-02", "orders placed"))
@@ -335,7 +338,7 @@ class PlanPageTest(TestCase):
             r = self.client.post(self.URL, {"needed": "ten", "completed_by": "2027-13-01"})
             html = self.client.get(r["Location"]).content.decode()
             self.assertIn("Needed must be a whole number.", html)
-            self.assertIn("Completed by must be a month (YYYY-MM).", html)
+            self.assertIn("Last completed by must be a month (YYYY-MM).", html)
             api.post_component_type_image.assert_not_called()
             # a blank form clears the plan (an empty version, the history keeps the old values)
             r = self.client.post(self.URL, {})
@@ -441,7 +444,7 @@ class DetectorPagesTest(TestCase):
         self.assertIn(f'<td class="num">2</td>\n        <td>2028-05</td>\n        <td class="num">{due}</td>', html)
         self.assertIn('<a class="hc-pill" role="tab" href="?c=Z00100600001" data-c="Z00100600001" data-d="other" aria-selected="true">Test Production Status</a>', html)
         self.assertIn('<div class="hc-cons" data-c="Z00100600001">', html)
-        self.assertIn('title="the type’s page">SiPM boards (6 SiPMs)</a></th>', html)   # the cached table, no HWDB call
+        self.assertIn('title="the type’s page">SiPM boards (6 SiPMs)</a><a class="ps-plan"', html)   # the cached table, no HWDB call
         self.assertIn('<td class="cl-const ps-num">48,000</td>', html)
         self.assertIn('<span class="hc-read">read ', html)
         self.assertIn('localStorage.setItem("hcCons", id)', html)
@@ -491,7 +494,8 @@ class TypePageTest(TestCase):
         html = self.client.get(self.url).content.decode()
         self.assertNotIn("data-plan-url", html)
         self.assertNotIn('class="chart-plan-use"', html)   # no HWDB plan: the browser-stored plan as before, no box
-        self.assertIn(">Set plan</a></dd>", html)   # no plan yet: anyone on a write instance may set one
+        self.assertIn(f'<tr><td colspan="5" class="pl-none">no plan</td><td><a href="/hw/plan/{SIPM}/?next=', html)   # no plan yet: anyone on a write instance may set one
+        self.assertIn('>Set plan</a></td></tr>', html)
         production.cache_plan("prod", SIPM, production.normalize_plan(PLAN))
         html = self.client.get(self.url).content.decode()
         self.assertIn('data-plan-total="48000" data-plan-done="2026-12" data-plan-need="2028-05" '
@@ -501,19 +505,22 @@ class TypePageTest(TestCase):
         self.assertEqual(html.count('class="chart-plan-use"'), 2)
         self.assertIn("untick “production plan” to set your own", html)
         self.assertIn("from the production plan", html)
-        self.assertIn('<dt>Plan</dt><dd class="span">needed 48000<span class="sep">·</span>completed by 2026-12<span class="sep">·</span>needed by 2028-05\n', html)
-        self.assertIn(f'<a href="/hw/plan/{SIPM}/?next=', html)
-        self.assertIn('title="The plan and its history — last set 2026-10-08 by chaoz">Edit</a></dd>', html)   # anyone on a write instance; the plan page applies the roles
+        # Chao 2026-10-27: the Plan row is a small table — needed, the first batch's two dates, the last batch's, the link
+        self.assertIn('<dt>Plan</dt><dd class="span"><table class="pl-mini">\n          <thead><tr><th>Needed</th><th>First completed</th><th>First needed</th><th>Last completed</th><th>Last needed</th><th></th></tr></thead>', html)
+        self.assertIn(f'<tr><td>48000</td><td>—</td><td>—</td><td>2026-12</td><td>2028-05</td><td><a href="/hw/plan/{SIPM}/?next=', html)
+        self.assertIn('title="The plan and its history — last set 2026-10-08 by chaoz">Edit</a></td></tr>', html)   # anyone on a write instance; the plan page applies the roles
+        production.cache_plan("prod", SIPM, {**production.normalize_plan(PLAN), "first_completed_by": "2026-03", "first_needed_by": "2026-09"})
+        self.assertIn('<tr><td>48000</td><td>2026-03</td><td>2026-09</td><td>2026-12</td><td>2028-05</td>', self.client.get(self.url).content.decode())
         production.cache_plan("prod", SIPM, None)
         html = self.client.get(self.url).content.decode()
-        self.assertIn(f'<dt>Plan</dt><dd class="span"><a href="/hw/plan/{SIPM}/?next=', html)
-        self.assertIn(">Set plan</a></dd>", html)
+        self.assertIn(f'<tr><td colspan="5" class="pl-none">no plan</td><td><a href="/hw/plan/{SIPM}/?next=', html)
+        self.assertIn('>Set plan</a></td></tr>', html)
         self.assertNotIn("data-plan-url", html)
         with self.settings(HWDB_WRITE_INSTANCES=["dev"]):
             html = self.client.get(self.url).content.decode()
             self.assertNotIn("<dt>Plan</dt>", html)   # read-only instance, no plan: no line
             production.cache_plan("prod", SIPM, production.normalize_plan(PLAN))
-            self.assertIn('by chaoz">History</a></dd>', self.client.get(self.url).content.decode())
+            self.assertIn('by chaoz">History</a></td></tr>', self.client.get(self.url).content.decode())
 
 
 class ConsortiumTypeTest(TestCase):

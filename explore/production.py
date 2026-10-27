@@ -40,7 +40,12 @@ _MONTH_RX = re.compile(r"^(\d{4})-(\d{2})(?:-\d{2})?$")   # a month, or a full d
 PTID_RX = re.compile(r"^[A-Z]\d{11}$")
 _MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-PLAN_KEYS = ("needed", "completed_by", "needed_by", "p6_completed_id", "p6_needed_id", "comment")
+PLAN_KEYS = ("needed", "completed_by", "needed_by", "p6_completed_id", "p6_needed_id",
+             "first_completed_by", "first_needed_by", "p6_first_completed_id", "p6_first_needed_id", "comment")   # the first-batch pair (Anselmo 2026-10-26)
+P6_ID_KEYS = (("p6_completed_id", "completed_by", "completed_src", "prod"),
+              ("p6_needed_id", "needed_by", "needed_src", "install"),
+              ("p6_first_completed_id", "first_completed_by", "first_completed_src", "prod"),
+              ("p6_first_needed_id", "first_needed_by", "first_needed_src", "install"))
 HISTORY_MAX = 12   # versions the plan page loads (one fetch each)
 _DATE_RX = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
 
@@ -106,6 +111,10 @@ def normalize_plan(raw) -> dict:
             "needed_by": _month(raw.get("needed_by")),
             "p6_completed_id": str(raw.get("p6_completed_id") or "").strip()[:60],
             "p6_needed_id": str(raw.get("p6_needed_id") or "").strip()[:60],
+            "first_completed_by": _month(raw.get("first_completed_by")),
+            "first_needed_by": _month(raw.get("first_needed_by")),
+            "p6_first_completed_id": str(raw.get("p6_first_completed_id") or "").strip()[:60],
+            "p6_first_needed_id": str(raw.get("p6_first_needed_id") or "").strip()[:60],
             "comment": str(raw.get("comment") or "").strip(),
             "updated_by": str(raw.get("updated_by") or "").strip(),
             "updated": str(raw.get("updated") or "").strip()}
@@ -188,6 +197,8 @@ def cache_plan(inst: str, part_type_id: str, plan: dict | None, consortium: str 
         defaults={"needed": plan["needed"], "completed_by": plan["completed_by"],
                   "needed_by": plan["needed_by"], "comment": plan["comment"],
                   "p6_completed_id": plan.get("p6_completed_id") or "", "p6_needed_id": plan.get("p6_needed_id") or "",
+                  "first_completed_by": plan.get("first_completed_by") or "", "first_needed_by": plan.get("first_needed_by") or "",
+                  "p6_first_completed_id": plan.get("p6_first_completed_id") or "", "p6_first_needed_id": plan.get("p6_first_needed_id") or "",
                   "updated_by": plan["updated_by"][:150], "updated": plan["updated"][:40]})
 
 
@@ -202,6 +213,8 @@ def cache_list(inst: str, part_type_id: str, rows: list[dict] | None) -> None:
 def _plan_dict(p: ProductionPlan) -> dict:
     return {"needed": p.needed, "completed_by": p.completed_by, "needed_by": p.needed_by,
             "p6_completed_id": p.p6_completed_id, "p6_needed_id": p.p6_needed_id,
+            "first_completed_by": p.first_completed_by, "first_needed_by": p.first_needed_by,
+            "p6_first_completed_id": p.p6_first_completed_id, "p6_first_needed_id": p.p6_first_needed_id,
             "comment": p.comment, "updated_by": p.updated_by, "updated": p.updated}
 
 
@@ -268,13 +281,15 @@ def apply_p6(plans: dict[str, dict]) -> dict[str, dict]:
     activity id, ``completed_by`` / ``needed_by`` become that activity's
     date (``YYYY-MM-DD``) and ``completed_src`` / ``needed_src`` say which
     activity; an id the last upload lacks, or one without a date, leaves
-    the typed month and is listed in ``p6_missing``."""
-    acts = p6.lookup({p.get(k) for p in plans.values() for k in ("p6_completed_id", "p6_needed_id")})
+    the typed month and is listed in ``p6_missing``. The first-batch pair
+    (``first_completed_by`` / ``first_needed_by``, Anselmo 2026-10-26)
+    resolves the same way."""
+    acts = p6.lookup({p.get(k[0]) for p in plans.values() for k in P6_ID_KEYS})
     out = {}
     for tid, p in plans.items():
-        q = {**p, "completed_src": "", "needed_src": "", "p6_missing": []}
-        for k_id, k_date, k_src, kind in (("p6_completed_id", "completed_by", "completed_src", "prod"),
-                                          ("p6_needed_id", "needed_by", "needed_src", "install")):
+        q = {**p, "completed_src": "", "needed_src": "", "first_completed_src": "", "first_needed_src": "", "p6_missing": [],
+             "first_completed_by": p.get("first_completed_by") or "", "first_needed_by": p.get("first_needed_by") or ""}
+        for k_id, k_date, k_src, kind in P6_ID_KEYS:
             aid = p.get(k_id) or ""
             if not aid:
                 continue
@@ -314,7 +329,8 @@ def names(inst: str, type_ids: list[str]) -> dict[str, str]:
 
 # ---- the table --------------------------------------------------------------
 
-COLUMNS = ["Type ID", "Needed", "In HWDB", "Completed by", "Needed by", "Float (months)", "Comment"]
+COLUMNS = ["Type ID", "Needed", "In HWDB", "First completed by", "First needed by", "Last completed by", "Last needed by",
+           "Float (months)", "Comment"]   # Anselmo 2026-10-26: the first batch's two dates before the last batch's
 
 
 def month_label(v) -> str:
@@ -355,12 +371,17 @@ def table(rows: list[dict], plans: dict[str, dict], cnt: dict[str, dict],
         p = plans.get(tid) or {}
         c = cnt.get(tid) or {"n": 0, "by_status": []}
         done, need = p.get("completed_by") or "", p.get("needed_by") or ""
-        fl = months_between(done, need)
+        fdone, fneed = p.get("first_completed_by") or "", p.get("first_needed_by") or ""
+        fl = months_between(done, need)   # the float: the last batch's pair
         out.append({
             "type": tid, "label": r.get("label") or nm.get(tid) or tid,
             "has_plan": tid in plans,
             "needed": "" if p.get("needed") is None else f"{p['needed']:,}",
             "n": f"{c['n']:,}", "by_status": ", ".join(f"{n} {st}" for st, n in c["by_status"]),
+            "first_completed_by": month_label(fdone), "first_completed_past": bool(_ym(fdone)) and _ym(fdone) <= now,
+            "first_completed_src": p.get("first_completed_src") or "",
+            "first_needed_by": month_label(fneed), "first_needed_past": bool(_ym(fneed)) and _ym(fneed) <= now,
+            "first_needed_src": p.get("first_needed_src") or "",
             "completed_by": month_label(done), "completed_past": bool(_ym(done)) and _ym(done) <= now,
             "completed_src": p.get("completed_src") or "",
             "needed_by": month_label(need), "needed_past": bool(_ym(need)) and _ym(need) <= now,

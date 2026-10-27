@@ -117,11 +117,12 @@ def compare(rows: list[dict]) -> dict | None:
     missing = [k for k in old if k not in new]
     changed = sum(1 for k, r in new.items() if k in old and old[k].date != r["date"])
     used = set()
-    for prod, inst in ProductionPlan.objects.values_list("p6_completed_id", "p6_needed_id"):
-        if prod:
-            used.add((prod, P6Activity.KIND_PROD))
-        if inst:
-            used.add((inst, P6Activity.KIND_INSTALL))
+    for prod, inst, fprod, finst in ProductionPlan.objects.values_list("p6_completed_id", "p6_needed_id",
+                                                                        "p6_first_completed_id", "p6_first_needed_id"):
+        for aid, kind in ((prod, P6Activity.KIND_PROD), (inst, P6Activity.KIND_INSTALL),
+                          (fprod, P6Activity.KIND_PROD), (finst, P6Activity.KIND_INSTALL)):
+            if aid:
+                used.add((aid, kind))
     plan_missing = sorted(k[0] for k in missing if k in used)
     return {"n_old": len(old), "n_new": len(new), "missing": len(missing), "plan_missing": plan_missing,
             "changed": changed, "warn": bool(plan_missing) or len(missing) > len(old) / 5}
