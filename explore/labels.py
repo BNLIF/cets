@@ -25,6 +25,7 @@ import json
 import logging
 import re
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from threading import local
@@ -37,6 +38,9 @@ from reportlab.graphics.shapes import Drawing
 from reportlab.lib import units
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas as rl_canvas
+
+from . import itemsedit
+from .models import HwdbComponentEvent
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +180,7 @@ STANDARD_FIELDS = ["part_id", "external_id", "part_name", "part_type_id", "seria
                    "status.name", "created", "creator.name", "comments", "specs_version"]
 BAR_ASPECT = 628 / 178   # HWDB's barcode PNG after the utility's crop — its natural shape
 FIT_MARGIN = 0.05        # fitted text stays this fraction of the label width clear of the edges
-ITEMS_MAX = 1000         # labels per run — one full HWDB read per item
+ITEMS_MAX = 1000         # labels per run — one full HWDB read per distinct item
 UPLOAD_MAX = 5 * 1024 * 1024
 
 _SUB = re.compile(r"\$\{([^}]*)\}")
@@ -251,6 +255,42 @@ def fetch_items(pids: list[str], make_api) -> list[dict]:
 
     with ThreadPoolExecutor(max_workers=4, initializer=_init) as pool:
         return list(pool.map(lambda pid: get_item(tl.api, pid), pids))
+
+
+_TYPED_RANGE = re.compile(r"^([A-Za-z]\d{11})-\d*\.\.\d*$")
+
+
+def resolve_list(inst: str, ptid: str, text: str | None) -> dict:
+    """#208 (Cathode via Hajime 2026-11-02): the paste box as a label list —
+    every entry in list order with repeats kept (an item pasted twice
+    prints twice), a full PID of any type taken by its own prefix from the
+    mirror; a bare suffix, a serial or a range is the page's type, as
+    ``itemsedit.resolve`` reads it, one entry at a time. ``pids`` carries
+    the repeats; ``repeats`` = ``[(pid, n), …]`` for n > 1; ``types`` = the
+    distinct type ids; ``unmatched`` / ``shared`` as the resolver's. A
+    range prefixed with a type id (``Z00100300005-00001..00005``) is that
+    type's."""
+    pids, unmatched, shared = [], [], []
+    mirror = HwdbComponentEvent.for_instance(inst)
+    for e in itemsedit._SEP.split(text or ""):
+        if not e:
+            continue
+        if itemsedit._PID.match(e):
+            pid = e.upper()
+            if mirror.filter(part_id=pid).exists():
+                pids.append(pid)
+            else:
+                unmatched.append(e)
+            continue
+        m = _TYPED_RANGE.match(e)
+        res = itemsedit.resolve(inst, m.group(1).upper() if m else ptid, e)
+        pids += [r.part_id for r in res["rows"]]
+        unmatched += res["unmatched"]
+        shared += res["shared"]
+    counts = Counter(pids)
+    return {"pids": pids, "unmatched": unmatched, "shared": shared,
+            "repeats": [(pid, n) for pid, n in counts.items() if n > 1],
+            "types": sorted({pid.rsplit("-", 1)[0] for pid in pids})}
 
 
 def field_paths(data: dict, prefix: str = "", depth: int = 3) -> list[str]:

@@ -5635,7 +5635,8 @@ def explore_items_edit_view(request, part_type_id):
 def explore_labels_view(request, part_type_id):
     """#175 (Hajime 2026-09-24): QR / bar-code label sheets for a list of the
     type's items — the utility's ``hwdb-labels`` in the Explorer. The list
-    is the Edit items paste box (PIDs, serials, ranges), an uploaded CSV /
+    is the Edit items paste box (PIDs — of any type, repeated to print again
+    (#208) — serials, ranges), an uploaded CSV /
     Excel column (``step=file`` returns it as text for the box) or rows
     ticked in the type's mirror table (``step=rows`` lists them); the layout
     is edited on the page and posted as JSON. ``step=preview`` renders the
@@ -5704,8 +5705,8 @@ def explore_labels_view(request, part_type_id):
                 labels.sheet_template(lay["sheet"])     # a custom sheet — ValueError says what is wrong
     except ValueError as e:
         return JsonResponse({"error": f"Sheet: {e}"}, status=400)
-    res = itemsedit.resolve(inst, part_type_id, post.get("items"))
-    pids = [r.part_id for r in res["rows"]]
+    res = labels.resolve_list(inst, part_type_id, post.get("items"))
+    pids = res["pids"]
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
     if step == "preview":
         data, fields = None, []
@@ -5727,16 +5728,20 @@ def explore_labels_view(request, part_type_id):
                              "fields": fields or labels.STANDARD_FIELDS,
                              "unmatched": res["unmatched"],
                              "shared": [sn for sn, _ in res["shared"]],
+                             "repeats": res["repeats"], "types": len(res["types"]),
                              "over": max(0, len(pids) - labels.ITEMS_MAX)})
     if not pids:
         return JsonResponse({"error": "No items matched the list."}, status=400)
     pids = pids[:labels.ITEMS_MAX]
+    distinct = list(dict.fromkeys(pids))   # a repeated item is read once, printed each time
     try:
-        items = labels.fetch_items(
-            pids, lambda: FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer))
+        records = labels.fetch_items(
+            distinct, lambda: FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer))
     except requests.RequestException as e:
         return JsonResponse({"error": f"Couldn’t read the items from HWDB — {_hwdb_error_detail(e)}"},
                             status=502)
+    by_pid = dict(zip(distinct, records))
+    items = [by_pid[pid] for pid in pids]
     pdf = labels.build_pdf(layouts, items, ui, intro=post.get("intro") == "1", shift_mm=shift)
     resp = HttpResponse(pdf, content_type="application/pdf")
     resp["Content-Disposition"] = f'attachment; filename="labels_{part_type_id}.pdf"'

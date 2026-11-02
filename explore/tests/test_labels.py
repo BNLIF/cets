@@ -21,6 +21,7 @@ from explore.models import HwdbComponentEvent
 from hwdb.fnal.bearer import FnalLinkRequired
 
 T = "D00400300001"
+T2 = "D00400300002"
 URL = f"/hw/dev/labels/{T}/"
 UI = "https://dbweb2.fnal.gov:8443/cdbdev"
 
@@ -208,6 +209,31 @@ class ViewTest(TestCase):
         self.assertIn("specifications.Vbd", j["fields"])
         self.assertTrue(j["png"])
         api.get_component.assert_called_once_with(f"{T}-00002")
+
+    def test_list_keeps_repeats_and_takes_other_types_pids(self):
+        """#208: an entry pasted twice prints twice, in list order; a full PID
+        of another type comes from the mirror by its own prefix; a suffix,
+        serial or range stays the page's type."""
+        HwdbComponentEvent.objects.create(instance="dev", part_type_id=T2, part_id=f"{T2}-00007",
+                                          serial_number="X-7", status="Unknown", status_id=0)
+        res = labels.resolve_list("dev", T, f"2, 2 HPK-1\n{T2}-00007 9 {T2}-00008 00002..00003 {T2}-00001..00009")
+        self.assertEqual(res["pids"], [f"{T}-00002", f"{T}-00002", f"{T}-00001", f"{T2}-00007",
+                                       f"{T}-00002", f"{T}-00003", f"{T2}-00007"])
+        self.assertEqual(res["repeats"], [(f"{T}-00002", 3), (f"{T2}-00007", 2)])
+        self.assertEqual(res["types"], [T, T2])
+        self.assertEqual(res["unmatched"], ["9", f"{T2}-00008"])
+        api = _api()
+        p1, p2 = _mocked(api)
+        with p1, p2:
+            r = self.client.post(URL, {"step": "preview", "items": f"3 3 {T2}-00007",
+                                       "layouts": json.dumps([labels.LAYOUTS["QR-Letter-2x4-Avery"]])})
+            j = r.json()
+            self.assertEqual((j["n"], j["types"], j["repeats"]), (3, 2, [[f"{T}-00003", 2]]))
+            r = self.client.post(URL, {"step": "pdf", "items": f"1 1 2 2 {T2}-00007",
+                                       "layouts": json.dumps([labels.LAYOUTS["QR-Letter-2x2-Avery"]])})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(_pages(r.content)), 2)   # 5 labels on 4-per-sheet pages
+        self.assertEqual(api.get_component.call_count, 4)   # preview 1 + pdf 3 distinct
 
     def test_preview_without_items_uses_a_sample(self):
         api = _api()

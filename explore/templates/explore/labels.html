@@ -92,7 +92,7 @@
         <div class="es-card">
           <h2>Items</h2>
           <div class="cl-field">
-            <label class="cl-lab" for="items">Items <span class="cl-hint">(PIDs, serial numbers or a range like 00120..06000 — one per line, or comma / space separated)</span></label>
+            <label class="cl-lab" for="items">Items <span class="cl-hint">(PIDs of any type, serial numbers or a range like 00120..06000 or Z00100300005-00120..06000 — one per line, or comma / space separated; a repeated entry prints again)</span></label>
             <textarea id="items" name="items">{{ items_text }}</textarea>
           </div>
           <div class="cl-field">
@@ -443,11 +443,12 @@
         $("lb-prev").style.width = Math.round(tpl["label size"][0] / inch * 96 * 1.6) + "px";
         cap.className = "lb-cap";
         cap.textContent = res.j.first ? "First item " + res.j.first + " on " + tpl["label size"].join(" × ") + " " + tpl.units + " labels" : "No item yet — a sample record on " + tpl["label size"].join(" × ") + " " + tpl.units + " labels";
-        var parts = [res.j.n + " item" + (res.j.n === 1 ? "" : "s") + " matched"];
+        var parts = [res.j.n + " label" + (res.j.n === 1 ? "" : "s") + (res.j.types > 1 ? " · items of " + res.j.types + " types" : "")];
         if (res.j.over) parts.push("only the first " + LIMIT + " print");
+        if (res.j.repeats.length) parts.push("repeated: " + res.j.repeats.map(function (r) { return r[0] + " ×" + r[1]; }).join(", "));
         if (res.j.unmatched.length) parts.push("not in the mirror: " + res.j.unmatched.join(", "));
         if (res.j.shared.length) parts.push("serial on several items, paste the PID: " + res.j.shared.join(", "));
-        st.textContent = parts.join(" · "); st.className = "lb-status" + (res.j.unmatched.length || res.j.shared.length ? " lb-warn" : "");
+        st.textContent = parts.join(" · "); st.className = "lb-status" + (res.j.unmatched.length || res.j.shared.length || res.j.repeats.length ? " lb-warn" : "");
         $("lb-pdf").disabled = !res.j.n;
         if (res.j.fields && res.j.fields.join() !== FIELDS.join()) {
           FIELDS = res.j.fields;
