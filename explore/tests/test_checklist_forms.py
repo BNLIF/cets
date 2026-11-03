@@ -890,6 +890,31 @@ class ChecklistEditorTest(TestCase):
             self.client.post(CONFIG_PAGE, {"cl_name": "ok", "config_json": "{nope"})
         api.post_component_type_image.assert_not_called()
 
+    def test_save_refuses_names_hwdb_takes_no_position_by(self):
+        """Hajime 2026-11-03 (#209): a linking map's slot label or a link
+        field's position with parentheses never reaches HWDB; the same label
+        on a map that doesn't link is just a label."""
+        api = _api()
+        m1, m2 = _mocked(api)
+        slot = {"label": "1 (H2 type)", "x": 1, "y": 2}
+        linking = {"name": "A", "test_type_name": "T", "sections": [{"title": "S", "fields": [
+            {"label": "Map", "type": "imagemap", "link": True, "slots": [slot]}]}]}
+        plain = {"name": "A", "test_type_name": "T", "sections": [{"title": "S", "fields": [
+            {"label": "Map", "type": "imagemap", "slots": [slot]}]}]}
+        link = {"name": "A", "test_type_name": "T", "sections": [{"title": "S", "fields": [
+            {"label": "L", "type": "link", "position": "1 (H2 type)"}]}]}
+        with m1, m2:
+            resp = self.client.post(CONFIG_PAGE, {"cl_name": "ok", "config_json": json.dumps(linking)}, follow=True)
+            self.assertIn("can’t be HWDB positions", resp.content.decode())
+            self.assertIn("1 (H2 type)", resp.content.decode())
+            self.client.post(CONFIG_PAGE, {"cl_name": "ok", "config_json": json.dumps(link)})
+            api.post_component_type_image.assert_not_called()
+            self.client.post(CONFIG_PAGE, {"cl_name": "ok", "config_json": json.dumps(plain)})
+            api.post_component_type_image.assert_called_once()
+            html = self.client.get(CONFIG_PAGE).content.decode()
+        self.assertIn("badPositionNames()", html)
+        self.assertIn('class="ec-hint ff-posbad"', html)
+
     def test_preview_renders_the_runtime_form(self):
         api = _api()
         m1, m2 = _mocked(api)

@@ -461,6 +461,7 @@
     </div>
     <div class="ec-row g-link" style="display:none;">
       <input class="ff-position" placeholder="functional position (blank = first free slot for the child&#8217;s type)" title="on an item&#8217;s page the field links live (link/unlink button) and a named position pre-fills its current occupant">
+      <span class="ec-hint ff-posbad" style="color:var(--bad); display:none;"></span>
     </div>
     <div class="ec-row g-tbllink" style="display:none;">
       <label class="ec-check ff-tbllink-w" title="every plain cell takes a PID (or a serial number resolved to one) and the items are linked as sub-components — by the button under the table, or at submit"><input type="checkbox" class="ff-tbllink"> link the cells as sub-components</label>
@@ -654,6 +655,7 @@
     $(".ff-expect", r).value = typeof f.expect === "string" && f.expect !== "preassigned" ? f.expect : "";
     $(".ff-into", r).value = f.into || "";
     syncMapPos(r);
+    syncLinkPos(r);
     syncImgStatus(r);
     syncType(r);
     syncMap(r);
@@ -673,6 +675,30 @@
     }).filter(Boolean);
   }
   var IMG_PROXY = "{% url 'explore:shipment_image' image_id='IMGID000' %}";
+  // Hajime 2026-11-03: what HWDB takes as a position name — a linking map's
+  // slot labels and a link field's position are warned as they are typed,
+  // and Save is held while one is off ("1 (H2 type)" is refused by HWDB).
+  var POS_OK = /^[A-Za-z0-9 _.-]{1,40}$/;
+  var POS_RULE = "letters, digits, spaces, _ . - only, no parentheses";
+  function badPositionNames() {
+    var bad = [];
+    $$(".clc-fld").forEach(function (r) {
+      var t = $(".ff-type", r).value;
+      if (t === "imagemap" && $(".ff-maplink", r).checked) {
+        readSlots(r).forEach(function (s) { if (!POS_OK.test(s.label)) bad.push(s.label); });
+      } else if (t === "link") {
+        var pos = $(".ff-position", r).value.trim();
+        if (pos && !POS_OK.test(pos)) bad.push(pos);
+      }
+    });
+    return bad;
+  }
+  function syncLinkPos(r) {
+    var pos = $(".ff-position", r).value.trim(), box = $(".ff-posbad", r);
+    var off = pos && !POS_OK.test(pos);
+    box.style.display = off ? "" : "none";
+    box.textContent = off ? "HWDB won’t take “" + pos + "” as a position name — " + POS_RULE + "." : "";
+  }
   // #133: the type's functional positions, fetched once, listed under a
   // linking imagemap with the slots that match them ticked
   var posP = null;
@@ -690,14 +716,17 @@
     box.style.display = "";
     positions().then(function (ps) {
       var labels = readSlots(r).map(function (s) { return s.label; });
-      if (!ps.length) { box.textContent = "This type defines no positions — nothing can be linked."; return; }
+      var bad = labels.filter(function (l) { return !POS_OK.test(l); });
+      var warn = bad.length ? '<span style="color:var(--bad);">HWDB won’t take ' + bad.map(function (l) { return "“" + esc(l) + "”"; }).join(", ") +
+        " as a position name — " + POS_RULE + ".</span><br>" : "";
+      if (!ps.length) { box.innerHTML = warn + "This type defines no positions — nothing can be linked."; return; }
       var named = ps.map(function (p) {
         var hit = labels.indexOf(p.position) !== -1;
         return '<span style="white-space:nowrap;' + (hit ? "" : "opacity:.6;") + '">' +
           (hit ? "&#10003; " : "") + esc(p.position) + ' <span class="mono">' + esc(p.child_type_id) + "</span></span>";
       });
       var other = labels.filter(function (l) { return !ps.some(function (p) { return p.position === l; }); });
-      box.innerHTML = "Positions: " + named.join(" &middot; ") +
+      box.innerHTML = warn + "Positions: " + named.join(" &middot; ") +
         (other.length ? "<br>First free position for the scanned item's type: " + other.map(esc).join(", ") : "");
     });
   }
@@ -735,9 +764,14 @@
     var ta = $(".ff-slots", r), n = readSlots(r).length + 1;
     var lab = prompt("Slot label", "Slot " + n);
     if (lab === null) return;
+    // on a linking map the label is a position name — say so before it lands
+    while ($(".ff-maplink", r).checked && lab.trim() && !POS_OK.test(lab.trim())) {
+      lab = prompt("HWDB won’t take “" + lab.trim() + "” as a position name — " + POS_RULE + ".\nSlot label", lab);
+      if (lab === null) return;
+    }
     ta.value = (ta.value.trim() ? ta.value.replace(/\s+$/, "") + "\n" : "")
                + ((lab.trim() || "Slot " + n) + " @ " + x + ", " + y);
-    syncMap(r); refresh();
+    syncMap(r); syncMapPos(r); refresh();
   }
   // the zoomed placement dialog — full-resolution drawing, slots shown live
   // ---- #125: the layout dialog — a schematic of a grid section. Items
@@ -1755,6 +1789,7 @@
       syncMap(e.target.closest(".clc-fld"));
       syncMapPos(e.target.closest(".clc-fld"));
     }
+    if (e.target.classList && e.target.classList.contains("ff-position")) syncLinkPos(e.target.closest(".clc-fld"));
     if (e.target.classList && (e.target.classList.contains("ff-tbllink") || e.target.classList.contains("ff-expectc"))) syncType(e.target.closest(".clc-fld"));
     if (e.target.classList && e.target.classList.contains("ff-maplink")) {
       syncMapPos(e.target.closest(".clc-fld"));
@@ -1871,7 +1906,13 @@
     render(i === "" ? {sections: [{title: "Section 1", fields: []}]} : tpls[parseInt(i, 10)].cfg);
     if (!$("#f-name").value && i !== "") $("#f-name").value = tpls[parseInt(i, 10)].title;
   });
-  document.getElementById("clc-save").addEventListener("submit", function () {
+  document.getElementById("clc-save").addEventListener("submit", function (e) {
+    var bad = badPositionNames();
+    if (bad.length) {
+      e.preventDefault();
+      alert("HWDB won’t take these as position names (" + POS_RULE + "): " + bad.join(", "));
+      return;
+    }
     $("#save-name").value = $("#f-name").value.trim();
     $("#save-json").value = JSON.stringify(collect());
   });

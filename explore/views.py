@@ -4686,6 +4686,26 @@ CHECKLIST_SKELETON = {
 }
 
 
+def _bad_position_names(cfg: dict) -> list[str]:
+    """Hajime 2026-11-03 (#209): the names a checklist would hand HWDB as
+    functional positions — a linking image map's slot labels, a link field's
+    position — that HWDB would refuse ("1 (H2 type)"). The editor warns as
+    they are typed; this is the backstop for a schema pasted as JSON."""
+    bad = []
+    for sec in cfg.get("sections") or []:
+        for f in (sec.get("fields") or []) if isinstance(sec, dict) else []:
+            if not isinstance(f, dict):
+                continue
+            names = []
+            if f.get("type") == "imagemap" and f.get("link"):
+                names = [str(sl.get("label") or "") for sl in f.get("slots") or []
+                         if isinstance(sl, dict)]
+            elif f.get("type") == "link" and f.get("position"):
+                names = [str(f["position"])]
+            bad += [n for n in names if not re.fullmatch(_POSITION_NAME, n)]
+    return bad
+
+
 @login_not_required
 @fnal_login_required
 def explore_checklist_config_view(request, part_type_id):
@@ -4728,6 +4748,11 @@ def explore_checklist_config_view(request, part_type_id):
             return redirect(back)
         if not isinstance(cfg, dict):
             messages.error(request, "The schema must be a JSON object.")
+            return redirect(back)
+        bad = _bad_position_names(cfg)
+        if bad:
+            messages.error(request, "These names can’t be HWDB positions — letters, digits, "
+                                    "spaces, _ . - only, no parentheses: " + ", ".join(bad))
             return redirect(back)
         fname = f"Checklist_{part_type_id}_{cl_name}.json"
         try:
