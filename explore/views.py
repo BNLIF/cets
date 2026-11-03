@@ -2792,6 +2792,14 @@ def explore_scan_outcome_view(request):
                                    for r in rows]})
 
 
+# What HWDB takes as a position name (Hajime 2026-11-03, #209: "1 (H2 type)"
+# was refused by HWDB, "1 H2 type" accepted). The same pattern sits on the
+# page's name inputs so the browser refuses it before the round trip.
+_POSITION_NAME = r"[A-Za-z0-9 _.-]{1,40}"
+_POSITION_NAME_RULE = ("Position names take letters, digits, spaces, _ . - only, up to 40 "
+                       "characters — HWDB rejects parentheses and other punctuation.")
+
+
 def _next_position_names(existing, prefix: str, count: int) -> list[str]:
     """``count`` new position names ``{prefix}{n}``, numbering on from the
     highest existing ``{prefix}<number>`` so re-runs never collide."""
@@ -3051,8 +3059,8 @@ def _clone_box_type(request, api, inst, part_type_id, record, connectors, page_u
 @login_not_required
 @fnal_login_required
 def explore_box_type_view(request, part_type_id):
-    """Edit a box type's positions (issue #69): bulk-add connector slots
-    ("N positions named PREFIX# accepting type X"), rename / retarget /
+    """Edit a type's positions (issue #69; any type, not just boxes): add
+    connector slots (one name as typed, or a numbered batch), rename / retarget /
     delete an existing one, or clone the type — all via a complete-envelope
     ``PATCH component-types/{id}``. HWDB forbids deleting or renaming a
     position that a linked item occupies; those refusals surface verbatim.
@@ -3062,7 +3070,7 @@ def explore_box_type_view(request, part_type_id):
     """
     inst = instance_of(request)
     if inst not in settings.HWDB_WRITE_INSTANCES:
-        return HttpResponseForbidden("Box-type editing is not enabled here.")
+        return HttpResponseForbidden("Editing positions is not enabled here.")
     page_url = _rev(request, "explore:box_type", args=[part_type_id])
     try:
         bearer = mint_for(request)
@@ -3106,8 +3114,8 @@ def explore_box_type_view(request, part_type_id):
             rest = {k: v for k, v in connectors.items() if k != pos}
             _patch_type_positions(request, api, part_type_id, record, rest,
                                   f"Deleted position {pos}.")
-        elif not re.fullmatch(r"[A-Za-z0-9 _.-]{1,40}", new_name):
-            messages.error(request, "Position name must be 1–40 plain characters.")
+        elif not re.fullmatch(_POSITION_NAME, new_name):
+            messages.error(request, _POSITION_NAME_RULE)
         elif not re.fullmatch(r"[A-Z]\d{11}", child):
             messages.error(request, f"“{child}” doesn’t look like a component-type id.")
         elif new_name != pos and new_name in connectors:
@@ -3122,25 +3130,30 @@ def explore_box_type_view(request, part_type_id):
         return redirect(page_url)
 
     if request.method == "POST":
-        prefix = (request.POST.get("prefix") or "").strip()
+        # Hajime 2026-11-03 (#209): one position takes the name exactly as
+        # typed — "H2 Type" is "H2 Type", not "H2 Type1"; only a batch
+        # numbers on. A name the type already has is refused, not renumbered.
+        name = (request.POST.get("name") or "").strip()
         child = (request.POST.get("child_type") or "").strip().upper()
         try:
             count = int(request.POST.get("count") or "0")
         except ValueError:
             count = 0
-        if not re.fullmatch(r"[A-Za-z0-9 _.-]{1,40}", prefix):
-            messages.error(request, "Position prefix must be 1–40 plain characters.")
+        if not re.fullmatch(_POSITION_NAME, name):
+            messages.error(request, _POSITION_NAME_RULE)
         elif not 1 <= count <= 200:
             messages.error(request, "Count must be between 1 and 200.")
         elif not re.fullmatch(r"[A-Z]\d{11}", child):
             messages.error(request, f"“{child}” doesn’t look like a component-type id.")
+        elif count == 1 and name in connectors:
+            messages.error(request, f"The type already has a position named “{name}”.")
         else:
-            new_names = _next_position_names(connectors, prefix, count)
+            new_names = [name] if count == 1 else _next_position_names(connectors, name, count)
             _patch_type_positions(
                 request, api, part_type_id, record,
                 {**connectors, **{n: child for n in new_names}},
-                f"Added {count} position(s) {new_names[0]}…{new_names[-1]} "
-                f"accepting {child}.")
+                f"Added position {name} accepting {child}." if count == 1 else
+                f"Added {count} positions {new_names[0]}…{new_names[-1]} accepting {child}.")
         return redirect(page_url)
 
     # Names for the accepted child types, from the mirror where known.
@@ -3159,6 +3172,7 @@ def explore_box_type_view(request, part_type_id):
             ({"name": pos, "child": ctid, "child_name": child_names.get(ctid, "")}
              for pos, ctid in connectors.items()), key=lambda p: p["name"]),
         "child_options": [{"id": c, "name": child_names.get(c, "")} for c in child_ids],
+        "position_names": sorted(connectors),
         "leaf_path": navigation.leaf_path_for(inst, part_type_id) if leaf else None,
         "can_edit": can_edit, "can_clone": can_clone,
     })

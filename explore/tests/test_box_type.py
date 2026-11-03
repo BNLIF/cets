@@ -158,7 +158,7 @@ class BoxTypeViewTest(TestCase):
             self.assertIn("Editing positions needs the HWDB administrator flag — your account lacks it", html)
             self.assertIn('name="op" value="save" disabled', html)
             self.assertIn('class="pk-submit" disabled>Add to the type in HWDB', html)
-            resp = self.client.post(PAGE, {"prefix": "FEMB", "count": "1", "child_type": "D05700300001"})
+            resp = self.client.post(PAGE, {"name": "FEMB", "count": "1", "child_type": "D05700300001"})
         self.assertEqual(resp.status_code, 403)
         api.patch_component_type.assert_not_called()
 
@@ -166,7 +166,7 @@ class BoxTypeViewTest(TestCase):
         api = _api()
         m1, m2 = _mocked(api)
         with m1, m2:
-            self.client.post(PAGE, {"prefix": "FEMB", "count": "3",
+            self.client.post(PAGE, {"name": "FEMB", "count": "3",
                                     "child_type": "d05700300001"})
         payload = api.patch_component_type.call_args.args[1]
         self.assertEqual(payload["connectors"], {
@@ -180,20 +180,50 @@ class BoxTypeViewTest(TestCase):
         api = _api()
         m1, m2 = _mocked(api)
         with m1, m2:
-            self.client.post(PAGE, {"prefix": "FEMB", "count": "0",
+            self.client.post(PAGE, {"name": "FEMB", "count": "0",
                                     "child_type": "D05700300001"})
-            self.client.post(PAGE, {"prefix": "FEMB", "count": "1",
+            self.client.post(PAGE, {"name": "FEMB", "count": "1",
                                     "child_type": "not-a-type"})
-            self.client.post(PAGE, {"prefix": "", "count": "1",
+            self.client.post(PAGE, {"name": "", "count": "1",
                                     "child_type": "D05700300001"})
+            # Hajime 2026-11-03 (#209): HWDB refuses parentheses — so do we, by name
+            resp = self.client.post(PAGE, {"name": "1 (H2 type)", "count": "1",
+                                           "child_type": "D05700300001"}, follow=True)
         api.patch_component_type.assert_not_called()
+        self.assertIn("HWDB rejects parentheses", resp.content.decode())
+
+    def test_one_position_takes_the_name_as_typed(self):
+        """#209: count 1 adds "H2 Type", not "H2 Type1"; a name the type has
+        is refused rather than renumbered."""
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PAGE, {"name": "H2 Type", "count": "1",
+                                    "child_type": "D05700300001"})
+            payload = api.patch_component_type.call_args.args[1]
+            self.assertEqual(payload["connectors"], {
+                "FEB1": "D05700300001", "FEB2": "D05700300001", "H2 Type": "D05700300001"})
+            api.patch_component_type.reset_mock()
+            resp = self.client.post(PAGE, {"name": "FEB1", "count": "1",
+                                           "child_type": "D05700300001"}, follow=True)
+        api.patch_component_type.assert_not_called()
+        self.assertIn("already has a position named “FEB1”", resp.content.decode())
+
+    def test_page_carries_names_for_the_duplicate_check(self):
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('id="bt-names"', html)
+        self.assertIn('["FEB1", "FEB2"]', html)
+        self.assertIn('pattern="[A-Za-z0-9 _.\\-]{1,40}"', html)
 
     def test_hwdb_rejection_is_reported(self):
         api = _api()
         api.patch_component_type.return_value = {"status": "ERROR", "data": "no permission"}
         m1, m2 = _mocked(api)
         with m1, m2:
-            resp = self.client.post(PAGE, {"prefix": "FEMB", "count": "1",
+            resp = self.client.post(PAGE, {"name": "FEMB", "count": "1",
                                            "child_type": "D05700300001"},
                                     follow=True)
         self.assertIn("no permission", resp.content.decode())

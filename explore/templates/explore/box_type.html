@@ -37,6 +37,8 @@
   .pk-scroll { max-height: 340px; overflow-y: auto; overflow-x: auto; border: 1px solid var(--rule); border-radius: var(--r-sm); }
   .pk-empty { color: var(--faint); font-size: 13px; padding: 6px 2px; }
   .pk-hint { font-size: 11.5px; color: var(--faint); }
+  .bt-dup { font-size: 11.5px; color: var(--bad, #a33); margin: 6px 0 0; }
+  .bt-dup:empty { display: none; }
   .bt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
   .bt-grid label { font-size: 12px; color: var(--faint); display: flex; flex-direction: column; gap: 3px; }
   .bt-grid input { font: inherit; font-size: 13px; color: var(--ink); background: var(--surface);
@@ -52,15 +54,15 @@
   <div class="pk-crumbs">
     <a href="{% url 'explore:shipments' %}">Shipments</a>
     {% if leaf_path %}<span class="sep">›</span><a href="{{ leaf_path }}">{{ type_name }}</a>{% endif %}
-    <span class="sep">›</span>Box positions
+    <span class="sep">›</span>Positions
   </div>
 
   {% for m in messages %}<div class="pk-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
 
   <h1>{{ type_name }} — <span class="mono">{{ part_type_id }}</span></h1>
   {% if not can_edit or not can_clone %}<div class="banner banner-warn" style="margin: 0 0 14px;">&#9888; Type-level change. Editing positions needs the HWDB administrator flag{% if not can_edit %} — your account lacks it{% endif %}; cloning into a new type needs the architect flag{% if not can_clone %} — your account lacks it{% endif %}. <a href="{% url 'explore:docs_permissions' %}" target="_blank" rel="noopener">Who may write what &#x2197;</a></div>{% endif %}
-  <p class="pk-sub">The named positions every box of this type has, and which component type each accepts.
-    Changes apply to the type — every existing and future box of it.</p>
+  <p class="pk-sub">The named positions every item of this type has, and which component type each accepts.
+    Changes apply to the type — every existing and future item of it.</p>
 
   <div class="pk-group">
     <h2>Current positions ({{ positions|length }})</h2>
@@ -71,8 +73,10 @@
         <tbody>
         {% for p in positions %}
           <tr>
-            <td><input form="pos-f{{ forloop.counter }}" name="new_name" class="mono"
-                       required maxlength="40" value="{{ p.name }}"></td>
+            <td><input form="pos-f{{ forloop.counter }}" name="new_name" class="mono bt-name"
+                       required maxlength="40" pattern="[A-Za-z0-9 _.\-]{1,40}" data-own="{{ p.name }}"
+                       title="Letters, digits, spaces, _ . - only — HWDB rejects parentheses and other punctuation"
+                       value="{{ p.name }}"></td>
             <td><input form="pos-f{{ forloop.counter }}" name="child_type" class="mono"
                        required pattern="[A-Za-z]\d{11}" list="bt-child-options" value="{{ p.child }}"
                        title="{{ p.child_name|default:'accepting component type' }}"></td>
@@ -84,7 +88,7 @@
                 <button type="submit" class="bt-mini" name="op" value="save"{% if not can_edit %} disabled{% endif %}
                         title="Rename the position and/or change what it accepts">Save</button>
                 <button type="submit" class="bt-mini bt-danger" name="op" value="delete" formnovalidate{% if not can_edit %} disabled{% endif %}
-                        onclick="return confirm('Delete position {{ p.name }} from every box of this type?')">Delete</button>
+                        onclick="return confirm('Delete position {{ p.name }} from every item of this type?')">Delete</button>
               </form>
             </td>
           </tr>
@@ -92,11 +96,12 @@
         </tbody>
       </table>
     </div>
+    <p class="bt-dup" id="bt-dup-edit"></p>
     <p class="pk-hint" style="margin:10px 0 0;">Save renames a position or changes what it accepts; Delete
-      removes it — each applies to the type, so every box of it changes shape. HWDB does not allow
+      removes it — each applies to the type, so every item of it changes shape. HWDB does not allow
       deleting or renaming a position that any linked item occupies; those edits will be rejected.</p>
     {% else %}
-    <div class="pk-empty">This type has no positions yet — boxes of it can’t hold anything until some are added.</div>
+    <div class="pk-empty">This type has no positions yet — items of it can’t hold sub-components until some are added.</div>
     {% endif %}
   </div>
 
@@ -104,8 +109,10 @@
     {% csrf_token %}
     <h2>Add positions</h2>
     <div class="bt-grid">
-      <label>Name prefix
-        <input name="prefix" required maxlength="40" placeholder="e.g. FEMB" value="{{ request.POST.prefix }}"></label>
+      <label>Name
+        <input name="name" class="bt-name" required maxlength="40" pattern="[A-Za-z0-9 _.\-]{1,40}"
+               title="Letters, digits, spaces, _ . - only — HWDB rejects parentheses and other punctuation"
+               placeholder="e.g. H2 Type, or FEMB for a batch" value="{{ request.POST.name }}"></label>
       <label>How many
         <input name="count" type="number" required min="1" max="200" value="1"></label>
       <label>Accepting component type
@@ -115,9 +122,10 @@
     <datalist id="bt-child-options">
       {% for c in child_options %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
     </datalist>
-    <p class="pk-hint" style="margin:10px 0 0;">Names continue the numbering: with FEMB1…FEMB10 present,
-      adding 2 × “FEMB” creates FEMB11 and FEMB12. The accepting type can be any component type id, not
-      just ones already used.</p>
+    <p class="bt-dup" id="bt-dup-add"></p>
+    <p class="pk-hint" style="margin:10px 0 0;">One position takes the name exactly as typed. More than one
+      numbers it: with FEMB1…FEMB10 present, 2 × “FEMB” adds FEMB11 and FEMB12. Letters, digits, spaces,
+      _ . - only — HWDB rejects parentheses. The accepting type can be any component type id.</p>
     <button type="submit" class="pk-submit"{% if not can_edit %} disabled{% endif %}>Add to the type in HWDB</button>
   </form>
 
@@ -126,7 +134,7 @@
     <h2>Clone into a new type</h2>
     <p style="font-size:13px; color:var(--ink); margin:0 0 10px;">Creates a NEW component type in the same
       subsystem, copying this type’s {{ positions|length }} position(s), spec datasheet, manufacturers and
-      roles. Use it when a differently-shaped box is needed and this type’s boxes should keep their shape.</p>
+      roles. Use it when a differently-shaped type is needed and this type’s items should keep their shape.</p>
     <div class="bt-grid">
       <label>New type name
         <input name="new_name" required maxlength="100" placeholder="e.g. CE Shipping Box (large)"></label>
@@ -139,4 +147,27 @@
     <button type="submit" class="pk-submit"{% if not can_clone %} disabled{% endif %}>Create new type in HWDB</button>
   </form>
 </div>
+{{ position_names|json_script:"bt-names" }}
+<script>
+// A name the type already has is flagged as it is typed, and the button held
+// until it changes (Hajime 2026-11-03): the server refuses it too.
+(function () {
+  var names = JSON.parse(document.getElementById('bt-names').textContent);
+  var countBox = document.querySelector('input[name="count"]');
+  document.querySelectorAll('.bt-name').forEach(function (box) {
+    var form = box.form, btn = form.querySelector('button[value="save"], .pk-submit');
+    var note = document.getElementById(box.name === 'name' ? 'bt-dup-add' : 'bt-dup-edit');
+    var wasOff = btn.disabled;
+    function check() {
+      var v = box.value.trim();
+      var batch = box.name === 'name' && Number(countBox.value) > 1;
+      var dup = v && v !== box.dataset.own && !batch && names.indexOf(v) >= 0;
+      note.textContent = dup ? 'The type already has a position named “' + v + '”.' : '';
+      btn.disabled = wasOff || dup;
+    }
+    box.addEventListener('input', check);
+    if (box.name === 'name') countBox.addEventListener('input', check);
+  });
+})();
+</script>
 {% endblock %}
