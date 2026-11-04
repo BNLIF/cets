@@ -1324,6 +1324,37 @@ class ItemCreateTest(TestCase):
         self.assertEqual(ChildMintSetting.objects.get(part_type_id=PTID).children,
                          [{"type_id": self.CHILD, "status_id": 120, "qaqc_uploaded": True, "certified_qaqc": True}])
 
+    def test_a_position_accepting_several_types_offers_the_choice(self):
+        """#210: such a position is a row of its own with a type picker; the
+        pick mints that type for it, and remembering keeps the pick by
+        position."""
+        from explore.models import ChildMintSetting
+        other = "D00900100003"
+        api = self._api_children()
+        api.get_component_type.return_value["data"]["connectors"] = {"A": self.CHILD, "M": f"{self.CHILD},{other}"}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(NEW_PAGE).content.decode()
+        self.assertIn('name="mint_child" value="pos:M">', html)
+        self.assertIn(f'<select name="type_pos:M"><option value="{self.CHILD}" selected>', html)
+        self.assertIn(f'<option value="{other}">', html)
+        with m1, m2, mock.patch("explore.views._is_architect", return_value=True):
+            self.client.post(NEW_PAGE, {"institution_id": "128", "mint_child": ["pos:M"],
+                                        "type_pos:M": other, "status_pos:M": "120", "remember_children": "1"})
+        creates = api.create_component.call_args_list
+        self.assertEqual([c.args[0] for c in creates], [PTID, other])
+        self.assertEqual(creates[1].args[1]["serial_number"], f"{NEW_PID}-M")
+        api.patch_subcomponents.assert_called_once_with(NEW_PID, {
+            "component": {"part_id": NEW_PID},
+            "subcomponents": {"A": None, "M": f"{other}-00001"}})
+        self.assertEqual(ChildMintSetting.objects.get(part_type_id=PTID).children,
+                         [{"type_id": other, "status_id": 120, "qaqc_uploaded": False,
+                           "certified_qaqc": False, "position": "M"}])
+        with m1, m2:
+            html = self.client.get(NEW_PAGE).content.decode()
+        self.assertIn('name="mint_child" value="pos:M" checked>', html)
+        self.assertIn(f'<option value="{other}" selected>', html)
+
     def test_default_birth_is_waiting_on_qaqc_with_flags_off(self):
         api = self._api_children()
         m1, m2 = _mocked(api)

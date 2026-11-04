@@ -4953,7 +4953,7 @@ def explore_item_create_view(request, part_type_id):
     # QA/QC flags it is born with; the remembered choice (architects,
     # "remember for this type") comes pre-filled
     connectors = (type_record.get("data") or {}).get("connectors") or {}
-    remembered = {d["type_id"]: d for d in (
+    remembered = {(f"pos:{d['position']}" if d.get("position") else d["type_id"]): d for d in (
         ChildMintSetting.for_instance(inst).filter(part_type_id=part_type_id)
         .values_list("children", flat=True).first() or []) if isinstance(d, dict)}
     child_types = _child_types(inst, connectors, remembered)
@@ -4971,11 +4971,12 @@ def explore_item_create_view(request, part_type_id):
                                     "belongs to.")
             return redirect(page_url)
         mint = [_child_choice(request.POST, c) for c in child_types
-                if c["type_id"] in request.POST.getlist("mint_child")]
+                if c["key"] in request.POST.getlist("mint_child")]
         if is_arch and request.POST.get("remember_children"):
             ChildMintSetting.objects.update_or_create(
                 instance=inst, part_type_id=part_type_id,
                 defaults={"children": [{k: c[k] for k in ("type_id", "status_id", "qaqc_uploaded", "certified_qaqc")}
+                                       | ({"position": c["positions"][0]} if c.get("choices") else {})
                                        for c in mint],
                           "updated_by": activity.actor_of(request)})
         if not has_data and may_define and request.POST.get("define_type_data"):
@@ -5097,38 +5098,47 @@ def _status_id(raw) -> int:
 
 def _child_types(inst, connectors: dict, remembered: dict) -> list[dict]:
     """#167: a type's positions grouped by the child type they accept —
-    ``[{type_id, name, positions, checked, status_id, qaqc_uploaded,
+    ``[{key, type_id, name, positions, checked, status_id, qaqc_uploaded,
     certified_qaqc}]`` in position order, pre-filled from the remembered
     choice (else unticked, Waiting on QA/QC, flags off); untyped positions
-    and those accepting several types (#210) are skipped (nothing
-    unambiguous to mint for them)."""
+    are skipped (nothing to mint for them). A position accepting several
+    types (#210) is a row of its own, keyed ``pos:<name>``, with ``choices``
+    — the form asks which type to mint, the remembered one preselected."""
     names = dict(HierarchyNode.for_instance(inst)
                  .filter(level=HierarchyNode.LEVEL_TYPE, part_type_id__in=parts.child_types(connectors))
                  .values_list("part_type_id", "name"))
     out: dict[str, dict] = {}
     for pos, v in sorted(connectors.items(), key=lambda kv: str(kv[0])):
         types = parts.accepted_types(v)
-        if len(types) != 1:
+        if not types:
             continue
-        tid = types[0]
-        if tid not in out:
-            r = remembered.get(tid) or {}
-            out[tid] = {"type_id": tid, "name": names.get(tid) or tid, "positions": [],
-                        "checked": tid in remembered,
+        key = types[0] if len(types) == 1 else f"pos:{pos}"
+        if key not in out:
+            r = remembered.get(key) or {}
+            tid = r["type_id"] if r.get("type_id") in types else types[0]
+            out[key] = {"key": key, "type_id": tid, "name": names.get(tid) or tid, "positions": [],
+                        "checked": key in remembered,
                         "status_id": r.get("status_id", NEW_ITEM_STATUS),
                         "qaqc_uploaded": bool(r.get("qaqc_uploaded")),
                         "certified_qaqc": bool(r.get("certified_qaqc"))}
-        out[tid]["positions"].append(pos)
+            if len(types) > 1:
+                out[key]["choices"] = [{"id": t, "name": names.get(t) or t} for t in types]
+        out[key]["positions"].append(pos)
     return list(out.values())
 
 
 def _child_choice(post, c: dict) -> dict:
-    """The form's choice for one child type: status (a known id, else the
-    default) and the two QA/QC flags."""
-    tid = c["type_id"]
-    return {**c, "status_id": _status_id(post.get(f"status_{tid}")),
-            "qaqc_uploaded": post.get(f"up_{tid}") == "1",
-            "certified_qaqc": post.get(f"cert_{tid}") == "1"}
+    """The form's choice for one row: status (a known id, else the default),
+    the two QA/QC flags and, for a position accepting several types (#210),
+    which of them to mint."""
+    k = c["key"]
+    out = {**c, "status_id": _status_id(post.get(f"status_{k}")),
+           "qaqc_uploaded": post.get(f"up_{k}") == "1",
+           "certified_qaqc": post.get(f"cert_{k}") == "1"}
+    pick = next((o for o in c.get("choices", ()) if o["id"] == (post.get(f"type_{k}") or "").upper()), None)
+    if pick:
+        out["type_id"], out["name"] = pick["id"], pick["name"]
+    return out
 
 
 EMPTY_TEMPLATE_MSG = ("its Item Specs template is empty, so HWDB can’t create items of it — "
