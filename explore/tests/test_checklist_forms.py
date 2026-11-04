@@ -2373,6 +2373,29 @@ class ImageMapTest(TestCase):
         self.assertIn('Board 1 <span class="cl-hint">D00300100009</span>', html)
         self.assertEqual(html.count("data-type-id="), 1)   # Board 2 has no guard at all
 
+    def test_a_slot_may_guard_several_types(self):
+        """Hajime 2026-11-05 (#210): "Slot 1 @ 31.8, 37.6, D…33, D…34" —
+        the slot's own Type ID takes a comma list, kept comma-joined; a PID
+        of either stands, and the form guards the input with the list."""
+        f = self._schema(slots=[{"label": "Slot 1", "x": 31.8, "y": 37.6, "type_id": "d00300100009, D00300100002"},
+                                {"label": "Slot 2", "x": 2, "y": 2, "type_id": "D00300100009, nope"}])["sections"][0]["fields"][0]
+        self.assertEqual([s.get("type_id") for s in f["slots"]], ["D00300100009,D00300100002", None])
+        schema = {"name": "t", "test_type_name": "T", "sections": [{"title": "S", "fields": [f]}]}
+        key = f["key"]
+        for pid in ("D00300100009-00001", "D00300100002-00001"):
+            self.assertEqual(checklistforms.parse(schema, {f"{key}-m0": pid}), {"S": {"Boards": {"Slot 1": pid}}})
+        self.assertEqual(checklistforms.parse(schema, {f"{key}-m0": "D00300100001-00001"}), {})
+        user = get_user_model().objects.create_user("n3", "n3@n.io", "pw")
+        self.client.force_login(user)
+        page = dict(SCHEMA)
+        page["sections"] = [{"title": "S", "fields": [{"type": "imagemap", "label": "Boards", "image_id": "img-1",
+                             "slots": [{"label": "Slot 1", "x": 1, "y": 1, "type_id": "D00300100009,D00300100002"}]}]}]
+        m1, m2 = _mocked(_api(schema=page))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('data-type-id="D00300100009,D00300100002"', html)
+        self.assertIn('data-serial-url="/hw/dev/serial/D00300100009,D00300100002/"', html)
+
     def test_form_renders_dots_and_slot_inputs(self):
         user = get_user_model().objects.create_user("n", "n@n.io", "pw")
         self.client.force_login(user)

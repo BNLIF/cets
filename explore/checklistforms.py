@@ -98,6 +98,15 @@ def load(api, part_type_id: str, name: str):
     return normalize(cfg, name), f"Schema: {row['image_name']}"
 
 
+def _type_ids(text) -> str:
+    """A Type ID, or several comma/space-separated (#210) — uppercased,
+    deduped and comma-joined; "" when empty or any one is malformed."""
+    tids = [t for t in re.split(r"[\s,]+", str(text or "").strip().upper()) if t]
+    if tids and all(re.fullmatch(r"[A-Z]\d{11}", t) for t in tids):
+        return ",".join(dict.fromkeys(tids))
+    return ""
+
+
 def _num(v):
     try:
         return float(v)
@@ -446,9 +455,8 @@ def _norm_field(f: dict) -> dict | None:
         # linking table (#153) to every plain cell.
         # Several, comma-separated, take any of them (#210: a position may
         # accept several types; Hajime 2026-11-05) — kept comma-joined.
-        tids = [t for t in re.split(r"[\s,]+", str(f.get("type_id") or "").strip().upper()) if t]
-        if tids and all(re.fullmatch(r"[A-Z]\d{11}", t) for t in tids):
-            out["type_id"] = ",".join(dict.fromkeys(tids))
+        if tids := _type_ids(f.get("type_id")):
+            out["type_id"] = tids
             # #149: ``sn`` — a regex a value must match in full to be looked
             # up as the serial number of an item of that type (and swapped
             # for its PID); anything else is a plain type mismatch. Nothing
@@ -481,8 +489,7 @@ def _norm_field(f: dict) -> dict | None:
                 continue
             seen.add(lab)
             slot = {"label": lab, "x": round(x, 2), "y": round(y, 2)}
-            stid = str(s.get("type_id") or "").strip().upper()
-            if re.fullmatch(r"[A-Z]\d{11}", stid):
+            if stid := _type_ids(s.get("type_id")):   # several too (Hajime 2026-11-05)
                 slot["type_id"] = stid
             slots.append(slot)
         out["slots"] = slots
