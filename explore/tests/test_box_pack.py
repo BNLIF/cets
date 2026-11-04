@@ -480,6 +480,24 @@ class PackPostTest(TestCase):
         payload = api.patch_subcomponents.call_args.args[1]
         self.assertEqual(payload["subcomponents"]["Slot 2"], GOOD)
 
+    def test_position_accepting_several_types_takes_either(self):
+        """#210: HWDB's v1 record lists a position's several types joined
+        with commas; an item of any of them lands there, and one pick takes
+        the position for the batch."""
+        api = _api()
+        api.get_component_type.return_value["data"]["connectors"] = {
+            "Slot 1": CHILD_TYPE, "Any": f"{DOC_TYPE},{CHILD_TYPE}"}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(PACK, {"pid": [GOOD]})
+            api.patch_subcomponents.assert_called_once_with(BOX, {
+                "component": {"part_id": BOX},
+                "subcomponents": {"Slot 1": IN_BOX, "Any": GOOD}})
+            api.patch_subcomponents.reset_mock()
+            resp = self.client.post(PACK, {"pid": [GOOD, BAD_QC]}, follow=True)
+        api.patch_subcomponents.assert_not_called()
+        self.assertIn("No free positions left", resp.content.decode())
+
     def test_more_items_than_free_slots_is_rejected(self):
         api = _api()
         m1, m2 = _mocked(api)

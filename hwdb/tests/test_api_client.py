@@ -122,6 +122,31 @@ class FnalDbApiClientSessionTest(TestCase):
         self.assertEqual(kwargs["json"], payload)
 
 
+class ConnectorsV2Test(TestCase):
+    """#210: positions are written through the v2 connectors endpoint —
+    same instance base with the version segment swapped, PUT for the
+    complete set, PATCH to merge — with ``part_type_id`` in the body."""
+
+    def test_put_and_patch_hit_v2_with_the_body(self):
+        api = FnalDbApiClient("https://example/cdbdev/api/v1", "b")
+        fake_resp = mock.Mock()
+        fake_resp.ok = True
+        fake_resp.json.return_value = {"status": "OK", "data": {}}
+        conns = {"my sub 1": ["D00599800033", "Z00100300080"]}
+        with mock.patch.object(api.session, "request", return_value=fake_resp) as req:
+            api.put_component_type_connectors("D00599800012", conns)
+            api.patch_component_type_connectors("D00599800012", conns)
+        (put, patch) = [c.args for c in req.call_args_list]
+        self.assertEqual(put[:2], ("PUT", "https://example/cdbdev/api/v2/component-types/D00599800012/connectors"))
+        self.assertEqual(patch[:2], ("PATCH", "https://example/cdbdev/api/v2/component-types/D00599800012/connectors"))
+        for c in req.call_args_list:
+            self.assertEqual(c.kwargs["json"], {"part_type_id": "D00599800012", "connectors": conns})
+        # v1 reads are untouched
+        with mock.patch.object(api.session, "request", return_value=fake_resp) as req:
+            api.get_component_type("D00599800012")
+        self.assertEqual(req.call_args.args[1], "https://example/cdbdev/api/v1/component-types/D00599800012")
+
+
 class FnalDbApiClientMemoTest(TestCase):
     """#172: ``memo=True`` answers a repeated type / sub-components GET from
     the client's own memo — a checklist page with four supercell tables

@@ -126,7 +126,7 @@ without a page reload. {% endcomment %}
                 <option value="">move to…</option>{% for p in c.move_to %}<option>{{ p }}</option>{% endfor %}</select>{% endif %}</td>
             {% else %}
             <td class="pk-slot-empty">— empty</td>
-            <td class="pk-act">{% if not is_box %}<input name="pid-{{ c.position }}" placeholder="{{ c.type_id }}-00000" autocomplete="off" autocapitalize="characters" spellcheck="false" title="Link a specific item into “{{ c.position }}”"><button class="pk-unlink" name="place" value="{{ c.position }}" title="Link the typed item into “{{ c.position }}”">Link here</button>{% endif %}</td>
+            <td class="pk-act">{% if not is_box %}<input name="pid-{{ c.position }}" placeholder="{{ c.types.0 }}-00000" autocomplete="off" autocapitalize="characters" spellcheck="false" title="Link a specific item into “{{ c.position }}”"><button class="pk-unlink" name="place" value="{{ c.position }}" title="Link the typed item into “{{ c.position }}”">Link here</button>{% endif %}</td>
             {% endif %}
           </tr>
         {% endfor %}

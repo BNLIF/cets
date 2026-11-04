@@ -22,6 +22,7 @@ import zipfile
 from datetime import date, datetime
 
 from .checklistforms import STATUS_OPTIONS
+from .parts import accepted_types
 
 UPLOAD_MAX = 20 * 1024 * 1024
 RETENTION_DAYS = 3      # a job goes this long after its last change; users rarely delete (Chao 2026-09-24)
@@ -834,9 +835,10 @@ def apply_row(api, ptid: str, row: dict, template: dict, connectors: dict,
             elif _PID.match(v):
                 wanted[pos] = v.upper()
             else:
-                hits = serial_lookup(connectors[pos], v)
+                types = accepted_types(connectors[pos])   # #210: a position may take several
+                hits = [h for t in types for h in serial_lookup(t, v)]
                 if len(hits) != 1:
-                    raise SheetError(f"{pos}: serial number {v} matches {len(hits)} {connectors[pos]} items")
+                    raise SheetError(f"{pos}: serial number {v} matches {len(hits)} {' or '.join(types)} items")
                 wanted[pos] = hits[0]
         if wanted != current:
             body = api.patch_subcomponents(pid, {"component": {"part_id": pid}, "subcomponents": wanted})

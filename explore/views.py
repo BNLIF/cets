@@ -823,7 +823,7 @@ def explore_type_positions_view(request, part_type_id):
     except Exception as e:
         logger.warning("positions for %s failed: %s", part_type_id, e)
         return JsonResponse({"positions": []})
-    return JsonResponse({"positions": [{"position": p, "child_type_id": c}
+    return JsonResponse({"positions": [{"position": p, "child_type_id": ", ".join(parts.accepted_types(c))}
                                        for p, c in sorted(connectors.items(), key=lambda kv: str(kv[0]))]})
 
 
@@ -2088,7 +2088,9 @@ _PACK_CANDIDATE_CAP = 500
 def _box_connectors(api, part_type_id) -> dict:
     """The box type's connectors: {functional position: child part_type_id}.
     These named slots are HWDB's own model — an item can only be linked into
-    one, and the slot set is fixed by the type's definition."""
+    one, and the slot set is fixed by the type's definition. A position may
+    accept several types (#210): the value is then HWDB's comma-joined
+    string — read it through ``parts.accepted_types``, never as one id."""
     return ((api.get_component_type(part_type_id).get("data") or {})
             .get("connectors") or {})
 
@@ -2107,12 +2109,14 @@ def _packing_context(api, instance, part_type_id, manifest) -> dict | None:
     names = {n.part_type_id: n.name
              for n in HierarchyNode.for_instance(instance).filter(
                  level=HierarchyNode.LEVEL_TYPE,
-                 part_type_id__in={v for v in connectors.values() if v})}
+                 part_type_id__in=parts.child_types(connectors))}
     occupied = {m["functional_position"]: m["part_id"] for m in manifest}
-    positions = [{"position": pos, "child_type_id": ctid,
-                  "child_type_name": names.get(ctid, ctid),
-                  "current": occupied.get(pos)}
-                 for pos, ctid in sorted(connectors.items())]
+    positions = []
+    for pos, v in sorted(connectors.items()):
+        types = parts.accepted_types(v)
+        positions.append({"position": pos, "child_type_id": ", ".join(types),
+                          "child_type_name": ", ".join(names.get(t, t) for t in types),
+                          "current": occupied.get(pos)})
     n_free = sum(1 for p in positions if not p["current"])
     return {"positions": positions, "n_total": len(positions), "n_free": n_free}
 
@@ -2129,9 +2133,10 @@ def _pack_groups(instance, connectors, manifest, show_all=False) -> list[dict]:
     occupied = {m["functional_position"] for m in manifest}
     in_box = {m["part_id"] for m in manifest if m["part_id"]}
     free_by_type: dict[str, list[str]] = {}
-    for pos, ctid in connectors.items():
-        if pos not in occupied and ctid:
-            free_by_type.setdefault(ctid, []).append(pos)
+    for pos, v in connectors.items():
+        if pos not in occupied:
+            for ctid in parts.accepted_types(v):   # #210: a several-type position joins each group
+                free_by_type.setdefault(ctid, []).append(pos)
     groups = []
     for ctid, free_pos in sorted(free_by_type.items()):
         rows = _type_candidates(instance, [ctid], show_all).exclude(part_id__in=in_box)
@@ -2226,21 +2231,23 @@ def _pack_body_context(instance, part_id, ptid, connectors, current,
     type_names = dict(
         HierarchyNode.for_instance(instance)
         .filter(level=HierarchyNode.LEVEL_TYPE,
-                part_type_id__in={c for c in connectors.values() if c})
+                part_type_id__in=parts.child_types(connectors))
         .values_list("part_type_id", "name"))
-    contents = [{"position": pos, "type_id": connectors.get(pos) or "",
-                 "type_name": type_names.get(connectors.get(pos))
-                              or connectors.get(pos) or "",
-                 "part_id": current[pos]}
-                for pos in sorted(current, key=str)]
+    contents = []
+    for pos in sorted(current, key=str):
+        types = parts.accepted_types(connectors.get(pos))
+        contents.append({"position": pos, "types": types,
+                         "type_name": ", ".join(type_names.get(t) or t for t in types),
+                         "part_id": current[pos]})
     # #136: where a filled position's occupant could move — the free
     # positions accepting its type (the contents pane's "move to" picker)
     free_of = {}
     for c in contents:
         if not c["part_id"]:
-            free_of.setdefault(c["type_id"], []).append(c["position"])
+            for t in c["types"]:
+                free_of.setdefault(t, []).append(c["position"])
     for c in contents:
-        c["move_to"] = free_of.get(c["type_id"], []) if c["part_id"] else []
+        c["move_to"] = free_of.get(c["part_id"].rsplit("-", 1)[0], []) if c["part_id"] else []
     is_box = curation.is_shipping_type(instance, ptid)
     return {
         "part_id": part_id,
@@ -2303,8 +2310,9 @@ def _placement_error(inst, connectors, current, pos, pid, moving=False) -> str |
     if current[pos]:
         return f"“{pos}” already holds {current[pos]} — unlink it first."
     ctid = pid.rsplit("-", 1)[0]
-    if connectors.get(pos) and connectors[pos] != ctid:
-        return f"“{pos}” takes {connectors[pos]} items, not {ctid}."
+    takes = parts.accepted_types(connectors.get(pos))
+    if takes and ctid not in takes:
+        return f"“{pos}” takes {' or '.join(takes)} items, not {ctid}."
     if not moving:
         if pid in current.values():
             return f"{pid} is already in this item."
@@ -2330,10 +2338,10 @@ def _scan_link(api, inst, box_pid, pid) -> tuple[bool, str]:
     if pid in current.values():
         return False, f"{pid} is already in this {noun}."
     ctid = pid.rsplit("-", 1)[0]
-    if ctid not in set(connectors.values()):
+    if ctid not in parts.child_types(connectors):
         return False, f"this {noun} has no positions for {ctid} items."
     free = [pos for pos in sorted(current, key=str)
-            if current[pos] is None and connectors.get(pos) == ctid]
+            if current[pos] is None and ctid in parts.accepted_types(connectors.get(pos))]
     if not free:
         return False, f"no free position left for {ctid} items."
     block = _procedure_status_block(inst, pid)
@@ -2456,7 +2464,7 @@ def explore_box_pack_view(request, part_id):
         # linking reads the mirror as is, Re-sync refreshes it, and HWDB
         # still refuses an in-use item at write time.
         if is_box:
-            for ctid in sorted({c for c in connectors.values() if c}):
+            for ctid in sorted(parts.child_types(connectors)):
                 events.sweep_parents(api, inst, ctid)
                 events.sweep_enabled(api, inst, ctid)
         # Phone-as-scanner hookup (issue #68): the picker polls the scan feed
@@ -2563,8 +2571,9 @@ def explore_box_pack_view(request, part_id):
     # Free slots per child type, in stable position order.
     free_by_type: dict[str, list] = {}
     for pos in sorted(current, key=str):
-        if current[pos] is None and connectors.get(pos):
-            free_by_type.setdefault(connectors[pos], []).append(pos)
+        if current[pos] is None:
+            for t in parts.accepted_types(connectors.get(pos)):
+                free_by_type.setdefault(t, []).append(pos)
     changes = {}
     for pid in picked:
         if not re.fullmatch(r"[A-Z]\d{11}-\d{5}", pid):
@@ -2574,16 +2583,17 @@ def explore_box_pack_view(request, part_id):
             messages.error(request, f"{pid} is already in this {noun}.")
             return _fail()
         ctid = pid.rsplit("-", 1)[0]
-        free = free_by_type.get(ctid)
-        if free is None:
+        if ctid not in free_by_type:
             messages.error(request,
                            f"This {noun} has no positions for {ctid} items ({pid}).")
             return _fail()
+        # a position taking several types (#210) is free until any pick takes it
+        free = [p for p in free_by_type[ctid] if p not in changes]
         if not free:
             messages.error(request,
                            f"No free positions left for {ctid} items ({pid}).")
             return _fail()
-        changes[free.pop(0)] = pid
+        changes[free[0]] = pid
 
     # One PATCH per item: HWDB has no "is it free?" lookup, so an item that's
     # secretly inside some other assembly only fails at write time — and it
@@ -2940,13 +2950,14 @@ def _type_role_gate(request, inst, api, ptid, record=None) -> dict | None:
             "mine": [r["name"] for r in mine]}
 
 
-def _patch_type_positions(request, api, part_type_id, record, connectors, ok_msg):
-    """PATCH the type's complete envelope with ``connectors`` swapped in and
-    flash the outcome — HWDB refusals (e.g. touching a position a linked item
-    occupies) surface verbatim."""
-    payload = _type_patch_envelope(record, connectors)
+def _put_type_positions(request, api, part_type_id, connectors, ok_msg):
+    """PUT the type's complete position set ``{position: [type ids]}`` through
+    the v2 connectors endpoint (#210 — the v1 envelope PATCH refuses a type
+    once a position accepts several types) and flash the outcome — HWDB
+    refusals (e.g. touching a position a linked item occupies) surface
+    verbatim."""
     try:
-        body = api.patch_component_type(part_type_id, payload)
+        body = api.put_component_type_connectors(part_type_id, connectors)
         ok, detail = body.get("status") == "OK", body.get("data")
     except requests.RequestException as e:
         ok, detail = False, _hwdb_error_detail(e)
@@ -2954,6 +2965,17 @@ def _patch_type_positions(request, api, part_type_id, record, connectors, ok_msg
         messages.success(request, ok_msg)
     else:
         messages.error(request, f"HWDB rejected the type update — {detail}")
+
+
+def _child_type_ids(text: str) -> list[str]:
+    """The accepting type ids typed into a position form, upper-cased and
+    deduped in order — several, comma-separated, make a position that takes
+    any of them (#210). Empty when any entry isn't a component-type id."""
+    ids = list(dict.fromkeys(t.upper() for t in re.split(r"[\s,]+", (text or "").strip()) if t))
+    return ids if ids and all(re.fullmatch(r"[A-Z]\d{11}", t) for t in ids) else []
+
+
+_CHILD_TYPE_RULE = "isn’t a component-type id (or a comma-separated list of them)."
 
 
 def _find_part_type_id(body, exclude: str):
@@ -2976,6 +2998,8 @@ def _clone_box_type(request, api, inst, part_type_id, record, connectors, page_u
     subsystem with the source's connectors, then (create can't carry them)
     PATCH the source's datasheet / manufacturers / roles onto it, and give
     it a mirror leaf so the tree shows it without a full hierarchy sync.
+    A position accepting several types (#210) rides on neither v1 call —
+    it is merged in through the v2 connectors endpoint after the spec copy.
     No official client exercises the create endpoint — errors are surfaced
     verbatim so a schema surprise explains itself."""
     new_name = (request.POST.get("new_name") or "").strip()
@@ -2996,11 +3020,13 @@ def _clone_box_type(request, api, inst, part_type_id, record, connectors, page_u
     except ValueError:
         messages.error(request, "Numeric type id must be a number (or blank).")
         return redirect(page_url)
+    multi = {p: parts.accepted_types(v) for p, v in connectors.items()
+             if len(parts.accepted_types(v)) > 1}
     payload = {"component_type_id": type_number,
                "name": new_name,
                "category": record.get("category") or "generic",
                "comments": comments,
-               "connectors": dict(connectors)}
+               "connectors": {p: v for p, v in connectors.items() if p not in multi}}
     try:
         body = api.post_component_type(m.group(1), int(m.group(2)), int(m.group(3)), payload)
         ok, detail = body.get("status") == "OK", body.get("data")
@@ -3032,6 +3058,13 @@ def _clone_box_type(request, api, inst, part_type_id, record, connectors, page_u
                 warn = f" (spec copy failed: {body.get('data') or body})"
         except requests.RequestException as e:
             warn = f" (spec copy failed: {_hwdb_error_detail(e)})"
+    if multi:
+        try:
+            body = api.patch_component_type_connectors(new_ptid, multi)
+            if body.get("status") != "OK":
+                warn += f" (positions {', '.join(sorted(multi))} not copied: {body.get('data') or body})"
+        except requests.RequestException as e:
+            warn += f" (positions {', '.join(sorted(multi))} not copied: {_hwdb_error_detail(e)})"
 
     leaf = HierarchyNode.for_instance(inst).filter(
         level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
@@ -3061,9 +3094,12 @@ def _clone_box_type(request, api, inst, part_type_id, record, connectors, page_u
 def explore_box_type_view(request, part_type_id):
     """Edit a type's positions (issue #69; any type, not just boxes): add
     connector slots (one name as typed, or a numbered batch), rename / retarget /
-    delete an existing one, or clone the type — all via a complete-envelope
-    ``PATCH component-types/{id}``. HWDB forbids deleting or renaming a
-    position that a linked item occupies; those refusals surface verbatim.
+    delete an existing one, or clone the type. Edits go through the v2
+    connectors endpoint as the complete ``{position: [type ids]}`` set
+    (#210: a position may accept several types, listed comma-separated on
+    the page; the v1 envelope PATCH refuses such a type). HWDB forbids
+    deleting or renaming a position that a linked item occupies; those
+    refusals surface verbatim.
     Architects only (the FNAL UI remains the sanctioned authoring route;
     this page covers touch-ups like fixing a freshly cloned type). The
     packing pages read connectors live, so changes show up immediately.
@@ -3095,6 +3131,7 @@ def explore_box_type_view(request, part_type_id):
         messages.error(request, f"Couldn’t read the type from HWDB — {_hwdb_error_detail(e)}")
         return redirect(_rev(request, "explore:home"))
     connectors = dict(record.get("connectors") or {})
+    accepts = {p: parts.accepted_types(v) for p, v in connectors.items()}   # the set a PUT sends
 
     if request.method == "POST" and (request.POST.get("action") or "extend") == "clone":
         if not can_clone:
@@ -3107,26 +3144,25 @@ def explore_box_type_view(request, part_type_id):
     if request.method == "POST" and request.POST.get("action") == "edit":
         pos = request.POST.get("position") or ""
         new_name = (request.POST.get("new_name") or "").strip()
-        child = (request.POST.get("child_type") or "").strip().upper()
-        if pos not in connectors:
+        child = _child_type_ids(request.POST.get("child_type"))
+        if pos not in accepts:
             messages.error(request, f"Position “{pos}” isn’t on the type — reload the page.")
         elif request.POST.get("op") == "delete":
-            rest = {k: v for k, v in connectors.items() if k != pos}
-            _patch_type_positions(request, api, part_type_id, record, rest,
-                                  f"Deleted position {pos}.")
+            rest = {k: v for k, v in accepts.items() if k != pos}
+            _put_type_positions(request, api, part_type_id, rest, f"Deleted position {pos}.")
         elif not re.fullmatch(_POSITION_NAME, new_name):
             messages.error(request, _POSITION_NAME_RULE)
-        elif not re.fullmatch(r"[A-Z]\d{11}", child):
-            messages.error(request, f"“{child}” doesn’t look like a component-type id.")
-        elif new_name != pos and new_name in connectors:
+        elif not child:
+            messages.error(request, f"“{(request.POST.get('child_type') or '').strip()}” {_CHILD_TYPE_RULE}")
+        elif new_name != pos and new_name in accepts:
             messages.error(request, f"The type already has a position named “{new_name}”.")
-        elif new_name == pos and child == connectors[pos]:
+        elif new_name == pos and child == accepts[pos]:
             messages.success(request, "Nothing to change.")
         else:
             updated = {(new_name if k == pos else k): (child if k == pos else v)
-                       for k, v in connectors.items()}
-            _patch_type_positions(request, api, part_type_id, record, updated,
-                                  f"Position {pos} is now {new_name}, accepting {child}.")
+                       for k, v in accepts.items()}
+            _put_type_positions(request, api, part_type_id, updated,
+                                f"Position {pos} is now {new_name}, accepting {', '.join(child)}.")
         return redirect(page_url)
 
     if request.method == "POST":
@@ -3134,7 +3170,7 @@ def explore_box_type_view(request, part_type_id):
         # typed — "H2 Type" is "H2 Type", not "H2 Type1"; only a batch
         # numbers on. A name the type already has is refused, not renumbered.
         name = (request.POST.get("name") or "").strip()
-        child = (request.POST.get("child_type") or "").strip().upper()
+        child = _child_type_ids(request.POST.get("child_type"))
         try:
             count = int(request.POST.get("count") or "0")
         except ValueError:
@@ -3143,21 +3179,22 @@ def explore_box_type_view(request, part_type_id):
             messages.error(request, _POSITION_NAME_RULE)
         elif not 1 <= count <= 200:
             messages.error(request, "Count must be between 1 and 200.")
-        elif not re.fullmatch(r"[A-Z]\d{11}", child):
-            messages.error(request, f"“{child}” doesn’t look like a component-type id.")
-        elif count == 1 and name in connectors:
+        elif not child:
+            messages.error(request, f"“{(request.POST.get('child_type') or '').strip()}” {_CHILD_TYPE_RULE}")
+        elif count == 1 and name in accepts:
             messages.error(request, f"The type already has a position named “{name}”.")
         else:
-            new_names = [name] if count == 1 else _next_position_names(connectors, name, count)
-            _patch_type_positions(
-                request, api, part_type_id, record,
-                {**connectors, **{n: child for n in new_names}},
-                f"Added position {name} accepting {child}." if count == 1 else
-                f"Added {count} positions {new_names[0]}…{new_names[-1]} accepting {child}.")
+            new_names = [name] if count == 1 else _next_position_names(accepts, name, count)
+            kinds = ", ".join(child)
+            _put_type_positions(
+                request, api, part_type_id,
+                {**accepts, **{n: child for n in new_names}},
+                f"Added position {name} accepting {kinds}." if count == 1 else
+                f"Added {count} positions {new_names[0]}…{new_names[-1]} accepting {kinds}.")
         return redirect(page_url)
 
     # Names for the accepted child types, from the mirror where known.
-    child_ids = sorted(set(connectors.values()))
+    child_ids = sorted(parts.child_types(connectors))
     child_names = dict(HierarchyNode.for_instance(inst)
                        .filter(level=HierarchyNode.LEVEL_TYPE, part_type_id__in=child_ids)
                        .values_list("part_type_id", "name"))
@@ -3169,8 +3206,9 @@ def explore_box_type_view(request, part_type_id):
         "part_type_id": part_type_id,
         "type_name": (leaf.name if leaf else record.get("full_name")) or part_type_id,
         "positions": sorted(
-            ({"name": pos, "child": ctid, "child_name": child_names.get(ctid, "")}
-             for pos, ctid in connectors.items()), key=lambda p: p["name"]),
+            ({"name": pos, "child": ", ".join(types),
+              "child_name": ", ".join(n for n in (child_names.get(t, "") for t in types) if n)}
+             for pos, types in accepts.items()), key=lambda p: p["name"]),
         "child_options": [{"id": c, "name": child_names.get(c, "")} for c in child_ids],
         "position_names": sorted(connectors),
         "leaf_path": navigation.leaf_path_for(inst, part_type_id) if leaf else None,
@@ -3446,15 +3484,16 @@ def _checklist_link(api, inst, part_id, pid: str, position: str) -> str | None:
     if position:
         if position not in current:
             return f"this type has no “{position}” position."
-        if connectors.get(position) and connectors[position] != ctid:
-            return f"position “{position}” expects {connectors[position]} items, not {ctid}."
+        takes = parts.accepted_types(connectors.get(position))
+        if takes and ctid not in takes:
+            return f"position “{position}” expects {' or '.join(takes)} items, not {ctid}."
         if current[position] and current[position] != pid:
             return (f"position “{position}” already holds "
                     f"{current[position]} — unlink it first.")
         pos = position
     else:
         free = [p for p in sorted(current, key=str)
-                if current[p] is None and connectors.get(p) == ctid]
+                if current[p] is None and ctid in parts.accepted_types(connectors.get(p))]
         if not free:
             return f"no free position for {ctid} items."
         pos = free[0]
@@ -3494,15 +3533,16 @@ def _checklist_link_map(api, inst, part_id, slots: dict) -> str | None:
             continue                       # already linked
         ctid = pid.rsplit("-", 1)[0]
         if label in current:
-            if connectors.get(label) and connectors[label] != ctid:
-                return f"slot “{label}”: expects {connectors[label]} items, not {ctid}."
+            takes = parts.accepted_types(connectors.get(label))
+            if takes and ctid not in takes:
+                return f"slot “{label}”: expects {' or '.join(takes)} items, not {ctid}."
             if current[label]:
                 return (f"slot “{label}”: position already holds "
                         f"{current[label]} — unlink it first.")
             pos = label
         else:
             free = [p for p in sorted(current, key=str)
-                    if current[p] is None and connectors.get(p) == ctid]
+                    if current[p] is None and ctid in parts.accepted_types(connectors.get(p))]
             if not free:
                 return f"slot “{label}”: no free position for {ctid} items."
             pos = free[0]
@@ -3555,12 +3595,10 @@ def _default_table_types(api, ptid: str, schema: dict) -> None:
         for f in tables:
             into = f.get("into") or ""
             if into:
-                child = connectors.get(into)
-                accepted = set(_box_connectors(api, child).values()) if child else set()
+                child = parts.accepted_types(connectors.get(into))
+                accepted = parts.child_types(_box_connectors(api, child[0])) if len(child) == 1 else set()
             else:
-                accepted = set(connectors.values())
-            accepted.discard(None)
-            accepted.discard("")
+                accepted = parts.child_types(connectors)
             if len(accepted) == 1:
                 f["type_id"] = accepted.pop()
     except Exception as e:
@@ -3650,14 +3688,15 @@ def _plan_positions(api, target: str, slots: dict) -> tuple[dict | None, str | N
         if pid in plan.values():
             return None, f"{pid} is listed twice."
         if label in current:
-            if connectors.get(label) and connectors[label] != ctid:
-                return None, f"slot “{label}”: expects {connectors[label]} items, not {ctid}."
+            takes = parts.accepted_types(connectors.get(label))
+            if takes and ctid not in takes:
+                return None, f"slot “{label}”: expects {' or '.join(takes)} items, not {ctid}."
             if current[label] and current[label] != pid:
                 return None, f"slot “{label}”: position already holds {current[label]}."
             pos = label
         else:
             free = [p for p in sorted(current, key=str)
-                    if current[p] is None and p not in plan and connectors.get(p) == ctid]
+                    if current[p] is None and p not in plan and ctid in parts.accepted_types(connectors.get(p))]
             if not free:
                 return None, f"no free position for {ctid} items."
             pos = free[0]
@@ -3721,7 +3760,7 @@ def _table_link_check(api, inst, target: str, values: list[str], type_id: str = 
                             else f"planned for “{where[pid]}”, which this type has no position of")
             else:
                 free = [p for p in sorted(current, key=str)
-                        if current[p] is None and connectors.get(p) == ctid]
+                        if current[p] is None and ctid in parts.accepted_types(connectors.get(p))]
                 if not free:
                     note = f"no free position for {ctid} items"
             if free:
@@ -3745,10 +3784,14 @@ def _map_positions(api, inst, part_id) -> list[dict]:
     names = {n.part_type_id: n.name
              for n in HierarchyNode.for_instance(inst).filter(
                  level=HierarchyNode.LEVEL_TYPE,
-                 part_type_id__in={v for v in connectors.values() if v})}
-    return [{"position": p, "child_type_id": c, "child_type_name": names.get(c, c),
-             "part_id": occupants.get(p)}
-            for p, c in sorted(connectors.items(), key=lambda kv: str(kv[0]))]
+                 part_type_id__in=parts.child_types(connectors))}
+    out = []
+    for p, v in sorted(connectors.items(), key=lambda kv: str(kv[0])):
+        types = parts.accepted_types(v)   # #210: several → comma-joined, the page's pick lists take that
+        out.append({"position": p, "child_type_id": ",".join(types),
+                    "child_type_name": ", ".join(names.get(t, t) for t in types),
+                    "part_id": occupants.get(p)})
+    return out
 
 
 @login_not_required
@@ -5057,14 +5100,17 @@ def _child_types(inst, connectors: dict, remembered: dict) -> list[dict]:
     ``[{type_id, name, positions, checked, status_id, qaqc_uploaded,
     certified_qaqc}]`` in position order, pre-filled from the remembered
     choice (else unticked, Waiting on QA/QC, flags off); untyped positions
-    are skipped (nothing to mint for them)."""
+    and those accepting several types (#210) are skipped (nothing
+    unambiguous to mint for them)."""
     names = dict(HierarchyNode.for_instance(inst)
-                 .filter(level=HierarchyNode.LEVEL_TYPE, part_type_id__in={t for t in connectors.values() if t})
+                 .filter(level=HierarchyNode.LEVEL_TYPE, part_type_id__in=parts.child_types(connectors))
                  .values_list("part_type_id", "name"))
     out: dict[str, dict] = {}
-    for pos, tid in sorted(connectors.items(), key=lambda kv: str(kv[0])):
-        if not tid:
+    for pos, v in sorted(connectors.items(), key=lambda kv: str(kv[0])):
+        types = parts.accepted_types(v)
+        if len(types) != 1:
             continue
+        tid = types[0]
         if tid not in out:
             r = remembered.get(tid) or {}
             out[tid] = {"type_id": tid, "name": names.get(tid) or tid, "positions": [],
@@ -7848,8 +7894,9 @@ def explore_sheet_upload_view(request, part_type_id, job_id=None):
     else:
         options = [("", "— not used —")] + list(sheetupload.FIELD_LABELS)
         options += [(f"spec:{k}", f"Specs: {k}") for k in template]
-        options += [(f"pos:{p}", f"Position {p} ({t})" if t else f"Position {p}")
-                    for p, t in sorted(connectors.items(), key=lambda kv: str(kv[0]))]
+        options += [(f"pos:{p}", f"Position {p} ({', '.join(t)})" if t else f"Position {p}")
+                    for p, t in sorted(((p, parts.accepted_types(v)) for p, v in connectors.items()),
+                                       key=lambda kv: str(kv[0]))]
     known = {o[0] for o in options}
     for a in job.mapping.values():
         if a and a not in known:

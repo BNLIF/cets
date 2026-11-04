@@ -330,6 +330,25 @@ class SubcompRefTest(TestCase):
         self.assertEqual(kids[0]["status"], "Passed")
 
 
+class AcceptedTypesTest(TestCase):
+    """parts.accepted_types / child_types (#210): a position's several
+    types come comma-joined in the v1 type record, listed from v2."""
+
+    def test_splits_the_v1_string_and_takes_a_list(self):
+        self.assertEqual(parts.accepted_types("D00599800033,Z00100300080"),
+                         ["D00599800033", "Z00100300080"])
+        self.assertEqual(parts.accepted_types("D00599800033"), ["D00599800033"])
+        self.assertEqual(parts.accepted_types(["D00599800033", " Z00100300080 "]),
+                         ["D00599800033", "Z00100300080"])
+        self.assertEqual(parts.accepted_types(None), [])
+        self.assertEqual(parts.accepted_types(""), [])
+
+    def test_child_types_flattens_every_position(self):
+        self.assertEqual(parts.child_types({"A": "X", "B": "Y,X", "C": None, "D": ""}),
+                         {"X", "Y"})
+        self.assertEqual(parts.child_types(None), set())
+
+
 class CableEndsTest(TestCase):
     """parts.cable_ends — a cable type's ENDs/connector counts from its
     expanded ``connectors`` keys (#72), e.g. HVS Test Bundle 4 Ends."""

@@ -449,6 +449,21 @@ def cable_ends(connectors: dict | None) -> list[dict]:
     return [{"name": n, "connectors": c} for n, c in ends.items()]
 
 
+def accepted_types(value) -> list[str]:
+    """The component types one position accepts, from a type record's
+    ``connectors`` value. A position may take several since HWDB's API
+    update of 2026-11-04 (Hajime, #210): the v1 type record joins them with
+    commas ("D00599800033,Z00100300080"), the v2 connectors endpoint lists
+    them. Untyped → empty."""
+    items = value if isinstance(value, (list, tuple)) else str(value or "").split(",")
+    return [str(t).strip() for t in items if t and str(t).strip()]
+
+
+def child_types(connectors: dict | None) -> set[str]:
+    """Every component type the positions accept (#210)."""
+    return {t for v in (connectors or {}).values() for t in accepted_types(v)}
+
+
 def current_container(rows) -> dict | None:
     """The item's current parent from its ``/container`` rows (the reverse of
     the manifest, same mount/unmount row shape): the newest entry that isn't

@@ -1,6 +1,8 @@
 """Tests for editing a box type's connector positions (issue #69): the
-complete-envelope PATCH, continuation naming, rename/retarget/delete,
-validation, and the write + architect gates. HWDB is mocked.
+complete position set sent through the v2 connectors PUT (#210), the
+envelope PATCH the clone's spec copy still uses, continuation naming,
+rename/retarget/delete, validation, and the write + architect gates. HWDB
+is mocked.
 
     python manage.py test explore
 """
@@ -45,6 +47,8 @@ def _api():
     api = mock.MagicMock()
     api.get_component_type.return_value = {"data": TYPE_RECORD}
     api.patch_component_type.return_value = {"status": "OK", "data": "Updated"}
+    api.put_component_type_connectors.return_value = {"status": "OK", "data": {}}
+    api.patch_component_type_connectors.return_value = {"status": "OK", "data": {}}
     api.whoami.return_value = {"data": {"architect": True, "administrator": True}}
     return api
 
@@ -98,18 +102,18 @@ class BoxTypeViewTest(TestCase):
         with m1, m2:
             self.client.post(PAGE, {"action": "edit", "op": "save", "position": "FEB1",
                                     "new_name": "FEMB1", "child_type": "d05700300002"})
-        payload = api.patch_component_type.call_args.args[1]
-        self.assertEqual(payload["connectors"],
-                         {"FEMB1": "D05700300002", "FEB2": "D05700300001"})
-        self.assertEqual(payload["name"], TYPE_RECORD["full_name"])
+        ptid, sent = api.put_component_type_connectors.call_args.args
+        self.assertEqual(ptid, PTID)
+        self.assertEqual(sent, {"FEMB1": ["D05700300002"], "FEB2": ["D05700300001"]})
+        api.patch_component_type.assert_not_called()   # #210: the v1 envelope no longer carries positions
 
     def test_delete_removes_a_position(self):
         api = _api()
         m1, m2 = _mocked(api)
         with m1, m2:
             self.client.post(PAGE, {"action": "edit", "op": "delete", "position": "FEB2"})
-        payload = api.patch_component_type.call_args.args[1]
-        self.assertEqual(payload["connectors"], {"FEB1": "D05700300001"})
+        sent = api.put_component_type_connectors.call_args.args[1]
+        self.assertEqual(sent, {"FEB1": ["D05700300001"]})
 
     def test_edit_validation_blocks_bad_input(self):
         api = _api()
@@ -123,7 +127,7 @@ class BoxTypeViewTest(TestCase):
                                     "new_name": "FEB1", "child_type": "not-a-type"})    # bad type id
             self.client.post(PAGE, {"action": "edit", "op": "save", "position": "FEB1",
                                     "new_name": "FEB1", "child_type": "D05700300001"})  # no-op
-        api.patch_component_type.assert_not_called()
+        api.put_component_type_connectors.assert_not_called()
 
     def test_non_architect_is_forbidden(self):
         api = _api()
@@ -146,7 +150,7 @@ class BoxTypeViewTest(TestCase):
             self.client.post(PAGE, {"action": "edit", "op": "delete", "position": "FEB2"})
             resp = self.client.post(PAGE, {"action": "clone", "new_name": "Copy", "type_number": ""})
         self.assertEqual(resp.status_code, 403)
-        api.patch_component_type.assert_called_once()
+        api.put_component_type_connectors.assert_called_once()
         api.post_component_type.assert_not_called()
 
     def test_architect_clones_but_cannot_edit(self):
@@ -160,21 +164,20 @@ class BoxTypeViewTest(TestCase):
             self.assertIn('class="pk-submit" disabled>Add to the type in HWDB', html)
             resp = self.client.post(PAGE, {"name": "FEMB", "count": "1", "child_type": "D05700300001"})
         self.assertEqual(resp.status_code, 403)
-        api.patch_component_type.assert_not_called()
+        api.put_component_type_connectors.assert_not_called()
 
-    def test_add_positions_patches_complete_envelope(self):
+    def test_add_positions_puts_the_complete_set(self):
         api = _api()
         m1, m2 = _mocked(api)
         with m1, m2:
             self.client.post(PAGE, {"name": "FEMB", "count": "3",
                                     "child_type": "d05700300001"})
-        payload = api.patch_component_type.call_args.args[1]
-        self.assertEqual(payload["connectors"], {
-            "FEB1": "D05700300001", "FEB2": "D05700300001",
-            "FEMB1": "D05700300001", "FEMB2": "D05700300001",
-            "FEMB3": "D05700300001"})
-        self.assertEqual(payload["name"], TYPE_RECORD["full_name"])
-        self.assertEqual(payload["manufacturers"], [7])
+        ptid, sent = api.put_component_type_connectors.call_args.args
+        self.assertEqual(ptid, PTID)
+        self.assertEqual(sent, {
+            "FEB1": ["D05700300001"], "FEB2": ["D05700300001"],
+            "FEMB1": ["D05700300001"], "FEMB2": ["D05700300001"],
+            "FEMB3": ["D05700300001"]})
 
     def test_validation_blocks_bad_input(self):
         api = _api()
@@ -189,7 +192,7 @@ class BoxTypeViewTest(TestCase):
             # Hajime 2026-11-03 (#209): HWDB refuses parentheses — so do we, by name
             resp = self.client.post(PAGE, {"name": "1 (H2 type)", "count": "1",
                                            "child_type": "D05700300001"}, follow=True)
-        api.patch_component_type.assert_not_called()
+        api.put_component_type_connectors.assert_not_called()
         self.assertIn("HWDB rejects parentheses", resp.content.decode())
 
     def test_one_position_takes_the_name_as_typed(self):
@@ -200,13 +203,13 @@ class BoxTypeViewTest(TestCase):
         with m1, m2:
             self.client.post(PAGE, {"name": "H2 Type", "count": "1",
                                     "child_type": "D05700300001"})
-            payload = api.patch_component_type.call_args.args[1]
-            self.assertEqual(payload["connectors"], {
-                "FEB1": "D05700300001", "FEB2": "D05700300001", "H2 Type": "D05700300001"})
-            api.patch_component_type.reset_mock()
+            sent = api.put_component_type_connectors.call_args.args[1]
+            self.assertEqual(sent, {
+                "FEB1": ["D05700300001"], "FEB2": ["D05700300001"], "H2 Type": ["D05700300001"]})
+            api.put_component_type_connectors.reset_mock()
             resp = self.client.post(PAGE, {"name": "FEB1", "count": "1",
                                            "child_type": "D05700300001"}, follow=True)
-        api.patch_component_type.assert_not_called()
+        api.put_component_type_connectors.assert_not_called()
         self.assertIn("already has a position named “FEB1”", resp.content.decode())
 
     def test_page_carries_names_for_the_duplicate_check(self):
@@ -220,13 +223,45 @@ class BoxTypeViewTest(TestCase):
 
     def test_hwdb_rejection_is_reported(self):
         api = _api()
-        api.patch_component_type.return_value = {"status": "ERROR", "data": "no permission"}
+        api.put_component_type_connectors.return_value = {"status": "ERROR", "data": "no permission"}
         m1, m2 = _mocked(api)
         with m1, m2:
             resp = self.client.post(PAGE, {"name": "FEMB", "count": "1",
                                            "child_type": "D05700300001"},
                                     follow=True)
         self.assertIn("no permission", resp.content.decode())
+
+    def test_a_position_accepting_several_types_round_trips(self):
+        """#210 (Hajime 2026-11-04): HWDB's v1 record joins the types with
+        commas; the page lists them comma-separated on one row, an edit or
+        an add takes such a list, and the PUT carries every position as a
+        list."""
+        api = _api()
+        api.get_component_type.return_value = {"data": {
+            **TYPE_RECORD, "connectors": {"FEB1": "D05700300001",
+                                          "H1": "D05700300002,D05700300003"}}}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+            self.assertIn('value="D05700300002, D05700300003"', html)
+            self.client.post(PAGE, {"action": "edit", "op": "save", "position": "H1",
+                                    "new_name": "H1", "child_type": "d05700300003, D05700300002"})
+            sent = api.put_component_type_connectors.call_args.args[1]
+            self.assertEqual(sent, {"FEB1": ["D05700300001"],
+                                    "H1": ["D05700300003", "D05700300002"]})
+            self.client.post(PAGE, {"name": "H", "count": "2",
+                                    "child_type": "D05700300001,D05700300003"})
+            sent = api.put_component_type_connectors.call_args.args[1]
+            self.assertEqual(sent, {"FEB1": ["D05700300001"],
+                                    "H1": ["D05700300002", "D05700300003"],
+                                    "H2": ["D05700300001", "D05700300003"],
+                                    "H3": ["D05700300001", "D05700300003"]})
+            api.put_component_type_connectors.reset_mock()
+            resp = self.client.post(PAGE, {"name": "H4", "count": "1",
+                                           "child_type": "D05700300001, nope"}, follow=True)
+        api.put_component_type_connectors.assert_not_called()
+        self.assertIn("isn’t a component-type id", resp.content.decode())
+        api.patch_component_type.assert_not_called()
 
     @override_settings(HWDB_WRITE_INSTANCES=["dev"])
     def test_prod_is_forbidden(self):
@@ -316,6 +351,27 @@ class CloneTypeTest(TestCase):
         with m1, m2:
             self._clone(name="")
         api.post_component_type.assert_not_called()
+
+    def test_clone_merges_a_several_type_position_through_v2(self):
+        """#210: the v1 create takes one type per position, so a position
+        accepting several is left out of the POST and PATCHed in through
+        the v2 connectors endpoint once the spec copy is done."""
+        api = _clone_api()
+        src = {**TYPE_RECORD, "connectors": {"FEB1": "D05700300001",
+                                             "H1": "D05700300002,D05700300003"}}
+        api.get_component_type.side_effect = lambda ptid: {
+            "data": NEW_RECORD if ptid == NEW_PTID else src}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            resp = self._clone()
+        self.assertEqual(api.post_component_type.call_args.args[3]["connectors"],
+                         {"FEB1": "D05700300001"})
+        api.patch_component_type_connectors.assert_called_once_with(
+            NEW_PTID, {"H1": ["D05700300002", "D05700300003"]})
+        # the spec copy (v1 envelope) went first — it would refuse a type already holding H1
+        calls = [c[0] for c in api.method_calls if c[0] in ("patch_component_type", "patch_component_type_connectors")]
+        self.assertEqual(calls, ["patch_component_type", "patch_component_type_connectors"])
+        self.assertIn("2 position(s)", resp.content.decode())
 
     def test_missing_id_in_response_skips_spec_copy(self):
         api = _clone_api()

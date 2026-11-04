@@ -80,15 +80,18 @@ class FnalDbApiClient:
             return None
         return endpoint
 
-    def _make_request(self, method, endpoint, data=None, params=None):
+    def _make_request(self, method, endpoint, data=None, params=None, v2=False):
         key = self._memo_key(method, endpoint, params)
         if key is not None and key in self._memo:
             return copy.deepcopy(self._memo[key])
         if self._memo is not None and method != "GET":
             self._memo.clear()   # a write may have changed what the memo holds
-        url = f"{self.base_url}/{endpoint}"
+        # v2 exists for one endpoint only (connectors, 2026-11-04): same host
+        # and instance, the version segment swapped
+        base = re.sub(r"/v1$", "/v2", self.base_url.rstrip("/")) if v2 else self.base_url
+        url = f"{base}/{endpoint}"
         headers = {}
-        if method in ("POST", "PATCH"):
+        if method in ("POST", "PATCH", "PUT"):
             headers["Content-Type"] = "application/json"
         try:
             response = self.session.request(
@@ -245,6 +248,24 @@ class FnalDbApiClient:
         return self._make_request(
             "PATCH", f"component-types/{part_type_id}", data=payload
         )
+
+    def put_component_type_connectors(self, part_type_id, connectors):
+        """Replace a type's positions (#210): ``PUT v2 component-types/{id}/
+        connectors`` with ``{position: [accepted type ids]}`` — the only
+        write HWDB takes once a position accepts several types (the v1
+        envelope PATCH then refuses the whole type, "Bad type IDs used", dev
+        2026-11-04). PUT replaces the set, so what is sent is complete.
+        """
+        return self._make_request(
+            "PUT", f"component-types/{part_type_id}/connectors",
+            data={"part_type_id": part_type_id, "connectors": connectors}, v2=True)
+
+    def patch_component_type_connectors(self, part_type_id, connectors):
+        """Merge positions into a type (#210): the v2 endpoint's PATCH adds or
+        retargets the positions given and leaves the rest alone."""
+        return self._make_request(
+            "PATCH", f"component-types/{part_type_id}/connectors",
+            data={"part_type_id": part_type_id, "connectors": connectors}, v2=True)
 
     def post_component_type(self, project_id, system_id, subsystem_id, payload):
         """Create a component type under a subsystem (issue #69):

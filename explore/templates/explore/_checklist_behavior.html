@@ -288,11 +288,11 @@
       if (!pid) return;
       var on = pid in linked, slot = b.getAttribute("data-slot"), ctid = pid.split("-")[0];
       // a slot named like a position must get that position's type
-      var wrong = !on && wants[slot] && wants[slot] !== ctid;
+      var wrong = !on && wants[slot] && wants[slot].split(",").indexOf(ctid) < 0;   // #210: several types, comma-joined
       b.classList.toggle("on", on);
       b.disabled = !!wrong;
       b.textContent = on ? "unlink" : "link";
-      b.title = on ? "in " + linked[pid] : wrong ? slot + " expects " + wants[slot] + " items" : "link into this item now";
+      b.title = on ? "in " + linked[pid] : wrong ? slot + " expects " + wants[slot].split(",").join(" or ") + " items" : "link into this item now";
       var note = fld.querySelector('.cl-lnk-in[data-for="' + b.getAttribute("data-for") + '"]');
       if (note) note.textContent = on ? "in " + linked[pid] : "";
     });
