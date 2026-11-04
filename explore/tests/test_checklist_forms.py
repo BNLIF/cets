@@ -2079,6 +2079,24 @@ class TypeGuardTest(TestCase):
             f = self._schema(type_id=bad)["sections"][0]["fields"][0]
             self.assertNotIn("type_id", f, bad)
 
+    def test_a_guard_of_several_types_takes_any_of_them(self):
+        """#210 (Hajime 2026-11-05): a comma-separated Type ID list is kept
+        comma-joined; a PID of any listed type stands, another is dropped,
+        and a serial is tried on each type in turn."""
+        f = self._schema(type_id="d00300100002, D00300100009,d00300100002")["sections"][0]["fields"][0]
+        self.assertEqual(f["type_id"], "D00300100002,D00300100009")
+        self.assertNotIn("type_id", self._schema(type_id="D00300100002, nope")["sections"][0]["fields"][0])
+        schema = self._schema(type_id="D00300100002,D00300100009")
+        key = schema["sections"][0]["fields"][0]["key"]
+        self.assertEqual(checklistforms.parse(schema, {key: "D00300100009-00014"}), {"S": {"Board": "D00300100009-00014"}})
+        self.assertEqual(checklistforms.parse(schema, {key: "D00300100002-00014"}), {"S": {"Board": "D00300100002-00014"}})
+        self.assertEqual(checklistforms.parse(schema, {key: "D00300100001-00014"}), {})
+        calls = []
+        def resolve(tid, sn):
+            calls.append(tid); return "D00300100009-00001" if tid == "D00300100009" else None
+        self.assertEqual(checklistforms.parse(schema, {key: "SN1"}, resolve), {"S": {"Board": "D00300100009-00001"}})
+        self.assertEqual(calls, ["D00300100002", "D00300100009"])
+
     def test_parse_drops_a_wrong_type_pid_and_keeps_a_matching_one(self):
         schema = self._schema(type_id="D00300100002")
         key = schema["sections"][0]["fields"][0]["key"]
@@ -2548,6 +2566,7 @@ class ImageMapLinkTest(TestCase):
             d = self.client.get(f"/hw/dev/checklist-map/{PART}/").json()
             self.assertEqual(d["positions"][0], {"position": "CBL1", "child_type_id": "D08100100003",
                                                  "child_type_name": "D08100100003",
+                                                 "child_types": [{"id": "D08100100003", "name": "D08100100003"}],
                                                  "part_id": "D08100100003-00009"})
             self.assertIsNone(d["error"])
             # link a board into its named slot → one PATCH, complete dict

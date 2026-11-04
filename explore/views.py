@@ -3793,8 +3793,9 @@ def _table_link_check(api, inst, target: str, values: list[str], type_id: str = 
 
 def _map_positions(api, inst, part_id) -> list[dict]:
     """The item's positions with their occupants, ``[{position,
-    child_type_id, child_type_name, part_id}]`` name-sorted — the imagemap's
-    live contents table (type names from the mirror, id when unknown)."""
+    child_type_id, child_type_name, child_types, part_id}]`` name-sorted —
+    the imagemap's live contents table (type names from the mirror, id when
+    unknown; ``child_types`` = ``[{id, name}]`` per accepted type, #210)."""
     connectors = _box_connectors(api, part_id.rsplit("-", 1)[0])
     occupants = {(m.get("functional_position") or ""): m.get("part_id")
                  for m in (api.get_subcomponents(part_id).get("data") or [])
@@ -3808,6 +3809,7 @@ def _map_positions(api, inst, part_id) -> list[dict]:
         types = parts.accepted_types(v)   # #210: several → comma-joined, the page's pick lists take that
         out.append({"position": p, "child_type_id": ",".join(types),
                     "child_type_name": ", ".join(names.get(t, t) for t in types),
+                    "child_types": [{"id": t, "name": names.get(t, t)} for t in types],
                     "part_id": occupants.get(p)})
     return out
 
@@ -4709,14 +4711,15 @@ def explore_serial_view(request, part_type_id):
     (and no bearer)."""
     serial = (request.GET.get("serial") or "").strip()
     inst = instance_of(request)
-    pids = _mirror_serials(inst, part_type_id, serial) if serial else []
+    types = [t for t in part_type_id.split(",") if t]   # #210: a guard of several types, comma-joined
+    pids = [p for t in types for p in _mirror_serials(inst, t, serial)] if serial else []
     if serial and not pids:
         try:
             bearer = mint_for(request)
         except (FnalLinkRequired, FnalUnavailable):
             return JsonResponse({"pid": None, "pids": []}, status=401)
         api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
-        pids = _hwdb_serials(api, part_type_id, serial)
+        pids = [p for t in types for p in _hwdb_serials(api, t, serial)]
     # #168: ``pids`` lists every item with the serial; ``pid`` only when it is one
     return JsonResponse({"pid": pids[0] if len(pids) == 1 else None, "pids": pids})
 

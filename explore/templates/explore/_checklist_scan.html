@@ -64,8 +64,9 @@
       var pid = extractPid(text);
       var tid = target.getAttribute("data-type-id"), sn = target.getAttribute("data-sn"), isSn = false;
       if (!/^[A-Z]\d{11}-\d{5}$/i.test(pid)) { isSn = !sn; try { isSn = isSn || new RegExp("^(?:" + sn + ")$").test(pid); } catch (e) {} }
-      if (tid && pid.toUpperCase().indexOf(tid + "-") !== 0 && !isSn) {
-        status.textContent = "Scanned " + pid + " — expected type " + tid + ".";
+      var tids = tid ? tid.split(",") : [];   // a guard may name several types, comma-joined
+      if (tids.length && !tids.some(function (t) { return pid.toUpperCase().indexOf(t + "-") === 0; }) && !isSn) {
+        status.textContent = "Scanned " + pid + " — expected type " + tids.join(" or ") + ".";
         return;
       }
       target.value = pid;

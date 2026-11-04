@@ -216,7 +216,7 @@
     clearTimeout(serialT[el.id]);
     if (n && n.getAttribute("data-pid") !== v) { n.remove(); if (el.classList.contains("cl-pidcell")) el.title = ""; }   // the "serial → PID" note follows its PID
     if (!v) return;
-    if (v.indexOf(tid + "-") === 0) { el.classList.add("cl-ok"); return; }
+    if (tid.split(",").some(function (t) { return v.indexOf(t + "-") === 0; })) { el.classList.add("cl-ok"); return; }   // any of several types
     if (!snMatch(el, el.value.trim())) { el.classList.add("cl-bad"); return; }
     serialT[el.id] = setTimeout(function () { resolveSerial(el, el.value.trim(), tid); }, 500);
   }
@@ -234,7 +234,7 @@
         n.textContent = d.pid ? serial + " \u2192 " + d.pid
                       : d.failed ? "serial number lookup failed — offline? try again later"
                       : many ? "serial number " + serial + " is on " + d.pids.length + " items: " + d.pids.join(", ") + " — enter the PID"
-                      : "no item of type " + tid + " has serial " + serial;
+                      : "no item of type " + tid.split(",").join(" or ") + " has serial " + serial;
         // a table cell keeps its size: the resolution goes to the tooltip, only a failure shows under the cell (wrapped)
         if (el.classList.contains("cl-pidcell")) { el.title = n.textContent; n.classList.toggle("cl-serial-err", !d.pid); }
         el.parentNode.appendChild(n);

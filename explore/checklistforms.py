@@ -444,9 +444,11 @@ def _norm_field(f: dict) -> dict | None:
         # input, and dropped here at parse). Malformed ids are ignored.
         # On an imagemap (#113) the guard applies to every slot; on a
         # linking table (#153) to every plain cell.
-        tid = str(f.get("type_id") or "").strip().upper()
-        if re.fullmatch(r"[A-Z]\d{11}", tid):
-            out["type_id"] = tid
+        # Several, comma-separated, take any of them (#210: a position may
+        # accept several types; Hajime 2026-11-05) — kept comma-joined.
+        tids = [t for t in re.split(r"[\s,]+", str(f.get("type_id") or "").strip().upper()) if t]
+        if tids and all(re.fullmatch(r"[A-Z]\d{11}", t) for t in tids):
+            out["type_id"] = ",".join(dict.fromkeys(tids))
             # #149: ``sn`` — a regex a value must match in full to be looked
             # up as the serial number of an item of that type (and swapped
             # for its PID); anything else is a plain type mismatch. Nothing
@@ -1438,12 +1440,14 @@ def _guarded(tid: str | None, raw: str, resolve, sn: str | None = None):
     ``resolve(type_id, serial)`` turns into the PID of the item of that
     type carrying it — every non-PID value with no ``sn`` pattern, only a
     full match with one (Chao 2026-09-18: blank = PID or serial). A serial
-    no item has is dropped too."""
-    if not tid or raw.upper().startswith(tid + "-"):
+    no item has is dropped too. ``tid`` may name several types,
+    comma-joined (#210): a PID of any stands, a serial is tried on each."""
+    tids = tid.split(",") if tid else []
+    if not tids or any(raw.upper().startswith(t + "-") for t in tids):
         return raw
     if resolve is None or _PID_SHAPE.fullmatch(raw) or (sn and not re.fullmatch(sn, raw)):
         return None
-    return resolve(tid, raw)
+    return next((pid for pid in (resolve(t, raw) for t in tids) if pid), None)
 
 
 def parse(schema: dict, post, resolve=None) -> dict:
