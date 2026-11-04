@@ -1,65 +1,92 @@
 {% load checklist %}
 {# #200: one consortium's generated production-status table, drawn as the fill page draws a named-row table (cl-table) but read-only — shared by the status page (live) and the overview (cached). Anselmo 2026-10-26: four dates — the first batch's pair then the last batch's; the float spans the last pair. Context: rows = production.table(...), can_edit, consortium (#206: the plan links carry it — a quiet ✎ after the component name since Chao 2026-10-27, nothing when there is no plan and no right to set one; dates from P6 carry a small P6 label, the activity in their tooltip — Anselmo 2026-10-22: the typed ones must be told apart), tree (#211: any row has children — rows are indented by their level, a parent's ▾ folds its rows, the fold remembered per table in the browser; a row naming whose plan it shows links that consortium's plan; a part finishing after its assembly carries a ⚠), cols (#211: the comment column is left out when empty in every row — the first-batch pair stays, Chao 2026-11-04 — Chao 2026-11-04, the table got too wide). #}
-{% if tree %}<div class="ps-fold"><button type="button" class="ps-fold-btn" data-fold="open">Expand all</button><button type="button" class="ps-fold-btn" data-fold="close">Collapse all</button></div>{% endif %}
+<div class="ps-bar">{% if tree %}<button type="button" class="ps-fold-btn" data-fold="open">Expand all</button><button type="button" class="ps-fold-btn" data-fold="close">Collapse all</button>{% endif %}<span class="ps-cols" title="Columns to show — remembered in this browser">{% for k, l in cols.ticks %}<label><input type="checkbox" data-col="{{ k }}" autocomplete="off"{% if k != "type" %} checked{% endif %}> {{ l }}</label>{% endfor %}</span></div>
 <div class="tbl-scroll"><table class="cl-table cl-gridlines ps-table" data-table="{{ consortium }}">
-  <thead><tr><th>Component</th><th>Type ID</th><th>Needed</th><th>In HWDB</th><th>First completed by</th><th>First needed by</th><th>Last completed by</th><th>Last needed by</th><th>Float (months)</th>{% if cols.comment %}<th>Comment</th>{% endif %}</tr></thead>
+  <thead><tr><th>Component</th><th data-col="type">Type ID</th><th data-col="needed">Needed</th><th data-col="n">In HWDB</th><th data-col="fdone">First completed by</th><th data-col="fneed">First needed by</th><th data-col="done">Last completed by</th><th data-col="need">Last needed by</th><th data-col="float">Float (months)</th>{% if cols.comment %}<th data-col="comment">Comment</th>{% endif %}</tr></thead>
   <tbody>
   {% for r in rows %}<tr data-level="{{ r.level }}" data-t="{{ r.type }}">
     <th scope="row" class="cl-rowlab"{% if r.level %} style="padding-left:{% widthratio r.level 1 18 %}px;"{% endif %}>{% if r.has_children %}<button type="button" class="ps-tog" aria-expanded="true" title="Fold its rows"></button>{% elif tree %}<span class="ps-tog ps-tog-none"></span>{% endif %}<a href="{% url 'explore:home' %}?node={{ r.type }}" title="the type’s page">{{ r.label }}</a>{% if r.has_plan or can_edit %}<a class="ps-plan" href="{% url 'explore:production_plan' part_type_id=r.type %}{% if r.plan_of %}?for={{ r.plan_of }}{% elif consortium %}?for={{ consortium }}{% endif %}" title="{% if r.has_plan %}{% if can_edit %}Edit the plan{% else %}The plan and its history{% endif %}{% if r.updated %} — set {{ r.updated }}{% endif %}{% if r.updated_by %} by {{ r.updated_by }}{% endif %}{% else %}No plan on this type yet — set one{% endif %}{% if r.plan_of %} ({{ r.plan_of }}’s){% endif %}">&#9998;</a>{% endif %}</th>
-    <td class="cl-const ps-types">{{ r.type }}</td>
-    <td class="cl-const ps-num{% if not r.needed %} ps-none{% endif %}">{{ r.needed|default:"—" }}</td>
-    <td class="cl-const ps-num" title="{{ r.by_status|default:'no items in the mirror' }}">{{ r.n }}</td>
-    <td class="cl-const{% if r.first_completed_past %} ps-past{% endif %}{% if not r.first_completed_by %} ps-none{% endif %}"{% if r.first_completed_src %} title="{{ r.first_completed_src }}"{% endif %}>{{ r.first_completed_by|default:"—" }}{% if r.first_completed_src %} <span class="ps-p6">P6</span>{% endif %}{% if r.first_dep_warn %} <span class="ps-warn" title="{{ r.first_dep_warn }}">&#9888;</span>{% endif %}</td>
-    <td class="cl-const{% if r.first_needed_past %} ps-past{% endif %}{% if not r.first_needed_by %} ps-none{% endif %}"{% if r.first_needed_src %} title="{{ r.first_needed_src }}"{% endif %}>{{ r.first_needed_by|default:"—" }}{% if r.first_needed_src %} <span class="ps-p6">P6</span>{% endif %}</td>
-    <td class="cl-const{% if r.completed_past %} ps-past{% endif %}{% if not r.completed_by %} ps-none{% endif %}"{% if r.completed_src %} title="{{ r.completed_src }}"{% endif %}>{{ r.completed_by|default:"—" }}{% if r.completed_src %} <span class="ps-p6">P6</span>{% endif %}{% if r.dep_warn %} <span class="ps-warn" title="{{ r.dep_warn }}">&#9888;</span>{% endif %}</td>
-    <td class="cl-const{% if r.needed_past %} ps-past{% endif %}{% if not r.needed_by %} ps-none{% endif %}"{% if r.needed_src %} title="{{ r.needed_src }}"{% endif %}>{{ r.needed_by|default:"—" }}{% if r.needed_src %} <span class="ps-p6">P6</span>{% endif %}{% if r.p6_missing %} <span class="ps-warn" title="{{ r.p6_missing }}">&#9888;</span>{% endif %}</td>
-    <td class="cl-const ps-num{% if not r.float %} ps-none{% endif %}">{{ r.float|default:"—" }}</td>
-    {% if cols.comment %}<td class="cl-const{% if r.comment|length > 24 %} cl-wrap ps-long{% endif %}">{{ r.comment|clmd_block }}</td>{% endif %}
+    <td data-col="type" class="cl-const ps-types">{{ r.type }}</td>
+    <td data-col="needed" class="cl-const ps-num{% if not r.needed %} ps-none{% endif %}">{{ r.needed|default:"—" }}</td>
+    <td data-col="n" class="cl-const ps-num" title="{{ r.by_status|default:'no items in the mirror' }}">{{ r.n }}</td>
+    <td data-col="fdone" class="cl-const{% if r.first_completed_past %} ps-past{% endif %}{% if not r.first_completed_by %} ps-none{% endif %}"{% if r.first_completed_src %} title="{{ r.first_completed_src }}"{% endif %}>{{ r.first_completed_by|default:"—" }}{% if r.first_completed_src %} <span class="ps-p6">P6</span>{% endif %}{% if r.first_dep_warn %} <span class="ps-warn" title="{{ r.first_dep_warn }}">&#9888;</span>{% endif %}</td>
+    <td data-col="fneed" class="cl-const{% if r.first_needed_past %} ps-past{% endif %}{% if not r.first_needed_by %} ps-none{% endif %}"{% if r.first_needed_src %} title="{{ r.first_needed_src }}"{% endif %}>{{ r.first_needed_by|default:"—" }}{% if r.first_needed_src %} <span class="ps-p6">P6</span>{% endif %}</td>
+    <td data-col="done" class="cl-const{% if r.completed_past %} ps-past{% endif %}{% if not r.completed_by %} ps-none{% endif %}"{% if r.completed_src %} title="{{ r.completed_src }}"{% endif %}>{{ r.completed_by|default:"—" }}{% if r.completed_src %} <span class="ps-p6">P6</span>{% endif %}{% if r.dep_warn %} <span class="ps-warn" title="{{ r.dep_warn }}">&#9888;</span>{% endif %}</td>
+    <td data-col="need" class="cl-const{% if r.needed_past %} ps-past{% endif %}{% if not r.needed_by %} ps-none{% endif %}"{% if r.needed_src %} title="{{ r.needed_src }}"{% endif %}>{{ r.needed_by|default:"—" }}{% if r.needed_src %} <span class="ps-p6">P6</span>{% endif %}{% if r.p6_missing %} <span class="ps-warn" title="{{ r.p6_missing }}">&#9888;</span>{% endif %}</td>
+    <td data-col="float" class="cl-const ps-num{% if not r.float %} ps-none{% endif %}">{{ r.float|default:"—" }}</td>
+    {% if cols.comment %}<td data-col="comment" class="cl-const{% if r.comment|length > 24 %} cl-wrap ps-long{% endif %}">{{ r.comment|clmd_block }}</td>{% endif %}
   </tr>{% endfor %}
   </tbody>
 </table></div>
-{% if tree %}<script>
+<script>
 (function () {
   // #211: fold a parent's rows — every following row deeper than it, up to the next row at its level or above.
   // The folded parents are remembered per table (localStorage psFold:<table>); Expand all / Collapse all reset them.
-  if (window.psFoldInit) return;
-  window.psFoldInit = true;
-  function under(tr) {
-    var out = [], lv = +tr.dataset.level, n = tr.nextElementSibling;
-    while (n && +n.dataset.level > lv) { out.push(n); n = n.nextElementSibling; }
-    return out;
-  }
-  function apply(tbl) {
-    var closed = {};
-    tbl.querySelectorAll("tr[data-level]").forEach(function (tr) { tr.hidden = false; });
-    tbl.querySelectorAll(".ps-tog[aria-expanded=false]").forEach(function (b) {
-      var tr = b.closest("tr"); closed[tr.dataset.t] = 1;
-      under(tr).forEach(function (r) { r.hidden = true; });
-    });
-    try { localStorage.setItem("psFold:" + tbl.dataset.table, JSON.stringify(closed)); } catch (e) {}
-  }
-  function restore(tbl) {
-    var closed = {};
-    try { closed = JSON.parse(localStorage.getItem("psFold:" + tbl.dataset.table) || "{}"); } catch (e) {}
-    tbl.querySelectorAll(".ps-tog[aria-expanded]").forEach(function (b) {
-      b.setAttribute("aria-expanded", closed[b.closest("tr").dataset.t] ? "false" : "true");
-    });
-    apply(tbl);
-  }
-  document.addEventListener("click", function (e) {
-    var b = e.target.closest(".ps-tog[aria-expanded]");
-    if (b) {
-      b.setAttribute("aria-expanded", b.getAttribute("aria-expanded") === "true" ? "false" : "true");
-      apply(b.closest("table"));
-      return;
+  // Columns (Chao 2026-11-04): a tick per column above the table, the unticked ones remembered per table (psCols:<table>);
+  // until something is stored the markup's defaults hold (Type ID off). autocomplete=off: a reload must not put the
+  // browser's remembered tick back over the stored one after this ran (Chao 2026-11-04, Chrome did).
+  // The overview includes this once per table, each copy running before the next table is parsed — so the handlers
+  // and functions are set up once, and every copy initialises the tables parsed so far that no copy has yet.
+  if (!window.psTree) {
+    function tableOf(el) { return el.closest(".ps-bar").nextElementSibling.querySelector("table"); }
+    function under(tr) {
+      var out = [], lv = +tr.dataset.level, n = tr.nextElementSibling;
+      while (n && +n.dataset.level > lv) { out.push(n); n = n.nextElementSibling; }
+      return out;
     }
-    var f = e.target.closest(".ps-fold-btn");
-    if (f) {
-      var tbl = f.closest(".ps-fold").nextElementSibling.querySelector("table");
-      tbl.querySelectorAll(".ps-tog[aria-expanded]").forEach(function (t) { t.setAttribute("aria-expanded", f.dataset.fold === "open" ? "true" : "false"); });
+    function apply(tbl) {
+      var closed = {};
+      tbl.querySelectorAll("tr[data-level]").forEach(function (tr) { tr.hidden = false; });
+      tbl.querySelectorAll(".ps-tog[aria-expanded=false]").forEach(function (b) {
+        var tr = b.closest("tr"); closed[tr.dataset.t] = 1;
+        under(tr).forEach(function (r) { r.hidden = true; });
+      });
+      try { localStorage.setItem("psFold:" + tbl.dataset.table, JSON.stringify(closed)); } catch (e) {}
+    }
+    function restore(tbl) {
+      var closed = {};
+      try { closed = JSON.parse(localStorage.getItem("psFold:" + tbl.dataset.table) || "{}"); } catch (e) {}
+      tbl.querySelectorAll(".ps-tog[aria-expanded]").forEach(function (b) {
+        b.setAttribute("aria-expanded", closed[b.closest("tr").dataset.t] ? "false" : "true");
+      });
       apply(tbl);
     }
-  });
-  document.querySelectorAll("table.ps-table[data-table]").forEach(restore);
+    function showCols(bar) {
+      var tbl = tableOf(bar), hide = {};
+      bar.querySelectorAll(".ps-cols input").forEach(function (c) { if (!c.checked) hide[c.dataset.col] = 1; });
+      tbl.querySelectorAll("[data-col]").forEach(function (cell) { cell.hidden = !!hide[cell.dataset.col]; });
+      return hide;
+    }
+    function cols(bar) {
+      var hide = showCols(bar);
+      try { localStorage.setItem("psCols:" + tableOf(bar).dataset.table, JSON.stringify(hide)); } catch (e) {}
+    }
+    function restoreCols(bar) {
+      var raw = null, off = {};
+      try { raw = localStorage.getItem("psCols:" + tableOf(bar).dataset.table); off = JSON.parse(raw || "{}"); } catch (e) {}
+      if (raw) bar.querySelectorAll(".ps-cols input").forEach(function (c) { c.checked = !off[c.dataset.col]; });
+      showCols(bar);   // no store until a tick changes
+    }
+    document.addEventListener("change", function (e) {
+      var c = e.target.closest(".ps-cols input"); if (c) cols(c.closest(".ps-bar"));
+    });
+    document.addEventListener("click", function (e) {
+      var b = e.target.closest(".ps-tog[aria-expanded]");
+      if (b) {
+        b.setAttribute("aria-expanded", b.getAttribute("aria-expanded") === "true" ? "false" : "true");
+        apply(b.closest("table"));
+        return;
+      }
+      var f = e.target.closest(".ps-fold-btn");
+      if (f) {
+        var tbl = tableOf(f);
+        tbl.querySelectorAll(".ps-tog[aria-expanded]").forEach(function (t) { t.setAttribute("aria-expanded", f.dataset.fold === "open" ? "true" : "false"); });
+        apply(tbl);
+      }
+    });
+    window.psTree = {restore: restore, restoreCols: restoreCols};
+  }
+  document.querySelectorAll(".ps-bar:not([data-init])").forEach(function (bar) { bar.dataset.init = "1"; window.psTree.restoreCols(bar); });
+  document.querySelectorAll("table.ps-table[data-table]:not([data-init])").forEach(function (tbl) { tbl.dataset.init = "1"; window.psTree.restore(tbl); });
 })();
-</script>{% endif %}
+</script>

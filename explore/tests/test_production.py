@@ -230,8 +230,8 @@ class EngineTest(TestCase):
         rp = production.row_plans("dev", rows, PTID)
         self.assertEqual((rp[femb]["needed"], rp[f"{femb}@{other}"]["needed"], rp[crp]["needed"]), (1, 1920, 160))
         # the optional column: no comment anywhere
-        self.assertEqual(production.columns(t), {"comment": False})
-        self.assertEqual(production.columns([]), {"comment": False})
+        self.assertEqual(production.columns(t), {"comment": False, "ticks": production.TICKS[:-1]})
+        self.assertEqual(production.columns([]), {"comment": False, "ticks": production.TICKS[:-1]})
         # a table whose row shows another's plan does not share the type (Chao 2026-11-04: the type page keeps its two plans)
         production.cache_list("dev", PTID, rows)
         production.cache_list("dev", other, [{"type": femb, "label": "", "level": 0, "plan_of": ""}])
@@ -285,23 +285,23 @@ class StatusPageTest(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn("<h1>Test Production Status</h1>", html)
         self.assertIn(f'<table class="cl-table cl-gridlines ps-table" data-table="{PTID}">', html)   # the fill page's table look
-        self.assertIn("<th>Component</th><th>Type ID</th><th>Needed</th><th>In HWDB</th><th>First completed by</th><th>First needed by</th><th>Last completed by</th><th>Last needed by</th><th>Float (months)</th><th>Comment</th></tr>", html)
-        self.assertNotIn('class="ps-fold"', html)   # a flat list: no fold controls, no toggles
+        self.assertIn('<th>Component</th><th data-col="type">Type ID</th><th data-col="needed">Needed</th><th data-col="n">In HWDB</th><th data-col="fdone">First completed by</th><th data-col="fneed">First needed by</th><th data-col="done">Last completed by</th><th data-col="need">Last needed by</th><th data-col="float">Float (months)</th><th data-col="comment">Comment</th></tr>', html)
+        self.assertNotIn('class="ps-fold-btn"', html)   # a flat list: no fold controls, no toggles
         self.assertNotIn('class="ps-tog', html)
         self.assertIn(f'<tr data-level="0" data-t="{SIPM}">\n    <th scope="row" class="cl-rowlab"><a href="/hw/dev/?node={SIPM}" title="the type’s page">SiPM boards (6 SiPMs)</a>'
                       f'<a class="ps-plan" href="/hw/dev/plan/{SIPM}/?for={PTID}" title="Edit the plan — set 2026-10-08 by chaoz">&#9998;</a></th>', html)   # Chao 2026-10-27: a pencil by the name, the Type ID cell bare
-        self.assertIn(f'<td class="cl-const ps-types">{SIPM}</td>', html)
-        self.assertIn('<td class="cl-const ps-num">48,000</td>', html)
-        self.assertIn('<td class="cl-const ps-num" title="3 available">3</td>', html)
-        self.assertIn('<td class="cl-const">May 2028</td>', html)
-        self.assertIn('<td class="cl-const ps-num">17</td>', html)
+        self.assertIn(f'<td data-col="type" class="cl-const ps-types">{SIPM}</td>', html)
+        self.assertIn('<td data-col="needed" class="cl-const ps-num">48,000</td>', html)
+        self.assertIn('<td data-col="n" class="cl-const ps-num" title="3 available">3</td>', html)
+        self.assertIn('<td data-col="need" class="cl-const">May 2028</td>', html)
+        self.assertIn('<td data-col="float" class="cl-const ps-num">17</td>', html)
         self.assertIn('<span class="clmd-green"><strong>Near completion</strong></span>', html)   # Markdown + colours
         self.assertIn("<li>HPK all tested</li>", html)
         # the type without a plan: its name, dashes, a "set plan" link for the architect
         self.assertIn('title="the type’s page">PDS module</a><a class="ps-plan"', html)
         self.assertIn(f'<a class="ps-plan" href="/hw/dev/plan/{PDS}/?for={PTID}" title="No plan on this type yet — set one">&#9998;</a>', html)
-        self.assertIn('<td class="cl-const ps-num ps-none">—</td>', html)
-        self.assertIn('<td class="cl-const ps-num" title="no items in the mirror">0</td>', html)
+        self.assertIn('<td data-col="needed" class="cl-const ps-num ps-none">—</td>', html)
+        self.assertIn('<td data-col="n" class="cl-const ps-num" title="no items in the mirror">0</td>', html)
         self.assertIn(f'href="/hw/dev/plan-list/{PTID}/?next=', html)   # ✎ Component list
         self.assertNotIn("ps-rev", html)   # no Submission picker: the history is per plan
         self.assertEqual(ProductionList.for_instance("dev").get(part_type_id=PTID).rows, production.normalize_list(LIST))
@@ -329,13 +329,16 @@ class StatusPageTest(TestCase):
         m1, m2 = _mocked(api)
         with m1, m2:
             html = self.client.get(self.URL).content.decode()
-        self.assertIn('<div class="ps-fold"><button type="button" class="ps-fold-btn" data-fold="open">Expand all</button>', html)
+        self.assertIn('<div class="ps-bar"><button type="button" class="ps-fold-btn" data-fold="open">Expand all</button>', html)
+        self.assertIn('<span class="ps-cols" title="Columns to show — remembered in this browser"><label><input type="checkbox" data-col="type" autocomplete="off"> Type ID</label><label><input type="checkbox" data-col="needed" autocomplete="off" checked> Needed</label>', html)
+        self.assertIn('<th data-col="float">Float (months)</th><th data-col="comment">Comment</th></tr>', html)
+        self.assertIn('localStorage.setItem("psCols:" + tableOf(bar).dataset.table', html)
         self.assertIn(f'<tr data-level="0" data-t="{PDS}">\n    <th scope="row" class="cl-rowlab"><button type="button" class="ps-tog" aria-expanded="true" title="Fold its rows"></button><a href="/hw/dev/?node={PDS}"', html)
         self.assertIn(f'<tr data-level="1" data-t="{SIPM}">\n    <th scope="row" class="cl-rowlab" style="padding-left:18px;"><span class="ps-tog ps-tog-none"></span><a href="/hw/dev/?node={SIPM}"', html)
         self.assertIn(f'<a class="ps-plan" href="/hw/dev/plan/{SIPM}/?for={other}" title="Edit the plan — set 2026-10-08 by chaoz ({other}’s)">', html)
-        self.assertIn('<td class="cl-const ps-num">7</td>', html)   # the other consortium's plan, not the plain one
-        self.assertIn('<td class="cl-const">Jun 2029</td>', html)
-        self.assertIn("<th>Float (months)</th><th>Comment</th></tr>", html)
+        self.assertIn('<td data-col="needed" class="cl-const ps-num">7</td>', html)   # the other consortium's plan, not the plain one
+        self.assertIn('<td data-col="done" class="cl-const">Jun 2029</td>', html)
+        self.assertIn('<th data-col="float">Float (months)</th><th data-col="comment">Comment</th></tr>', html)
         self.assertIn('localStorage.setItem("psFold:" + tbl.dataset.table', html)
         cached = ProductionList.for_instance("dev").get(part_type_id=PTID).rows
         self.assertEqual([(r["level"], r["plan_of"]) for r in cached], [(0, ""), (1, other)])
@@ -345,7 +348,7 @@ class StatusPageTest(TestCase):
         ConsortiumTypeOverride.objects.create(instance="dev", part_type_id=PTID)
         html = self.client.get("/hw/dev/status/").content.decode()
         self.assertIn('data-fold="close">Collapse all</button>', html)
-        self.assertIn('<td class="cl-const ps-num">7</td>', html)
+        self.assertIn('<td data-col="needed" class="cl-const ps-num">7</td>', html)
 
     def test_no_list_says_so_and_keeps_the_mark(self):
         ConsortiumTypeOverride.objects.create(instance="prod", part_type_id="D05700200099")
@@ -555,7 +558,7 @@ class DetectorPagesTest(TestCase):
         self.assertIn('<a class="hc-pill" role="tab" href="?c=Z00100600001" data-c="Z00100600001" data-d="other" aria-selected="true">Test Production Status</a>', html)
         self.assertIn('<div class="hc-cons" data-c="Z00100600001">', html)
         self.assertIn('title="the type’s page">SiPM boards (6 SiPMs)</a><a class="ps-plan"', html)   # the cached table, no HWDB call
-        self.assertIn('<td class="cl-const ps-num">48,000</td>', html)
+        self.assertIn('<td data-col="needed" class="cl-const ps-num">48,000</td>', html)
         self.assertIn(f'<a class="ps-plan" href="/hw/dev/plan/{PDS}/?for={PTID}" title="No plan on this type yet — set one">&#9998;</a>', html)   # Chao 2026-11-04: a ✎ on a row without a plan, here too
         self.assertIn('<span class="hc-read">read ', html)
         self.assertIn(f'<a class="hc-cons-open" href="/hw/dev/plan-list/{PTID}/?next=/hw/dev/status/%3Fc%3D{PTID}" title="The rows of this table — the component types, nested">&#9998; Edit table</a>', html)   # Chao 2026-11-04: not "Refresh"

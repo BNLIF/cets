@@ -136,7 +136,11 @@
   .ps-table .ps-tog.ps-tog-none { cursor: default; }
   .ps-table tr[data-level="0"] th.cl-rowlab { font-weight: 700; }
   .ps-table tr:not([data-level="0"]) th.cl-rowlab { font-weight: 500; }
-  .ps-fold { display: flex; gap: 6px; margin: 0 0 6px; }
+  .ps-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 0 0 6px; }
+  .ps-cols { display: inline-flex; gap: 2px 10px; flex-wrap: wrap; margin-left: auto; font-size: 12px; color: var(--dim); }
+  .ps-cols label { white-space: nowrap; cursor: pointer; }
+  .ps-cols input { vertical-align: -1px; margin: 0 2px 0 0; }
+  @media print { .ps-bar { display: none; } }
   .ps-fold-btn { font: inherit; font-size: 12px; padding: 2px 10px; border-radius: 999px; cursor: pointer; color: var(--dim); background: var(--page); border: 1px solid var(--rule); }
   .ps-fold-btn:hover { border-color: var(--rule-hard); color: var(--ink); }
   .ps-table td.cl-const > p, .ps-table td.cl-const > ul, .ps-table td.cl-const > ol { margin: 0; }   /* full Markdown in a cell: no paragraph gaps */

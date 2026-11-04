@@ -494,7 +494,12 @@ def columns(table: list[dict]) -> dict[str, bool]:
     columns have anything in them — the comment, for now — so the partial
     leaves the empty ones out. The first batch's two dates always show
     (Chao, the same day)."""
-    return {"comment": any(r["comment"] for r in table)}
+    return {"comment": any(r["comment"] for r in table),
+            "ticks": [t for t in TICKS if t[0] != "comment" or any(r["comment"] for r in table)]}
+
+
+TICKS = [("type", "Type ID"), ("needed", "Needed"), ("n", "In HWDB"), ("fdone", "First completed"), ("fneed", "First needed"),
+         ("done", "Last completed"), ("need", "Last needed"), ("float", "Float"), ("comment", "Comment")]   # a tick per column (Chao 2026-11-04)
 
 
 def summary(rows: list[dict], plans: dict[str, dict], today: date | None = None) -> dict:
