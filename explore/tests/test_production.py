@@ -229,9 +229,9 @@ class EngineTest(TestCase):
         production.cache_plan("dev", crp, plans[crp])
         rp = production.row_plans("dev", rows, PTID)
         self.assertEqual((rp[femb]["needed"], rp[f"{femb}@{other}"]["needed"], rp[crp]["needed"]), (1, 1920, 160))
-        # the optional columns: the first pair (the CRP has one), no comment anywhere
-        self.assertEqual(production.columns(t), {"first": True, "comment": False})
-        self.assertEqual(production.columns([]), {"first": False, "comment": False})
+        # the optional column: no comment anywhere
+        self.assertEqual(production.columns(t), {"comment": False})
+        self.assertEqual(production.columns([]), {"comment": False})
         # a table whose row shows another's plan does not share the type (Chao 2026-11-04: the type page keeps its two plans)
         production.cache_list("dev", PTID, rows)
         production.cache_list("dev", other, [{"type": femb, "label": "", "level": 0, "plan_of": ""}])
@@ -285,8 +285,7 @@ class StatusPageTest(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn("<h1>Test Production Status</h1>", html)
         self.assertIn(f'<table class="cl-table cl-gridlines ps-table" data-table="{PTID}">', html)   # the fill page's table look
-        # #211 (Chao 2026-11-04): the first-batch pair's columns are out — empty on every row; the comment stays
-        self.assertIn("<th>Component</th><th>Type ID</th><th>Needed</th><th>In HWDB</th><th>completed by</th><th>needed by</th><th>Float (months)</th><th>Comment</th></tr>", html)
+        self.assertIn("<th>Component</th><th>Type ID</th><th>Needed</th><th>In HWDB</th><th>First completed by</th><th>First needed by</th><th>Last completed by</th><th>Last needed by</th><th>Float (months)</th><th>Comment</th></tr>", html)
         self.assertNotIn('class="ps-fold"', html)   # a flat list: no fold controls, no toggles
         self.assertNotIn('class="ps-tog', html)
         self.assertIn(f'<tr data-level="0" data-t="{SIPM}">\n    <th scope="row" class="cl-rowlab"><a href="/hw/dev/?node={SIPM}" title="the type’s page">SiPM boards (6 SiPMs)</a>'

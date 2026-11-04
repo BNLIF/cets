@@ -491,10 +491,10 @@ def _after_parent(what: str, mine, parent: dict | None, key: str) -> str:
 
 def columns(table: list[dict]) -> dict[str, bool]:
     """#211 (Chao 2026-11-04: the table gets too wide): which optional
-    columns have anything in them — the first batch's two dates, the
-    comment — so the partial leaves the empty ones out."""
-    return {"first": any(r["first_completed_by"] or r["first_needed_by"] for r in table),
-            "comment": any(r["comment"] for r in table)}
+    columns have anything in them — the comment, for now — so the partial
+    leaves the empty ones out. The first batch's two dates always show
+    (Chao, the same day)."""
+    return {"comment": any(r["comment"] for r in table)}
 
 
 def summary(rows: list[dict], plans: dict[str, dict], today: date | None = None) -> dict:
