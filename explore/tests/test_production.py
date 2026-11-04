@@ -153,10 +153,24 @@ class EngineTest(TestCase):
                           "p6_first_completed_id": "", "p6_first_needed_id": "", "updated_by": "c", "updated": ""})
         self.assertEqual(production.normalize_plan(None)["needed"], None)
         self.assertEqual(production.normalize_list({"rows": [SIPM.lower(), {"type": PDS, "label": " PDS "}, {"type": "nope"}, 3]}),
-                         [{"type": SIPM, "label": ""}, {"type": PDS, "label": "PDS"}])
+                         [{"type": SIPM, "label": "", "level": 0, "plan_of": ""}, {"type": PDS, "label": "PDS", "level": 0, "plan_of": ""}])
         self.assertEqual(production.months_between("2026-12", "2028-05"), 17)
         self.assertEqual(production.months_between("2027-03-20", "2029-01"), 22)
         self.assertEqual(production.month_label("2027-03"), "Mar 2027")
+
+    def test_levels_and_lines(self):
+        # #211: a level at most one under the row above; plan_of a well-formed type id; the text form both ways
+        rows = production.normalize_list({"rows": [{"type": SIPM, "level": 3}, {"type": PDS, "level": "2", "plan_of": PTID.lower()},
+                                                   {"type": SIPM, "level": 9}, {"type": PDS, "level": -1, "plan_of": "x"}]})
+        self.assertEqual([(r["level"], r["plan_of"]) for r in rows], [(0, ""), (1, PTID), (2, ""), (0, "")])
+        rows, bad = production.parse_lines(f"{SIPM}  SiPM boards\n\n    {PDS.lower()}@{PTID}  PDS modules\n\t{SIPM} x\nnope here\n {PDS}")
+        self.assertEqual(rows, [{"type": SIPM, "label": "SiPM boards", "level": 0},
+                                {"type": PDS, "label": "PDS modules", "level": 1, "plan_of": PTID},   # 4 spaces asks for 2, clamped to 1
+                                {"type": SIPM, "label": "x", "level": 1},
+                                {"type": PDS, "label": "", "level": 1}])   # one space rounds to a level
+        self.assertEqual(bad, ["nope here"])
+        self.assertEqual(production.to_lines(rows), f"{SIPM}  SiPM boards\n  {PDS}@{PTID}  PDS modules\n  {SIPM}  x\n  {PDS}")
+        self.assertEqual(production.plan_key(rows[1]), f"{PDS}@{PTID}")
 
     def test_read_plan_and_list_take_the_newest_version(self):
         api = _api()
@@ -166,7 +180,8 @@ class EngineTest(TestCase):
         self.assertEqual(production.plan_history(api, vs)[1]["plan"]["needed_by"], "2028-01")
         self.assertEqual(production.read_plan(api, PDS), (None, []))
         rows, lvs = production.read_list(api, PTID)
-        self.assertEqual(rows, [{"type": SIPM, "label": "SiPM boards (6 SiPMs)"}, {"type": PDS, "label": ""}])
+        self.assertEqual(rows, [{"type": SIPM, "label": "SiPM boards (6 SiPMs)", "level": 0, "plan_of": ""},
+                                {"type": PDS, "label": "", "level": 0, "plan_of": ""}])
         self.assertEqual(lvs[0]["comments"], "first list")
 
     def test_table_and_summary(self):
@@ -186,6 +201,43 @@ class EngineTest(TestCase):
         self.assertEqual((t[1]["has_plan"], t[1]["needed"], t[1]["n"], t[1]["float"]), (False, "", "0", ""))
         self.assertEqual(production.summary(rows, plans, today=date(2027, 1, 15)), {"n": 2, "needed_by": "2028-05", "due": 1})
         self.assertEqual(production.summary(rows, plans, today=date(2026, 6, 1))["due"], 0)
+        self.assertEqual([(r["level"], r["has_children"], r["dep_warn"]) for r in t], [(0, False, ""), (0, False, "")])
+
+    def test_tree_rows_plan_of_and_the_dependency_mark(self):
+        # #211: CRP › FEMB › ASIC; the FEMB row shows another consortium's plan; a part finishing after its assembly is marked
+        crp, femb, asic, other = "D08100400001", "D08100500001", "D08100100001", "Z00100600003"
+        rows = [{"type": crp, "label": "Inst. CRP", "level": 0, "plan_of": ""},
+                {"type": femb, "label": "", "level": 1, "plan_of": other},
+                {"type": asic, "label": "LArASIC", "level": 2, "plan_of": ""},
+                {"type": PDS, "label": "CRU", "level": 1, "plan_of": ""}]
+        plans = {crp: production.normalize_plan({"needed": 160, "completed_by": "2027-08", "first_completed_by": "2027-01"}),
+                 femb: production.normalize_plan({"needed": 1, "completed_by": "2029-01"}),   # the plain plan, not shown
+                 f"{femb}@{other}": production.normalize_plan({"needed": 1920, "completed_by": "2027-06", "first_completed_by": "2027-03"}),
+                 asic: production.normalize_plan({"needed": 4000, "completed_by": "2027-10-05"})}
+        t = production.table(rows, plans, production.counts("dev", [crp, femb, asic, PDS]), {femb: "FEMB"}, today=date(2027, 1, 15))
+        self.assertEqual([(r["label"], r["level"], r["has_children"], r["plan_of"]) for r in t],
+                         [("Inst. CRP", 0, True, ""), ("FEMB", 1, True, other), ("LArASIC", 2, False, ""), ("CRU", 1, False, "")])
+        self.assertEqual((t[1]["needed"], t[1]["completed_by"], t[1]["has_plan"]), ("1,920", "Jun 2027", True))
+        self.assertEqual(t[1]["dep_warn"], "")   # Jun 2027 before the CRP's Aug 2027
+        self.assertEqual(t[1]["first_dep_warn"], "First completed by Mar 2027 is after Inst. CRP’s Jan 2027")
+        self.assertEqual(t[2]["dep_warn"], "Last completed by Oct 2027 is after FEMB’s Jun 2027")   # against its own parent, the FEMB
+        self.assertEqual((t[3]["dep_warn"], t[3]["has_plan"]), ("", False))
+        self.assertEqual(production.summary(rows, plans, today=date(2027, 1, 15)), {"n": 4, "needed_by": "", "due": 0})
+        # the overview's cached plans by row: the plan_of consortium's over the plain
+        production.cache_plan("dev", femb, plans[femb])
+        production.cache_plan("dev", femb, plans[f"{femb}@{other}"], consortium=other)
+        production.cache_plan("dev", crp, plans[crp])
+        rp = production.row_plans("dev", rows, PTID)
+        self.assertEqual((rp[femb]["needed"], rp[f"{femb}@{other}"]["needed"], rp[crp]["needed"]), (1, 1920, 160))
+        # the optional columns: the first pair (the CRP has one), no comment anywhere
+        self.assertEqual(production.columns(t), {"first": True, "comment": False})
+        self.assertEqual(production.columns([]), {"first": False, "comment": False})
+        # a table whose row shows another's plan does not share the type (Chao 2026-11-04: the type page keeps its two plans)
+        production.cache_list("dev", PTID, rows)
+        production.cache_list("dev", other, [{"type": femb, "label": "", "level": 0, "plan_of": ""}])
+        production.cache_list("dev", "Z00100600002", [{"type": femb, "label": "", "level": 0, "plan_of": ""}])
+        self.assertEqual(production.shared_by("dev", femb), ["Z00100600002", other])
+        self.assertEqual(production.shared_by("dev", crp), [PTID])
 
     def test_caches(self):
         production.cache_plan("dev", SIPM, production.normalize_plan(PLAN))
@@ -232,9 +284,12 @@ class StatusPageTest(TestCase):
             html = r.content.decode()
         self.assertEqual(r.status_code, 200)
         self.assertIn("<h1>Test Production Status</h1>", html)
-        self.assertIn('<table class="cl-table cl-gridlines ps-table">', html)   # the fill page's table look
-        self.assertIn("<th>Component</th><th>Type ID</th><th>Needed</th><th>In HWDB</th><th>First completed by</th><th>First needed by</th><th>Last completed by</th><th>Last needed by</th><th>Float (months)</th><th>Comment</th>", html)
-        self.assertIn(f'<th scope="row" class="cl-rowlab"><a href="/hw/dev/?node={SIPM}" title="the type’s page">SiPM boards (6 SiPMs)</a>'
+        self.assertIn(f'<table class="cl-table cl-gridlines ps-table" data-table="{PTID}">', html)   # the fill page's table look
+        # #211 (Chao 2026-11-04): the first-batch pair's columns are out — empty on every row; the comment stays
+        self.assertIn("<th>Component</th><th>Type ID</th><th>Needed</th><th>In HWDB</th><th>completed by</th><th>needed by</th><th>Float (months)</th><th>Comment</th></tr>", html)
+        self.assertNotIn('class="ps-fold"', html)   # a flat list: no fold controls, no toggles
+        self.assertNotIn('class="ps-tog', html)
+        self.assertIn(f'<tr data-level="0" data-t="{SIPM}">\n    <th scope="row" class="cl-rowlab"><a href="/hw/dev/?node={SIPM}" title="the type’s page">SiPM boards (6 SiPMs)</a>'
                       f'<a class="ps-plan" href="/hw/dev/plan/{SIPM}/?for={PTID}" title="Edit the plan — set 2026-10-08 by chaoz">&#9998;</a></th>', html)   # Chao 2026-10-27: a pencil by the name, the Type ID cell bare
         self.assertIn(f'<td class="cl-const ps-types">{SIPM}</td>', html)
         self.assertIn('<td class="cl-const ps-num">48,000</td>', html)
@@ -256,6 +311,42 @@ class StatusPageTest(TestCase):
         # one listing per type read, one fetch per newest file
         self.assertEqual(api.get_component_type_images.call_count, 3)
         self.assertEqual(api.get_image_response.call_count, 2)
+
+    def test_tree_and_plan_of(self):
+        # #211: nested rows fold, a row reads the named consortium's plan
+        other = "Z00100600003"
+        lst = {"rows": [{"type": PDS, "label": "PDS modules", "level": 0}, {"type": SIPM, "level": 1, "plan_of": other}]}
+        api = _api(lst=lst, plans={SIPM: PLAN})
+        api.get_component_type_images.side_effect = None
+        files = {"l1": lst, "p-plain": PLAN, "p-other": {**PLAN, "needed": 7, "completed_by": "2029-06"}}
+        listing = {PTID: [{"image_id": "l1", "image_name": f"Production_list_{PTID}.json", "created": "2026-10-08T10:00:00"}],
+                   SIPM: [{"image_id": "p-plain", "image_name": f"Production_plan_{SIPM}.json", "created": "2026-10-08T10:00:00"},
+                          {"image_id": "p-other", "image_name": f"Production_plan_{SIPM}_{other}.json", "created": "2026-10-09T10:00:00"},
+                          {"image_id": "c1", "image_name": f"Checklist_{SIPM}_QC.json", "created": "2026-10-01T00:00:00"},
+                          {"image_id": "c2", "image_name": f"Checklist_{SIPM}_Old.json", "created": "2026-10-01T00:00:00", "comments": "[retired]"}],
+                   PDS: [{"image_id": "c3", "image_name": f"Checklist_{PDS}_Receiving.json", "created": "2026-10-01T00:00:00"}]}
+        api.get_component_type_images.side_effect = lambda t: {"data": listing.get(t, [])}
+        api.get_image_response.side_effect = lambda iid: mock.Mock(content=json.dumps(files[iid]).encode())
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(self.URL).content.decode()
+        self.assertIn('<div class="ps-fold"><button type="button" class="ps-fold-btn" data-fold="open">Expand all</button>', html)
+        self.assertIn(f'<tr data-level="0" data-t="{PDS}">\n    <th scope="row" class="cl-rowlab"><button type="button" class="ps-tog" aria-expanded="true" title="Fold its rows"></button><a href="/hw/dev/?node={PDS}"', html)
+        self.assertIn(f'<tr data-level="1" data-t="{SIPM}">\n    <th scope="row" class="cl-rowlab" style="padding-left:18px;"><span class="ps-tog ps-tog-none"></span><a href="/hw/dev/?node={SIPM}"', html)
+        self.assertIn(f'<a class="ps-plan" href="/hw/dev/plan/{SIPM}/?for={other}" title="Edit the plan — set 2026-10-08 by chaoz ({other}’s)">', html)
+        self.assertIn('<td class="cl-const ps-num">7</td>', html)   # the other consortium's plan, not the plain one
+        self.assertIn('<td class="cl-const">Jun 2029</td>', html)
+        self.assertIn("<th>Float (months)</th><th>Comment</th></tr>", html)
+        self.assertIn('localStorage.setItem("psFold:" + tbl.dataset.table', html)
+        cached = ProductionList.for_instance("dev").get(part_type_id=PTID).rows
+        self.assertEqual([(r["level"], r["plan_of"]) for r in cached], [(0, ""), (1, other)])
+        self.assertEqual(ProductionPlan.for_instance("dev").get(part_type_id=SIPM, consortium=other).needed, 7)
+        self.assertEqual(ProductionPlan.for_instance("dev").get(part_type_id=SIPM, consortium="").needed, 48000)
+        # the overview draws the same tree from the caches
+        ConsortiumTypeOverride.objects.create(instance="dev", part_type_id=PTID)
+        html = self.client.get("/hw/dev/status/").content.decode()
+        self.assertIn('data-fold="close">Collapse all</button>', html)
+        self.assertIn('<td class="cl-const ps-num">7</td>', html)
 
     def test_no_list_says_so_and_keeps_the_mark(self):
         ConsortiumTypeOverride.objects.create(instance="prod", part_type_id="D05700200099")
@@ -371,15 +462,35 @@ class ListPageTest(TestCase):
         m1, m2 = _mocked(api)
         with m1, m2:
             html = self.client.get(self.URL).content.decode()
-            self.assertIn('<textarea class="pl-rows" name="rows" spellcheck="false" placeholder="', html)
+            self.assertIn('<textarea class="pl-rows" name="rows" id="pl-rows" spellcheck="false" hidden placeholder="', html)
             self.assertIn(f">{SIPM}  SiPM boards (6 SiPMs)\n{PDS}</textarea>", html)
             self.assertIn(f"Production_list_{PTID}.json</span> on the type in HWDB · 1 version · last saved 2026-10-08 10:00", html)
-            r = self.client.post(self.URL, {"rows": f"{PDS}  PDS modules\n\n{SIPM.lower()} SiPM boards\n", "reason": "reordered"})
+            # #211: the row editor's data — the rows with their mirror names, the other tables (for "whose plan"), the endpoints
+            self.assertIn('<script id="pl-data" type="application/json">', html)
+            data = json.loads(html.split('<script id="pl-data" type="application/json">')[1].split("</script>")[0])
+            self.assertEqual(data["rows"][0], {"type": SIPM, "label": "SiPM boards (6 SiPMs)", "level": 0, "plan_of": "", "name": "SiPM board"})
+            self.assertEqual((data["tables"], data["search"], data["positions"], data["summary"]),
+                             ([], "/hw/dev/search/api/", "/hw/dev/type-positions/X00000000000/", "/hw/dev/hierarchy/summary/"))
+            self.assertIn('<button type="button" class="pl-ib pl-mode" id="pl-text">Text</button>', html)
+            self.assertIn('data-do="sub" title="Add the types its positions take, under it">+ sub-components</button>', html)
+            r = self.client.post(self.URL, {"rows": f"{PDS}  PDS modules\n\n  {SIPM.lower()}@Z00100600003 SiPM boards\n", "reason": "reordered"})
             self.assertEqual(r["Location"], f"/hw/dev/status/{PTID}/")
         a = api.post_component_type_image.call_args
         self.assertEqual((a.args[0], a.args[2], a.kwargs["comments"]), (PTID, f"Production_list_{PTID}.json", "reordered"))
-        self.assertEqual(json.loads(a.args[1].getvalue()), {"rows": [{"type": PDS, "label": "PDS modules"}, {"type": SIPM, "label": "SiPM boards"}]})
+        self.assertEqual(json.loads(a.args[1].getvalue()), {"rows": [{"type": PDS, "label": "PDS modules", "level": 0},
+                                                                     {"type": SIPM, "label": "SiPM boards", "level": 1, "plan_of": "Z00100600003"}]})
         self.assertEqual(ProductionList.for_instance("dev").get(part_type_id=PTID).rows[0]["type"], PDS)
+
+    def test_editor_lists_the_other_tables(self):
+        # #211: a row may show another table's plan of its type — the editor is told which tables list each type
+        production.cache_list("dev", "Z00100600003", [{"type": SIPM, "label": "", "level": 0, "plan_of": ""}])
+        _node("Z00100600003", instance="dev", component_type_name="FDVD CE")
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(self.URL).content.decode()
+        data = json.loads(html.split('<script id="pl-data" type="application/json">')[1].split("</script>")[0])
+        self.assertEqual(data["tables"], [{"id": "Z00100600003", "name": "FDVD CE", "types": [SIPM]}])
 
     def test_bad_line_and_gates(self):
         api = _api()
@@ -395,8 +506,8 @@ class ListPageTest(TestCase):
                 self.assertEqual(self.client.post(self.URL, {"rows": SIPM}).status_code, 403)
             self.assertIn("This type lists no HWDB roles, so HWDB refuses every write onto it.", html)
             self.assertNotIn('<form method="post">', html)
-            self.assertIn(f'<tr><td class="mono">{SIPM}</td><td>SiPM boards (6 SiPMs)</td><td class="">SiPM board</td></tr>', html)
-            self.assertIn(f'<tr><td class="mono">{PDS}</td><td>—</td><td class="pl-dim">not in the mirror</td></tr>', html)
+            self.assertIn(f'<tr><td class="mono">{SIPM}</td><td>SiPM boards (6 SiPMs)</td><td class="">SiPM board</td><td class="mono"></td></tr>', html)
+            self.assertIn(f'<tr><td class="mono">{PDS}</td><td>—</td><td class="pl-dim">not in the mirror</td><td class="mono"></td></tr>', html)
 
     def test_saving_a_list_does_not_mark_the_type(self):
         # Chao 2026-10-08: the consortium mark (type page) shows the list link, not the other way round
@@ -433,7 +544,7 @@ class DetectorPagesTest(TestCase):
         ConsortiumTypeOverride.objects.create(instance="dev", part_type_id=PTID)
         html = self.client.get("/hw/dev/status/").content.decode()
         self.assertIn('<a class="hc-tab" aria-selected="true" href="/hw/dev/status/">Production status</a>', html)
-        self.assertIn(f'<a href="{navigation.leaf_path_for("dev", PTID)}" title="the consortium type’s page">Test Production Status</a>', html)   # Chao: the index names the type page
+        self.assertIn(f'<a href="{navigation.leaf_path_for("dev", PTID)}" title="the table’s type page">Test Production Status</a>', html)   # Chao: the index names the type page
         self.assertIn('<td class="num">—</td>', html)   # not read yet: no numbers in the index
         self.assertIn(f'Not read yet — <a href="/hw/dev/status/{PTID}/">open its status page</a>', html)
         production.cache_list("dev", PTID, production.normalize_list(LIST))
@@ -446,7 +557,9 @@ class DetectorPagesTest(TestCase):
         self.assertIn('<div class="hc-cons" data-c="Z00100600001">', html)
         self.assertIn('title="the type’s page">SiPM boards (6 SiPMs)</a><a class="ps-plan"', html)   # the cached table, no HWDB call
         self.assertIn('<td class="cl-const ps-num">48,000</td>', html)
+        self.assertIn(f'<a class="ps-plan" href="/hw/dev/plan/{PDS}/?for={PTID}" title="No plan on this type yet — set one">&#9998;</a>', html)   # Chao 2026-11-04: a ✎ on a row without a plan, here too
         self.assertIn('<span class="hc-read">read ', html)
+        self.assertIn(f'<a class="hc-cons-open" href="/hw/dev/plan-list/{PTID}/?next=/hw/dev/status/%3Fc%3D{PTID}" title="The rows of this table — the component types, nested">&#9998; Edit table</a>', html)   # Chao 2026-11-04: not "Refresh"
         self.assertIn('localStorage.setItem("hcCons", id)', html)
         production.cache_list("dev", PTID, [])
         html = self.client.get("/hw/dev/status/").content.decode()

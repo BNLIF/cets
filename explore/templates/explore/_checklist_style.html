@@ -127,6 +127,18 @@
   .ps-table td.cl-const .ps-p6 { font-size: 9.5px; font-weight: 600; letter-spacing: .04em; color: var(--accent-ink); background: var(--accent-soft);
     padding: 1px 5px; border-radius: 999px; vertical-align: 1px; }   /* a date from the P6 schedule (Anselmo 2026-10-22) */
   .ps-table td.cl-const.cl-wrap.ps-long { max-width: 440px; min-width: 260px; }
+  /* #211: a tree — the fold toggle before a parent's name, a spacer before the others' */
+  .ps-table .ps-tog { display: inline-block; width: 18px; margin-right: 4px; padding: 0; font: inherit; font-size: 16px; line-height: 1;
+    color: var(--faint); background: none; border: none; cursor: pointer; text-align: center; vertical-align: -1px; }   /* the sidebar's ▸ ▾ */
+  .ps-table .ps-tog:hover { color: var(--ink); }
+  .ps-table .ps-tog[aria-expanded="false"]::before { content: "\25B8"; }
+  .ps-table .ps-tog[aria-expanded="true"]::before { content: "\25BE"; }
+  .ps-table .ps-tog.ps-tog-none { cursor: default; }
+  .ps-table tr[data-level="0"] th.cl-rowlab { font-weight: 700; }
+  .ps-table tr:not([data-level="0"]) th.cl-rowlab { font-weight: 500; }
+  .ps-fold { display: flex; gap: 6px; margin: 0 0 6px; }
+  .ps-fold-btn { font: inherit; font-size: 12px; padding: 2px 10px; border-radius: 999px; cursor: pointer; color: var(--dim); background: var(--page); border: 1px solid var(--rule); }
+  .ps-fold-btn:hover { border-color: var(--rule-hard); color: var(--ink); }
   .ps-table td.cl-const > p, .ps-table td.cl-const > ul, .ps-table td.cl-const > ol { margin: 0; }   /* full Markdown in a cell: no paragraph gaps */
   .ps-table td.cl-const > p + p, .ps-table td.cl-const > * + ul, .ps-table td.cl-const > * + ol { margin-top: 6px; }
   .ps-table td.cl-const > ul, .ps-table td.cl-const > ol { padding-left: 18px; }

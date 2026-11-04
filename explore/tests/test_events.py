@@ -546,8 +546,7 @@ class ExplorePlotViewTest(TestCase):
         self.assertIn('<input type="number" class="chart-plan-total"', html)
         self.assertIn('<input type="month" class="chart-plan-done" title="Completed by (month)"', html)   # Anselmo: month precision is enough
         self.assertIn('<input type="month" class="chart-plan-need" title="Needed by (month, at SURF)"', html)
-        self.assertIn('<span class="chart-plan-note" data-kind="comp"></span>', html)
-        self.assertIn('<span class="chart-plan-note" data-kind="test"></span>', html)
+        self.assertNotIn("chart-plan-note", html)   # Chao 2026-11-04: no plan echo by the counts — the Plan table shows it
         self.assertIn("<span>Projected</span>", html)
         # months everywhere (Anselmo): the window, the projection and the plan dates
         self.assertIn('<input type="month" class="chart-win-from" title="From (month)"', html)

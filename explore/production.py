@@ -20,6 +20,14 @@ date) — resolved against the last uploaded P6 schedule (``p6.py``) by
 list (HD and VD FEMBs) carries one plan per consortium,
 ``Production_plan_<type>_<consortium>.json``; the plain name is the
 plan of a type on one list.
+
+#211 (Anselmo + Hajime 2026-11-04, the I&I workshop's CRP example): a
+list row carries a ``level`` — its depth under the row above it — so a
+table reads as a tree (CRP › FEMB › the ASICs) with collapsible rows; a
+row may name whose plan it shows (``plan_of``, another consortium's
+suffixed plan, for a type that only has those); and a part whose
+completed-by comes after its parent's is marked. A table of the project managers lists types across
+the consortia the same way — the plans stay where they are.
 """
 
 from __future__ import annotations
@@ -121,7 +129,11 @@ def normalize_plan(raw) -> dict:
 
 
 def normalize_list(raw) -> list[dict]:
-    """``[{type, label}]`` — rows naming a well-formed type id, in order."""
+    """``[{type, label, level, plan_of}]`` — rows naming a well-formed type
+    id, in order. ``level`` (#211) is the row's depth: 0, or at most one
+    more than the row above; ``plan_of`` names the consortium type whose
+    plan of the type the row shows ("" = this table's own, else the
+    plain one)."""
     rows = (raw or {}).get("rows") if isinstance(raw, dict) else None
     out = []
     for r in rows or []:
@@ -130,9 +142,58 @@ def normalize_list(raw) -> list[dict]:
         if not isinstance(r, dict):
             continue
         tid = str(r.get("type") or "").strip().upper()
-        if PTID_RX.match(tid):
-            out.append({"type": tid, "label": str(r.get("label") or "").strip()})
+        if not PTID_RX.match(tid):
+            continue
+        po = str(r.get("plan_of") or "").strip().upper()
+        out.append({"type": tid, "label": str(r.get("label") or "").strip(),
+                    "level": _level(r.get("level"), out[-1]["level"] if out else -1),
+                    "plan_of": po if PTID_RX.match(po) else ""})
     return out
+
+
+def _level(v, prev: int) -> int:
+    try:
+        n = int(v or 0)
+    except (TypeError, ValueError):
+        n = 0
+    return max(0, min(n, prev + 1))
+
+
+_LINE_RX = re.compile(r"^(?P<type>[A-Za-z]\d{11})(?:@(?P<plan_of>[A-Za-z]\d{11}))?(?:\s+(?P<label>.*))?$")
+
+
+def parse_lines(text: str) -> tuple[list[dict], list[str]]:
+    """The list page's text form → ``(rows, bad lines)``. One row per line:
+    the type id, ``@consortium`` for the plan it shows, then the label;
+    the level is the indentation (two spaces, or a tab, per level —
+    clamped to one under the row above)."""
+    rows, bad = [], []
+    for raw in (text or "").splitlines():
+        if not raw.strip():
+            continue
+        lead = raw[:len(raw) - len(raw.lstrip(" \t"))]
+        m = _LINE_RX.match(raw.strip())
+        if not m:
+            bad.append(raw.strip())
+            continue
+        row = {"type": m.group("type").upper(), "label": (m.group("label") or "").strip(),
+               "level": _level(lead.count("\t") + (lead.count(" ") + 1) // 2, rows[-1]["level"] if rows else -1)}
+        if m.group("plan_of"):
+            row["plan_of"] = m.group("plan_of").upper()
+        rows.append(row)
+    return rows, bad
+
+
+def to_lines(rows: list[dict]) -> str:
+    """The rows as the text form (the inverse of ``parse_lines``)."""
+    return "\n".join(("  " * (r.get("level") or 0)) + r["type"] + (f"@{r['plan_of']}" if r.get("plan_of") else "")
+                      + (f"  {r['label']}" if r.get("label") else "") for r in rows)
+
+
+def plan_key(row: dict) -> str:
+    """The key a row's plan sits under in a plans dict: the type id, or
+    ``type@consortium`` for a row that names whose plan it shows."""
+    return f"{row['type']}@{row['plan_of']}" if row.get("plan_of") else row["type"]
 
 
 def read_plan(api, part_type_id: str, rows=None, consortium: str = "") -> tuple[dict | None, list[dict]]:
@@ -228,6 +289,19 @@ def cached_plans(inst: str, type_ids: list[str], consortium: str = "") -> dict[s
     return out
 
 
+def row_plans(inst: str, rows: list[dict], consortium: str) -> dict[str, dict]:
+    """The cached plans a table's rows show, by ``plan_key``: this
+    consortium's own plan of each type over the plain one, and for a row
+    naming ``plan_of`` that consortium's (else the plain one)."""
+    out = cached_plans(inst, [r["type"] for r in rows], consortium)
+    for r in rows:
+        if r.get("plan_of"):
+            p = cached_plans(inst, [r["type"]], r["plan_of"]).get(r["type"])
+            if p is not None:
+                out[plan_key(r)] = p
+    return out
+
+
 def type_plan(inst: str, part_type_id: str) -> dict | None:
     """The type page's plan (its Plan line, the dashboard's plan lines):
     the type's plain plan, else the first consortium's — P6 applied."""
@@ -268,10 +342,12 @@ def detector_of(full_name: str) -> str:
 
 
 def shared_by(inst: str, part_type_id: str) -> list[str]:
-    """The consortium types whose cached component list names the type —
-    two or more = one plan per consortium (#206)."""
+    """The consortium types whose cached component list names the type as
+    its own — two or more = one plan per consortium (#206). A row that
+    shows another table's plan (``plan_of``, #211) does not count: that
+    table reuses a plan, it does not hold one."""
     return [lst.part_type_id for lst in ProductionList.for_instance(inst)
-            if any(r.get("type") == part_type_id for r in lst.rows)]
+            if any(r.get("type") == part_type_id and not r.get("plan_of") for r in lst.rows)]
 
 
 # ---- P6 (#206) --------------------------------------------------------------
@@ -366,16 +442,24 @@ def table(rows: list[dict], plans: dict[str, dict], cnt: dict[str, dict],
     today = today or date.today()
     now = (today.year, today.month)
     out = []
-    for r in rows:
+    parents: list[dict] = []   # #211: the open ancestors, by level
+    for i, r in enumerate(rows):
         tid = r["type"]
-        p = plans.get(tid) or {}
+        p = plans.get(plan_key(r)) or {}
         c = cnt.get(tid) or {"n": 0, "by_status": []}
         done, need = p.get("completed_by") or "", p.get("needed_by") or ""
         fdone, fneed = p.get("first_completed_by") or "", p.get("first_needed_by") or ""
         fl = months_between(done, need)   # the float: the last batch's pair
+        level = r.get("level") or 0
+        del parents[level:]
+        parent = parents[-1] if parents else None
         out.append({
             "type": tid, "label": r.get("label") or nm.get(tid) or tid,
-            "has_plan": tid in plans,
+            "level": level, "plan_of": r.get("plan_of") or "",
+            "has_children": i + 1 < len(rows) and (rows[i + 1].get("level") or 0) > level,
+            "dep_warn": _after_parent("Last completed by", done, parent, "completed_by"),
+            "first_dep_warn": _after_parent("First completed by", fdone, parent, "first_completed_by"),
+            "has_plan": plan_key(r) in plans,
             "needed": "" if p.get("needed") is None else f"{p['needed']:,}",
             "n": f"{c['n']:,}", "by_status": ", ".join(f"{n} {st}" for st, n in c["by_status"]),
             "first_completed_by": month_label(fdone), "first_completed_past": bool(_ym(fdone)) and _ym(fdone) <= now,
@@ -391,7 +475,26 @@ def table(rows: list[dict], plans: dict[str, dict], cnt: dict[str, dict],
             "comment": p.get("comment") or "",
             "updated_by": p.get("updated_by") or "", "updated": p.get("updated") or "",
         })
+        parents.append({"label": out[-1]["label"], "completed_by": done, "first_completed_by": fdone})
     return out
+
+
+def _after_parent(what: str, mine, parent: dict | None, key: str) -> str:
+    """#211: the dependency mark — the part's month comes after the
+    assembly's it goes into (both known) → the tooltip; "" otherwise."""
+    theirs = (parent or {}).get(key) or ""
+    a, b = _ym(mine), _ym(theirs)
+    if a is None or b is None or a <= b:
+        return ""
+    return f"{what} {month_label(mine)} is after {parent['label']}’s {month_label(theirs)}"
+
+
+def columns(table: list[dict]) -> dict[str, bool]:
+    """#211 (Chao 2026-11-04: the table gets too wide): which optional
+    columns have anything in them — the first batch's two dates, the
+    comment — so the partial leaves the empty ones out."""
+    return {"first": any(r["first_completed_by"] or r["first_needed_by"] for r in table),
+            "comment": any(r["comment"] for r in table)}
 
 
 def summary(rows: list[dict], plans: dict[str, dict], today: date | None = None) -> dict:
@@ -399,7 +502,7 @@ def summary(rows: list[dict], plans: dict[str, dict], today: date | None = None)
     the earliest Needed-by, rows whose Completed-by month has passed."""
     today = today or date.today()
     this_month = f"{today.year:04d}-{today.month:02d}"
-    ps = [plans[r["type"]] for r in rows if r["type"] in plans]
+    ps = [plans[plan_key(r)] for r in rows if plan_key(r) in plans]
     return {"n": len(rows),
             "needed_by": min((p["needed_by"] for p in ps if p["needed_by"]), default=""),
             "due": sum(1 for p in ps if p["completed_by"] and p["completed_by"] <= this_month)}

@@ -211,8 +211,8 @@
         <dt>System</dt><dd>{{ leaf.system_name }} ({{ leaf.system_id }})</dd>
         <dt>Subsystem</dt><dd>{{ leaf.subsystem_name }} ({{ leaf.subsystem_id }})</dd>
         {% if not is_consortium %}
-        <dt>{% if is_shipping %}Boxes in HWDB{% else %}Items in HWDB{% endif %}</dt><dd>{{ leaf.n_components }}<span class="chart-plan-note" data-kind="comp"></span></dd>
-        <dt>Test events</dt><dd>{{ leaf.n_tests }}<span class="chart-plan-note" data-kind="test"></span></dd>
+        <dt>{% if is_shipping %}Boxes in HWDB{% else %}Items in HWDB{% endif %}</dt><dd>{{ leaf.n_components }}</dd>
+        <dt>Test events</dt><dd>{{ leaf.n_tests }}</dd>
         {% endif %}
         {# #110: fill-out links for the type's consortium checklists — each opens the PID chooser (scan / items table / new item). Filled lazily so the mirror-only render never waits on HWDB; no checklists = no row. #}
         <dt id="cl-names-dt" hidden>Checklists</dt><dd id="cl-names-dd" class="span" hidden
@@ -850,7 +850,6 @@
             var planKey = 'chartPlan:' + location.pathname + '#' + kind, plan = {};
             try { plan = JSON.parse(localStorage.getItem(planKey) || '{}') || {}; } catch (e) { plan = {}; }
             var planIn = { total: panel.querySelector('.chart-plan-total'), done: panel.querySelector('.chart-plan-done'), need: panel.querySelector('.chart-plan-need') };
-            var planNote = document.querySelector('.chart-plan-note[data-kind="' + kind + '"]');
             var planFixed = false;   // #200: true while the type's production plan in HWDB sets the plan — never stored here
             var manual = plan;       // the browser-stored plan (#174), kept while the HWDB plan is in use
             function savePlan() {
@@ -858,8 +857,6 @@
                 plan = { total: parseInt(planIn.total.value, 10) > 0 ? parseInt(planIn.total.value, 10) : 0, done: ym(planIn.done.value), need: ym(planIn.need.value) };
                 if (!planFixed) manual = plan;
                 try { if (planFixed) {} else if (plan.total || plan.done || plan.need) localStorage.setItem(planKey, JSON.stringify(plan)); else localStorage.removeItem(planKey); } catch (e) {}
-                if (planNote) planNote.textContent = (plan.total ? ' · of ' + plan.total.toLocaleString() + ' to produce' : '')
-                    + (plan.done ? ' · completed by ' + plan.done : '') + (plan.need ? ' · needed by ' + plan.need : '');
             }
             // #200: the type's production plan in HWDB sets the values by default, read-only here (the plan
             // page edits them); the "production plan" box unticked (Hajime 2026-10-08: nobody should need a

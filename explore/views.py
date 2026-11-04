@@ -406,6 +406,7 @@ def explore_production_overview_view(request):
         "sidebar": navigation.sidebar_tree(inst, {}),
         "status_types": status_types,
         "detectors": detectors if len(detectors) > 1 else [],
+        "can_edit": inst in settings.HWDB_WRITE_INSTANCES,   # Chao 2026-11-04: the ✎ on a row without a plan, as on the live page
     })
 
 
@@ -485,15 +486,18 @@ def _production_status_list(request, inst) -> list[dict]:
         lst = ProductionList.for_instance(inst).filter(part_type_id=tid).first()
         rows = lst.rows if lst else []
         ids = [r["type"] for r in rows]
-        plans = production.apply_p6(production.cached_plans(inst, ids, tid))
+        plans = production.apply_p6(production.row_plans(inst, rows, tid))
+        table = production.table(rows, plans, production.counts(inst, ids),
+                                 production.names(inst, ids), today) if lst else None
         out.append({"part_type_id": tid, "name": (node.name if node else "") or tid,
                     "detector": production.detector_of(node.full_name) if node else "",   # HD / VD sub-tabs on the overview
                     "url": _rev(request, "explore:production_status", args=[tid]),
                     "type_url": navigation.leaf_path_for(inst, tid) or "",
                     "list_url": _rev(request, "explore:production_list", args=[tid]),
                     "read_at": lst.read_at if lst else None,
-                    "rows": production.table(rows, plans, production.counts(inst, ids),
-                                             production.names(inst, ids), today) if lst else None,
+                    "rows": table,
+                    "tree": any(r["has_children"] for r in table or []),
+                    "cols": production.columns(table or []),
                     **production.summary(rows, plans, today)})
     return out
 
@@ -521,31 +525,45 @@ def explore_production_status_view(request, part_type_id):
     node = HierarchyNode.for_instance(inst).filter(
         level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
     rows, _vs = production.read_list(api, part_type_id)
-    production.cache_list(inst, part_type_id, rows)
+    has_list = rows is not None
     rows = rows or []
     ids = [r["type"] for r in rows]
-    plans = {}
-    for tid in ids:
-        # #206: this consortium's own plan of the type first (a type two
-        # consortia list), else the type's plain plan — both caches refreshed
-        listing = production._listing(api, tid)
-        own, _v = production.read_plan(api, tid, rows=listing, consortium=part_type_id)
-        production.cache_plan(inst, tid, own, consortium=part_type_id)
-        plan, _v = production.read_plan(api, tid, rows=listing)
-        production.cache_plan(inst, tid, plan)
-        if own is not None:
-            plans[tid] = own
-        elif plan is not None:
-            plans[tid] = plan
+    plans, listings = {}, {}
+    for r in rows:
+        tid = r["type"]
+        if tid not in listings:
+            # #206: this consortium's own plan of the type first (a type two
+            # consortia list), else the type's plain plan — both caches refreshed
+            listing = listings[tid] = production._listing(api, tid)
+            own, _v = production.read_plan(api, tid, rows=listing, consortium=part_type_id)
+            production.cache_plan(inst, tid, own, consortium=part_type_id)
+            plan, _v = production.read_plan(api, tid, rows=listing)
+            production.cache_plan(inst, tid, plan)
+            if own is not None:
+                plans[tid] = own
+            elif plan is not None:
+                plans[tid] = plan
+        if r["plan_of"]:
+            # #211: the row shows another consortium's plan of the type
+            theirs, _v = production.read_plan(api, tid, rows=listings[tid], consortium=r["plan_of"])
+            production.cache_plan(inst, tid, theirs, consortium=r["plan_of"])
+            if theirs is not None:
+                plans[production.plan_key(r)] = theirs
+            elif tid in plans:
+                plans[production.plan_key(r)] = plans[tid]
+    production.cache_list(inst, part_type_id, rows if has_list else None)
     plans = production.apply_p6(plans)
+    table = production.table(rows, plans, production.counts(inst, ids),
+                             production.names(inst, ids), timezone.localdate())
     return render(request, "explore/production_status.html", {
         "active_nav": "detector",
         "sidebar": navigation.sidebar_tree(inst, {}),
         "part_type_id": part_type_id,
         "type_name": (node.name if node else "") or part_type_id,
         "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
-        "rows": production.table(rows, plans, production.counts(inst, ids),
-                                 production.names(inst, ids), timezone.localdate()),
+        "rows": table,
+        "tree": any(r["has_children"] for r in table),
+        "cols": production.columns(table),
         "list_url": _rev(request, "explore:production_list", args=[part_type_id]),
         "can_edit": inst in settings.HWDB_WRITE_INSTANCES,   # the plan pages apply the type's roles themselves
         "consortium": part_type_id,   # #206: the plan links carry it
@@ -703,17 +721,7 @@ def explore_production_list_view(request, part_type_id):
     if request.method == "POST":
         if not can_edit:
             return HttpResponseForbidden("Editing a component list needs one of the type’s HWDB roles, on a write instance.")
-        new, bad = [], []
-        for line in (request.POST.get("rows") or "").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            tid, _sp, label = line.partition(" ")
-            tid = tid.strip().upper()
-            if production.PTID_RX.match(tid):
-                new.append({"type": tid, "label": label.strip()})
-            else:
-                bad.append(line)
+        new, bad = production.parse_lines(request.POST.get("rows") or "")
         if bad:
             messages.error(request, "Each line starts with a type id (a letter and 11 digits): "
                                     + "; ".join(bad[:5]))
@@ -739,6 +747,12 @@ def explore_production_list_view(request, part_type_id):
 
     ids = [r["type"] for r in rows or []]
     nm = production.names(inst, ids)
+    # #211: the row editor — the other tables (consortium types with a cached
+    # list) so a row can pick whose plan it shows, the types' names
+    lists = list(ProductionList.for_instance(inst).exclude(part_type_id=part_type_id))
+    lnm = production.names(inst, [lst.part_type_id for lst in lists])
+    others = [{"id": lst.part_type_id, "name": lnm.get(lst.part_type_id) or lst.part_type_id,
+               "types": sorted({r["type"] for r in lst.rows})} for lst in lists]
     return render(request, "explore/production_list.html", {
         "active_nav": "detector",
         "sidebar": navigation.sidebar_tree(inst, {}),
@@ -746,7 +760,11 @@ def explore_production_list_view(request, part_type_id):
         "type_name": (node.name if node else "") or part_type_id,
         "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
         "rows": [{**r, "name": nm.get(r["type"], "")} for r in rows or []],
-        "text": "\n".join(f"{r['type']}  {r['label']}".rstrip() for r in rows or []),
+        "text": production.to_lines(rows or []),
+        "editor": {"rows": [{**r, "name": nm.get(r["type"], "")} for r in rows or []], "tables": others,
+                   "search": _rev(request, "explore:search_api"),
+                   "positions": _rev(request, "explore:type_positions", args=["X00000000000"]),
+                   "summary": _rev(request, "explore:type_summary")},
         "n_versions": len(vs),
         "last": vs[0] if vs else None,
         "can_edit": can_edit,

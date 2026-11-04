@@ -3,7 +3,7 @@
 
 {% block content %}
 <style>
-  .es-page { padding: 22px 30px 56px; max-width: 980px; }
+  .es-page { padding: 22px 30px 56px; max-width: 1280px; }
   .es-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
   .es-crumbs a { color: var(--accent-ink); text-decoration: none; }
   .es-crumbs a:hover { text-decoration: underline; }
@@ -30,8 +30,33 @@
   .pl-list td { padding: 5px 14px 5px 0; border-bottom: 1px solid var(--rule); color: var(--ink); }
   .pl-list .pl-dim { color: var(--faint); }
   .pl-file { color: var(--faint); font-size: 12px; margin-top: 10px; }
+  /* #211: the row editor — one line per row: the type, its label, whose plan, the row buttons */
+  .pl-ed { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .pl-ed th { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; text-align: left; padding: 2px 10px 4px 0; border-bottom: 1px solid var(--rule); }
+  .pl-ed td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+  .pl-ed td.pl-ty { white-space: nowrap; }
+  .pl-ed td.pl-ty .mono { font-size: 11.5px; color: var(--dim); margin-left: 6px; }
+  .pl-ed td.pl-ty .pl-dim { color: var(--faint); font-style: italic; }
+  .pl-ed input[type=text], .pl-ed select { font: inherit; font-size: 13px; color: var(--ink); padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff); }
+  .pl-ed input[type=text] { width: 100%; min-width: 120px; }
+  .pl-ed td.pl-btns { text-align: right; }
+  .pl-ed td.pl-btns .pl-grp { display: inline-block; white-space: nowrap; }   /* the arrows stay together; the text buttons may drop to a second line */
+  .pl-ib { font: inherit; font-size: 12px; line-height: 1; padding: 3px 6px; border-radius: 6px; cursor: pointer; color: var(--dim); background: var(--page); border: 1px solid var(--rule); }
+  .pl-ib:hover:not(:disabled) { border-color: var(--rule-hard); color: var(--ink); }
+  .pl-ib:disabled { opacity: .35; cursor: default; }
+  .pl-ib[aria-pressed="true"] { color: var(--accent-ink); border-color: var(--accent-ink); background: var(--surface); }
+  .pl-add { position: relative; display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+  .pl-add input { font: inherit; font-size: 13px; color: var(--ink); padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff); width: 340px; }
+  .pl-hits { position: absolute; top: 100%; left: 0; z-index: 5; min-width: 340px; max-height: 260px; overflow: auto; background: var(--page); border: 1px solid var(--rule); border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.08); }
+  .pl-hits button { display: block; width: 100%; text-align: left; font: inherit; font-size: 13px; padding: 6px 10px; border: none; background: none; cursor: pointer; color: var(--ink); }
+  .pl-hits button:hover, .pl-hits button:focus { background: var(--surface); outline: none; }
+  .pl-hits .mono { font-size: 11.5px; color: var(--dim); margin-left: 6px; }
+  .pl-hits .pl-sub { display: block; font-size: 11.5px; color: var(--faint); }
+  .pl-mode { margin-left: auto; }
+  .pl-hint { color: var(--faint); font-size: 12px; margin: 8px 0 0; }
+  .pl-none { color: var(--dim); font-size: 13px; padding: 8px 0; }
 </style>
-{# #200: a consortium type's component list — the types its production-status table reports, one per line, kept as Production_list_<type>.json on the type in HWDB (every version kept); architects edit. #}
+{# #200: a consortium type's component list — the types its production-status table reports, one per line, kept as Production_list_<type>.json on the type in HWDB (every version kept); architects edit. #211: a row editor over the same text — a type picker off the mirror, the label, whose plan the row shows, ▲▼ to reorder (with its rows), ← → for the level, "+ sub-components" off the type's positions; "+ under" puts the next picked type under the row (Chao 2026-11-04: a dependency need not be an HWDB position); "Text" shows the lines (indentation = level, @consortium = whose plan). #}
 
 <div class="es-page">
   <div class="es-crumbs">
@@ -42,25 +67,181 @@
   </div>
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
   <h1>Component list <span class="mono" style="font-size:.75em; font-weight:400; color:var(--dim);">{{ part_type_id }}</span></h1>
-  <p class="es-sub">{{ type_name }} · the component types its production-status table reports, in order.</p>
+  <p class="es-sub">{{ type_name }} · the component types its production-status table reports, in order; a row under another is a part of it.</p>
   {% if role_gate %}<div class="banner banner-warn" style="margin: 0 0 14px;">&#9888; {% if role_gate.required %}Saving onto this type needs one of its HWDB roles <b>{{ role_gate.required|join:", " }}</b>. Your account holds {% if role_gate.mine %}<b>{{ role_gate.mine|join:", " }}</b>{% else %}no roles{% endif %}, so the list cannot be edited here. <a href="{% url 'explore:docs_permissions' %}" target="_blank" rel="noopener">Who may write what &#x2197;</a>{% else %}This type lists no HWDB roles, so HWDB refuses every write onto it. An HWDB administrator must add roles to the type first. <a href="{% url 'explore:docs_permissions' %}" target="_blank" rel="noopener">Who may write what &#x2197;</a>{% endif %}</div>{% endif %}
 
   <div class="es-card">
   {% if can_edit %}
-    <form method="post">
+    <form method="post" id="pl-form">
       {% csrf_token %}
       {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
-      <textarea class="pl-rows" name="rows" spellcheck="false" placeholder="D00400300001  SiPM boards&#10;Z10400100001  PDS modules&#10;one type per line: the type id, then a label (the type’s name when left out)">{{ text }}</textarea>
+      <div id="pl-editor">
+        <table class="pl-ed"><thead><tr><th>Component</th><th>Label</th><th>Plan</th><th></th></tr></thead><tbody id="pl-body"></tbody></table>
+        <p class="pl-none" id="pl-none" hidden>No rows yet — add a type below.</p>
+        <div class="pl-add">
+          <input type="text" id="pl-q" placeholder="add a type — name or id" autocomplete="off" spellcheck="false">
+          <div class="pl-hits" id="pl-hits" hidden></div>
+          <button type="button" class="pl-ib pl-mode" id="pl-text">Text</button>
+        </div>
+      </div>
+      <textarea class="pl-rows" name="rows" id="pl-rows" spellcheck="false" hidden placeholder="D00400300001  SiPM boards&#10;  Z10400100001  PDS modules&#10;one type per line: the type id, then a label (the type’s name when left out); indent a line to put it under the one above; id@consortium shows that consortium’s plan">{{ text }}</textarea>
       <input type="text" class="pl-reason" name="reason" placeholder="reason — kept with this version">
       <div class="pl-actions">
         <button type="submit" class="es-btn primary">Save list to HWDB</button>
         <a class="es-btn quiet" href="{{ next|default:status_url }}">Cancel</a>
       </div>
     </form>
+    {{ editor|json_script:"pl-data" }}
+    <script>
+    (function () {
+      // #211: the row editor. The rows live in `rows` ({type, label, level, plan_of}); the textarea is the
+      // form's value, written from the rows on submit (and shown in Text mode, parsed back when it closes).
+      var D = JSON.parse(document.getElementById("pl-data").textContent);
+      var rows = D.rows.map(function (r) { return {type: r.type, label: r.label || "", level: r.level || 0, plan_of: r.plan_of || ""}; });
+      var names = {}; D.rows.forEach(function (r) { if (r.name) names[r.type] = r.name; });
+      var body = document.getElementById("pl-body"), none = document.getElementById("pl-none"), ta = document.getElementById("pl-rows");
+      var ed = document.getElementById("pl-editor"), q = document.getElementById("pl-q"), hits = document.getElementById("pl-hits");
+      var ID = /^[A-Z]\d{11}$/;
+      var addUnder = null;   // the row the next picked type goes under (its "+ under" pressed), else the end at level 0
+      function clamp() { rows.forEach(function (r, i) { r.level = Math.max(0, Math.min(r.level, i ? rows[i - 1].level + 1 : 0)); }); }
+      function block(i) { var n = i + 1; while (n < rows.length && rows[n].level > rows[i].level) n++; return n - i; }
+      function sibling(i, dir) {   // the index of the previous / next row at the same level under the same parent, else -1
+        if (dir < 0) { for (var j = i - 1; j >= 0; j--) { if (rows[j].level < rows[i].level) return -1; if (rows[j].level === rows[i].level) return j; } return -1; }
+        var n = i + block(i); return n < rows.length && rows[n].level === rows[i].level ? n : -1;
+      }
+      function tables(t) { return D.tables.filter(function (x) { return x.types.indexOf(t) >= 0; }); }
+      function fresh(t, level) {   // a new row: it shows the one other table's plan when exactly one lists the type (a table reuses plans, it does not fork them)
+        var tb = tables(t); return {type: t, label: "", level: level, plan_of: tb.length === 1 ? tb[0].id : ""};
+      }
+      function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]; }); }
+      function draw() {
+        clamp();
+        none.hidden = rows.length > 0;
+        if (addUnder !== null && !rows[addUnder]) addUnder = null;
+        q.placeholder = addUnder === null ? "add a type — name or id" : "add a type under " + (names[rows[addUnder].type] || rows[addUnder].type);
+        body.innerHTML = rows.map(function (r, i) {
+          var tb = tables(r.type);
+          var sel = tb.length ? '<select data-k="plan_of" title="Whose plan this row shows"><option value="">this table</option>' + tb.map(function (x) {
+            return '<option value="' + x.id + '"' + (x.id === r.plan_of ? " selected" : "") + ">" + esc(x.name) + "</option>"; }).join("") + "</select>" : "";
+          return '<tr data-i="' + i + '"><td class="pl-ty" style="padding-left:' + (r.level * 18) + 'px">' +
+            (names[r.type] ? esc(names[r.type]) : '<span class="pl-dim">not in the mirror</span>') + '<span class="mono">' + r.type + "</span></td>" +
+            '<td><input type="text" data-k="label" value="' + esc(r.label) + '" placeholder="' + esc(names[r.type] || "") + '"></td>' +
+            "<td>" + sel + "</td>" +
+            '<td class="pl-btns"><span class="pl-grp">' +
+            '<button type="button" class="pl-ib" data-do="up" title="Move up"' + (sibling(i, -1) < 0 ? " disabled" : "") + ">&#9650;</button> " +
+            '<button type="button" class="pl-ib" data-do="down" title="Move down"' + (sibling(i, 1) < 0 ? " disabled" : "") + ">&#9660;</button> " +
+            '<button type="button" class="pl-ib" data-do="out" title="One level up"' + (r.level ? "" : " disabled") + ">&#8592;</button> " +
+            '<button type="button" class="pl-ib" data-do="in" title="Under the row above"' + (i && rows[i - 1].level >= r.level ? "" : " disabled") + ">&#8594;</button></span> " +
+            '<span class="pl-grp"><button type="button" class="pl-ib" data-do="add" title="Add a type under it — pick it in the box below" aria-pressed="' + (addUnder === i ? "true" : "false") + '">+ under</button> ' +
+            '<button type="button" class="pl-ib" data-do="sub" title="Add the types its positions take, under it">+ sub-components</button> ' +
+            '<button type="button" class="pl-ib" data-do="del" title="Remove">&#10005;</button></span></td></tr>';
+        }).join("");
+      }
+      function lines() {
+        return rows.map(function (r) { return "  ".repeat(r.level) + r.type + (r.plan_of ? "@" + r.plan_of : "") + (r.label ? "  " + r.label : ""); }).join("\n");
+      }
+      function parse(text) {
+        var out = [];
+        text.split("\n").forEach(function (raw) {
+          if (!raw.trim()) return;
+          var lead = raw.match(/^[ \t]*/)[0], m = raw.trim().match(/^([A-Za-z]\d{11})(?:@([A-Za-z]\d{11}))?(?:\s+(.*))?$/);
+          if (!m) return;
+          var lv = (lead.match(/\t/g) || []).length + Math.floor(((lead.match(/ /g) || []).length + 1) / 2);
+          out.push({type: m[1].toUpperCase(), plan_of: (m[2] || "").toUpperCase(), label: (m[3] || "").trim(), level: lv});
+        });
+        return out;
+      }
+      function learn(ids) {   // names of types the mirror knows, 20 per call
+        var need = ids.filter(function (t) { return !(t in names); });
+        if (!need.length) return Promise.resolve();
+        return Promise.all(chunk(need, 20).map(function (c) {
+          return fetch(D.summary + "?ids=" + c.join(","), {credentials: "same-origin"}).then(function (r) { return r.json(); }).then(function (j) {
+            (j.types || []).forEach(function (t) { names[t.part_type_id] = t.name || ""; });
+          }).catch(function () {});
+        }));
+      }
+      function chunk(a, n) { var o = []; for (var i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; }
+      body.addEventListener("input", function (e) {
+        var tr = e.target.closest("tr"), k = e.target.dataset.k;
+        if (tr && k) rows[+tr.dataset.i][k] = e.target.value;
+      });
+      body.addEventListener("change", function (e) {
+        var tr = e.target.closest("tr"), k = e.target.dataset.k;
+        if (tr && k) rows[+tr.dataset.i][k] = e.target.value;
+      });
+      body.addEventListener("click", function (e) {
+        var b = e.target.closest("button[data-do]"); if (!b) return;
+        var i = +b.closest("tr").dataset.i, r = rows[i], n = block(i), j;
+        if (b.dataset.do === "add") { addUnder = addUnder === i ? null : i; draw(); q.focus(); return; }
+        addUnder = null;
+        if (b.dataset.do === "del") { rows.splice(i, 1); for (j = i; j < i + n - 1; j++) rows[j].level--; }   // its rows stay, one level up
+        if (b.dataset.do === "in") { for (j = i; j < i + n; j++) rows[j].level++; }
+        if (b.dataset.do === "out") { for (j = i; j < i + n; j++) rows[j].level--; }
+        if (b.dataset.do === "up" || b.dataset.do === "down") {
+          var s = sibling(i, b.dataset.do === "up" ? -1 : 1); if (s < 0) return;
+          var a = Math.min(i, s), c = Math.max(i, s), first = rows.slice(a, a + block(a)), second = rows.slice(c, c + block(c));
+          rows.splice.apply(rows, [a, first.length + second.length].concat(second, first));
+        }
+        if (b.dataset.do === "sub") {
+          b.disabled = true;
+          fetch(D.positions.replace("X00000000000", r.type), {credentials: "same-origin"}).then(function (x) { return x.json(); }).then(function (j) {
+            var kids = [], have = rows.slice(i + 1, i + n).filter(function (x) { return x.level === r.level + 1; }).map(function (x) { return x.type; });
+            (j.positions || []).forEach(function (p) { String(p.child_type_id || "").split(",").forEach(function (t) {
+              t = t.trim(); if (ID.test(t) && kids.indexOf(t) < 0 && have.indexOf(t) < 0) kids.push(t); }); });
+            return learn(kids).then(function () {
+              rows.splice.apply(rows, [i + n, 0].concat(kids.map(function (t) { return fresh(t, r.level + 1); })));
+              draw();
+            });
+          }).catch(function () { b.disabled = false; });
+          return;
+        }
+        draw();
+      });
+      // the type picker: the instant search's types, off the mirror
+      var timer = null;
+      q.addEventListener("input", function () {
+        clearTimeout(timer); var v = q.value.trim();
+        if (v.length < 2) { hits.hidden = true; return; }
+        timer = setTimeout(function () {
+          fetch(D.search + "?q=" + encodeURIComponent(v), {credentials: "same-origin"}).then(function (r) { return r.json(); }).then(function (j) {
+            var ts = j.types || [];
+            if (!ts.length && ID.test(v.toUpperCase())) ts = [{part_type_id: v.toUpperCase(), name: "", sub: "not in the mirror"}];
+            hits.innerHTML = ts.map(function (t) { return '<button type="button" data-t="' + t.part_type_id + '" data-n="' + esc(t.name) + '">' + esc(t.name || t.part_type_id) + '<span class="mono">' + t.part_type_id + '</span><span class="pl-sub">' + esc(t.sub || "") + "</span></button>"; }).join("");
+            hits.hidden = !ts.length;
+          }).catch(function () { hits.hidden = true; });
+        }, 200);
+      });
+      q.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); var f = hits.querySelector("button"); if (f && !hits.hidden) f.click(); }
+        if (e.key === "Escape") { hits.hidden = true; if (addUnder !== null) { addUnder = null; draw(); } }
+      });
+      hits.addEventListener("click", function (e) {
+        var b = e.target.closest("button[data-t]"); if (!b) return;
+        if (b.dataset.n) names[b.dataset.t] = b.dataset.n;
+        var row = fresh(b.dataset.t, 0);
+        if (addUnder !== null) { row.level = rows[addUnder].level + 1; rows.splice(addUnder + block(addUnder), 0, row); }
+        else rows.push(row);
+        q.value = ""; hits.hidden = true; draw(); q.focus();
+      });
+      document.addEventListener("click", function (e) { if (!e.target.closest(".pl-add")) hits.hidden = true; });
+      // Text mode: the lines themselves, parsed back on return
+      var textMode = false, modeBtn = document.getElementById("pl-text");
+      modeBtn.addEventListener("click", function () {
+        textMode = !textMode;
+        if (textMode) { ta.value = lines(); ta.hidden = false; ed.querySelector("table").hidden = true; none.hidden = true; q.hidden = true; modeBtn.textContent = "Rows"; }
+        else {
+          rows = parse(ta.value);
+          learn(rows.map(function (r) { return r.type; })).then(function () { ta.hidden = true; ed.querySelector("table").hidden = false; q.hidden = false; modeBtn.textContent = "Text"; draw(); });
+        }
+      });
+      document.getElementById("pl-form").addEventListener("submit", function () { if (!textMode) ta.value = lines(); });
+      draw();
+    })();
+    </script>
   {% elif rows %}
     <table class="pl-list">
-      <thead><tr><th>Type ID</th><th>Label</th><th>Type</th></tr></thead>
-      <tbody>{% for r in rows %}<tr><td class="mono">{{ r.type }}</td><td>{{ r.label|default:"—" }}</td><td class="{% if not r.name %}pl-dim{% endif %}">{{ r.name|default:"not in the mirror" }}</td></tr>{% endfor %}</tbody>
+      <thead><tr><th>Type ID</th><th>Label</th><th>Type</th><th>Plan</th></tr></thead>
+      <tbody>{% for r in rows %}<tr><td class="mono"{% if r.level %} style="padding-left:{% widthratio r.level 1 18 %}px;"{% endif %}>{{ r.type }}</td><td>{{ r.label|default:"—" }}</td><td class="{% if not r.name %}pl-dim{% endif %}">{{ r.name|default:"not in the mirror" }}</td><td class="mono">{{ r.plan_of|default:"" }}</td></tr>{% endfor %}</tbody>
     </table>
   {% else %}
     <p style="margin:0; color:var(--dim); font-size:13.5px;">No component list on this type yet.</p>
