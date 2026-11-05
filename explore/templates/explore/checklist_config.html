@@ -489,7 +489,8 @@
       <span class="ec-hint" style="flex:1 1 100%;">Click the image to add a slot &mdash; one per line: label @ x, y (% of image size), then its own Type ID if it differs (several, comma-separated, take any of them).</span>
       <textarea class="ff-slots" rows="3" placeholder="Board 1 @ 4.5, 8, Z00100300008" style="flex:1 1 100%;"></textarea>
       <label class="ec-check" title="at submit each scanned item is linked into this item's sub-components: a slot named like one of the type's positions goes there, any other slot takes the first free position for the scanned item's type"><input type="checkbox" class="ff-maplink"> link scanned items as sub-components</label>
-      <label class="ff-maplinked-wrap" style="display:none;">Linked list beside the map <select class="ff-maplinked"><option value="open">shown</option><option value="collapsed">collapsed</option><option value="off">hidden</option></select></label>
+      <label class="ec-check" title="the type ids next to the slot labels — off keeps the guard but hides them"><input type="checkbox" class="ff-slottypes" checked> show each slot&#8217;s Type ID</label>
+      <label class="ff-maplinked-wrap" style="display:none;">Linked list <select class="ff-maplinked"><option value="open">beside the map</option><option value="collapsed">beside, collapsed</option><option value="below">below the slots</option><option value="off">hidden</option></select></label>
       <div class="ec-hint ff-mappos" style="flex:1 1 100%; display:none;"></div>
       <button type="button" class="es-btn quiet ff-mapzoom" style="display:none; align-self:flex-start;" title="place slots on the full-size drawing">&#x26F6; Zoom</button>
       <div class="clc-mapwrap" style="position:relative; display:none; max-width:100%;">
@@ -650,6 +651,7 @@
     }).join("\n");
     $(".ff-maplink", r).checked = !!f.link;                            // #133
     $(".ff-maplinked", r).value = f.linked || "open";                  // Hajime 2026-09-25
+    $(".ff-slottypes", r).checked = f.slot_types !== "off";            // Hajime 2026-11-05
     $(".ff-tbllink", r).checked = f.type === "table" && !!f.link;      // #153
     $(".ff-expectc", r).checked = !!f.expect;                          // #185
     $(".ff-expect", r).value = typeof f.expect === "string" && f.expect !== "preassigned" ? f.expect : "";
@@ -1416,6 +1418,7 @@
       var mid = $(".ff-imageid", r).value.trim();
       if (mid) f.image_id = mid;
       f.slots = readSlots(r);
+      if (!$(".ff-slottypes", r).checked) f.slot_types = "off";
       if ($(".ff-maplink", r).checked) {                               // #133
         f.link = true;
         if ($(".ff-maplinked", r).value !== "open") f.linked = $(".ff-maplinked", r).value;

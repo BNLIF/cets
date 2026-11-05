@@ -2370,7 +2370,7 @@ class ImageMapTest(TestCase):
             html = self.client.get(PAGE).content.decode()
         self.assertIn('data-type-id="D00300100009"', html)
         self.assertIn('data-serial-url="/hw/dev/serial/D00300100009/"', html)
-        self.assertIn('Board 1 <span class="cl-hint">D00300100009</span>', html)
+        self.assertIn('Board 1</label> <span class="cl-hint cl-map-types">D00300100009</span>', html)
         self.assertEqual(html.count("data-type-id="), 1)   # Board 2 has no guard at all
 
     def test_a_slot_may_guard_several_types(self):
@@ -2395,6 +2395,23 @@ class ImageMapTest(TestCase):
             html = self.client.get(PAGE).content.decode()
         self.assertIn('data-type-id="D00300100009,D00300100002"', html)
         self.assertIn('data-serial-url="/hw/dev/serial/D00300100009,D00300100002/"', html)
+        self.assertIn('Slot 1</label> <span class="cl-hint cl-map-types">D00300100009, D00300100002</span>', html)   # wrappable
+
+    def test_slot_types_may_be_hidden(self):
+        """Hajime 2026-11-05: ``slot_types: off`` drops the type ids beside
+        the slot labels; the guard stays."""
+        f = self._schema(slot_types="OFF", slots=[{"label": "Slot 1", "x": 1, "y": 1, "type_id": "D00300100009"}])["sections"][0]["fields"][0]
+        self.assertEqual(f["slot_types"], "off")
+        self.assertNotIn("slot_types", self._schema(slot_types="on")["sections"][0]["fields"][0])
+        self.client.force_login(get_user_model().objects.create_user("n4", "n4@n.io", "pw"))
+        page = dict(SCHEMA)
+        page["sections"] = [{"title": "S", "fields": [{"type": "imagemap", "label": "Boards", "image_id": "img-1", "slot_types": "off",
+                             "slots": [{"label": "Slot 1", "x": 1, "y": 1, "type_id": "D00300100009"}]}]}]
+        m1, m2 = _mocked(_api(schema=page))
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('data-type-id="D00300100009"', html)
+        self.assertNotIn('<span class="cl-hint cl-map-types">', html)
 
     def test_form_renders_dots_and_slot_inputs(self):
         user = get_user_model().objects.create_user("n", "n@n.io", "pw")
@@ -2429,7 +2446,7 @@ class ImageMapLinkedListTest(TestCase):
         with m1, m2:
             return self.client.get(PAGE).content.decode()
 
-    def test_normalize_keeps_only_the_three_values_with_link(self):
+    def test_normalize_keeps_only_the_four_values_with_link(self):
         def f(**extra):
             return checklistforms.normalize({"name": "t", "test_type_name": "T", "sections": [{"title": "S", "fields": [
                 {"type": "imagemap", "label": "B", "image_id": "i", "slots": [{"label": "a", "x": 1, "y": 1}], **extra}]}]},
@@ -2437,6 +2454,7 @@ class ImageMapLinkedListTest(TestCase):
         self.assertEqual(f(link=True)["linked"], "open")
         self.assertEqual(f(link=True, linked="Collapsed")["linked"], "collapsed")
         self.assertEqual(f(link=True, linked="off")["linked"], "off")
+        self.assertEqual(f(link=True, linked="below")["linked"], "below")   # Hajime 2026-11-05
         self.assertEqual(f(link=True, linked="sideways")["linked"], "open")
         self.assertNotIn("linked", f(linked="off"))   # meaningless without link
 
@@ -2446,10 +2464,34 @@ class ImageMapLinkedListTest(TestCase):
         self.assertIn('class="cl-map-cols"', html)
         html = self._html(linked="collapsed")
         self.assertIn('<details class="cl-map-pos"><summary><h3>Linked', html)
+        html = self._html(linked="below")   # under the slots, no columns
+        self.assertIn('<details class="cl-map-pos" open><summary><h3>Linked', html)
+        self.assertNotIn('class="cl-map-cols"', html)
         html = self._html(linked="off")
         self.assertNotIn('<details class="cl-map-pos"', html)
         self.assertNotIn('class="cl-map-cols"', html)
         self.assertIn(f'data-link-url="/hw/dev/checklist-map/{PART}/"', html)   # the slots still link live
+
+    def test_the_preview_shows_the_box_as_a_placeholder(self):
+        """Chao 2026-11-05: the editor's preview has no item, so the box
+        stands in its chosen place with a note instead of the table."""
+        def preview(**extra):
+            schema = {"name": "t", "test_type_name": "T", "sections": [{"title": "S", "fields": [
+                {"type": "imagemap", "label": "Boards", "image_id": "img-1", "link": True,
+                 "slots": [{"label": "Board 1", "x": 1, "y": 1}], **extra}]}]}
+            m1, m2 = _mocked(_api())
+            with m1, m2:
+                return self.client.post(f"{CONFIG_PAGE}preview/", {"config_json": json.dumps(schema), "cl_name": "t"}).content.decode()
+        html = preview()
+        self.assertIn('class="cl-map-cols"', html)
+        self.assertIn('<details class="cl-map-pos" open><summary><h3>Linked', html)
+        self.assertIn("The item’s linked positions, on its page.", html)
+        self.assertNotIn("cl-map-tbl", html)
+        self.assertNotIn("data-link-url", html)
+        html = preview(linked="below")
+        self.assertNotIn('class="cl-map-cols"', html)
+        self.assertIn('<details class="cl-map-pos" open>', html)
+        self.assertNotIn('<details class="cl-map-pos"', preview(linked="off"))
 
 
 class ImageMapLinkTest(TestCase):

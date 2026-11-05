@@ -79,8 +79,9 @@
   </ol>
 {% elif f.type == "imagemap" %}
   <span class="cl-lab">{{ f.label|clmd }}{% if f.description %} <span class="cl-desc">{{ f.description|clmd }}</span>{% endif %}{% if f.type_id %} <span class="cl-hint">type {{ f.type_id }}{% if f.sn %} &middot; SN {{ f.sn }}{% endif %}</span>{% endif %}{% if f.expect and part_id %} <span class="cl-hint cl-plan-n">{% if f.planned %}pre-assigned: {{ f.planned|length }}{% if f.plan_linked %} &middot; {{ f.plan_linked|length }} linked{% endif %}{% else %}no pre-assignment yet{% endif %}</span>{% endif %}</span>
-  {# the linked-positions list beside a linking map: f.linked = open (default) / collapsed / off (Hajime 2026-09-25) #}
-  {% if f.link and part_id and f.linked != "off" %}<div class="cl-map-cols"><div>{% endif %}
+  {# the linked-positions list beside a linking map: f.linked = open (default) / collapsed / off (Hajime 2026-09-25) / below (Hajime 2026-11-05: under the slots, no columns); the editor's preview shows it as a placeholder (Chao 2026-11-05) #}
+  {% firstof part_id preview as cl_host %}
+  {% if f.link and cl_host and f.linked != "off" and f.linked != "below" %}<div class="cl-map-cols"><div>{% endif %}
   <div class="cl-map"{% if f.link and part_id %} data-link-url="{% url 'explore:checklist_map' part_id=part_id %}"{% endif %}>
     <img src="{% url 'explore:shipment_image' image_id=f.image_id %}" alt="{{ f.label }}">
     {% for s in f.items %}<button type="button" class="cl-scan cl-map-dot{% if s.value %} on{% endif %}"
@@ -90,22 +91,23 @@
   <div class="cl-map-list">
     {% for s in f.items %}
     <span class="cl-map-slot"><span class="cl-map-n">{{ forloop.counter }}</span>
-      <label for="{{ s.name }}">{{ s.label }}{% if s.type_id and s.type_id != f.type_id %} <span class="cl-hint">{{ s.type_id }}</span>{% endif %}</label>
-      {# s.type_id = the slot's own type or the map's (a slot may guard its own type) #}
-      <input id="{{ s.name }}" name="{{ s.name }}" value="{{ s.value }}" autocomplete="off"
+      <label for="{{ s.name }}">{{ s.label }}</label>{% if s.type_id and s.type_id != f.type_id and f.slot_types != "off" %} <span class="cl-hint cl-map-types">{{ s.types }}</span>{% endif %}
+      {# s.type_id = the slot's own type or the map's (a slot may guard its own type); the box and its buttons move to a second line together when the label leaves no room #}
+      <span class="cl-map-ctl"><input id="{{ s.name }}" name="{{ s.name }}" value="{{ s.value }}" autocomplete="off"
         autocapitalize="characters" spellcheck="false"{% if s.type_id %} data-type-id="{{ s.type_id }}"{% if f.sn %} data-sn="{{ f.sn }}"{% endif %} data-serial-url="{% url 'explore:serial' part_type_id=s.type_id %}"{% endif %}>
       <button type="button" class="es-btn quiet cl-scan" data-target="{{ s.name }}" title="Scan">&#9635;</button>{% if s.type_id or f.link and part_id %}
       {# no type on the slot: the live state supplies it per slot (cl-pick[data-slot]) — a slot named like a position takes that position's type, any other every type the free positions accept #}
       <button type="button" class="es-btn quiet cl-pick" data-target="{{ s.name }}"{% if f.link %} data-free="1"{% endif %}{% if not s.type_id %} data-slot="{{ s.label }}" hidden{% endif %} title="Pick from the type’s items">&#9776;</button>{% endif %}{% if f.link and part_id %}
-      <button type="button" class="es-btn quiet cl-map-lnk" data-slot="{{ s.label }}" data-for="{{ s.name }}" hidden></button>{% endif %}</span>
+      <button type="button" class="es-btn quiet cl-map-lnk" data-slot="{{ s.label }}" data-for="{{ s.name }}" hidden></button>{% endif %}</span></span>
     {% endfor %}
   </div>
   {% if f.expect and f.link and part_id %}<div class="cl-tbl-link" data-link-url="{% url 'explore:checklist_map' part_id=part_id %}" data-into="" data-plan-key="{{ f.expect }}"{% if f.plan_json %} data-plan="{{ f.plan_json }}"{% endif %}{% if f.plan_linked_json %} data-plan-linked="{{ f.plan_linked_json }}"{% endif %}><button type="button" class="es-btn quiet cl-plan" title="Write the scanned items as the pre-assignment into this item’s specifications — nothing is linked, no record is made">save plan</button> <span class="cl-tbl-status cl-hint"></span></div>{% endif %}
-  {% if f.link and part_id and f.linked != "off" %}</div>
-  <details class="cl-map-pos"{% if f.linked != "collapsed" %} open{% endif %}><summary><h3>Linked <span class="cl-map-count"></span></h3></summary>
-    <table class="cl-map-tbl" data-part-url="{% url 'explore:part' part_id=part_id %}"><thead><tr><th>Type</th><th>Position</th><th>Item</th><th></th></tr></thead>
+  {% if f.link and cl_host and f.linked != "off" and f.linked != "below" %}</div>{% endif %}
+  {% if f.link and cl_host and f.linked != "off" %}<details class="cl-map-pos"{% if f.linked != "collapsed" %} open{% endif %}><summary><h3>Linked <span class="cl-map-count"></span></h3></summary>
+    {% if part_id %}<table class="cl-map-tbl" data-part-url="{% url 'explore:part' part_id=part_id %}"><thead><tr><th>Type</th><th>Position</th><th>Item</th><th></th></tr></thead>
     <tbody><tr><td colspan="4" class="cl-hint">loading positions…</td></tr></tbody></table>
-    <div class="cl-map-err"></div></details></div>{% endif %}
+    <div class="cl-map-err"></div>{% else %}<p class="cl-hint">The item’s linked positions, on its page.</p>{% endif %}</details>{% endif %}
+  {% if f.link and cl_host and f.linked != "off" and f.linked != "below" %}</div>{% endif %}
 {% elif f.type == "static" %}
   {% if f.thumb is False %}{# #122: the label opens the figure, no thumbnail #}
   <div><a class="cl-static-link" data-lightbox href="{% if f.image_id %}{% url 'explore:shipment_image' image_id=f.image_id %}{% else %}{{ f.image }}{% endif %}">&#128196; {{ f.label|default:'view drawing'|clmd }}</a></div>

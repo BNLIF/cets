@@ -4894,6 +4894,7 @@ def explore_checklist_preview_view(request, part_type_id):
                    # #118: a checklist jump link without an item resolves to
                    # this type's PID chooser in the preview
                    "part_type_id": part_type_id,
+                   "preview": True,   # a linking map's Linked box as a placeholder
                    "arrived_default": ""})
 
 

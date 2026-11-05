@@ -495,12 +495,17 @@ def _norm_field(f: dict) -> dict | None:
         out["slots"] = slots
         if not out["image_id"] or not slots:
             return None
+        # Hajime 2026-11-05: the type ids beside the slot labels crowd the
+        # PID boxes — ``slot_types: off`` hides them (the guard still holds)
+        if str(f.get("slot_types") or "").strip().lower() == "off":
+            out["slot_types"] = "off"
         if f.get("link"):        # #133: scanned boards become subcomponents
             out["link"] = True
             # Hajime 2026-09-25: the linked-positions list beside the map
-            # takes room on a tablet — "open" (default), "collapsed", "off"
+            # takes room on a tablet — "open" (default), "collapsed", "off";
+            # "below" (Hajime 2026-11-05) puts it under the slots instead
             linked = str(f.get("linked") or "").strip().lower()
-            out["linked"] = linked if linked in ("collapsed", "off") else "open"
+            out["linked"] = linked if linked in ("collapsed", "off", "below") else "open"
     if out.get("link") and t in ("table", "imagemap"):
         # #185 (Anselmo): ``expect`` names a key in the link target's
         # specifications DATA holding the pre-assigned items ``{position:
@@ -1315,6 +1320,7 @@ def _bind_leaf(f: dict, v) -> None:
         f["items"] = [{"label": s["label"], "x": s["x"], "y": s["y"],
                        "name": f"{f['key']}-m{i}",
                        "type_id": s.get("type_id") or f.get("type_id"),
+                       "types": (s.get("type_id") or "").replace(",", ", "),   # the slot's own, shown wrappable
                        "value": _fmt(vals.get(s["label"]))}
                       for i, s in enumerate(f["slots"])]
     elif t == "photo":

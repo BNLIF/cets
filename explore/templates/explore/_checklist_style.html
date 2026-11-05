@@ -225,8 +225,8 @@
     text-shadow: 0 0 3px var(--surface), 0 0 3px var(--surface); }
   .cl-map-dot.on { color: var(--good); border-color: var(--good); }
   .cl-map-list { display: grid; gap: 6px 14px; margin-top: 8px;
-    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
-  .cl-map-slot { display: flex; gap: 6px; align-items: center; font-size: calc(13px * var(--cl-scale, 1)); }
+    grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); }   /* a column holds a label and a full PID with its buttons */
+  .cl-map-slot { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: calc(13px * var(--cl-scale, 1)); }   /* the PID box drops to a second line when the label leaves it no room */
   .es-btn.cl-map-lnk { flex: 0 0 auto; color: var(--good); border-color: var(--good); }   /* "link" — the action to take */
   .es-btn.cl-map-lnk.on { color: var(--dim); border-color: var(--rule); }                  /* "unlink" — already done */
   /* the packing page's two columns: drawing + slots left, live contents right */
@@ -254,8 +254,11 @@
   .cl-lnk-in:empty { display: none; }
   .cl-map-err:empty { display: none; }
   @media (max-width: 900px) { .cl-map-cols { grid-template-columns: 1fr; } }
-  .cl-map-slot label { flex: 0 1 auto; white-space: nowrap; }
-  .cl-map-slot input { flex: 1 1 90px; min-width: 0; font-family: var(--font-mono); }
+  .cl-map-slot label { flex: 0 0 auto; white-space: nowrap; }
+  .cl-map-slot .cl-map-types { flex: 0 1 auto; }                        /* the slot's own type ids wrap as needed (Hajime 2026-11-05) */
+  .cl-map-ctl { display: flex; gap: 6px; align-items: center; flex: 1 1 auto; }       /* the PID box with its buttons */
+  .cl-map-slot input { flex: 1 0 19ch; min-width: 0; font-family: var(--font-mono); }   /* never narrower than a full PID */
+  .cl-map-list ~ .cl-map-pos { margin-top: 10px; }                      /* the linked list below the slots */
   .cl-map-n { flex: 0 0 auto; color: var(--faint); font-size: calc(11.5px * var(--cl-scale, 1)); min-width: 16px;
     text-align: right; }
   .cl-note { font-size: calc(13px * var(--cl-scale, 1)); color: var(--ink); }
