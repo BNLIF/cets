@@ -76,6 +76,20 @@ def shipped_received(locations: list[dict]) -> tuple[datetime | None, datetime |
     return shipped, received
 
 
+def last_stop(locations: list[dict]) -> tuple[datetime | None, str]:
+    """The latest real-location event as ``(arrived, name)`` — unlike
+    ``shipped_received``'s ``received``, kept while the box is in transit: it
+    is the stop the box left (Chao 2026-11-05, #212). ``(None, "")`` when the
+    box was never anywhere real."""
+    real = [(_parse_dt(e.get("arrived")), (e.get("location") or {}).get("name") or "")
+            for e in locations
+            if (e.get("location") or {}).get("id") not in (0, None)]
+    real = [r for r in real if r[0] is not None]
+    if not real:
+        return None, ""
+    return max(real, key=lambda r: r[0])
+
+
 # Hajime's cabling model (#72) suffixes the PID in ``/subcomponents`` rows.
 # On the connected component: ``<cable PID>.<END name>:<connector #>``; on the
 # cable's own rows the peer shows as ``<peer PID>.<functional position>`` (no
@@ -264,6 +278,7 @@ def refresh_box(api, instance: str, part_type_id: str, part_id: str) -> None:
     loc = (latest or {}).get("location") or {}
     shipped, received = shipped_received(locs)
     shipped = _gate_shipped(api, part_id, shipped)
+    stop_date, stop_name = last_stop(locs)
     ShipmentItem.for_instance(instance).filter(part_id=part_id).delete()
     ShipmentItem.objects.create(
         instance=instance, part_type_id=part_type_id, part_id=part_id,
@@ -271,6 +286,7 @@ def refresh_box(api, instance: str, part_type_id: str, part_id: str) -> None:
         n_contents=len(manifest),
         last_arrived=_parse_dt((latest or {}).get("arrived")),
         shipped_date=shipped, received_date=received,
+        last_stop_name=stop_name, last_stop_date=stop_date,
     )
     _mirror_box_parent(instance, part_id, manifest)
 
@@ -353,12 +369,14 @@ def sync_shipments(api_base_url: str, bearer: str, part_type_id: str,
     for pid, locs, manifest, shipped, received in results:
         latest = latest_location(locs)
         loc = (latest or {}).get("location") or {}
+        stop_date, stop_name = last_stop(locs)
         ship_rows.append(ShipmentItem(
             instance=instance, part_type_id=part_type_id, part_id=pid,
             location_name=loc.get("name") or "", location_id=loc.get("id"),
             n_contents=len(manifest),
             last_arrived=_parse_dt((latest or {}).get("arrived")),
             shipped_date=shipped, received_date=received,
+            last_stop_name=stop_name, last_stop_date=stop_date,
         ))
 
     if mode == "incremental":

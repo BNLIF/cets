@@ -80,6 +80,9 @@
   #sd-jmodal-close { border: none; background: none; font-size: 20px; line-height: 1; cursor: pointer; color: var(--faint); }
   #sd-jmodal-body { margin: 0; padding: 12px 14px; max-height: 70vh; overflow: auto; font-family: var(--font-mono); font-size: 12px; }
   .sd-wf .k { color: var(--ink); font-weight: 600; }
+  .sd-reset { margin: 8px 0 2px; }
+  .sd-reset button { font: inherit; font-size: 12px; font-weight: 600; color: var(--ink); background: none; border: 1px solid var(--rule-hard); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+  .sd-reset button:hover { border-color: var(--accent); }
   .sd-atts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   .sd-dl { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500;
     color: var(--good); text-decoration: none; border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule));
@@ -192,8 +195,7 @@
         {% if watching %}★ Watching{% else %}☆ Watch{% endif %}</button>
     </form>
     {% if is_shipping %}
-      {% if detail.in_transit %}<span class="sd-pill is-transit">In Transit</span>
-      {% elif detail.has_location %}<span class="sd-pill is-delivered">Delivered</span>{% endif %}
+      <span class="sd-pill{% if ship_bucket == "transit" %} is-transit{% elif ship_bucket == "delivered" %} is-delivered{% endif %}">{{ ship_label }}</span>
     {% elif detail.status %}<span class="sd-pill">{{ detail.status }}</span>{% endif %}
   </div>
   <p class="sd-subtitle">
@@ -457,6 +459,13 @@
             <td>{% with c=checklists.receiving %}{% if c and c.completed_at %}<span style="color:var(--good); font-weight:600;">completed {{ c.completed_at|date:"Y-m-d" }}</span>{% elif c %}step {{ c.current_scene }} of 3 · {{ c.route_label }}{% else %}not started{% endif %}{% endwith %}
               · <a style="color:var(--accent-ink); text-decoration:none;" href="{% url 'explore:receiving' part_id=part_id %}">open ›</a></td></tr>
         </table>
+        {% if checklists %}
+        <form method="post" action="{% url 'explore:box_reset' part_id=part_id %}" class="sd-reset"
+              onsubmit="return confirm('Reset the checklists of {{ part_id }}?\n\nThis clears its pre-shipping, shipping and receiving runs here so the box can be used again. HWDB keeps the previous trip\u2019s records.');">
+          {% csrf_token %}
+          <button type="submit" title="Clear this box’s checklist runs to use the box again — HWDB records are kept">Reset checklists</button>
+        </form>
+        {% endif %}
         {# Workflow documents live up here so nobody scrolls for them. #}
         {% if shipping_sheets %}{% include "explore/_sheet_selector.html" %}{% endif %}
         {% for sec in detail.sections %}{% if sec.attachments %}

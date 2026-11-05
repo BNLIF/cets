@@ -538,16 +538,15 @@
         <summary class="ship-boxes-sum">Boxes ({{ shipments|length }}) <span class="cell-muted" style="font-weight:400;">— click to collapse</span></summary>
 <div class="tbl-scroll">
         <table class="ship-table">
-            <thead><tr><th>Box PID</th><th>Status</th><th>Latest location</th><th>Contents</th><th>Shipped</th><th>Received</th></tr></thead>
+            <thead><tr><th>Box PID</th><th>Status</th><th>Contents</th><th>Shipped</th><th>Last received</th></tr></thead>
             <tbody>
             {% for s in shipments %}
                 <tr class="ship-row" onclick="if(!getSelection().toString())location.href='{% url 'explore:part' part_id=s.part_id %}'" title="Open shipping details for {{ s.part_id }}">
                     <td class="mono"><a href="{% url 'explore:part' part_id=s.part_id %}" onclick="event.stopPropagation()" title="Open this box’s detail page">{{ s.part_id }}</a></td>
-                    <td><span class="ship-pill {% if s.is_in_transit %}is-transit{% elif s.location_id is not None %}is-delivered{% else %}is-unknown{% endif %}">{{ s.status_label }}</span></td>
-                    <td>{{ s.location_name|default:"—" }}</td>
+                    <td><span class="ship-pill{% if s.ship_bucket == "transit" %} is-transit{% elif s.ship_bucket == "delivered" %} is-delivered{% endif %}">{{ s.ship_label }}</span></td>
                     <td class="mono">{{ s.n_contents }}</td>
                     <td class="mono">{% if s.shipped_date %}{{ s.shipped_date|date:"Y-m-d" }}{% else %}—{% endif %}</td>
-                    <td class="mono">{% if s.received_date %}{{ s.received_date|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+                    <td>{{ s.last_received_label }}</td>
                 </tr>
             {% endfor %}
             </tbody>
@@ -1135,6 +1134,7 @@
     var pane = document.getElementById("newbox-pane");
     if (!pane) return;
     var loaded = false;
+    if (location.hash === "#newbox-pane") pane.open = true;  // linked from the Shipments page (#212)
     pane.addEventListener("toggle", function () {
         if (!pane.open || loaded) return;
         loaded = true;

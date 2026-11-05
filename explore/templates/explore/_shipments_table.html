@@ -8,20 +8,20 @@ keeps its scroll position. {% endcomment %}
        {% if t.active %}aria-current="true"{% endif %}>{{ t.label }}<span class="n">{{ t.count }}</span></a>
     {% endfor %}
   </div>
-  <p class="ship-tabcap">{{ tab_caption }}</p>
+  <p class="ship-tabcap">{{ tab_caption }}{% if tab == "empty" and new_box_url %} <a class="ship-newbox" href="{{ new_box_url }}" title="Mint a new box of the selected type in HWDB">+ New box</a>{% endif %}</p>
   {% if page_obj.paginator.count %}
   <div class="ship-table-wrap">
     <table class="ship-table">
-      <thead><tr><th>Box PID</th><th>Type</th><th>Latest location</th><th>Contents</th><th>Shipped</th><th>Received</th><th></th></tr></thead>
+      <thead><tr><th>Box PID</th><th>Type</th><th>Contents</th><th>Shipped</th><th>Last received</th>{% if tab == "delivered" %}<th>Delivered</th>{% endif %}<th></th></tr></thead>
       <tbody>
       {% for item in page_obj %}
         <tr onclick="if(!getSelection().toString())location.href='{% url 'explore:part' part_id=item.box.part_id %}'" title="Open shipping details for {{ item.box.part_id }}">
           <td class="mono"><a class="ship-link" href="{% url 'explore:part' part_id=item.box.part_id %}" onclick="event.stopPropagation()" title="Open this box’s detail page">{{ item.box.part_id }}</a></td>
           <td><a class="ship-link" href="{{ item.path }}" onclick="event.stopPropagation()" title="Open the component type page">{{ item.type_name }}</a></td>
-          <td>{{ item.box.location_name|default:"—" }}</td>
           <td class="mono">{{ item.box.n_contents }}</td>
           <td class="mono">{% if item.box.shipped_date %}{{ item.box.shipped_date|date:"Y-m-d" }}{% else %}—{% endif %}</td>
-          <td class="mono">{% if item.box.received_date %}{{ item.box.received_date|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+          <td>{{ item.box.last_received_label }}</td>
+          {% if tab == "delivered" %}<td class="mono">{{ item.delivered|date:"Y-m-d" }}</td>{% endif %}
           <td class="ship-act" onclick="event.stopPropagation()">
             {% if tab == "empty" and can_pack %}<a class="ship-packbtn" href="{% url 'explore:box_pack' part_id=item.box.part_id %}" title="Open the packing page for this box">Start packing →</a>{% endif %}
             <form method="post" action="{% url 'explore:shipment_refresh' part_id=item.box.part_id %}" class="ship-rf-form"
@@ -45,7 +45,7 @@ keeps its scroll position. {% endcomment %}
   {% endif %}
   {% else %}
   <div class="empty">
-    <p>No boxes here.</p>
+    <p>No boxes here.{% if tab == "empty" and new_box_url %} <a class="ship-newbox" href="{{ new_box_url }}" title="Mint a new box of the selected type in HWDB">+ New box</a>{% endif %}</p>
     <p>If nothing is mirrored yet, run <strong>Sync new</strong> to pull the tracked types from HWDB.</p>
   </div>
   {% endif %}

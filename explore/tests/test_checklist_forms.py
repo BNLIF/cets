@@ -1532,8 +1532,8 @@ class ItemCreateTest(TestCase):
         # country select + institution select from the shared widget
         api = self._api_create()
         # real HWDB shape: the affiliation is "BNL", the institution carries
-        # only its long name → matched on initials; In-Transit's "--" country
-        # stays off the country list
+        # only its long name → matched on initials; the id-0 In-Transit
+        # sentinel stays off the picker altogether (#212), its "--" country too
         api.get_institutions.return_value = {"data": [
             {"id": 128, "name": "Brookhaven National Laboratory",
              "country": {"code": "US", "name": "United States"}},
@@ -1544,7 +1544,7 @@ class ItemCreateTest(TestCase):
             html = self.client.get(NEW_PAGE).content.decode()
         self.assertIn('class="ip-country"', html)
         self.assertIn('<option value="128" data-cc="US" selected>Brookhaven National Laboratory</option>', html)
-        self.assertIn('<option value="0" data-cc="--">In-Transit</option>', html)
+        self.assertNotIn('<option value="0" data-cc', html)
         self.assertNotIn('<option value="--">', html)
         pref = InstitutionPref.objects.get()
         self.assertEqual(pref.institution_id, 128)

@@ -277,6 +277,11 @@ class ShipmentItem(InstanceScoped):
     # while still in transit).
     shipped_date = models.DateTimeField(null=True, blank=True)
     received_date = models.DateTimeField(null=True, blank=True)
+    # The latest REAL location event, kept even while the box is in transit
+    # — the stop it left (Chao 2026-11-05, #212). Empty on rows mirrored
+    # before this field existed, until their type re-syncs.
+    last_stop_name = models.CharField(max_length=200, blank=True, default="")
+    last_stop_date = models.DateTimeField(null=True, blank=True)
     synced_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -288,22 +293,57 @@ class ShipmentItem(InstanceScoped):
         return self.location_id == 0
 
     @property
-    def ship_status(self) -> str:
-        """Status bucket for the Shipments dashboard (#87). In Transit wins;
-        otherwise contents decide — ≥1 item is "in packing" (not fully
-        unpacked, or being packed for the next trip), 0 is an empty box ready
-        to start packing. Whether a location is set doesn't matter."""
+    def location_label(self) -> str:
+        """The location to print: "In Transit" for the id-0 sentinel whatever
+        HWDB currently names that row (#212: it was renamed to an institution
+        in late 2026), else the mirrored name, else "—"."""
+        if self.location_id == 0:
+            return "In Transit"
+        return self.location_name or "—"
+
+    @property
+    def last_received_label(self) -> str:
+        """One cell for the tables (Chao 2026-11-05, #212): the last receipt
+        as "2026-04-21 @ CERN" — for a box in transit, the stop it left; the
+        bare place when no date is known; "In Transit" for a moving box with
+        no stop on record (or mirrored before the stop was kept); "—" with
+        no location at all."""
+        moving = self.location_id == 0
+        name = self.last_stop_name or ("" if moving else self.location_name)
+        date = self.last_stop_date or (None if moving else self.received_date)
+        if name and date:
+            return f"{date:%Y-%m-%d} @ {name}"
+        if name:
+            return name
+        return "In Transit" if moving else "—"
+
+    def delivered_at(self, receiving_completed):
+        """When this box counts as delivered (#212): the CETS receiving
+        checklist completed AFTER the box last entered transit — a receipt
+        from an earlier trip doesn't carry over once the box ships again.
+        ``receiving_completed`` is that checklist's completion time, or None."""
+        if receiving_completed is None:
+            return None
+        if self.shipped_date and receiving_completed < self.shipped_date:
+            return None
+        return receiving_completed
+
+    def ship_status_with(self, receiving_completed) -> str:
+        """Status bucket for the Shipments dashboard (#87, #212). In Transit
+        wins; then delivered (see ``delivered_at``); otherwise contents decide
+        — ≥1 item is "in packing" (not fully unpacked, or being packed for the
+        next trip), 0 is an empty box ready to start packing. Whether a
+        location is set doesn't matter."""
         if self.location_id == 0:
             return "transit"
+        if self.delivered_at(receiving_completed):
+            return "delivered"
         return "packing" if self.n_contents else "empty"
 
     @property
-    def status_label(self) -> str:
-        if self.location_id == 0:
-            return "In transit"
-        if self.location_id is not None:
-            return "Delivered"
-        return "Unknown"
+    def ship_status(self) -> str:
+        """The bucket with no receiving checklist in play (mirror-only callers)."""
+        return self.ship_status_with(None)
 
     def __str__(self):
         return f"ShipmentItem({self.part_id}, {self.location_name})"

@@ -10,14 +10,13 @@ just this pane via htmx (?bpage=), so the page keeps its scroll position. {% end
     {% endif %}
 <div class="tbl-scroll">
     <table class="ship-table">
-        <thead><tr><th>Box PID</th><th>Status</th><th>Latest location</th><th>Arrived</th></tr></thead>
+        <thead><tr><th>Box PID</th><th>Status</th><th>Last received</th></tr></thead>
         <tbody>
         {% for s in empty_boxes_page %}
             <tr class="ship-row" onclick="if(!getSelection().toString())location.href='{% url 'explore:part' part_id=s.part_id %}'" title="Open shipping details for {{ s.part_id }}">
                 <td class="mono"><a href="{% url 'explore:part' part_id=s.part_id %}" onclick="event.stopPropagation()" title="Open this box’s detail page">{{ s.part_id }}</a></td>
-                <td><span class="ship-pill {% if s.is_in_transit %}is-transit{% elif s.location_id is not None %}is-delivered{% else %}is-unknown{% endif %}">{{ s.status_label }}</span></td>
-                <td>{{ s.location_name|default:"—" }}</td>
-                <td class="mono">{% if s.last_arrived %}{{ s.last_arrived|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+                <td><span class="ship-pill{% if s.ship_bucket == "transit" %} is-transit{% elif s.ship_bucket == "delivered" %} is-delivered{% endif %}">{{ s.ship_label }}</span></td>
+                <td>{{ s.last_received_label }}</td>
             </tr>
         {% endfor %}
         </tbody>

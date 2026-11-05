@@ -8,6 +8,7 @@ shipping-leaf rendering. HWDB fetch is mocked — no network.
 
 from __future__ import annotations
 
+from datetime import datetime
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -98,6 +99,18 @@ class LatestLocationTest(TestCase):
 
 
 class ShippedReceivedTest(TestCase):
+    def test_last_stop_is_the_latest_real_location_even_in_transit(self):
+        # Chao 2026-11-05 (#212): the In transit tab shows the stop the box left.
+        locs = [_loc("In Transit", 0, "2026-10-11T12:22:00-05:00"),
+                _loc("BNL", 128, "2026-09-04T00:56:00-05:00"),
+                _loc("UMN", 186, "2026-08-04T15:50:00-05:00"),
+                _loc("In Transit", 0, "2026-08-04T15:48:00-05:00")]
+        dt, name = shipments.last_stop(locs)
+        self.assertEqual((dt.date().isoformat(), name), ("2026-09-04", "BNL"))
+        self.assertEqual(shipments.last_stop([_loc("In Transit", 0, "2026-10-11T12:22:00-05:00")]),
+                         (None, ""))
+        self.assertEqual(shipments.last_stop([]), (None, ""))
+
     def test_in_transit_has_shipped_but_no_received(self):
         locs = [_loc("BNL", 128, "2026-06-03T00:00:00-05:00"),
                 _loc("In Transit", 0, "2026-06-05T00:00:00-05:00")]
@@ -429,8 +442,10 @@ class ShipmentPanelViewTest(TestCase):
         html = self.client.get(navigation.leaf_path_for("prod", leaf.part_type_id)).content.decode()
         self.assertIn("Boxes with contents", html)
         self.assertIn("ship-pill is-transit", html)
-        self.assertIn("ship-pill is-delivered", html)
+        self.assertIn(">In packing</span>", html)       # the Shipments tabs' vocabulary (#212)
+        self.assertNotIn("ship-pill is-delivered", html)   # a located box is not "delivered"
         self.assertIn("<th>Contents</th>", html)
+        self.assertIn("<th>Last received</th>", html)
         self.assertIn("details class=\"chart-card ship-boxes\"", html)  # collapsible
 
     def test_rows_link_to_box_detail_page(self):
@@ -629,6 +644,32 @@ class ShipmentDetailPageTest(TestCase):
         self.assertIn("label.pdf", body)                   # real filename in ?name=
         self.assertIn(navigation.leaf_path_for("prod", SHIP_PTID), body)  # breadcrumb back to leaf
 
+    def test_status_pill_speaks_the_shipments_vocabulary(self):
+        # #212: the pill is the Shipments tab bucket — In transit from the
+        # live timeline; a located box with contents is "In packing", not
+        # "Delivered"; Delivered needs a receiving run completed here.
+        from explore.models import BoxChecklist
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=self._api()):
+            html = self.client.get(self.url).content.decode()
+        self.assertIn('class="sd-pill is-transit">In transit</span>', html)
+        api = self._api()
+        api.get_locations.return_value = {"data": [
+            _loc("In Transit", 0, "2026-06-10T00:00:00-05:00"),
+            _loc("CERN", 200, "2026-06-20T00:00:00-05:00")]}
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            html = self.client.get(self.url).content.decode()
+        self.assertIn('class="sd-pill">In packing</span>', html)
+        self.assertNotIn("Delivered", html)
+        BoxChecklist.objects.create(part_id=self.part_id, workflow="receiving", route="confirm_surf",
+                                    current_scene=3, created_by="box",
+                                    completed_at=timezone.make_aware(datetime(2026, 6, 21)))
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            html = self.client.get(self.url).content.decode()
+        self.assertIn('class="sd-pill is-delivered">Delivered</span>', html)
+
     def test_sheet_history_selector_and_deduped_attachments(self):
         # Sheets are append-only (one per checklist run): the Pre-shipping
         # card lists them all in a newest-first selector (old and new naming
@@ -737,6 +778,51 @@ class ShipStatusTest(TestCase):
     def test_empty_without_location_is_empty(self):
         self.assertEqual(self._item(location_id=None, n_contents=0).ship_status, "empty")
 
+    # #212: a receiving checklist completed in CETS since the last ship makes
+    # the box "delivered"; transit still wins; an older receipt doesn't count.
+    def test_delivered_when_receiving_completed_after_last_ship(self):
+        box = self._item(location_id=200, n_contents=2,
+                         shipped_date=timezone.make_aware(datetime(2026, 10, 1)))
+        done = timezone.make_aware(datetime(2026, 10, 5))
+        self.assertEqual(box.ship_status_with(done), "delivered")
+        self.assertEqual(box.delivered_at(done), done)
+
+    def test_receipt_from_an_earlier_trip_does_not_count(self):
+        box = self._item(location_id=200, n_contents=0,
+                         shipped_date=timezone.make_aware(datetime(2026, 10, 1)))
+        done = timezone.make_aware(datetime(2026, 9, 5))
+        self.assertEqual(box.ship_status_with(done), "empty")
+        self.assertIsNone(box.delivered_at(done))
+
+    def test_transit_wins_over_delivered(self):
+        done = timezone.make_aware(datetime(2026, 10, 5))
+        self.assertEqual(self._item(location_id=0, n_contents=2).ship_status_with(done), "transit")
+
+    def test_never_shipped_box_with_a_receipt_is_delivered(self):
+        done = timezone.make_aware(datetime(2026, 10, 5))
+        self.assertEqual(self._item(location_id=200, n_contents=0).ship_status_with(done), "delivered")
+
+    def test_last_received_label(self):
+        when = timezone.make_aware(datetime(2026, 4, 21, 9, 0))
+        # a moving box shows the stop it left; without one on record, "In Transit"
+        self.assertEqual(self._item(location_id=0, n_contents=1, location_name="IJCLAB",
+                                    last_stop_name="BNL", last_stop_date=when).last_received_label,
+                         "2026-04-21 @ BNL")
+        self.assertEqual(self._item(location_id=200, n_contents=1, location_name="CERN",
+                                    received_date=when).last_received_label, "2026-04-21 @ CERN")
+        self.assertEqual(self._item(location_id=0, n_contents=1, location_name="IJCLAB",
+                                    received_date=None).last_received_label, "In Transit")
+        self.assertEqual(self._item(location_id=200, n_contents=1,
+                                    location_name="CERN").last_received_label, "CERN")
+        self.assertEqual(self._item(location_id=None, n_contents=0).last_received_label, "—")
+
+    def test_location_label_prints_in_transit_for_id_0_whatever_hwdb_calls_it(self):
+        self.assertEqual(self._item(location_id=0, n_contents=1,
+                                    location_name="IJCLAB Orsay").location_label, "In Transit")
+        self.assertEqual(self._item(location_id=200, n_contents=1,
+                                    location_name="CERN").location_label, "CERN")
+        self.assertEqual(self._item(location_id=None, n_contents=0).location_label, "—")
+
 
 class ShipmentsPageTest(TestCase):
     """Top-level Shipments dashboard (Hajime's ask; #87 redesign: status tabs
@@ -810,10 +896,12 @@ class ShipmentsPageTest(TestCase):
         self.assertIn(">B1<", html)
 
     def test_search_matches_pid_type_name_and_ptid(self):
+        def transit_count(resp):
+            return next(t["count"] for t in resp.context["tabs"] if t["key"] == "transit")
         resp = self.client.get(reverse("explore:shipments"), {"q": "shipping box"})
-        self.assertEqual(resp.context["tabs"][0]["count"], 1)   # B1 via type name
+        self.assertEqual(transit_count(resp), 1)   # B1 via type name
         resp = self.client.get(reverse("explore:shipments"), {"q": "D0812"})
-        self.assertEqual(resp.context["tabs"][0]["count"], 1)   # via part_type_id
+        self.assertEqual(transit_count(resp), 1)   # via part_type_id
         resp = self.client.get(reverse("explore:shipments"), {"q": "zzz"})
         self.assertEqual(sum(t["count"] for t in resp.context["tabs"]), 0)
 
@@ -823,6 +911,69 @@ class ShipmentsPageTest(TestCase):
         resp = self.client.get(reverse("explore:shipments"), {"q": "B2"})
         self.assertEqual(resp.context["tab"], "packing")
         self.assertIn(">B2<", resp.content.decode())
+
+    # #212 — Delivered tab + column from the local receiving checklist; the
+    # tabs read Empty / In packing / In transit / Delivered in that order.
+    def test_tab_order_is_the_lifecycle(self):
+        resp = self.client.get(reverse("explore:shipments"))
+        self.assertEqual([t["key"] for t in resp.context["tabs"]],
+                         ["empty", "packing", "transit", "delivered"])
+        self.assertEqual(resp.context["tab"], "transit")   # default unchanged
+
+    def test_completed_receiving_checklist_moves_the_box_to_delivered(self):
+        from explore.models import BoxChecklist
+        done = timezone.make_aware(datetime(2026, 11, 3, 10, 0))
+        BoxChecklist.objects.create(part_id="B2", workflow="receiving", route="confirm_surf",
+                                    current_scene=3, completed_at=done, created_by="w")
+        resp = self.client.get(reverse("explore:shipments"), {"tab": "delivered"})
+        html = resp.content.decode()
+        self.assertIn(">B2<", html)
+        self.assertIn("<th>Delivered</th>", html)           # the date column, this tab only
+        self.assertIn("<td class=\"mono\">2026-11-03</td>", html)
+        self.assertNotIn("<th>Delivered</th>",
+                         self.client.get(reverse("explore:shipments")).content.decode())
+        self.assertEqual(next(t["count"] for t in resp.context["tabs"]
+                              if t["key"] == "packing"), 0)   # left In packing
+        html = self.client.get(reverse("explore:shipments"), {"tab": "packing"}).content.decode()
+        self.assertNotIn(">B2<", html)
+
+    def test_last_received_cell_merges_date_and_place(self):
+        # Chao 2026-11-05: one "Last received" cell replaces Latest location +
+        # Received; "In Transit" while moving.
+        ShipmentItem.objects.filter(part_id="B2").update(
+            received_date=timezone.make_aware(datetime(2026, 4, 21, 9, 0)))
+        html = self.client.get(reverse("explore:shipments"),
+                               {"tab": "packing"}).content.decode()
+        self.assertIn("<th>Last received</th>", html)
+        self.assertNotIn("<th>Received</th>", html)
+        self.assertNotIn("<th>Latest location</th>", html)
+        self.assertIn("2026-04-21 @ CERN", html)
+        html = self.client.get(reverse("explore:shipments")).content.decode()
+        self.assertIn("<td>In Transit</td>", html)          # no stop on record yet
+        ShipmentItem.objects.filter(part_id="B1").update(
+            last_stop_name="BNL", last_stop_date=timezone.make_aware(datetime(2026, 9, 4)))
+        html = self.client.get(reverse("explore:shipments")).content.decode()
+        self.assertIn("<td>2026-09-04 @ BNL</td>", html)   # the stop it left
+        self.assertNotIn("<td>In Transit</td>", html)
+
+    def test_transit_box_prints_in_transit_whatever_hwdb_named_id_0(self):
+        ShipmentItem.objects.filter(part_id="B1").update(location_name="IJCLAB Orsay")
+        html = self.client.get(reverse("explore:shipments")).content.decode()
+        self.assertIn("In Transit", html)
+        self.assertNotIn("IJCLAB", html)
+
+    @override_settings(HWDB_WRITE_INSTANCES=["prod"])
+    def test_new_box_link_on_the_empty_tab_only_with_a_type_picked(self):
+        ShipmentItem.objects.create(part_type_id=self.leaf.part_type_id, part_id="B3",
+                                    location_name="CERN", location_id=200, n_contents=0)
+        url = reverse("explore:shipments")
+        html = self.client.get(url, {"tab": "empty"}).content.decode()
+        self.assertNotIn("+ New box", html)                   # no type picked
+        html = self.client.get(url, {"tab": "empty", "type": self.leaf.part_type_id}).content.decode()
+        self.assertIn("+ New box", html)
+        self.assertIn("#newbox-pane", html)
+        html = self.client.get(url, {"tab": "packing", "type": self.leaf.part_type_id}).content.decode()
+        self.assertNotIn("+ New box", html)                   # empty tab only
 
     def test_single_hit_search_drops_a_hiding_type_filter(self):
         other = H.objects.create(

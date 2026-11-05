@@ -56,7 +56,7 @@ from .queries import (
 )
 from .parts import assembly_children, current_container, part_detail, subtree_rows, test_summary
 from .shipments import (_mirror_box_parent, _spec_data, current_manifest, refresh_box,
-                        sync_shipments)
+                        shipped_received, sync_shipments)
 
 logger = logging.getLogger(__name__)
 FNAL_UNAVAILABLE = "FNAL authentication service is unavailable. Please try again later."
@@ -238,12 +238,14 @@ def explore_view(request, trail=None):
         # below render like any other leaf); these panes add the box view.
         ptid = leaf.part_type_id
         rows = list(ShipmentItem.for_instance(inst).filter(part_type_id=ptid, n_contents__gt=0))
+        _stamp_ship_status(inst, rows)
         # Empty boxes get their own paginated pane (they're mirrored too, but
         # kept out of the main table, summary cards and the Shipments tab).
         # Paged by ?bpage= — ?page= belongs to the components table.
         empty_boxes_page = Paginator(
             ShipmentItem.for_instance(inst).filter(part_type_id=ptid, n_contents=0),
             50).get_page(request.GET.get("bpage"))
+        empty_boxes_page.object_list = _stamp_ship_status(inst, list(empty_boxes_page.object_list))
         if can_create_box:
             # "Use an existing box" picker — newest empty boxes first.
             empty_pids = list(
@@ -254,8 +256,8 @@ def explore_view(request, trail=None):
         # Sync marker on the leaf — NOT inferred from rows, so a synced type with
         # 0 non-empty boxes reads as synced (no auto-sync loop).
         shipment_synced_at = leaf.shipments_synced_at
-        in_transit = sum(1 for r in rows if r.location_id == 0)
-        delivered = sum(1 for r in rows if r.location_id not in (0, None))
+        in_transit = sum(1 for r in rows if r.ship_bucket == "transit")
+        delivered = sum(1 for r in rows if r.ship_bucket == "delivered")
         shipment_summary = {
             "total": len(rows), "in_transit": in_transit, "delivered": delivered,
         }
@@ -891,16 +893,42 @@ def explore_type_locations_view(request, part_type_id):
 
 # Shipments dashboard status tabs (#87). In Transit is HWDB location id 0;
 # otherwise contents decide the bucket — see ShipmentItem.ship_status.
+# Lifecycle order (Hajime 2026-11-05, #212); the default tab stays In transit.
 _SHIP_TABS = [
-    ("transit", "In transit",
-     "Location is HWDB's “In Transit” — shipped, not yet arrived."),
-    ("packing", "In packing",
-     "Holds at least one item — not fully unpacked, or being packed for the "
-     "next shipment."),
     ("empty", "Empty box",
      "Nothing inside — pick one to start packing. Boxes with no location "
      "event yet show “—”."),
+    ("packing", "In packing",
+     "Holds at least one item — not fully unpacked, or being packed for the "
+     "next shipment."),
+    ("transit", "In transit",
+     "Location is HWDB's “In Transit” — shipped, not yet arrived."),
+    ("delivered", "Delivered",
+     "Receiving checklist completed here since the box last shipped. Reset "
+     "the box's checklists on its page to use it again."),
 ]
+
+
+_SHIP_LABELS = {k: lbl for k, lbl, _c in _SHIP_TABS}
+
+
+def _receiving_done(inst, part_ids=None) -> dict:
+    """``{box pid: completed_at}`` of the receiving checklists finished here —
+    what turns a box "delivered" (#212)."""
+    qs = BoxChecklist.for_instance(inst).filter(workflow="receiving", completed_at__isnull=False)
+    if part_ids is not None:
+        qs = qs.filter(part_id__in=part_ids)
+    return dict(qs.values_list("part_id", "completed_at"))
+
+
+def _stamp_ship_status(inst, rows):
+    """Give mirror rows the Shipments tab bucket + label (``ship_bucket``,
+    ``ship_label``) so every table speaks the one vocabulary (#212)."""
+    done = _receiving_done(inst, [r.part_id for r in rows])
+    for r in rows:
+        r.ship_bucket = r.ship_status_with(done.get(r.part_id))
+        r.ship_label = _SHIP_LABELS[r.ship_bucket]
+    return rows
 
 
 def _shipping_sidebar(request, entries, sel_type):
@@ -965,9 +993,11 @@ def shipments_view(request):
     box across the curated shipping types, split into status tabs — In transit
     / In packing / Empty box — with a shipping-only sidebar (?type= filter),
     search (?q=, matches box PID / type name / type id), and a per-row refresh.
-    Reads the mirror only."""
+    Reads the mirror only — plus the local receiving-checklist runs, which
+    decide "Delivered" (#212)."""
     inst = instance_of(request)
     ptids = _shipping_ptids(inst)
+    received = _receiving_done(inst)
 
     # entries feeds the sidebar; sync_targets the sweep buttons.
     boxes, entries, sync_targets = [], [], []
@@ -984,8 +1014,10 @@ def shipments_view(request):
         rows = list(ShipmentItem.for_instance(inst).filter(part_type_id=ptid))
         entries.append((leaf, len(rows)))
         for r in rows:
+            done = received.get(r.part_id)
             boxes.append({"box": r, "type_name": leaf.name, "ptid": ptid,
-                          "path": path, "status": r.ship_status})
+                          "path": path, "status": r.ship_status_with(done),
+                          "delivered": r.delivered_at(done)})
 
     sel_type = request.GET.get("type") or ""
     if sel_type and sel_type not in {leaf.part_type_id for leaf, _n in entries}:
@@ -1040,6 +1072,10 @@ def shipments_view(request):
         "prev_url": _qs(tab, page_obj.previous_page_number()) if page_obj.has_previous() else "",
         "next_url": _qs(tab, page_obj.next_page_number()) if page_obj.has_next() else "",
         "can_pack": inst in settings.HWDB_WRITE_INSTANCES,
+        # "+ New box" on the Empty tab needs ONE type picked (#212): the type
+        # page's New box pane, opened by its hash.
+        "new_box_url": (navigation.leaf_path_for(inst, sel_type) + "#newbox-pane"
+                        if sel_type and inst in settings.HWDB_WRITE_INSTANCES else ""),
     }
     # htmx tab/pager clicks swap just the boxes pane in place (no scroll-to-top).
     if getattr(request, "htmx", False) and request.htmx.target == "shipments-pane":
@@ -1091,7 +1127,7 @@ def explore_shipments_search_api_view(request):
     boxes = [{
         "part_id": b.part_id,
         "status": labels[b.ship_status],
-        "location": b.location_name or "—",
+        "location": b.location_label,
         "url": "?" + urlencode({"q": b.part_id}),
     } for b in (ShipmentItem.for_instance(inst)
                 .filter(part_type_id__in=ptids, part_id__icontains=q)
@@ -1711,6 +1747,23 @@ def explore_part_view(request, part_id):
         shown |= {a["image_id"] for a in exec_summaries}
     other_attachments = [a for a in detail["attachments"] if a["image_id"] not in shown]
 
+    # Ship/receive checklist runs on this box (issue #65), by workflow.
+    box_checklists = ({c.workflow: c for c in
+                       BoxChecklist.for_instance(inst).filter(part_id=part_id)}
+                      if can_update_location else {})
+    ship_bucket = ship_label = ""
+    if is_shipping:
+        # The status pill speaks the Shipments tabs' vocabulary (#212), from
+        # the live timeline + contents and the receiving run on this box.
+        tl = detail["timeline"]
+        shipped, _received = shipped_received(
+            [{"arrived": e["arrived"], "location": {"id": e["location_id"]}} for e in tl])
+        probe = ShipmentItem(location_id=tl[0]["location_id"] if tl else None,
+                             n_contents=len(detail["manifest"]), shipped_date=shipped)
+        rc = box_checklists.get("receiving")
+        ship_bucket = probe.ship_status_with(rc.completed_at if rc else None)
+        ship_label = _SHIP_LABELS[ship_bucket]
+
     return render(request, "explore/part_detail.html", {
         # A box belongs to the Shipments tab; everything else to Hardware.
         "active_nav": "shipments" if is_shipping else "hardware",
@@ -1761,10 +1814,9 @@ def explore_part_view(request, part_id):
         "can_delete_spec": can_es and not is_shipping and _is_architect(request, inst, api),
         # Consortium checklists defined on this type (#95), by name.
         "part_checklists": part_checklists,
-        # Ship/receive checklist runs on this box (issue #65), by workflow.
-        "checklists": ({c.workflow: c for c in
-                        BoxChecklist.for_instance(inst).filter(part_id=part_id)}
-                       if can_update_location else {}),
+        "checklists": box_checklists,
+        "ship_bucket": ship_bucket,
+        "ship_label": ship_label,
     })
 
 
@@ -1787,10 +1839,13 @@ def _institution_options(api) -> list[dict]:
     except Exception as e:
         logger.warning("institutions fetch failed: %s", e)
         return []
+    # id 0 is the In-Transit sentinel the ship step posts; it's never a place
+    # to pick (#212: HWDB renamed that row to an institution, so it would
+    # otherwise list — and receive a box into transit).
     opts = [{"id": r.get("id"), "name": r.get("name") or "",
              "country_code": ((r.get("country") or {}).get("code") or ""),
              "country_name": ((r.get("country") or {}).get("name") or "")}
-            for r in rows if isinstance(r, dict) and r.get("id") is not None]
+            for r in rows if isinstance(r, dict) and r.get("id") not in (None, 0)]
     return sorted(opts, key=lambda o: o["name"].lower())
 
 
@@ -7239,6 +7294,37 @@ def explore_receiving_view(request, part_id):
                 (r2.get("location") or {}).get("institution_name", ""),
                 r2.get("arrived") or "")
     return render(request, "explore/receiving.html", ctx)
+
+
+@login_not_required
+@fnal_login_required
+@require_POST
+def explore_box_reset_view(request, part_id):
+    """Reset on the item page's Shipping Workflows pane (Hajime 2026-11-05,
+    #212): drop the box's three CETS checklist runs (pre-shipping, shipping,
+    receiving) so the physical container can be packed and shipped again.
+    Local only — HWDB keeps the previous trip's checklists and sheets in the
+    Item Specifications (append-only, #73); the next pre-shipping run writes
+    a new version over them. The page confirms before posting."""
+    inst = instance_of(request)
+    part_url = _rev(request, "explore:part", args=[part_id])
+    ptid = part_id.rsplit("-", 1)[0]
+    if inst not in settings.HWDB_WRITE_INSTANCES or not curation.is_shipping_type(inst, ptid):
+        return HttpResponseForbidden("Checklists are not enabled here.")
+    runs = BoxChecklist.for_instance(inst).filter(part_id=part_id)
+    names = sorted(dict(BoxChecklist.WORKFLOWS).get(c.workflow, c.workflow)
+                   for c in runs)
+    n, _per_model = runs.delete()
+    if not n:
+        messages.info(request, "No checklist runs to reset.")
+        return redirect(part_url)
+    messages.success(request, f"Checklists reset — {', '.join(names)} cleared; "
+                              "the box can be packed again.")
+    activity.log(inst, ActivityEvent.KIND_CHECKLIST,
+                 f"{part_id}: shipping checklists reset ({', '.join(names)} cleared)",
+                 part_id=part_id, part_type_id=ptid,
+                 actor=activity.actor_of(request))
+    return redirect(part_url)
 
 
 @login_not_required
