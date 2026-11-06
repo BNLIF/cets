@@ -360,6 +360,8 @@ def explore_view(request, trail=None):
         # the dropdown is read-only when the current class comes from the yaml
         "class_locked": (is_shipping and not shipping_override) or (is_consortium and not consortium_override),
         "status_url": _rev(request, "explore:production_status", args=[leaf.part_type_id]) if is_consortium else "",
+        "links_url": _rev(request, "explore:production_links", args=[leaf.part_type_id]) if is_consortium else "",   # #213
+        "type_es_url": _rev(request, "explore:type_es", args=[leaf.part_type_id]) if leaf and not is_consortium else "",   # #213
         "list_url": _rev(request, "explore:production_list", args=[leaf.part_type_id]) if is_consortium else "",
         "type_plans": type_plans,
         "show_plans": show_plans,
@@ -496,6 +498,7 @@ def _production_status_list(request, inst) -> list[dict]:
                     "url": _rev(request, "explore:production_status", args=[tid]),
                     "type_url": navigation.leaf_path_for(inst, tid) or "",
                     "list_url": _rev(request, "explore:production_list", args=[tid]),
+                    "links_url": _rev(request, "explore:production_links", args=[tid]),   # Related links beside Edit table (Chao 2026-11-06)
                     "read_at": lst.read_at if lst else None,
                     "rows": table,
                     "tree": any(r["has_children"] for r in table or []),
@@ -567,6 +570,7 @@ def explore_production_status_view(request, part_type_id):
         "tree": any(r["has_children"] for r in table),
         "cols": production.columns(table),
         "list_url": _rev(request, "explore:production_list", args=[part_type_id]),
+        "links_url": _rev(request, "explore:production_links", args=[part_type_id]),   # #213
         "can_edit": inst in settings.HWDB_WRITE_INSTANCES,   # the plan pages apply the type's roles themselves
         "consortium": part_type_id,   # #206: the plan links carry it
     })
@@ -778,6 +782,111 @@ def explore_production_list_view(request, part_type_id):
 
 
 _PTID_RX = re.compile(r"^[A-Z]\d{11}$")
+
+
+@login_not_required
+@fnal_login_required
+def explore_production_organizer_view(request, part_type_id):
+    """#213 (Chao 2026-11-05, after Hajime on Slack): the Links page — a
+    table's nested component list as a Markdown table with each type's
+    page, checklists and executive summaries linked, built on each visit
+    and kept nowhere, drawn as the organizer checklist (#189) it becomes
+    once pasted into one ("Organizer" is the saved checklist's line, so
+    the page is not called that). One image listing per listed type, live, as the status
+    page. POST = hand it to the checklist editor as an unsaved draft (the
+    table as the organizer's instructions, carried in the session); the
+    editor's own Save is the only write — Hajime's organizers are ordered
+    by workflow stage, so this is the quick start, not the organizer."""
+    inst = instance_of(request)
+    page_url = _rev(request, "explore:production_links", args=[part_type_id])
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(_rev(request, "explore:hierarchy"))
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    node = HierarchyNode.for_instance(inst).filter(
+        level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
+    own = api.get_component_type_images(part_type_id).get("data") or []   # the list, and whether an Organizer exists
+    rows, _vs = production.read_list(api, part_type_id, rows=own)
+    rows = rows or []
+    ids = [r["type"] for r in rows]
+    info = {tid: [c["name"] for c in checklistforms.active(api, tid)] for tid in set(ids)}   # one listing per distinct type
+    md = production.organizer_markdown(
+        rows, production.names(inst, ids), info,
+        lambda t: _rev(request, "explore:home") + f"?node={t}",
+        lambda t: _rev(request, "explore:type_es", args=[t]),
+        lambda t, c: _rev(request, "explore:type_checklist", args=[t, c]))
+    organizers = []   # the type's organizer checklists by the flag, not the name — a renamed one still counts (Chao)
+    for c in checklistforms.active(api, part_type_id, rows=own):
+        try:
+            cfg = json.loads(api.get_image_response(c["image_id"]).content)
+        except Exception:
+            continue
+        if isinstance(cfg, dict) and cfg.get("organizer"):
+            organizers.append({"name": c["name"],
+                               "url": _rev(request, "explore:type_checklist", args=[part_type_id, c["name"]]),
+                               "edit_url": _rev(request, "explore:checklist_config", args=[part_type_id])
+                                           + "?" + urlencode({"name": c["name"], "next": page_url})})
+    draft = production.organizer_draft(md)
+    if request.method == "POST":
+        if inst not in settings.HWDB_WRITE_INSTANCES:
+            return HttpResponseForbidden("Checklists can only be edited on a write instance.")
+        request.session[f"cl_draft:{part_type_id}"] = draft
+        editor = _rev(request, "explore:checklist_config", args=[part_type_id])
+        return redirect(f"{editor}?{urlencode({'name': 'Organizer', 'draft': '1', 'next': page_url})}")
+    return render(request, "explore/production_organizer.html", {
+        "active_nav": "detector",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "part_type_id": part_type_id,
+        "type_name": (node.name if node else "") or part_type_id,
+        "schema": checklistforms.normalize(draft, "Organizer"),   # drawn as the saved organizer would be
+        "md": md,   # for Copy Markdown — pasted into an existing organizer's note to bring it up to date
+        "n_rows": len(rows),
+        "status_url": _rev(request, "explore:production_status", args=[part_type_id]),
+        "list_url": _rev(request, "explore:production_list", args=[part_type_id]),
+        "organizers": organizers,   # with one present the editor hand-off hides: Copy Markdown + paste keeps the edited one
+        "can_edit": inst in settings.HWDB_WRITE_INSTANCES,
+    })
+
+
+@login_not_required
+@fnal_login_required
+def explore_type_es_view(request, part_type_id):
+    """#213: the type's executive summaries — its items from the mirror,
+    one line each with a link to the item's ES, as the checklist chooser
+    lists them (#110). Mirror-only per item: no ES is read here; one image
+    listing says whether the type has an ES config at all."""
+    inst = instance_of(request)
+    page_url = _rev(request, "explore:type_es", args=[part_type_id])
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(_rev(request, "explore:home"))
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    node = HierarchyNode.for_instance(inst).filter(
+        level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
+    has_config = execsummary._newest_config_row(production._listing(api, part_type_id), part_type_id) is not None
+    rows = (HwdbComponentEvent.for_instance(inst)
+            .filter(part_type_id=part_type_id)
+            .order_by(F("updated").desc(nulls_last=True),
+                      F("created").desc(nulls_last=True), "part_id"))
+    return render(request, "explore/type_es.html", {
+        "active_nav": "hardware",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "part_type_id": part_type_id,
+        "type_name": (node.name if node else "") or part_type_id,
+        "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
+        "has_config": has_config,
+        "parts_page": Paginator(rows, 50).get_page(request.GET.get("page")),
+    })
 
 
 @login_not_required
@@ -4896,6 +5005,14 @@ def explore_checklist_config_view(request, part_type_id):
     cl_name = (request.GET.get("name") or "").strip()
     raw, current_name = (checklistforms.raw_load(api, part_type_id, cl_name)
                          if cl_name else (None, None))
+    if request.GET.get("draft") == "1":
+        # #213: the generated organizer handed over as an unsaved draft — over
+        # the stored schema of that name, which a Save would version
+        draft = request.session.get(f"cl_draft:{part_type_id}")
+        if isinstance(draft, dict):
+            raw = draft
+            messages.info(request, "A draft generated from the component list — nothing is saved until Save to HWDB"
+                                   + (f", which adds a version of {current_name}." if current_name else "."))
     return render(request, "explore/checklist_config.html", {
         "item_field_choices": [(n, checklistforms.ITEM_FIELD_LABELS[n])
                                for n in checklistforms.ITEM_FIELDS],

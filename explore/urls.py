@@ -15,6 +15,8 @@ urlpatterns = [
     path("schedule/", views.explore_production_schedule_view, name="production_schedule"),   # #206: the P6 schedule as last uploaded (the Detector area's third page)
     path("schedule/upload/", views.explore_production_p6_view, name="production_p6"),   # #206: upload the P6 schedule
     path("status/<str:part_type_id>/", views.explore_production_status_view, name="production_status"),   # #199: one consortium, live
+    path("status/<str:part_type_id>/links/", views.explore_production_organizer_view, name="production_links"),   # #213: the list as a table of links, generated
+    path("exec-summary/<str:part_type_id>/", views.explore_type_es_view, name="type_es"),   # #213: the type's items, each with its ES
     path("plan/<str:part_type_id>/", views.explore_production_plan_view, name="production_plan"),   # #200: a type's production plan + history
     path("plan-list/<str:part_type_id>/", views.explore_production_list_view, name="production_list"),   # #200: a consortium type's component list
     path("type-positions/<str:part_type_id>/", views.explore_type_positions_view,

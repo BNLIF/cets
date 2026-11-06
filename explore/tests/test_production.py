@@ -43,7 +43,8 @@ def _api(lst=LIST, plans=None, images=None):
     ``plans`` its plan (newest of two versions), everything by image id."""
     plans = {SIPM: PLAN} if plans is None else plans
     api = mock.MagicMock()
-    files = {"l1": lst}
+    files = {"l1": lst, "org": {"name": "Organizer", "organizer": True, "sections": []},
+             "wf": {"name": "Workflow", "organizer": True, "sections": []}, "plain": {"name": "Plain", "sections": []}}
     listing = {PTID: [{"image_id": "l1", "image_name": f"Production_list_{PTID}.json",
                        "created": "2026-10-08T10:00:00", "comments": "first list"},
                       {"image_id": "org", "image_name": f"Checklist_{PTID}_Organizer.json",
@@ -303,6 +304,7 @@ class StatusPageTest(TestCase):
         self.assertIn('<td data-col="needed" class="cl-const ps-num ps-none">—</td>', html)
         self.assertIn('<td data-col="n" class="cl-const ps-num" title="no items in the mirror">0</td>', html)
         self.assertIn(f'href="/hw/dev/plan-list/{PTID}/?next=', html)   # ✎ Component list
+        self.assertIn(f'<a class="es-btn quiet" style="margin-left:auto; text-decoration:none;" href="/hw/dev/status/{PTID}/links/"', html)   # #213
         self.assertNotIn("ps-rev", html)   # no Submission picker: the history is per plan
         self.assertEqual(ProductionList.for_instance("dev").get(part_type_id=PTID).rows, production.normalize_list(LIST))
         self.assertEqual(ProductionPlan.for_instance("dev").get(part_type_id=SIPM).needed, 48000)
@@ -562,6 +564,7 @@ class DetectorPagesTest(TestCase):
         self.assertIn(f'<a class="ps-plan" href="/hw/dev/plan/{PDS}/?for={PTID}" title="No plan on this type yet — set one">&#9998;</a>', html)   # Chao 2026-11-04: a ✎ on a row without a plan, here too
         self.assertIn('<span class="hc-read">read ', html)
         self.assertIn(f'<a class="hc-cons-open" href="/hw/dev/plan-list/{PTID}/?next=/hw/dev/status/%3Fc%3D{PTID}" title="The rows of this table — the component types, nested">&#9998; Edit table</a>', html)   # Chao 2026-11-04: not "Refresh"
+        self.assertIn(f'<a class="hc-cons-open" href="/hw/dev/status/{PTID}/links/" title="The component list as a table of links — each type’s page, checklists and executive summaries">Related links</a>', html)   # Chao 2026-11-06
         self.assertIn('localStorage.setItem("hcCons", id)', html)
         production.cache_list("dev", PTID, [])
         html = self.client.get("/hw/dev/status/").content.decode()
@@ -597,6 +600,154 @@ class DetectorPagesTest(TestCase):
         self.assertNotIn("hc-pill", html.split("<h1>")[1])
 
 
+class OrganizerPageTest(TestCase):
+    """#213: the list as a generated organizer — a Markdown table — and the hand-off to the editor as a draft."""
+    URL = f"/hw/dev/status/{PTID}/links/"
+    LIST3 = {"rows": [{"type": SIPM, "label": "SiPM boards", "level": 0}, {"type": PDS, "level": 1},
+                      {"type": SIPM, "label": "Deep", "level": 2}, {"type": PDS, "label": "Deeper", "level": 3}]}
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("o", "o@o.io", "pw"))
+        _node(PTID, instance="dev", component_type_name="FDVD CRP")
+        _node(SIPM, instance="dev", component_type_name="SiPM board")
+        _node(PDS, instance="dev", component_type_name="PDS module")
+
+    OWN = [{"image_id": "l1", "image_name": f"Production_list_{PTID}.json", "created": "2026-10-08T10:00:00"}]
+
+    def _api(self, lst=LIST3, own=None):
+        api = _api(lst=lst, plans={}, images={
+            **({PTID: own} if own is not None else {}),
+            SIPM: [{"image_id": "c1", "image_name": f"Checklist_{SIPM}_QC.json", "created": "2026-10-01T00:00:00"},
+                   {"image_id": "c4", "image_name": f"Checklist_{SIPM}_Burn-in.json", "created": "2026-10-01T00:00:00"},
+                   {"image_id": "c2", "image_name": f"Checklist_{SIPM}_Old.json", "created": "2026-10-01T00:00:00", "comments": "[retired]"}],
+            PDS: [{"image_id": "c3", "image_name": f"Checklist_{PDS}_Receiving.json", "created": "2026-10-01T00:00:00"}]})
+        return api
+
+    def test_markdown_table(self):
+        rows = production.normalize_list(self.LIST3)
+        md = production.organizer_markdown(rows, {PDS: "PDS module"}, {SIPM: ["QC", "Burn-in"]},
+                                           lambda t: f"/t/{t}", lambda t: f"/es/{t}", lambda t, c: f"/c/{t}/{c}")
+        self.assertEqual(md.splitlines(), [
+            "| Component | Type ID | Checklists | Exec summaries |", "|---|---|---|---|",
+            f"| **SiPM boards** | [`{SIPM}`](/t/{SIPM}) | [QC](/c/{SIPM}/QC) | [all items](/es/{SIPM}) |",
+            f"| | | [Burn-in](/c/{SIPM}/Burn-in) | |",   # a checklist per line: its own row under the component
+            f"| &nbsp;&nbsp;&nbsp;&nbsp;↳ **PDS module** | [`{PDS}`](/t/{PDS}) | — | [all items](/es/{PDS}) |",
+            f"| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↳ **Deep** | [`{SIPM}`](/t/{SIPM}) | [QC](/c/{SIPM}/QC) | [all items](/es/{SIPM}) |",
+            f"| | | [Burn-in](/c/{SIPM}/Burn-in) | |",
+            f"| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↳ **Deeper** | [`{PDS}`](/t/{PDS}) | — | [all items](/es/{PDS}) |"])
+        self.assertEqual(production.organizer_draft("x"), {"name": "Organizer", "organizer": True, "sections": [
+            {"title": "Components", "fields": [{"type": "static", "label": "", "note": "x"}]}]})
+
+    def test_page_renders_the_table(self):
+        api = self._api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            r = self.client.get(self.URL)
+            html = r.content.decode()
+        self.assertEqual(r.status_code, 200)
+        self.assertTemplateUsed(r, "explore/production_organizer.html")
+        self.assertIn("<h1>Links <span", html)
+        self.assertIn('id="links-copy"', html)   # Copy Markdown, for an organizer already saved
+        # the fixture's Organizer exists: the hand-off hides (it would supersede the edited one), its editor link shows
+        self.assertNotIn("Edit as organizer checklist", html)
+        self.assertIn(f'href="/hw/dev/checklist-config/{PTID}/?name=Organizer&amp;next=%2Fhw%2Fdev%2Fstatus%2F{PTID}%2Flinks%2F" title="Open this organizer checklist in the editor — paste the copied Markdown over its note">&#9998; Edit Organizer</a>', html)
+        self.assertIn(f'The organizer checklist <a href="/hw/dev/checklist/{PTID}/Organizer/">Organizer</a> does not follow the list — paste the copied Markdown over the note in the editor.', html)
+        self.assertIn('data-title="Components"', html)   # drawn as the organizer it becomes: one section, the table as a static note
+        self.assertIn('<div class="cl-note cl-md"><table>', html)
+        self.assertIn("<th>Component</th>\n<th>Type ID</th>\n<th>Checklists</th>\n<th>Exec summaries</th>", html)
+        self.assertIn("<td><strong>SiPM boards</strong></td>", html)
+        self.assertIn("↳ <strong>PDS module</strong></td>", html)   # no label: the mirror's name; indented
+        self.assertIn(f'<td><a href="/hw/dev/?node={SIPM}" target="_blank" rel="noopener"><code>{SIPM}</code></a></td>', html)
+        self.assertIn(f'<td><a href="/hw/dev/checklist/{SIPM}/Burn-in/" target="_blank" rel="noopener">Burn-in</a></td>', html)   # the retired one left out
+        self.assertNotIn("Old", html.split('id="cl-org"')[1])
+        self.assertIn(f'<td><a href="/hw/dev/checklist/{PDS}/Receiving/" target="_blank" rel="noopener">Receiving</a></td>', html)
+        self.assertIn(f'<td><a href="/hw/dev/exec-summary/{SIPM}/" target="_blank" rel="noopener">all items</a></td>', html)
+        self.assertIn(f'<td><a href="/hw/dev/exec-summary/{PDS}/" target="_blank" rel="noopener">all items</a></td>', html)
+        self.assertNotIn("Submit to HWDB", html)
+        self.assertEqual(api.get_component_type_images.call_count, 3)   # the type's own listing, one per distinct listed type
+        self.assertEqual(api.get_image_response.call_count, 2)   # the list and the type's own checklist (for the organizer flag); none of the listed types' checklists
+
+    def test_organizers_by_flag_not_name(self):
+        # a renamed organizer still counts, a plain checklist on the type does not; with none the hand-off shows
+        api = self._api(own=self.OWN + [
+            {"image_id": "wf", "image_name": f"Checklist_{PTID}_Workflow.json", "created": "2026-10-08T00:00:00"},
+            {"image_id": "plain", "image_name": f"Checklist_{PTID}_Plain.json", "created": "2026-10-08T00:00:00"}])
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(self.URL).content.decode()
+        self.assertNotIn("Edit as organizer checklist", html)
+        self.assertIn("&#9998; Edit Workflow</a>", html)
+        self.assertNotIn("Edit Plain", html)
+        self.assertIn(f'The organizer checklist <a href="/hw/dev/checklist/{PTID}/Workflow/">Workflow</a> does not follow the list', html)
+        api = self._api(own=self.OWN)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(self.URL).content.decode()
+        self.assertIn('<button type="submit" class="es-btn quiet" title="Open the checklist editor with this table as an unsaved draft — nothing is saved until Save to HWDB">&#9998; Edit as organizer checklist</button>', html)
+        self.assertNotIn("does not follow the list", html)
+
+    def test_no_list_and_read_only(self):
+        api = self._api(lst={"rows": []})
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(self.URL).content.decode()
+            self.assertIn("No component list on this type yet — <a href=", html)
+            self.assertNotIn("Edit as organizer checklist", html)
+            with self.settings(HWDB_WRITE_INSTANCES=["prod"]):
+                self.assertEqual(self.client.post(self.URL).status_code, 403)
+
+    def test_draft_goes_to_the_editor_unsaved(self):
+        api = self._api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            r = self.client.post(self.URL)
+            self.assertEqual(r["Location"], f"/hw/dev/checklist-config/{PTID}/?name=Organizer&draft=1&next=%2Fhw%2Fdev%2Fstatus%2F{PTID}%2Flinks%2F")
+            api.post_component_type_image.assert_not_called()   # nothing written
+            draft = self.client.session[f"cl_draft:{PTID}"]
+            self.assertEqual((draft["name"], draft["organizer"], draft["sections"][0]["title"]), ("Organizer", True, "Components"))
+            self.assertTrue(draft["sections"][0]["fields"][0]["note"].startswith("| Component | Type ID | Checklists | Exec summaries |"))
+            html = self.client.get(r["Location"]).content.decode()
+        initial = json.loads(html.split('<script id="clc-initial" type="application/json">')[1].split("</script>")[0])
+        self.assertEqual(initial, draft)   # the editor opens on the draft, not the stored Organizer
+        self.assertIn('<input id="f-name" value="Organizer"', html)
+        self.assertIn(f"A draft generated from the component list — nothing is saved until Save to HWDB, which adds a version of Checklist_{PTID}_Organizer.json.", html)
+        api.post_component_type_image.assert_not_called()
+        # without ?draft=1 the editor shows the stored schema as before
+        with m1, m2:
+            html = self.client.get(f"/hw/dev/checklist-config/{PTID}/?name=Organizer").content.decode()
+        self.assertNotIn("A draft generated from the component list", html)
+
+
+class TypEsPageTest(TestCase):
+    """#213: the type's items, each linking to its executive summary."""
+    URL = f"/hw/dev/exec-summary/{SIPM}/"
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("e", "e@e.io", "pw"))
+        _node(SIPM, instance="dev", component_type_name="SiPM board")
+        for i in range(3):
+            HwdbComponentEvent.objects.create(instance="dev", part_type_id=SIPM, part_id=f"{SIPM}-0000{i}", serial_number=f"S{i}", status="available")
+
+    def test_lists_the_items(self):
+        api = _api(plans={})
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            r = self.client.get(self.URL)
+            html = r.content.decode()
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("<h1>Executive summaries <span", html)
+        self.assertIn("no ES config on this type", html)
+        self.assertIn(f'<td class="mono"><a href="/hw/dev/part/{SIPM}-00000/exec-summary/" onclick="event.stopPropagation()">{SIPM}-00000</a></td>', html)
+        self.assertIn('<td class="mono">S2</td>', html)
+        self.assertEqual(html.count('class="ship-row"'), 3)
+        api = _api(plans={}, images={SIPM: [{"image_id": "e1", "image_name": f"ES_{SIPM}_20261001.json", "created": "2026-10-01T00:00:00"}]})
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(self.URL).content.decode()
+        self.assertNotIn("no ES config on this type", html)
+        self.assertEqual(api.get_image_response.call_count, 0)   # nothing loaded: one listing, the mirror for the rest
+
+
 class TypePageTest(TestCase):
     def setUp(self):
         self.client.force_login(get_user_model().objects.create_user("t", "t@t.io", "pw"))
@@ -604,6 +755,16 @@ class TypePageTest(TestCase):
         HwdbTestEvent.objects.create(part_type_id=SIPM, part_id="", test_type_name="t", created=timezone.now())
         HwdbComponentEvent.objects.create(part_type_id=SIPM, part_id="P1", created=timezone.now())
         self.url = navigation.leaf_path_for("prod", SIPM)
+
+    def test_organizer_and_es_links(self):
+        # #213: a type's Manage row links its executive-summaries page; a consortium type's Status line its generated organizer
+        html = self.client.get(self.url).content.decode()
+        self.assertIn(f'<dt>Exec summaries</dt><dd class="span"><a href="/hw/exec-summary/{SIPM}/" title="Every item of the type with a link to its executive summary">by item</a></dd>', html)
+        self.assertNotIn("/links/", html)
+        ConsortiumTypeOverride.objects.create(instance="prod", part_type_id=SIPM)
+        html = self.client.get(self.url).content.decode()
+        self.assertIn(f'<a href="/hw/status/{SIPM}/links/" title="The component list as a table of links — each type’s page, checklists and executive summaries — built on each visit">Links</a></dd>', html)
+        self.assertNotIn("Exec summaries", html)
 
     def test_plan_line_and_dashboard_feed(self):
         html = self.client.get(self.url).content.decode()

@@ -1,0 +1,68 @@
+{% extends 'explore/base.html' %}
+{% block title %}Executive summaries · {{ type_name }} · HWDB Explorer{% endblock %}
+
+{% block content %}
+{# #213 (Chao 2026-11-05): the type's items, each with a link to its executive summary — the checklist chooser's table (#110), mirror-only per item. #}
+<style>
+  .es-page { padding: 22px 30px 56px; max-width: 980px; }
+  .es-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .es-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .es-crumbs a:hover { text-decoration: underline; }
+  .es-crumbs .sep { color: var(--faint); margin: 0 7px; }
+  .es-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 2px; }
+  .es-sub { color: var(--dim); font-size: 13px; margin: 0 0 14px; }
+  .mono { font-family: var(--font-mono); }
+  .es-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
+  .es-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
+    border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+  .cell-muted { color: var(--faint); }
+  /* the checklist chooser's items-table look (checklist_entry.html) */
+  .ship-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .ship-table th { text-align: left; font-weight: 600; color: var(--faint); font-size: 12px;
+    text-transform: uppercase; letter-spacing: .03em; padding: 6px 10px; border-bottom: 1px solid var(--rule); }
+  .ship-table td { padding: 8px 10px; border-bottom: 1px solid var(--rule); }
+  .ship-table tr:last-child td { border-bottom: none; }
+  .ship-table .mono { font-family: var(--font-mono); font-size: 12.5px; }
+  .ship-table a { color: var(--accent-ink); }
+  tr.ship-row { cursor: pointer; }
+  tr.ship-row:hover { background: var(--surface); }
+</style>
+
+<div class="es-page">
+  <div class="es-crumbs">
+    <a href="{% url 'explore:home' %}">Explorer</a>
+    <span class="sep">›</span>{% if type_url %}<a href="{{ type_url }}">{{ type_name }}</a>{% else %}{{ type_name }}{% endif %}
+    <span class="sep">›</span>Executive summaries
+  </div>
+  {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+  <h1>Executive summaries <span class="mono" style="font-size:.7em; font-weight:400; color:var(--dim);">{{ part_type_id }}</span></h1>
+  <p class="es-sub">{{ type_name }} · one per item{% if not has_config %} · <span title="Without an ES config on the type the summary page runs in its default mode">no ES config on this type</span>{% endif %}</p>
+
+  <div id="es-pane">
+    {% if parts_page.paginator.num_pages > 1 %}
+    <div style="display:flex;gap:14px;justify-content:center;align-items:center;margin:4px 0 14px;font-size:13px;">
+        {% if parts_page.has_previous %}<a style="color:var(--accent-ink);text-decoration:none;" href="?page=1">« First</a><a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.previous_page_number }}">‹ Prev</a>{% else %}<span class="cell-muted">« First</span><span class="cell-muted">‹ Prev</span>{% endif %}
+        <span class="cell-muted" style="font-variant-numeric:tabular-nums;">Page {{ parts_page.number }} of {{ parts_page.paginator.num_pages }} · {{ parts_page.paginator.count }} items</span>
+        {% if parts_page.has_next %}<a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.next_page_number }}">Next ›</a><a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.paginator.num_pages }}">Last »</a>{% else %}<span class="cell-muted">Next ›</span><span class="cell-muted">Last »</span>{% endif %}
+    </div>
+    {% endif %}
+    <div class="tbl-scroll">
+    <table class="ship-table">
+        <thead><tr><th>Part ID</th><th>Serial number</th><th>Status</th><th>Updated</th></tr></thead>
+        <tbody>
+        {% for p in parts_page %}
+            <tr class="ship-row" onclick="if(!getSelection().toString())location.href='{% url 'explore:exec_summary' part_id=p.part_id %}'" title="Open the executive summary of {{ p.part_id }}">
+                <td class="mono"><a href="{% url 'explore:exec_summary' part_id=p.part_id %}" onclick="event.stopPropagation()">{{ p.part_id }}</a></td>
+                <td class="mono">{{ p.serial_number|default:"—" }}</td>
+                <td>{{ p.status|default:"—" }}</td>
+                <td class="mono">{% if p.updated %}{{ p.updated|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+            </tr>
+        {% empty %}
+            <tr><td colspan="4" class="cell-muted">No items mirrored — sync the type first.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

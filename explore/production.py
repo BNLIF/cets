@@ -489,6 +489,37 @@ def _after_parent(what: str, mine, parent: dict | None, key: str) -> str:
     return f"{what} {month_label(mine)} is after {parent['label']}’s {month_label(theirs)}"
 
 
+def organizer_markdown(rows: list[dict], nm: dict[str, str], info: dict[str, list],
+                       type_url, es_url, cl_url) -> str:
+    """#213 (Chao 2026-11-05, the table layout chosen over sections and
+    bullets): a table's nested component list as a Markdown table — one
+    row per component, indented in its first cell, the type id linking
+    the type page, a line per checklist (its own row under the component,
+    Chao: one per line), and a link to its executive-summaries page —
+    worded, not counted: once saved into an organizer the text is fixed,
+    so a count would go stale (Chao). ``info[tid]`` = the checklist
+    names; ``cl_url(tid, name)``."""
+    lines = ["| Component | Type ID | Checklists | Exec summaries |", "|---|---|---|---|"]
+    for r in rows:
+        tid = r["type"]
+        indent = "&nbsp;&nbsp;&nbsp;&nbsp;" * (r.get("level") or 0) + ("↳ " if r.get("level") else "")
+        cls = [f"[{c}]({cl_url(tid, c)})" for c in info.get(tid) or []] or ["—"]
+        lines.append(f"| {indent}**{r.get('label') or nm.get(tid) or tid}** | [`{tid}`]({type_url(tid)}) | {cls[0]} "
+                     f"| [all items]({es_url(tid)}) |")
+        lines += [f"| | | {c} | |" for c in cls[1:]]
+    return "\n".join(lines)
+
+
+def organizer_draft(md: str) -> dict:
+    """The organizer checklist (#189) the editor opens as a draft: one
+    section whose static field carries the table as its note — the
+    Markdown slot the editor previews (Chao 2026-11-05: not the
+    instructions, which it does not render) — and the consortium shapes
+    it from there."""
+    return {"name": "Organizer", "organizer": True,
+            "sections": [{"title": "Components", "fields": [{"type": "static", "label": "", "note": md}]}]}
+
+
 def columns(table: list[dict]) -> dict[str, bool]:
     """#211 (Chao 2026-11-04: the table gets too wide): which optional
     columns have anything in them — the comment, for now — so the partial
