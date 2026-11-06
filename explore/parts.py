@@ -40,7 +40,7 @@ def _safe_data(label, fn) -> list:
 
 
 def _beyond_checklists(spec_block):
-    """The spec block minus the three shipping checklists inside ``DATA``
+    """The spec block minus the four shipping checklists inside ``DATA``
     (an emptied DATA drops out); a DATA of any other shape stays as is."""
     if not isinstance(spec_block, dict):
         return spec_block
@@ -509,7 +509,7 @@ def part_detail(api, part_id: str, is_shipping: bool) -> dict:
     images = [i for i in _safe_data("images", lambda: api.get_images(part_id)) if i.get("image_id")]
     name_by_id = {str(i["image_id"]): i.get("image_name") for i in images}
     if is_shipping:
-        # The three lifecycle cards first; whatever else the record holds
+        # The four lifecycle cards first; whatever else the record holds
         # (other datasheet keys, a DATA that is not the checklist dict) renders
         # through the generic cards after them, so nothing stays hidden.
         sections = shipment_details(data_blob) + spec_sections(_beyond_checklists(spec_block))

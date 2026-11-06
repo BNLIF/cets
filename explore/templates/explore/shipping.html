@@ -171,7 +171,8 @@
       </div>
       <label class="inline" style="margin-top:10px;"><input type="checkbox" name="affirm_shipment" required>
         The cargo has physically shipped.</label>
-      <p class="ps-hint" style="margin-top:8px;">Continuing posts the In-Transit location onto the box.</p>
+      <p class="ps-hint" style="margin-top:8px;">Continuing posts the In-Transit location onto the box{% if not cl.is_surf %}
+        and records the Shipping Checklist on it{% endif %}.</p>
 
     {% elif scene == 6 %}
       <p style="font-size:13px; color:var(--ink);">All writes are done. Keep the wrap-up CSV for your

@@ -63,6 +63,7 @@ def _api():
                                         "email": "chao@bnl.gov", "roles": []}}
     api.post_location.return_value = {"status": "OK"}
     api.patch_subcomponents.return_value = {"status": "OK"}
+    api.patch_component.return_value = {"status": "OK"}
     return api
 
 
@@ -92,6 +93,25 @@ class ReceivingEngineTest(TestCase):
         api.patch_subcomponents.assert_called_once_with(BOX, {
             "component": {"part_id": BOX},
             "subcomponents": {"FEB1": None, "FEB2": None}})
+
+    def test_receiving_checklist_dict(self):
+        # Hajime 2026-11-06: the final location, who received, when.
+        self.assertEqual(checklists.build_receiving_checklist_dict(_cl(), "Chao Zhang"), {
+            "Final Location": "BNL (128)",
+            "Received by": "Chao Zhang",
+            "Received (date in CT)": "2026-07-14 09:30"})
+
+    def test_patch_receiving_keeps_the_rest_of_the_spec(self):
+        api = _api()
+        self.assertIsNone(checklists.patch_receiving(api, _cl(), "Chao Zhang"))
+        payload = api.patch_component.call_args.args[1]
+        self.assertEqual(payload["part_id"], BOX)
+        self.assertEqual(payload["manufacturer"], {"id": 7})
+        data = payload["specifications"]["DATA"]
+        self.assertEqual(data["Pre-Shipping Checklist"], PRESHIP_SPEC["Pre-Shipping Checklist"])
+        self.assertEqual(data["Receiving Checklist"],
+                         [{"Final Location": "BNL (128)"}, {"Received by": "Chao Zhang"},
+                          {"Received (date in CT)": "2026-07-14 09:30"}])
 
     def test_transshipping_posts_box_only(self):
         api = _api()
@@ -161,6 +181,15 @@ class ReceivingFlowTest(TestCase):
         posted = [c.args[0] for c in api.post_location.call_args_list]
         self.assertEqual(posted, [BOX, "D05700300001-00012", "D05700300001-00013"])
         self.assertEqual(api.post_location.call_args_list[0].args[1], PAYLOAD)
+        # The Receiving Checklist goes in first, named after the account
+        # (whoami's full name), with the location as "Name (id)".
+        calls = [c[0] for c in api.method_calls if c[0] in ("patch_component", "post_location")]
+        self.assertEqual(calls[:2], ["patch_component", "post_location"])
+        data = api.patch_component.call_args.args[1]["specifications"]["DATA"]
+        self.assertEqual(data["Receiving Checklist"], [
+            {"Final Location": "Brookhaven National Laboratory (128)"},
+            {"Received by": "Chao Zhang"},
+            {"Received (date in CT)": "2026-07-14 09:30"}])
         api.patch_subcomponents.assert_called_once_with(BOX, {
             "component": {"part_id": BOX},
             "subcomponents": {"FEB1": None, "FEB2": None}})

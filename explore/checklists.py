@@ -481,26 +481,56 @@ def build_shipping_csv(checklist, info: dict, poc_name: str, poc_email: str,
     return filename, buf.getvalue()
 
 
-def patch_shipping(api, checklist, info: dict, poc_name: str, poc_email: str) -> str | None:
-    """Scene 4's write: fold the Shipping Checklist into the item's latest
-    specs block and PATCH — same envelope as pre-shipping. Error or None."""
-    item = api.get_component(checklist.part_id).get("data") or {}
+def _patch_checklist(api, part_id: str, key: str, checklist: dict) -> str | None:
+    """Fold one checklist (``key`` → list of one-key entries, the iPad shape)
+    into the item's latest specs block and PATCH — same envelope as
+    pre-shipping. Error or None."""
+    item = api.get_component(part_id).get("data") or {}
     specs_list = item.get("specifications") or [{}]
     specs = specs_list[-1] if isinstance(specs_list[-1], dict) else {}
     if not isinstance(specs.get("DATA"), dict):
         specs["DATA"] = {}
-    specs["DATA"]["Shipping Checklist"] = [
-        {k: v} for k, v in
-        build_shipping_checklist_dict(checklist, info, poc_name, poc_email).items()]
+    specs["DATA"][key] = [{k: v} for k, v in checklist.items()]
     manufacturer = item.get("manufacturer")
-    body = api.patch_component(checklist.part_id, {
-        "part_id": checklist.part_id,
+    body = api.patch_component(part_id, {
+        "part_id": part_id,
         "comments": item.get("comments"),
         "manufacturer": {"id": manufacturer["id"]} if manufacturer else None,
         "serial_number": item.get("serial_number"),
         "specifications": specs,
     })
     return None if body.get("status") == "OK" else str(body.get("data") or body)
+
+
+def patch_shipping(api, checklist, info: dict, poc_name: str, poc_email: str) -> str | None:
+    """The Shipping Checklist write — at the final-approval step on the SURF
+    route, at the ship step on the others (Hajime 2026-11-06: the Dashboard
+    wrote it on the SURF route alone, so non-SURF and transshipping boxes
+    carried none). Error or None."""
+    return _patch_checklist(
+        api, checklist.part_id, "Shipping Checklist",
+        build_shipping_checklist_dict(checklist, info, poc_name, poc_email))
+
+
+def build_receiving_checklist_dict(checklist, received_by: str) -> dict:
+    """The ``Receiving Checklist`` spec dict (Hajime 2026-11-06): the final
+    location, who received the box (the full name of the account that ran
+    the checklist) and when — the HWDB keeps no receiving record beyond the
+    location timeline, so the item page can show the arrival in one place."""
+    r2 = checklist.state.get("Receiving2", {})
+    loc = r2.get("location") or {}
+    return {
+        "Final Location": f"{loc.get('institution_name')} ({loc.get('institution_id')})",
+        "Received by": received_by,
+        "Received (date in CT)": r2.get("arrived"),
+    }
+
+
+def patch_receiving(api, checklist, received_by: str) -> str | None:
+    """Scene 2's record write, before the location posts: re-running the
+    step after a failed post rewrites the same entries. Error or None."""
+    return _patch_checklist(api, checklist.part_id, "Receiving Checklist",
+                            build_receiving_checklist_dict(checklist, received_by))
 
 
 def receiving_email_html(part_id: str, poc_name: str, poc_email: str,

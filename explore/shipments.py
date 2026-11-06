@@ -130,12 +130,14 @@ def current_manifest(subs: list[dict] | None) -> list[dict]:
 
 
 # The FD shipping workflow writes these checklists into the box item's
-# free-form spec DATA blob (see the Python dashboard). Each is (HWDB key,
-# display title); we render all three as a fixed lifecycle, even when empty.
+# free-form spec DATA blob (see the Python dashboard); the Receiving one is
+# ours (Hajime 2026-11-06). Each is (HWDB key, display title); we render all
+# four as a fixed lifecycle, even when empty.
 _DETAIL_SECTIONS = (
     ("Pre-Shipping Checklist", "Pre-shipping"),
     ("Shipping Checklist", "Shipping"),
     ("Warehouse", "Info @ Warehouse"),
+    ("Receiving Checklist", "Receiving"),
 )
 
 
@@ -205,7 +207,7 @@ def _image_label(key: str) -> str:
 
 
 def shipment_details(data_blob: dict | None) -> list[dict]:
-    """Parse the box's spec DATA into the three lifecycle detail sections.
+    """Parse the box's spec DATA into the four lifecycle detail sections.
 
     The FD shipping workflow stores pre-shipping / shipping / warehouse
     checklists in ``specifications[0].DATA``; each is a *list of single-field
@@ -213,7 +215,7 @@ def shipment_details(data_blob: dict | None) -> list[dict]:
     ordered key/value ``fields``, peeling any ``Image ID for …`` key into a
     downloadable ``attachment`` (bill of lading, proforma invoice, approval
     message, label). Field names are taken verbatim from HWDB — no hardcoded
-    schema. All three sections are **always** returned in lifecycle order (a
+    schema. All four sections are **always** returned in lifecycle order (a
     stage not yet reached has empty ``fields``/``attachments``), so the page
     can show the whole timeline (ADR-0013).
     """

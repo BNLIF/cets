@@ -494,28 +494,28 @@ class ShipmentDetailsTest(TestCase):
                                   "Destination of this shipment": "FNAL"})
         self.assertEqual(sec["attachments"], [{"label": "Shipping Sheet", "image_id": "img-9"}])
 
-    def test_always_returns_all_three_sections_in_lifecycle_order(self):
-        # Even with only Warehouse populated, all three render (empty stages
+    def test_always_returns_all_four_sections_in_lifecycle_order(self):
+        # Even with only Warehouse populated, all four render (empty stages
         # show just their title), in fixed lifecycle order.
         blob = {"Warehouse": [{"SKU": "SKU-1"}], "Shipping Checklist": [{}]}
         secs = shipments.shipment_details(blob)
         self.assertEqual([s["title"] for s in secs],
-                         ["Pre-shipping", "Shipping", "Info @ Warehouse"])
+                         ["Pre-shipping", "Shipping", "Info @ Warehouse", "Receiving"])
         self.assertEqual(secs[0]["fields"], [])               # Pre-shipping empty
         self.assertEqual(secs[1]["fields"], [])               # Shipping empty
         self.assertEqual(secs[2]["fields"], [{"label": "SKU", "value": "SKU-1"}])
 
-    def test_none_blob_returns_three_empty_sections(self):
+    def test_none_blob_returns_four_empty_sections(self):
         secs = shipments.shipment_details(None)
-        self.assertEqual(len(secs), 3)
+        self.assertEqual(len(secs), 4)
         self.assertTrue(all(not s["fields"] and not s["attachments"] for s in secs))
 
-    def test_string_blob_returns_three_empty_sections(self):
+    def test_string_blob_returns_four_empty_sections(self):
         # Z00100300005-05044 on dev had DATA stored as a bare string; the
         # box page must not crash on it.
         for blob in ("some text", ["a", "b"], 42):
             secs = shipments.shipment_details(blob)
-            self.assertEqual(len(secs), 3)
+            self.assertEqual(len(secs), 4)
             self.assertTrue(all(not s["fields"] and not s["attachments"] for s in secs))
 
 
@@ -559,13 +559,13 @@ class PartDetailEngineTest(TestCase):
     def test_shipping_box_shows_other_specs_after_the_checklists(self):
         # Datasheet keys beyond the checklists, and a DATA that is not the
         # checklist dict (a sheet upload wrote a string on Z00100300005-05044),
-        # render through the generic cards after the three lifecycle cards.
+        # render through the generic cards after the four lifecycle cards.
         api = self._api(component={"data": {"specifications": [
             {"DATA": "free text", "Box type": "crate", "_meta": {"x": 1}}]}})
         d = parts.part_detail(api, "B1", is_shipping=True)
         self.assertEqual([s["title"] for s in d["sections"]],
-                         ["Pre-shipping", "Shipping", "Info @ Warehouse", "Specifications"])
-        self.assertEqual({f["label"]: f["value"] for f in d["sections"][3]["fields"]},
+                         ["Pre-shipping", "Shipping", "Info @ Warehouse", "Receiving", "Specifications"])
+        self.assertEqual({f["label"]: f["value"] for f in d["sections"][4]["fields"]},
                          {"DATA": "free text", "Box type": "crate"})
         # Extra DATA keys next to the checklists show in a DATA card; the
         # checklists themselves are not repeated there.
@@ -573,13 +573,13 @@ class PartDetailEngineTest(TestCase):
             {"Warehouse": [{"SKU": "SKU-1"}], "Notes": {"Packed by": "AB"}}))
         d = parts.part_detail(api, "B1", is_shipping=True)
         self.assertEqual([s["title"] for s in d["sections"]],
-                         ["Pre-shipping", "Shipping", "Info @ Warehouse", "DATA"])
-        self.assertEqual([(f["label"], f["value"]) for f in d["sections"][3]["fields"]],
+                         ["Pre-shipping", "Shipping", "Info @ Warehouse", "Receiving", "DATA"])
+        self.assertEqual([(f["label"], f["value"]) for f in d["sections"][4]["fields"]],
                          [("Notes › Packed by", "AB")])
-        # Only the checklists → just the three cards, as before.
+        # Only the checklists → just the four cards, as before.
         d = parts.part_detail(self._api(component=_component({"Warehouse": [{"SKU": "SKU-1"}]})),
                               "B1", is_shipping=True)
-        self.assertEqual(len(d["sections"]), 3)
+        self.assertEqual(len(d["sections"]), 4)
 
     def test_flags_image_attachments_for_thumbnailing(self):
         api = self._api(
@@ -636,7 +636,7 @@ class ShipmentDetailPageTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         body = resp.content.decode()
         self.assertIn(self.part_id, body)
-        # All three lifecycle sections render, even the empty ones.
+        # All four lifecycle sections render, even the empty ones.
         self.assertIn("Pre-shipping", body)
         self.assertIn("Info @ Warehouse", body)
         self.assertIn("Not recorded yet.", body)           # empty stage placeholder

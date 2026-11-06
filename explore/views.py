@@ -7131,7 +7131,10 @@ def explore_shipping_view(request, part_id):
             messages.error(request, err)
             return redirect(page_url)
 
-        if scene == 4 and cl.is_surf:  # the Shipping Checklist patch
+        # The Shipping Checklist patch: with the final approval on the SURF
+        # route, at the ship step on the others, which skip steps 3-4
+        # (Hajime 2026-11-06 — before, those routes wrote none).
+        if scene == (4 if cl.is_surf else 5):
             poc_name, poc_email = _poc()
             try:
                 perr = checklists.patch_shipping(api, cl, _info(), poc_name, poc_email)
@@ -7316,10 +7319,20 @@ def explore_receiving_view(request, part_id):
             messages.error(request, err)
             return redirect(page_url)
 
-        if scene == 2:  # the writes: locations fan-out + detach
+        if scene == 2:  # the writes: Receiving Checklist, locations fan-out + detach
+            # Received by = the account's full name (Hajime 2026-11-06);
+            # whoami caches it in the session, else one call here.
+            received_by = request.session.get("fnal_full_name") or ""
+            if not received_by:
+                try:
+                    who = api.whoami().get("data") or {}
+                except Exception:
+                    who = {}
+                received_by = who.get("full_name") or who.get("username") or activity.actor_of(request)
             manifest = _manifest()
             try:
-                rerr = checklists.receive_box(api, cl, manifest)
+                rerr = (checklists.patch_receiving(api, cl, received_by)
+                        or checklists.receive_box(api, cl, manifest))
             except requests.RequestException as e:
                 rerr = _hwdb_error_detail(e)
             if rerr:
@@ -7328,12 +7341,13 @@ def explore_receiving_view(request, part_id):
             _refresh_box_quietly(api, inst, ptid, part_id)
             if cl.route == "confirm_transshipping":
                 messages.success(
-                    request, "Arrival location posted; contents stay linked (transshipping).")
+                    request, "Receiving Checklist recorded and arrival location posted; "
+                             "contents stay linked (transshipping).")
                 detail = "contents stay linked (transshipping)"
             else:
                 messages.success(
-                    request, f"Arrival location posted for the box and {len(manifest)} "
-                             "item(s); all contents detached.")
+                    request, f"Receiving Checklist recorded; arrival location posted for the "
+                             f"box and {len(manifest)} item(s); all contents detached.")
                 detail = f"{len(manifest)} item(s) detached"
             activity.log(inst, ActivityEvent.KIND_LOCATION,
                          f"{part_id} arrived — location posted, {detail}",

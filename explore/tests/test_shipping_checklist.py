@@ -297,7 +297,10 @@ class ShippingFlowTest(TestCase):
         cl = BoxChecklist.for_instance("dev").get(part_id=BOX, workflow="shipping")
         self.assertEqual(cl.route, "confirm_non_surf")
 
-    def test_non_surf_skips_patch_but_still_goes_in_transit(self):
+    def test_non_surf_patches_base_checklist_at_the_ship_step(self):
+        # Hajime 2026-11-06: steps 3-4 are off this route, so the Shipping
+        # Checklist (base keys alone) goes in with the ship step, before the
+        # In-Transit post.
         api = _api()
         m1, m2 = _mocked(api)
         with m1, m2:
@@ -311,7 +314,13 @@ class ShippingFlowTest(TestCase):
             self.client.post(PAGE, {"action": "advance",
                                     "shipment_time": "2026-07-13T08:00",
                                     "affirm_shipment": "on"})              # 5
-        api.patch_component.assert_not_called()
+        data = api.patch_component.call_args.args[1]["specifications"]["DATA"]
+        cl_map = {k: v for e in data["Shipping Checklist"] for k, v in e.items()}
+        self.assertEqual(cl_map["DUNE PID"], BOX)
+        self.assertEqual(cl_map["POC name"], "POC Person")
+        self.assertNotIn("Image ID for BoL", cl_map)
+        self.assertEqual([c[0] for c in api.method_calls if c[0] in ("patch_component", "post_location")],
+                         ["patch_component", "post_location"])
         api.post_location.assert_called_once()
         cl.refresh_from_db()
         self.assertEqual(cl.current_scene, 6)

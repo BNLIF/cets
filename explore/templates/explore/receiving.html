@@ -74,7 +74,7 @@
     has been received.</p>
   <div class="ps-card">
     <h2>Done</h2>
-    <p style="font-size:13.5px; color:var(--ink);">The arrival location is in HWDB
+    <p style="font-size:13.5px; color:var(--ink);">The Receiving Checklist and the arrival location are in HWDB
       {% if cl.route == 'confirm_transshipping' %}(contents kept linked for transshipping).
       {% else %}and the box's contents have been detached.{% endif %}</p>
     <form method="post" onsubmit="return confirm('Discard this completed run and start over?');">
@@ -130,8 +130,9 @@
       <label class="inline" style="margin-top:10px;"><input type="checkbox" name="affirm_update" required>
         Yes, update the location now</label>
       <p class="ps-hint" style="margin-top:8px;">
-        {% if cl.route == 'confirm_transshipping' %}Continuing posts the arrival location onto the box
-        (transshipping — contents stay linked).{% else %}Continuing posts the arrival location onto the
+        Continuing records the Receiving Checklist (location, received by, when) on the box and
+        {% if cl.route == 'confirm_transshipping' %}posts the arrival location onto it
+        (transshipping — contents stay linked).{% else %}posts the arrival location onto the
         box and every sub-component, then unlinks all contents.{% endif %}</p>
 
     {% elif scene == 3 %}
