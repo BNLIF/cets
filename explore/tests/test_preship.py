@@ -213,6 +213,15 @@ class RouteSkipsTest(TestCase):
                                                    checklists.scene_key(4): SCENE_DATA[4]})
         d = checklists.build_checklist_dict(cl, {"subcomponents": {}}, "img1")
         self.assertIsNone(d["Visual Inspection (YES = no damage)"])
+        # The non-SURF spec carries the shipment keys too (Hajime 2026-11-07).
+        cl.state[checklists.scene_key(5)] = SCENE_DATA[5]
+        d = checklists.build_checklist_dict(cl, {"subcomponents": {}}, "img1")
+        self.assertEqual(d["Dimension of this shipment"], "1x1x1 m")
+        self.assertEqual(d["Weight of this shipment"], "40 kg")
+        self.assertEqual(d["Freight Forwarder name"], "FF Inc")
+        self.assertEqual(d["Mode of Transportation"], "ground")
+        self.assertEqual(d["Expected Arrival Date (CT)"], "2026-08-01T15:00")
+        self.assertNotIn("HTS code", d)
         cl.state[checklists.scene_key(7)] = {"damage_status": "no damage"}
         self.assertEqual(checklists.build_checklist_dict(cl, {"subcomponents": {}}, "img1")["Visual Inspection (YES = no damage)"], "YES")
 
@@ -374,8 +383,19 @@ class PatchBuildTest(TestCase):
         self.assertRegex(filename,
                          rf"^Notification_{BOX}_hajime_\d{{4}}-\d{{2}}-\d{{2}}-\d{{2}}-\d{{2}}\.csv$")
         self.assertIn("Freight Forwarder name,FF Inc", text)
+        self.assertIn("Shipment's destination,SURF", text)   # Hajime 2026-11-07
+        self.assertIn("HTS code,8543.70", text)
         self.assertIn("DUNE PID," + BOX, text)
         self.assertIn("P-1,FEB,FEB1", text)
+        # Off SURF the shipment block stays, less the HTS row (Hajime 2026-11-07).
+        cl = _cl(route="confirm_non_surf", state={checklists.scene_key(4): SCENE_DATA[4],
+                                                   checklists.scene_key(5): SCENE_DATA[5]})
+        _f, text = checklists.build_csv(cl, info, "hajime")
+        for row in ("Dimension,1x1x1 m", "Weight,40 kg", "Freight Forwarder name,FF Inc",
+                    "Mode of Transportation,ground", "Expected Arrival Date (CT),2026-08-01T15:00",
+                    "Shipment's origin,BNL", "Shipment's destination,SURF"):
+            self.assertIn(row, text)
+        self.assertNotIn("HTS code", text)
         pdf = checklists.build_label_pdf(BOX, info, "Development HWDB", None,
                                          poc_name="POC Person",
                                          poc_email="poc@x.org")

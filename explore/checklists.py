@@ -654,18 +654,21 @@ def build_csv(checklist, info: dict, username: str = "") -> tuple[str, str]:
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=",")
     p4a, p4b = ws.get("PreShipping4a", {}), ws.get("PreShipping4b", {})
-    rows = []
+    # The shipment block on every route, destination included (Hajime
+    # 2026-11-07: the Dashboard's CSV had it on SURF alone and never the
+    # destination); the HTS code stays a SURF row.
+    rows = [
+        ["Dimension", p4a.get("dimension", "")],
+        ["Weight", p4a.get("weight", "")],
+        ["Freight Forwarder name", p4b.get("freight_forwarder", "")],
+        ["Mode of Transportation", p4b.get("mode_of_transportation", "")],
+        ["Expected Arrival Date (CT)", p4b.get("expected_arrival_time", "")],
+        ["Shipment's origin", p4a.get("shipment_origin", "")],
+        ["Shipment's destination", p4a.get("shipment_destination", "")],
+    ]
     if checklist.is_surf:
-        rows.extend([
-            ["Dimension", p4a.get("dimension", "")],
-            ["Weight", p4a.get("weight", "")],
-            ["Freight Forwarder name", p4b.get("freight_forwarder", "")],
-            ["Mode of Transportation", p4b.get("mode_of_transportation", "")],
-            ["Expected Arrival Date (CT)", p4b.get("expected_arrival_time", "")],
-            ["Shipment's origin", p4a.get("shipment_origin", "")],
-            ["HTS code", p4a.get("hts_code", "")],
-            [],
-        ])
+        rows.append(["HTS code", p4a.get("hts_code", "")])
+    rows.append([])
     rows.extend([
         ["System Name (ID)", f"{info.get('system_name', '')} ({info.get('system_id', '')})"],
         ["Subsystem Name (ID)", f"{info.get('subsystem_name', '')} ({info.get('subsystem_id', '')})"],
@@ -897,12 +900,17 @@ def build_checklist_dict(checklist, info: dict, image_id) -> dict:
             "FD Logistics team acknoledgement (date in CT)": p6.get("acknowledged_time"),
             **common_tail,
         }
-    return {
+    return {  # the shipment keys too (Hajime 2026-11-07; the Dashboard kept them SURF-only)
         "POC name": p3.get("approver_name"),
         "POC Email": _emails(p3.get("approver_email", "")),
         **common_head,
         "Origin of this shipment": p4a.get("shipment_origin"),
         "Destination of this shipment": p4a.get("shipment_destination"),
+        "Dimension of this shipment": p4a.get("dimension"),
+        "Weight of this shipment": p4a.get("weight"),
+        "Freight Forwarder name": p4b.get("freight_forwarder"),
+        "Mode of Transportation": p4b.get("mode_of_transportation"),
+        "Expected Arrival Date (CT)": p4b.get("expected_arrival_time"),
         **common_tail,
     }
 
