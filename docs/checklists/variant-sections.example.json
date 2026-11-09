@@ -5,7 +5,7 @@
   "sections": [
     {"title": "Identification", "fields": [
       {"type": "qr", "label": "PID"},
-      {"type": "select", "label": "Variant", "options": ["H", "J"]}
+      {"type": "select", "label": "Variant", "options": ["H", "J"], "exclusive": true}
     ]},
     {"title": "Measurements — H", "when": {"field": "Variant", "equals": "H"}, "fields": [
       {"type": "static", "label": "Figure H", "note": "Replace with the H measurement diagram (upload a reference image)."},

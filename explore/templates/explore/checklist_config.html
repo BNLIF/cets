@@ -412,6 +412,7 @@
     </div>
     <div class="ec-row g-select" style="display:none;">
       <input class="ff-options" placeholder="options, comma-separated">
+      <label class="ec-check" title="the sections this select shows are variants of one another: a submission records the chosen option&#8217;s sections alone, the hidden ones&#8217; values are dropped"><input type="checkbox" class="ff-excl"> record the shown sections only</label>
     </div>
     <div class="ec-row g-textpat" style="display:none;">
       <input class="ff-pattern" placeholder="pattern (regex, e.g. 011-\d{5}) — adds a Phone button that reads the value off the item" style="flex:1 1 100%;"
@@ -620,6 +621,7 @@
     syncTblBtn(r);
     $(".ff-steps", r).value = (f.steps || []).join("\n");
     $(".ff-reqall", r).checked = !!f.require_all;                       // #131
+    $(".ff-excl", r).checked = f.type === "select" && !!f.exclusive;     // #216
     if (f.color) {                        // #115: the picker can't be empty —
       $(".ff-color", r).value = f.color;  // "no tint" is tracked on data-on
       $(".ff-color", r).dataset.on = "1";
@@ -1392,7 +1394,10 @@
       var rows = rowsOf(r);                                             // #119
       if (rows.length) f.rows = rows;
     }
-    if (t === "select") f.options = list($(".ff-options", r).value, ",");
+    if (t === "select") {
+      f.options = list($(".ff-options", r).value, ",");
+      if ($(".ff-excl", r).checked) f.exclusive = true;                 // #216
+    }
     if (t === "steps") {
       f.steps = $(".ff-steps", r).value.split("\n")                     // keep the
         .map(function (s) { return s.replace(/\s+$/, ""); })           // indent (#106)

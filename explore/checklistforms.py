@@ -782,6 +782,12 @@ def _norm_field(f: dict) -> dict | None:
                           if str(o).strip()]
         if not out["options"]:
             return None
+        # #216 (Hajime): the sections this select shows are variants of one
+        # another — a submission records the chosen option's alone, the
+        # hidden ones' values (prefilled from the last submission, or typed
+        # before switching) are dropped at submit
+        if f.get("exclusive"):
+            out["exclusive"] = True
     if t == "steps":
         # #106: leading spaces indent a step under the previous one (2 spaces
         # per level, editor convention); the stored value key is the stripped
@@ -795,17 +801,38 @@ def _norm_field(f: dict) -> dict | None:
     return out
 
 
+def hidden_sections(schema: dict, post) -> dict[int, bool]:
+    """The sections an unmet ``when`` rule hides for this submission, as the
+    browser hid them: section index → whether the rule's select is
+    ``exclusive`` (#216). A sub-section hides with its parent and inherits
+    its flag."""
+    hidden: dict[int, bool] = {}
+    for si, sec in enumerate(schema["sections"]):
+        w = sec.get("when")
+        if w and (post.get(f"w{si}" if w.get("path") else w["key"]) or "") != w["equals"]:
+            hidden[si] = bool(w.get("exclusive")) or hidden.get(sec.get("parent"), False)
+        elif sec.get("parent") in hidden:
+            hidden[si] = hidden[sec["parent"]]
+    return hidden
+
+
+def exclusive_hidden(schema: dict, post) -> set[str]:
+    """#216: titles of the sections whose values this submission must NOT
+    record — hidden by an ``exclusive`` select's rule (a variant the user
+    didn't pick, prefilled from the last submission or typed before
+    switching)."""
+    return {schema["sections"][si]["title"]
+            for si, excl in hidden_sections(schema, post).items() if excl}
+
+
 def unchecked_required(schema: dict, post) -> list[str]:
     """#131: labels of ``require_all`` steps fields with a step still
     unchecked — the server-side twin of the checkboxes' ``required``.
     Sections hidden by an unmet ``when`` rule don't count, exactly as the
     browser skips their controls."""
-    out, hidden = [], set()
+    out, hidden = [], hidden_sections(schema, post)
     for si, sec in enumerate(schema["sections"]):
-        w = sec.get("when")
-        if (w and (post.get(f"w{si}" if w.get("path") else w["key"]) or "") != w["equals"]) \
-                or sec.get("parent") in hidden:   # a sub-section hides with its parent
-            hidden.add(si)
+        if si in hidden:
             continue
         for f in (leaf for top in sec["fields"] for leaf in _row_leaves(top)):
             if f["type"] == "steps" and f.get("require_all") and not all(
@@ -1099,6 +1126,8 @@ def _resolve_when(schema: dict) -> None:
             sec["when"] = {"field": label, "key": sel["key"], "equals": eq}
             if ssec:
                 sec["when"]["section"] = ssec
+            if sel.get("exclusive"):   # #216
+                sec["when"]["exclusive"] = True
 
 
 def _by_label(schema: dict, types: tuple) -> dict:

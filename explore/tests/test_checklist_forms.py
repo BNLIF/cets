@@ -4971,3 +4971,67 @@ class EditChecklistLinkTest(TestCase):
             org = self.client.get(f"/hw/dev/checklist/{PTID}/{NAME}/").content.decode()
         self.assertIn(edit, org)
         self.assertEqual(org.count("Edit checklist"), 1)
+
+
+class ExclusiveSelectTest(TestCase):
+    """#216 (Hajime): a select marked ``exclusive`` records the sections it
+    shows one option at a time — the unpicked variants' values (prefilled
+    from the last submission, or typed before switching) are dropped at
+    submit from the record, the Specs fold and the photo references. A
+    plain select (Anomalies: yes / no) keeps a hidden section's values."""
+    SCHEMA = {"name": "S", "test_type_name": "S", "sections": [
+        {"title": "Id", "fields": [
+            {"type": "select", "label": "Type", "options": ["C", "E"], "exclusive": True},
+            {"type": "select", "label": "Anomalies", "options": ["no", "yes"]}]},
+        {"title": "Type C", "when": {"field": "Type", "equals": "C"}, "fields": [
+            {"type": "number", "label": "Width", "to_spec": True},
+            {"type": "photo", "label": "Photo"}]},
+        {"title": "Type C detail", "level": 2, "fields": [{"type": "text", "label": "Note"}]},
+        {"title": "Type E", "when": {"field": "Type", "equals": "E"}, "fields": [
+            {"type": "number", "label": "Width", "to_spec": True}]},
+        {"title": "Anomaly", "when": {"field": "Anomalies", "equals": "yes"}, "fields": [
+            {"type": "text", "label": "What"}]}]}
+    PREV = {"DATA": {"Type C": {"Width": 1.5, "Photo": {"image_id": "old", "image_name": "p.png"}},
+                     "Type C detail": {"Note": "n"}, "Anomaly": {"What": "scratch"}}}
+
+    def test_normalize_carries_the_flag_onto_the_rules(self):
+        n = checklistforms.normalize(self.SCHEMA, "S")
+        secs = {s["title"]: s for s in n["sections"]}
+        self.assertTrue(secs["Id"]["fields"][0]["exclusive"])
+        self.assertNotIn("exclusive", secs["Id"]["fields"][1])
+        self.assertTrue(secs["Type C"]["when"]["exclusive"])
+        self.assertNotIn("exclusive", secs["Anomaly"]["when"])
+        # the hidden set: Type C + its sub-section drop, Anomaly stays recorded
+        self.assertEqual(checklistforms.exclusive_hidden(n, {"f0-0": "E", "f0-1": "no"}),
+                         {"Type C", "Type C detail"})
+        self.assertEqual(checklistforms.exclusive_hidden(n, {"f0-0": "C", "f0-1": "no"}), {"Type E"})
+        self.assertEqual(checklistforms.hidden_sections(n, {"f0-0": "C", "f0-1": "no"}),
+                         {3: True, 4: False})
+
+    def test_submit_records_the_chosen_variant_alone(self):
+        self.client.force_login(get_user_model().objects.create_user("x", "x@x.io", "pw"))
+        api = _api(schema=self.SCHEMA, prev=self.PREV, test_types=("ES", "S"))
+        api.get_component.return_value["data"]["specifications"] = [{"DATA": {
+            "Type C": {"Width": 1.5}, "Other": "kept"}}]
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+            self.assertIn("shown and recorded when Type = C", html)
+            self.assertIn("shown when Anomalies = yes", html)
+            # the browser posts the hidden Type C inputs (prefilled) with the new E ones
+            self.client.post(PAGE, {"f0-0": "E", "f0-1": "no", "f1-0": "1.5", "f2-0": "n",
+                                    "f3-0": "2.5", "f4-0": "scratch"})
+        data = api.post_test.call_args.args[1]["test_data"]["DATA"]
+        self.assertEqual(data, {"Id": {"Type": "E", "Anomalies": "no"},
+                                "Type E": {"Width": 2.5},
+                                "Anomaly": {"What": "scratch"}})   # not exclusive → kept, hidden or not
+        spec = api.patch_component.call_args.args[1]["specifications"]["DATA"]
+        self.assertEqual(spec, {"Type E": {"Width": 2.5}, "Other": "kept"})
+
+    def test_editor_round_trips_the_tick(self):
+        self.client.force_login(get_user_model().objects.create_user("y", "y@y.io", "pw"))
+        m1, m2 = _mocked(_api(schema=self.SCHEMA))
+        with m1, m2:
+            html = self.client.get(f"/hw/dev/checklist-config/{PTID}/").content.decode()
+        self.assertIn('class="ff-excl"', html)
+        self.assertIn("f.exclusive = true", html)

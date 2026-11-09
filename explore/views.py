@@ -3558,16 +3558,17 @@ def explore_es_plot_view(request, part_id, index):
     })
 
 
-def _checklist_photos(request, api, part_id, name, schema, prev_td, data) -> str | None:
+def _checklist_photos(request, api, part_id, name, schema, prev_td, data, skip=()) -> str | None:
     """Upload the form's photos ahead of the test record (the iPad's
     ordering — the record references their image_ids); a slot without a new
-    file keeps the previous submission's reference. Returns an error string
+    file keeps the previous submission's reference — except in a section
+    named in ``skip`` (#216: an unpicked variant's). Returns an error string
     or None; already-posted photos stay on the item either way (HWDB is
     append-only)."""
     prev = (prev_td or {}).get("DATA")
     prev = prev if isinstance(prev, dict) else {}
     for title, f in checklistforms.leaf_fields(schema):
-        if f["type"] != "photo":
+        if f["type"] != "photo" or title in skip:
             continue
         img = request.FILES.get(f["key"])
         note = (request.POST.get(f["key"] + "-note") or "").strip()   # #128
@@ -4226,6 +4227,12 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
     data = checklistforms.parse(schema, request.POST, resolve)
     if shared:
         return _shared_serial_error(shared)
+    # #216: the variants an exclusive select didn't pick are not this
+    # submission's — their inputs sat hidden in the form, prefilled from
+    # the last record (Hajime: a PID is of ONE segment type)
+    unpicked = checklistforms.exclusive_hidden(schema, request.POST)
+    for title in unpicked:
+        data.pop(title, None)
     # #103: the Item card — one PATCH for the changed standard fields, a
     # location post only when the institution changed (iPad order: item,
     # then location, then the test)
@@ -4318,7 +4325,7 @@ def _checklist_submit(request, api, part_id, name, schema, prev_td,
     # a link HWDB won't take) — four orphan photos on -00149 came from
     # refused submits that had already uploaded. Only the record post itself
     # can now fail after them.
-    err = _checklist_photos(request, api, part_id, name, schema, prev_td, data)
+    err = _checklist_photos(request, api, part_id, name, schema, prev_td, data, unpicked)
     if err:
         return err
     try:

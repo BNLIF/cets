@@ -66,7 +66,7 @@
   <h3>Show a section only when…</h3>
   <p>The <span class="dd-ui">— always —</span> select lists the checklist's <code>select</code> and PID fields:</p>
   <ul>
-    <li><b>A select field</b> = an option: the section shows while that option is chosen. Two sections on the same field with different options give "pick H or J, then see that variant's table".</li>
+    <li><b>A select field</b> = an option: the section shows while that option is chosen. Two sections on the same field with different options give "pick H or J, then see that variant's table". A hidden section keeps its values (typed before switching, or prefilled from the last submission) and they are recorded too — unless the select has <span class="dd-ui">record the shown sections only</span> ticked: then a submission records the chosen option's sections alone, the unpicked variants dropped from the record, the Specs and the previous photos (a PID is of one variant).</li>
     <li><b>A PID field</b> › a key = a value: the section shows while the scanned item's stored value at that key equals the value — read live from HWDB. A bare key such as <code>Side</code> reads the item's Item Specifications; <code>serial_number</code> or <code>location.name</code> read the standard fields; dots walk deeper.</li>
   </ul>
   <p class="dd-note">A hidden section's fields are left out of the submission; values typed before switching are kept in case you switch back. A rule that matches nothing shows the section rather than hiding it.</p>
@@ -102,7 +102,7 @@
     <tr><td>text / textarea</td><td>one line / several; a text field may carry a <a href="#read">pattern</a> the value must match, or <span class="dd-ui">read from</span> a PID field
       and a key: the box is then read-only and shows the value stored under that key on the item scanned there (a bare key reads its Item Specifications; <code>serial_number</code>, <code>location.name</code> read the standard fields; dots walk deeper) — a sub-component's installed side, read when its parent's assembly form scans it</td><td>the text</td></tr>
     <tr><td>date/time</td><td>a date-time picker</td><td><code>YYYY-MM-DDTHH:MM</code></td></tr>
-    <tr><td>select</td><td>a dropdown of the options (comma-separated in the editor)</td><td>the chosen option</td></tr>
+    <tr><td>select</td><td>a dropdown of the options (comma-separated in the editor); <span class="dd-ui">record the shown sections only</span> makes the sections it shows exclusive — see <a href="#sections">Sections</a></td><td>the chosen option</td></tr>
     <tr><td>photo</td><td>take or pick a picture, with an optional comment; uploaded to the item at submit</td><td>the HWDB image id and name</td></tr>
     <tr><td>QR / PID</td><td>scan or type a PID (or a serial number), with Scan, Pick and phone buttons</td><td>the PID</td></tr>
     <tr><td>link child</td><td>a PID field that also links the item as a sub-component, live or at submit</td><td>the PID</td></tr>
