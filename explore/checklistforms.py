@@ -42,10 +42,11 @@ SPEC_CAPABLE = {"check", "number", "table", "text", "textarea", "datetime",
 
 
 RETIRED_MARK = "[retired]"   # in the image's HWDB comment, so a listing knows without loading the schema
+PROCEDURE_MARK = "[procedure]"   # likewise (#213 round 2): a static information page — procedure, drawings — not a form
 
 
 def available(api, part_type_id: str, rows=None) -> list[dict]:
-    """``[{name, image_id, image_name, created, retired}]`` — the newest row
+    """``[{name, image_id, image_name, created, retired, procedure}]`` — the newest row
     per checklist name among the type's ``Checklist_{typeid}_{name}.json``
     images. ``rows`` lets a caller that already listed the type's images
     (the part page shares the ES config's listing) skip the fetch. Any
@@ -53,7 +54,9 @@ def available(api, part_type_id: str, rows=None) -> list[dict]:
     (Chao 2026-10-08): the schema's ``retired`` flag, mirrored into the
     newest version's HWDB comment by the editor — such a checklist is
     left off item pages and choosers (``active``), the editor still
-    lists it."""
+    lists it. ``procedure`` (#213 round 2) the same way: the checklist is a
+    static page of procedures / drawings, listed apart from the QA/QC
+    checklists on the resources pages."""
     try:
         if rows is None:
             rows = api.get_component_type_images(part_type_id).get("data") or []
@@ -70,7 +73,8 @@ def available(api, part_type_id: str, rows=None) -> list[dict]:
                 best[name] = r
         return [{"name": k, "image_id": str(v["image_id"]),
                  "image_name": v.get("image_name"), "created": v.get("created"),
-                 "retired": RETIRED_MARK in str(v.get("comments") or "")}
+                 "retired": RETIRED_MARK in str(v.get("comments") or ""),
+                 "procedure": PROCEDURE_MARK in str(v.get("comments") or "")}
                 for k, v in sorted(best.items())]
     except Exception as e:
         logger.warning("checklist listing for %s failed: %s", part_type_id, e)
@@ -928,6 +932,10 @@ def normalize(cfg: dict, name: str) -> dict:
               # item: sections of Link-to-checklist fields, selects driving
               # ``when`` rules, nothing to submit
               "organizer": bool(cfg.get("organizer")),
+              # #213 round 2 (Hajime): a procedure — static notes, links and
+              # drawings about the type, nothing to submit; rendered like an
+              # organizer, listed under Procedures / Drawings
+              "procedure": bool(cfg.get("procedure")),
               # Chao 2026-10-08: a retired checklist stays in HWDB (type
               # images are never deleted) but is left off item pages
               "retired": bool(cfg.get("retired")),

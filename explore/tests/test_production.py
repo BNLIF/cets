@@ -20,6 +20,7 @@ from django.utils import timezone
 from explore import checklistforms, navigation, production
 from explore.models import ConsortiumTypeOverride, HwdbComponentEvent, HwdbTestEvent, ProductionList, ProductionPlan
 from explore.tests.test_events import _node
+from hwdb.api_client import FnalDbApiClient
 
 PTID = "Z00100600001"           # the consortium's virtual type (dev; marked from its type page)
 SIPM, PDS = "D00400300001", "Z10400100001"
@@ -38,13 +39,14 @@ TABLE_SCHEMA = {
 }
 
 
-def _api(lst=LIST, plans=None, images=None):
+def _api(lst=LIST, plans=None, images=None, files=None):
     """A mocked client: the consortium type carries the list, each type in
     ``plans`` its plan (newest of two versions), everything by image id."""
     plans = {SIPM: PLAN} if plans is None else plans
-    api = mock.MagicMock()
+    api = mock.MagicMock(spec=FnalDbApiClient)   # the client's real interface: a helper mistaken for a view (api.user) must fail here
     files = {"l1": lst, "org": {"name": "Organizer", "organizer": True, "sections": []},
-             "wf": {"name": "Workflow", "organizer": True, "sections": []}, "plain": {"name": "Plain", "sections": []}}
+             "wf": {"name": "Workflow", "organizer": True, "sections": []}, "plain": {"name": "Plain", "sections": []},
+             **(files or {})}
     listing = {PTID: [{"image_id": "l1", "image_name": f"Production_list_{PTID}.json",
                        "created": "2026-10-08T10:00:00", "comments": "first list"},
                       {"image_id": "org", "image_name": f"Checklist_{PTID}_Organizer.json",
@@ -59,6 +61,7 @@ def _api(lst=LIST, plans=None, images=None):
     for tid, rows in (images or {}).items():
         listing[tid] = rows
     api.get_component_type_images.side_effect = lambda t: {"data": listing.get(t, [])}
+    api.get_images.side_effect = lambda pid: {"data": []}   # an item's attachments: none unless a test says so
     api.get_image_response.side_effect = lambda iid: mock.Mock(content=json.dumps(files[iid]).encode())
     api.post_component_type_image.return_value = {"status": "OK", "image_id": "new"}
     api.whoami.return_value = {"data": {"architect": True, "username": "chaoz"}}
@@ -304,7 +307,7 @@ class StatusPageTest(TestCase):
         self.assertIn('<td data-col="needed" class="cl-const ps-num ps-none">—</td>', html)
         self.assertIn('<td data-col="n" class="cl-const ps-num" title="no items in the mirror">0</td>', html)
         self.assertIn(f'href="/hw/dev/plan-list/{PTID}/?next=', html)   # ✎ Component list
-        self.assertIn(f'<a class="es-btn quiet" style="margin-left:auto; text-decoration:none;" href="/hw/dev/status/{PTID}/links/"', html)   # #213
+        self.assertIn(f'<a class="es-btn quiet" style="margin-left:auto; text-decoration:none;" href="/hw/dev/status/{PTID}/resources/"', html)   # #213
         self.assertNotIn("ps-rev", html)   # no Submission picker: the history is per plan
         self.assertEqual(ProductionList.for_instance("dev").get(part_type_id=PTID).rows, production.normalize_list(LIST))
         self.assertEqual(ProductionPlan.for_instance("dev").get(part_type_id=SIPM).needed, 48000)
@@ -564,7 +567,7 @@ class DetectorPagesTest(TestCase):
         self.assertIn(f'<a class="ps-plan" href="/hw/dev/plan/{PDS}/?for={PTID}" title="No plan on this type yet — set one">&#9998;</a>', html)   # Chao 2026-11-04: a ✎ on a row without a plan, here too
         self.assertIn('<span class="hc-read">read ', html)
         self.assertIn(f'<a class="hc-cons-open" href="/hw/dev/plan-list/{PTID}/?next=/hw/dev/status/%3Fc%3D{PTID}" title="The rows of this table — the component types, nested">&#9998; Edit table</a>', html)   # Chao 2026-11-04: not "Refresh"
-        self.assertIn(f'<a class="hc-cons-open" href="/hw/dev/status/{PTID}/links/" title="The component list as a table of links — each type’s page, checklists and executive summaries">Related links</a>', html)   # Chao 2026-11-06
+        self.assertIn(f'<a class="hc-cons-open" href="/hw/dev/status/{PTID}/resources/" title="Each component type’s checklists, procedures and executive summaries, built from the component list">Resources</a>', html)   # Chao 2026-11-06
         self.assertIn('localStorage.setItem("hcCons", id)', html)
         production.cache_list("dev", PTID, [])
         html = self.client.get("/hw/dev/status/").content.decode()
@@ -600,91 +603,101 @@ class DetectorPagesTest(TestCase):
         self.assertNotIn("hc-pill", html.split("<h1>")[1])
 
 
-class OrganizerPageTest(TestCase):
-    """#213: the list as a generated organizer — a Markdown table — and the hand-off to the editor as a draft."""
-    URL = f"/hw/dev/status/{PTID}/links/"
+class ProcedureChecklistTest(TestCase):
+    """#213 round 2 (Hajime): a checklist flagged Procedure is a static page about the type — listed apart, nothing to submit."""
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("p", "p@p.io", "pw"))
+        _node(PTID, instance="dev", component_type_name="FDVD CRP")
+
+    def test_flag_listing_editor_and_pages(self):
+        self.assertTrue(checklistforms.normalize({"name": "x", "procedure": True, "sections": []}, "x")["procedure"])
+        self.assertFalse(checklistforms.normalize({"name": "x", "sections": []}, "x")["procedure"])
+        proc = {"name": "Assembly", "procedure": True, "sections": [{"title": "Steps", "fields": [{"type": "static", "label": "", "note": "Torque **5 Nm**"}]}]}
+        api = _api(images={PTID: [
+            {"image_id": "pr", "image_name": f"Checklist_{PTID}_Assembly.json", "created": "2026-10-08T00:00:00",
+             "comments": "Consortium checklist schema (Explorer editor) [procedure]"},
+            {"image_id": "c", "image_name": f"Checklist_{PTID}_QC.json", "created": "2026-10-08T00:00:00",
+             "comments": "Consortium checklist schema (Explorer editor)"}]}, files={"pr": proc, "c": {"name": "QC", "test_type_name": "T", "sections": []}})
+        self.assertEqual([(r["name"], r["procedure"]) for r in checklistforms.available(api, PTID)], [("Assembly", True), ("QC", False)])
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(f"/hw/dev/checklist-config/{PTID}/").content.decode()
+            self.assertIn('<input type="checkbox" id="f-proc"> information only', html)
+            # saving marks the HWDB comment so listings know without loading the schema
+            self.client.post(f"/hw/dev/checklist-config/{PTID}/", {"cl_name": "Assembly", "config_json": json.dumps(proc)})
+            self.assertEqual(api.post_component_type_image.call_args.kwargs["comments"], "Consortium checklist schema (Explorer editor) [procedure]")
+            # the chooser URL renders it as a page with no item, like an organizer
+            r = self.client.get(f"/hw/dev/checklist/{PTID}/Assembly/")
+            self.assertTemplateUsed(r, "explore/checklist_organizer.html")
+            html = r.content.decode()
+            self.assertIn("<title>Assembly · Procedure · ", html)
+            self.assertIn("Torque <strong>5 Nm</strong>", html)
+            self.assertNotIn("Submit to HWDB", html)
+            # an item's form URL for it goes to that page
+            r = self.client.get(f"/hw/dev/part/{PTID}-00001/checklist/Assembly/")
+            self.assertEqual((r.status_code, r["Location"]), (302, f"/hw/dev/checklist/{PTID}/Assembly/"))
+
+
+class ResourcesPageTest(TestCase):
+    """#213 (round 2, Hajime's table 1): the list as a tree table of each type's checklists, procedures, executive summaries and items; the Markdown export; the hand-off to the editor as a draft."""
+    URL = f"/hw/dev/status/{PTID}/resources/"
     LIST3 = {"rows": [{"type": SIPM, "label": "SiPM boards", "level": 0}, {"type": PDS, "level": 1},
                       {"type": SIPM, "label": "Deep", "level": 2}, {"type": PDS, "label": "Deeper", "level": 3}]}
+    OWN = [{"image_id": "l1", "image_name": f"Production_list_{PTID}.json", "created": "2026-10-08T10:00:00"}]
 
     def setUp(self):
         self.client.force_login(get_user_model().objects.create_user("o", "o@o.io", "pw"))
         _node(PTID, instance="dev", component_type_name="FDVD CRP")
         _node(SIPM, instance="dev", component_type_name="SiPM board")
         _node(PDS, instance="dev", component_type_name="PDS module")
-
-    OWN = [{"image_id": "l1", "image_name": f"Production_list_{PTID}.json", "created": "2026-10-08T10:00:00"}]
+        for i in range(2):
+            HwdbComponentEvent.objects.create(instance="dev", part_type_id=SIPM, part_id=f"{SIPM}-0000{i}", status="available")
 
     def _api(self, lst=LIST3, own=None):
-        api = _api(lst=lst, plans={}, images={
+        return _api(lst=lst, plans={}, images={
             **({PTID: own} if own is not None else {}),
             SIPM: [{"image_id": "c1", "image_name": f"Checklist_{SIPM}_QC.json", "created": "2026-10-01T00:00:00"},
                    {"image_id": "c4", "image_name": f"Checklist_{SIPM}_Burn-in.json", "created": "2026-10-01T00:00:00"},
-                   {"image_id": "c2", "image_name": f"Checklist_{SIPM}_Old.json", "created": "2026-10-01T00:00:00", "comments": "[retired]"}],
+                   {"image_id": "c5", "image_name": f"Checklist_{SIPM}_Assembly.json", "created": "2026-10-01T00:00:00", "comments": "[procedure]"},
+                   {"image_id": "c2", "image_name": f"Checklist_{SIPM}_Old.json", "created": "2026-10-01T00:00:00", "comments": "[retired]"},
+                   {"image_id": "e1", "image_name": f"ES_{SIPM}_20261001.json", "created": "2026-10-01T00:00:00"}],
             PDS: [{"image_id": "c3", "image_name": f"Checklist_{PDS}_Receiving.json", "created": "2026-10-01T00:00:00"}]})
-        return api
 
-    def test_markdown_table(self):
-        rows = production.normalize_list(self.LIST3)
-        md = production.organizer_markdown(rows, {PDS: "PDS module"}, {SIPM: ["QC", "Burn-in"]},
-                                           lambda t: f"/t/{t}", lambda t: f"/es/{t}", lambda t, c: f"/c/{t}/{c}")
-        self.assertEqual(md.splitlines(), [
-            "| Component | Type ID | Checklists | Exec summaries |", "|---|---|---|---|",
-            f"| **SiPM boards** | [`{SIPM}`](/t/{SIPM}) | [QC](/c/{SIPM}/QC) | [all items](/es/{SIPM}) |",
-            f"| | | [Burn-in](/c/{SIPM}/Burn-in) | |",   # a checklist per line: its own row under the component
-            f"| &nbsp;&nbsp;&nbsp;&nbsp;↳ **PDS module** | [`{PDS}`](/t/{PDS}) | — | [all items](/es/{PDS}) |",
-            f"| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↳ **Deep** | [`{SIPM}`](/t/{SIPM}) | [QC](/c/{SIPM}/QC) | [all items](/es/{SIPM}) |",
-            f"| | | [Burn-in](/c/{SIPM}/Burn-in) | |",
-            f"| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↳ **Deeper** | [`{PDS}`](/t/{PDS}) | — | [all items](/es/{PDS}) |"])
-        self.assertEqual(production.organizer_draft("x"), {"name": "Organizer", "organizer": True, "sections": [
-            {"title": "Components", "fields": [{"type": "static", "label": "", "note": "x"}]}]})
+    def test_rows_and_markdown(self):
+        rows = production.resources_rows(production.normalize_list(self.LIST3), {PDS: "PDS module"},
+                                         {SIPM: {"checklists": ["QC", "Burn-in"], "procedures": ["Assembly"], "es": True}},
+                                         {SIPM: {"n": 2, "by_status": []}})
+        self.assertEqual([(r["label"], r["level"], r["has_children"], r["n"], r["es"]) for r in rows],
+                         [("SiPM boards", 0, True, 2, True), ("PDS module", 1, True, 0, False), ("Deep", 2, True, 2, True), ("Deeper", 3, False, 0, False)])
 
-    def test_page_renders_the_table(self):
+    def test_page_renders_the_tree_table(self):
         api = self._api()
         m1, m2 = _mocked(api)
         with m1, m2:
             r = self.client.get(self.URL)
             html = r.content.decode()
         self.assertEqual(r.status_code, 200)
-        self.assertTemplateUsed(r, "explore/production_organizer.html")
-        self.assertIn("<h1>Links <span", html)
-        self.assertIn('id="links-copy"', html)   # Copy Markdown, for an organizer already saved
-        # the fixture's Organizer exists: the hand-off hides (it would supersede the edited one), its editor link shows
+        self.assertTemplateUsed(r, "explore/production_resources.html")
+        self.assertIn("<h1>Resources <span", html)
+        self.assertNotIn("Copy Markdown", html)   # read-only since Chao 2026-11-10: no export, no organizer hand-off
         self.assertNotIn("Edit as organizer checklist", html)
-        self.assertIn(f'href="/hw/dev/checklist-config/{PTID}/?name=Organizer&amp;next=%2Fhw%2Fdev%2Fstatus%2F{PTID}%2Flinks%2F" title="Open this organizer checklist in the editor — paste the copied Markdown over its note">&#9998; Edit Organizer</a>', html)
-        self.assertIn(f'The organizer checklist <a href="/hw/dev/checklist/{PTID}/Organizer/">Organizer</a> does not follow the list — paste the copied Markdown over the note in the editor.', html)
-        self.assertIn('data-title="Components"', html)   # drawn as the organizer it becomes: one section, the table as a static note
-        self.assertIn('<div class="cl-note cl-md"><table>', html)
-        self.assertIn("<th>Component</th>\n<th>Type ID</th>\n<th>Checklists</th>\n<th>Exec summaries</th>", html)
-        self.assertIn("<td><strong>SiPM boards</strong></td>", html)
-        self.assertIn("↳ <strong>PDS module</strong></td>", html)   # no label: the mirror's name; indented
-        self.assertIn(f'<td><a href="/hw/dev/?node={SIPM}" target="_blank" rel="noopener"><code>{SIPM}</code></a></td>', html)
-        self.assertIn(f'<td><a href="/hw/dev/checklist/{SIPM}/Burn-in/" target="_blank" rel="noopener">Burn-in</a></td>', html)   # the retired one left out
-        self.assertNotIn("Old", html.split('id="cl-org"')[1])
-        self.assertIn(f'<td><a href="/hw/dev/checklist/{PDS}/Receiving/" target="_blank" rel="noopener">Receiving</a></td>', html)
-        self.assertIn(f'<td><a href="/hw/dev/exec-summary/{SIPM}/" target="_blank" rel="noopener">all items</a></td>', html)
-        self.assertIn(f'<td><a href="/hw/dev/exec-summary/{PDS}/" target="_blank" rel="noopener">all items</a></td>', html)
+        self.assertNotIn("Edit Organizer", html)
+        # a tree: rows at their level, the parents fold, the status table's script
+        self.assertIn(f'<tr data-level="0" data-t="{SIPM}">', html)
+        self.assertIn(f'<tr data-level="1" data-t="{PDS}">\n      <th scope="row" class="cl-rowlab" style="padding-left:18px;"><button type="button" class="ps-tog" aria-expanded="true" title="Fold its rows"></button><span class="rs-arrow" aria-hidden="true">&#8627;</span><a href="/hw/dev/?node={PDS}" title="the type’s page">PDS module</a></th>', html)
+        self.assertIn('data-fold="close">Collapse all</button>', html)
+        self.assertIn("window.psTree", html)
+        # the columns: checklists to the chooser, procedures apart, ES only with a config, the live count to the items page
+        self.assertIn(f'<a href="/hw/dev/checklist/{SIPM}/Burn-in/" title="Pick the item to fill this checklist on">Burn-in</a><a href="/hw/dev/checklist/{SIPM}/QC/" title="Pick the item to fill this checklist on">QC</a></td>', html)   # the listing's order: by name
+        self.assertNotIn("Old", html.split("<tbody>")[1])   # retired: left out
+        self.assertIn(f'<td class="cl-const rs-list"><a href="/hw/dev/checklist/{SIPM}/Assembly/">Assembly</a></td>', html)
+        self.assertNotIn(f'<a href="/hw/dev/checklist/{SIPM}/Assembly/" title="Pick', html)   # not among the QA/QC checklists
+        self.assertNotIn(f"/hw/dev/exec-summary/{SIPM}/", html)   # one Items / Exec summaries column: the Items page carries each item's summary (Chao 2026-11-10)
+        self.assertIn(f'<a href="/hw/dev/items/{SIPM}/?from={PTID}" title="The type’s items — each one’s checklists, executive summary and linked parts">2 items</a>', html)   # ?from: the Items page's way back here
+        self.assertIn(f'<a href="/hw/dev/items/{PDS}/?from={PTID}" title="The type’s items — each one’s checklists, executive summary and linked parts">0 items</a>', html)
         self.assertNotIn("Submit to HWDB", html)
         self.assertEqual(api.get_component_type_images.call_count, 3)   # the type's own listing, one per distinct listed type
-        self.assertEqual(api.get_image_response.call_count, 2)   # the list and the type's own checklist (for the organizer flag); none of the listed types' checklists
-
-    def test_organizers_by_flag_not_name(self):
-        # a renamed organizer still counts, a plain checklist on the type does not; with none the hand-off shows
-        api = self._api(own=self.OWN + [
-            {"image_id": "wf", "image_name": f"Checklist_{PTID}_Workflow.json", "created": "2026-10-08T00:00:00"},
-            {"image_id": "plain", "image_name": f"Checklist_{PTID}_Plain.json", "created": "2026-10-08T00:00:00"}])
-        m1, m2 = _mocked(api)
-        with m1, m2:
-            html = self.client.get(self.URL).content.decode()
-        self.assertNotIn("Edit as organizer checklist", html)
-        self.assertIn("&#9998; Edit Workflow</a>", html)
-        self.assertNotIn("Edit Plain", html)
-        self.assertIn(f'The organizer checklist <a href="/hw/dev/checklist/{PTID}/Workflow/">Workflow</a> does not follow the list', html)
-        api = self._api(own=self.OWN)
-        m1, m2 = _mocked(api)
-        with m1, m2:
-            html = self.client.get(self.URL).content.decode()
-        self.assertIn('<button type="submit" class="es-btn quiet" title="Open the checklist editor with this table as an unsaved draft — nothing is saved until Save to HWDB">&#9998; Edit as organizer checklist</button>', html)
-        self.assertNotIn("does not follow the list", html)
+        self.assertEqual(api.get_image_response.call_count, 1)   # the list; none of the listed types' checklists
 
     def test_no_list_and_read_only(self):
         api = self._api(lst={"rows": []})
@@ -692,38 +705,14 @@ class OrganizerPageTest(TestCase):
         with m1, m2:
             html = self.client.get(self.URL).content.decode()
             self.assertIn("No component list on this type yet — <a href=", html)
-            self.assertNotIn("Edit as organizer checklist", html)
-            with self.settings(HWDB_WRITE_INSTANCES=["prod"]):
-                self.assertEqual(self.client.post(self.URL).status_code, 403)
-
-    def test_draft_goes_to_the_editor_unsaved(self):
-        api = self._api()
-        m1, m2 = _mocked(api)
-        with m1, m2:
-            r = self.client.post(self.URL)
-            self.assertEqual(r["Location"], f"/hw/dev/checklist-config/{PTID}/?name=Organizer&draft=1&next=%2Fhw%2Fdev%2Fstatus%2F{PTID}%2Flinks%2F")
-            api.post_component_type_image.assert_not_called()   # nothing written
-            draft = self.client.session[f"cl_draft:{PTID}"]
-            self.assertEqual((draft["name"], draft["organizer"], draft["sections"][0]["title"]), ("Organizer", True, "Components"))
-            self.assertTrue(draft["sections"][0]["fields"][0]["note"].startswith("| Component | Type ID | Checklists | Exec summaries |"))
-            html = self.client.get(r["Location"]).content.decode()
-        initial = json.loads(html.split('<script id="clc-initial" type="application/json">')[1].split("</script>")[0])
-        self.assertEqual(initial, draft)   # the editor opens on the draft, not the stored Organizer
-        self.assertIn('<input id="f-name" value="Organizer"', html)
-        self.assertIn(f"A draft generated from the component list — nothing is saved until Save to HWDB, which adds a version of Checklist_{PTID}_Organizer.json.", html)
-        api.post_component_type_image.assert_not_called()
-        # without ?draft=1 the editor shows the stored schema as before
-        with m1, m2:
-            html = self.client.get(f"/hw/dev/checklist-config/{PTID}/?name=Organizer").content.decode()
-        self.assertNotIn("A draft generated from the component list", html)
 
 
 class TypEsPageTest(TestCase):
-    """#213: the type's items, each linking to its executive summary."""
+    """#213: the type's executive summaries — every item linking its own, nothing else (Chao 2026-11-10: kept apart from the Items page)."""
     URL = f"/hw/dev/exec-summary/{SIPM}/"
 
     def setUp(self):
-        self.client.force_login(get_user_model().objects.create_user("e", "e@e.io", "pw"))
+        self.client.force_login(get_user_model().objects.create_user("e2", "e2@e.io", "pw"))
         _node(SIPM, instance="dev", component_type_name="SiPM board")
         for i in range(3):
             HwdbComponentEvent.objects.create(instance="dev", part_type_id=SIPM, part_id=f"{SIPM}-0000{i}", serial_number=f"S{i}", status="available")
@@ -735,17 +724,149 @@ class TypEsPageTest(TestCase):
             r = self.client.get(self.URL)
             html = r.content.decode()
         self.assertEqual(r.status_code, 200)
+        self.assertTemplateUsed(r, "explore/type_es.html")
         self.assertIn("<h1>Executive summaries <span", html)
         self.assertIn("no ES config on this type", html)
         self.assertIn(f'<td class="mono"><a href="/hw/dev/part/{SIPM}-00000/exec-summary/" onclick="event.stopPropagation()">{SIPM}-00000</a></td>', html)
-        self.assertIn('<td class="mono">S2</td>', html)
         self.assertEqual(html.count('class="ship-row"'), 3)
+        self.assertNotIn("checklist/", html)   # the Items page has the checklists, not this one
         api = _api(plans={}, images={SIPM: [{"image_id": "e1", "image_name": f"ES_{SIPM}_20261001.json", "created": "2026-10-01T00:00:00"}]})
         m1, m2 = _mocked(api)
         with m1, m2:
             html = self.client.get(self.URL).content.decode()
         self.assertNotIn("no ES config on this type", html)
         self.assertEqual(api.get_image_response.call_count, 0)   # nothing loaded: one listing, the mirror for the rest
+
+
+class ItemsPageTest(TestCase):
+    """#213 (round 2, Hajime's table 2): the type's items, each with every checklist of the type linking its own form, ticked where the mirror has a record; the ES column only with a config; its linked parts."""
+    URL = f"/hw/dev/items/{SIPM}/"
+    CL = [{"image_id": "c1", "image_name": f"Checklist_{SIPM}_QC.json", "created": "2026-10-01T00:00:00"},
+          {"image_id": "c5", "image_name": f"Checklist_{SIPM}_Assembly.json", "created": "2026-10-01T00:00:00", "comments": "[procedure]"}]
+    FILES = {"c1": {"name": "QC", "test_type_name": "QC test", "sections": []}, "c5": {"name": "Assembly", "procedure": True, "sections": []}}
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("e", "e@e.io", "pw"))
+        _node(SIPM, instance="dev", component_type_name="SiPM board")
+        for i in range(3):
+            HwdbComponentEvent.objects.create(instance="dev", part_type_id=SIPM, part_id=f"{SIPM}-0000{i}", serial_number=f"S{i}", status="available")
+        HwdbTestEvent.objects.create(instance="dev", part_type_id=SIPM, part_id=f"{SIPM}-00000", test_type_name="QC test", created=timezone.make_aware(timezone.datetime(2026, 10, 3, 9, 0)))
+        HwdbTestEvent.objects.create(instance="dev", part_type_id=SIPM, part_id=f"{SIPM}-00000", test_type_name="Other", created=timezone.now())
+
+    def test_lists_the_items(self):
+        api = _api(plans={}, images={SIPM: self.CL}, files=self.FILES)
+        api.get_images.side_effect = lambda pid: {"data": [{"image_name": f"ExecutiveSummary_{SIPM}-00000_20261003_091500.pdf"},
+                                                           {"image_name": f"ExecutiveSummary_{SIPM}-00000_20260901_080000.pdf"},
+                                                           {"image_name": "photo.jpg"}] if pid == f"{SIPM}-00000" else []}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            r = self.client.get(self.URL)
+            html = r.content.decode()
+        self.assertEqual(r.status_code, 200)
+        self.assertTemplateUsed(r, "explore/type_items.html")
+        self.assertIn("<h1>Items <span", html)
+        self.assertIn("no ES config on this type", html)
+        self.assertIn(f'<td class="cl-const rs-list"><a href="/hw/dev/checklist/{SIPM}/Assembly/">Assembly</a></td>', html)   # the type's procedures, per row
+        self.assertIn(f'<th scope="row" class="cl-rowlab"><a href="/hw/dev/part/{SIPM}-00000/" class="mono" title="The item’s page">{SIPM}-00000</a></th>', html)
+        self.assertIn('<td class="cl-const mono">S2</td>', html)
+        self.assertEqual(html.count('<th scope="row" class="cl-rowlab">'), 3)
+        self.assertIn('class="cl-table cl-gridlines ps-table rs-table"', html)   # the Resources and Linked-parts tables' style (Chao)
+        # each checklist of the type links THIS item's form; a tick and date where the mirror holds a record
+        self.assertIn(f'<a href="/hw/dev/part/{SIPM}-00000/checklist/QC/" title="Recorded 2026-10-03 — open to see or update it">QC<span class="rs-when">&#10003; 2026-10-03</span></a>', html)
+        self.assertIn(f'<a href="/hw/dev/part/{SIPM}-00001/checklist/QC/" class="rs-open" title="No record yet — open to fill it">QC</a>', html)
+        self.assertNotIn("checklist/Assembly/\" class=\"rs-open", html)   # a procedure is not per item
+        self.assertIn(f'<td class="cl-const"><a href="/hw/dev/part/{SIPM}-00000/parts/" title="The item’s linked sub-components, one level at a time">Trace parts</a></td>', html)
+        # every item has a summary page, config or not (Chao 2026-11-10); posted ones carry the newest PDF's date
+        self.assertIn(f'<td class="cl-const"><a href="/hw/dev/part/{SIPM}-00000/exec-summary/" title="Summary posted 2026-10-03 — open to see or regenerate it">View summary<span class="rs-when">&#10003; 2026-10-03</span></a></td>', html)
+        self.assertIn(f'<td class="cl-const"><a href="/hw/dev/part/{SIPM}-00001/exec-summary/" class="rs-open" title="No summary posted yet — open to generate it">View summary</a></td>', html)
+        self.assertEqual(api.get_images.call_count, 3)   # one attachments listing per item on the page
+        self.assertEqual(api.get_image_response.call_count, 1)   # the QC schema, for its test type; the mirror for the rest
+        api = _api(plans={}, images={SIPM: self.CL + [{"image_id": "e1", "image_name": f"ES_{SIPM}_20261001.json", "created": "2026-10-01T00:00:00"}]}, files=self.FILES)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(self.URL).content.decode()
+        self.assertNotIn("no ES config on this type", html)
+        self.assertIn(f'<a href="/hw/dev/part/{SIPM}-00001/exec-summary/" class="rs-open" title="No summary posted yet — open to generate it">View summary</a>', html)
+        self.assertNotIn("· Resources</a>", html)   # no origin: no way-back crumb
+
+    def test_way_back_to_the_resources_table(self):
+        # ?from=<consortium type> (the Resources table's Items links) adds a crumb back to it and travels on to Linked parts
+        _node(PTID, instance="dev", component_type_name="FDVD CRP")
+        api = _api(plans={}, images={SIPM: self.CL}, files=self.FILES)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(f"{self.URL}?from={PTID}").content.decode()
+            self.assertIn(f'<a href="/hw/dev/status/{PTID}/resources/" title="The Resources table you came from">FDVD CRP · Resources</a>', html)
+            self.assertIn(f'<a href="/hw/dev/part/{SIPM}-00000/parts/?from={PTID}" title="The item’s linked sub-components, one level at a time">Trace parts</a>', html)
+            html = self.client.get(f"{self.URL}?from=bogus").content.decode()   # malformed: ignored
+            self.assertNotIn("· Resources</a>", html)
+
+
+class PartTreePageTest(TestCase):
+    """#213 (round 2, Hajime's table 3): one item's linked parts with the items page's columns, one level at a time."""
+    ROOT = f"{SIPM}-00001"
+    URL = f"/hw/dev/part/{SIPM}-00001/parts/"
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("t", "t@t.io", "pw"))
+        _node(SIPM, instance="dev", component_type_name="SiPM board")
+        _node(PDS, instance="dev", component_type_name="PDS module")
+        HwdbTestEvent.objects.create(instance="dev", part_type_id=PDS, part_id=f"{PDS}-00007", test_type_name="Recv", created=timezone.make_aware(timezone.datetime(2026, 9, 4, 9, 0)))
+
+    def _api(self):
+        api = _api(plans={}, images={
+            SIPM: [{"image_id": "c1", "image_name": f"Checklist_{SIPM}_QC.json", "created": "2026-10-01T00:00:00"},
+                   {"image_id": "e1", "image_name": f"ES_{SIPM}_20261001.json", "created": "2026-10-01T00:00:00"}],
+            PDS: [{"image_id": "c3", "image_name": f"Checklist_{PDS}_Receiving.json", "created": "2026-10-01T00:00:00"},
+                  {"image_id": "c5", "image_name": f"Checklist_{PDS}_Assembly.json", "created": "2026-10-01T00:00:00", "comments": "[procedure]"}]},
+            files={"c1": {"name": "QC", "test_type_name": "QC test", "sections": []}, "c3": {"name": "Receiving", "test_type_name": "Recv", "sections": []},
+                   "c5": {"name": "Assembly", "procedure": True, "sections": []}})
+        api.get_component.return_value = {"data": {"component_type": {"name": "SiPM board"}, "serial_number": "S1"}}
+        tree = {self.ROOT: [{"part_id": f"{PDS}-00007", "type_name": "PDS module", "functional_position": "Slot A"},
+                            {"part_id": f"{PDS}-00008", "type_name": "PDS module", "functional_position": "Slot B", "operation": "unmount"}],
+                f"{PDS}-00007": [{"part_id": f"{SIPM}-00002", "type_name": "SiPM board", "functional_position": "Sensor"}]}
+        api.get_subcomponents.side_effect = lambda pid: {"data": tree.get(pid, [])}
+        return api
+
+    def test_page_and_one_more_level(self):
+        api = self._api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            r = self.client.get(self.URL)
+            html = r.content.decode()
+        self.assertEqual(r.status_code, 200)
+        self.assertTemplateUsed(r, "explore/part_tree.html")
+        self.assertIn("<h1>Linked parts <span", html)
+        self.assertIn("SiPM board · SN S1 · its sub-components", html)
+        # the item itself, then its direct sub-components (the unmounted one left out), each with its type's resources
+        self.assertIn(f'<tr data-level="0" data-pid="{self.ROOT}">', html)
+        self.assertIn(f'<a href="/hw/dev/part/{self.ROOT}/checklist/QC/" class="rs-open" title="No record yet — open to fill it">QC</a>', html)
+        self.assertIn(f'<td class="cl-const"><a href="/hw/dev/part/{self.ROOT}/exec-summary/" class="rs-open" title="No summary posted yet — open to generate it">View summary</a></td>', html)
+        self.assertIn(f'<tr data-level="1" data-pid="{PDS}-00007">\n  <th scope="row" class="cl-rowlab" style="padding-left:18px;"><button type="button" class="ps-tog" aria-expanded="false" data-load="1" title="Its sub-components"></button><span class="rs-arrow" aria-hidden="true">&#8627;</span><a href="/hw/dev/part/{PDS}-00007/" title="The item’s page">PDS module</a><span class="rs-pos">Slot A</span></th>', html)
+        self.assertIn(f'<a href="/hw/dev/part/{PDS}-00007/checklist/Receiving/" title="Recorded 2026-09-04 — open to see or update it">Receiving<span class="rs-when">&#10003; 2026-09-04</span></a>', html)
+        self.assertIn(f'<a href="/hw/dev/checklist/{PDS}/Assembly/">Assembly</a>', html)   # the type's procedure
+        self.assertNotIn(f"{PDS}-00008", html)
+        self.assertNotIn(f"{SIPM}-00002", html)   # the grandchild waits for its ▸
+        self.assertEqual(api.get_subcomponents.call_count, 1)   # one level
+        self.assertNotIn("· Resources</a>", html)
+        self.assertIn(f'<a href="/hw/dev/items/{SIPM}/">Items</a>', html)
+        # arriving from a Resources table: its crumb, and the Items crumb keeps the way back
+        _node(PTID, instance="dev", component_type_name="FDVD CRP")
+        with m1, m2:
+            html = self.client.get(f"{self.URL}?from={PTID}").content.decode()
+        self.assertIn(f'<a href="/hw/dev/status/{PTID}/resources/" title="The Resources table you came from">FDVD CRP · Resources</a>', html)
+        self.assertIn(f'<a href="/hw/dev/items/{SIPM}/?from={PTID}">Items</a>', html)
+        # the ▸ fetches the next level alone
+        with m1, m2:
+            r = self.client.get(f"{self.URL}?node={PDS}-00007&level=2")
+            frag = r.content.decode()
+        self.assertTemplateUsed(r, "explore/_part_tree_rows.html")
+        self.assertNotIn("<html", frag)
+        self.assertIn(f'<tr data-level="2" data-pid="{SIPM}-00002">', frag)
+        self.assertIn('style="padding-left:36px;"', frag)
+        self.assertIn(f'<a href="/hw/dev/part/{SIPM}-00002/checklist/QC/" class="rs-open"', frag)
+        with m1, m2:
+            self.assertEqual(self.client.get(f"{self.URL}?node={SIPM}-00002&level=3").content.decode().strip(), "")   # a leaf: no rows
 
 
 class TypePageTest(TestCase):
@@ -759,12 +880,13 @@ class TypePageTest(TestCase):
     def test_organizer_and_es_links(self):
         # #213: a type's Manage row links its executive-summaries page; a consortium type's Status line its generated organizer
         html = self.client.get(self.url).content.decode()
-        self.assertIn(f'<dt>Exec summaries</dt><dd class="span"><a href="/hw/exec-summary/{SIPM}/" title="Every item of the type with a link to its executive summary">by item</a></dd>', html)
-        self.assertNotIn("/links/", html)
+        self.assertIn(f'<dt>Items in HWDB</dt><dd><a href="/hw/items/{SIPM}/" title="The items — each one’s checklists, executive summary and linked parts">2</a></dd>', html)   # the count opens the Items page (Chao 2026-11-10)
+        self.assertNotIn("Exec summaries", html)
+        self.assertNotIn("/resources/", html)
         ConsortiumTypeOverride.objects.create(instance="prod", part_type_id=SIPM)
         html = self.client.get(self.url).content.decode()
-        self.assertIn(f'<a href="/hw/status/{SIPM}/links/" title="The component list as a table of links — each type’s page, checklists and executive summaries — built on each visit">Links</a></dd>', html)
-        self.assertNotIn("Exec summaries", html)
+        self.assertIn(f'<a href="/hw/status/{SIPM}/resources/" title="Each component type’s checklists, procedures and executive summaries, built on each visit from the component list">Resources</a></dd>', html)
+        self.assertNotIn("/hw/items/", html)   # a consortium type's items are its tables, not parts
 
     def test_plan_line_and_dashboard_feed(self):
         html = self.client.get(self.url).content.decode()

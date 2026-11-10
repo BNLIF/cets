@@ -15,7 +15,7 @@ urlpatterns = [
     path("schedule/", views.explore_production_schedule_view, name="production_schedule"),   # #206: the P6 schedule as last uploaded (the Detector area's third page)
     path("schedule/upload/", views.explore_production_p6_view, name="production_p6"),   # #206: upload the P6 schedule
     path("status/<str:part_type_id>/", views.explore_production_status_view, name="production_status"),   # #199: one consortium, live
-    path("status/<str:part_type_id>/links/", views.explore_production_organizer_view, name="production_links"),   # #213: the list as a table of links, generated
+    path("status/<str:part_type_id>/resources/", views.explore_production_resources_view, name="production_resources"),   # #213: the list as a table of resources, generated
     path("exec-summary/<str:part_type_id>/", views.explore_type_es_view, name="type_es"),   # #213: the type's items, each with its ES
     path("plan/<str:part_type_id>/", views.explore_production_plan_view, name="production_plan"),   # #200: a type's production plan + history
     path("plan-list/<str:part_type_id>/", views.explore_production_list_view, name="production_list"),   # #200: a consortium type's component list
@@ -129,6 +129,8 @@ urlpatterns = [
     path("part/<str:part_id>/receiving/", views.explore_receiving_view, name="receiving"),
     path("part/<str:part_id>/box-reset/", views.explore_box_reset_view, name="box_reset"),
     path("assembly/<str:part_id>/", views.explore_assembly_view, name="assembly"),
+    path("part/<str:part_id>/parts/", views.explore_part_tree_view, name="part_tree"),   # #213 round 2: the item's linked parts, one level at a time
+    path("items/<str:part_type_id>/", views.explore_type_items_view, name="type_items"),   # #213 round 2: the type's items with each one's checklists, ES and linked parts
     # The box page is now the generic part page (ADR-0014); keep old links working.
     path("shipment/<str:part_id>/",
          RedirectView.as_view(pattern_name="explore:part", permanent=True),

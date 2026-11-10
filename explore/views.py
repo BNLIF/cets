@@ -360,8 +360,8 @@ def explore_view(request, trail=None):
         # the dropdown is read-only when the current class comes from the yaml
         "class_locked": (is_shipping and not shipping_override) or (is_consortium and not consortium_override),
         "status_url": _rev(request, "explore:production_status", args=[leaf.part_type_id]) if is_consortium else "",
-        "links_url": _rev(request, "explore:production_links", args=[leaf.part_type_id]) if is_consortium else "",   # #213
-        "type_es_url": _rev(request, "explore:type_es", args=[leaf.part_type_id]) if leaf and not is_consortium else "",   # #213
+        "resources_url": _rev(request, "explore:production_resources", args=[leaf.part_type_id]) if is_consortium else "",   # #213
+        "type_items_url": _rev(request, "explore:type_items", args=[leaf.part_type_id]) if leaf and not is_consortium else "",   # #213: the Items page off the "Items in HWDB" count (Chao 2026-11-10)
         "list_url": _rev(request, "explore:production_list", args=[leaf.part_type_id]) if is_consortium else "",
         "type_plans": type_plans,
         "show_plans": show_plans,
@@ -498,7 +498,7 @@ def _production_status_list(request, inst) -> list[dict]:
                     "url": _rev(request, "explore:production_status", args=[tid]),
                     "type_url": navigation.leaf_path_for(inst, tid) or "",
                     "list_url": _rev(request, "explore:production_list", args=[tid]),
-                    "links_url": _rev(request, "explore:production_links", args=[tid]),   # Related links beside Edit table (Chao 2026-11-06)
+                    "resources_url": _rev(request, "explore:production_resources", args=[tid]),   # Resources beside Edit table (Chao 2026-11-06)
                     "read_at": lst.read_at if lst else None,
                     "rows": table,
                     "tree": any(r["has_children"] for r in table or []),
@@ -570,7 +570,7 @@ def explore_production_status_view(request, part_type_id):
         "tree": any(r["has_children"] for r in table),
         "cols": production.columns(table),
         "list_url": _rev(request, "explore:production_list", args=[part_type_id]),
-        "links_url": _rev(request, "explore:production_links", args=[part_type_id]),   # #213
+        "resources_url": _rev(request, "explore:production_resources", args=[part_type_id]),   # #213
         "can_edit": inst in settings.HWDB_WRITE_INSTANCES,   # the plan pages apply the type's roles themselves
         "consortium": part_type_id,   # #206: the plan links carry it
     })
@@ -784,21 +784,37 @@ def explore_production_list_view(request, part_type_id):
 _PTID_RX = re.compile(r"^[A-Z]\d{11}$")
 
 
+def _type_resources(api, inst, tid: str) -> dict:
+    """#213 round 2: one type's resources off ONE image listing — its active
+    QA/QC ``checklists`` and ``procedures`` (listing rows: name, image_id,
+    …) and whether it has an ES config (``es``). Nothing loaded."""
+    listing = production._listing(api, tid)
+    acts = checklistforms.active(api, tid, rows=listing)
+    return {"checklists": [c for c in acts if not c["procedure"]],
+            "procedures": [c for c in acts if c["procedure"]],
+            "es": execsummary._newest_config_row(listing, tid) is not None}
+
+
+def _resource_names(res: dict) -> dict:
+    return {"checklists": [c["name"] for c in res["checklists"]],
+            "procedures": [c["name"] for c in res["procedures"]], "es": res["es"]}
+
+
 @login_not_required
 @fnal_login_required
-def explore_production_organizer_view(request, part_type_id):
-    """#213 (Chao 2026-11-05, after Hajime on Slack): the Links page — a
-    table's nested component list as a Markdown table with each type's
-    page, checklists and executive summaries linked, built on each visit
-    and kept nowhere, drawn as the organizer checklist (#189) it becomes
-    once pasted into one ("Organizer" is the saved checklist's line, so
-    the page is not called that). One image listing per listed type, live, as the status
-    page. POST = hand it to the checklist editor as an unsaved draft (the
-    table as the organizer's instructions, carried in the session); the
-    editor's own Save is the only write — Hajime's organizers are ordered
-    by workflow stage, so this is the quick start, not the organizer."""
+def explore_production_resources_view(request, part_type_id):
+    """#213 (Chao 2026-11-05; round 2 Hajime 2026-11-10): the Resources
+    page — a table's nested component list as a tree table (the status
+    table's indent and fold) with, per component, the type's QA/QC
+    checklists (each to its PID chooser), its procedures / drawings
+    (checklists flagged Procedure), its executive summaries when the type
+    has an ES config, and its item count linking the Items page. Built on
+    each visit from one image listing per listed type and the mirror's
+    counts, kept nowhere; read-only (Chao 2026-11-10: the Markdown export
+    and the organizer-draft hand-off went — a saved organizer links this
+    page instead of carrying a copy of it)."""
     inst = instance_of(request)
-    page_url = _rev(request, "explore:production_links", args=[part_type_id])
+    page_url = _rev(request, "explore:production_resources", args=[part_type_id])
     try:
         bearer = mint_for(request)
     except FnalLinkRequired:
@@ -810,47 +826,108 @@ def explore_production_organizer_view(request, part_type_id):
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
     node = HierarchyNode.for_instance(inst).filter(
         level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
-    own = api.get_component_type_images(part_type_id).get("data") or []   # the list, and whether an Organizer exists
-    rows, _vs = production.read_list(api, part_type_id, rows=own)
+    rows, _vs = production.read_list(api, part_type_id)
     rows = rows or []
     ids = [r["type"] for r in rows]
-    info = {tid: [c["name"] for c in checklistforms.active(api, tid)] for tid in set(ids)}   # one listing per distinct type
-    md = production.organizer_markdown(
-        rows, production.names(inst, ids), info,
-        lambda t: _rev(request, "explore:home") + f"?node={t}",
-        lambda t: _rev(request, "explore:type_es", args=[t]),
-        lambda t, c: _rev(request, "explore:type_checklist", args=[t, c]))
-    organizers = []   # the type's organizer checklists by the flag, not the name — a renamed one still counts (Chao)
-    for c in checklistforms.active(api, part_type_id, rows=own):
-        try:
-            cfg = json.loads(api.get_image_response(c["image_id"]).content)
-        except Exception:
-            continue
-        if isinstance(cfg, dict) and cfg.get("organizer"):
-            organizers.append({"name": c["name"],
-                               "url": _rev(request, "explore:type_checklist", args=[part_type_id, c["name"]]),
-                               "edit_url": _rev(request, "explore:checklist_config", args=[part_type_id])
-                                           + "?" + urlencode({"name": c["name"], "next": page_url})})
-    draft = production.organizer_draft(md)
-    if request.method == "POST":
-        if inst not in settings.HWDB_WRITE_INSTANCES:
-            return HttpResponseForbidden("Checklists can only be edited on a write instance.")
-        request.session[f"cl_draft:{part_type_id}"] = draft
-        editor = _rev(request, "explore:checklist_config", args=[part_type_id])
-        return redirect(f"{editor}?{urlencode({'name': 'Organizer', 'draft': '1', 'next': page_url})}")
-    return render(request, "explore/production_organizer.html", {
+    info = {tid: _resource_names(_type_resources(api, inst, tid)) for tid in set(ids)}   # one listing per distinct type
+    table = production.resources_rows(rows, production.names(inst, ids), info, production.counts(inst, ids))
+    for r in table:
+        r["type_url"] = _rev(request, "explore:home") + f"?node={r['type']}"
+        r["items_url"] = _rev(request, "explore:type_items", args=[r["type"]])
+        r["checklists"] = [{"name": c, "url": _rev(request, "explore:type_checklist", args=[r["type"], c])} for c in r["checklists"]]
+        r["procedures"] = [{"name": c, "url": _rev(request, "explore:type_checklist", args=[r["type"], c])} for c in r["procedures"]]
+    return render(request, "explore/production_resources.html", {
         "active_nav": "detector",
         "sidebar": navigation.sidebar_tree(inst, {}),
         "part_type_id": part_type_id,
         "type_name": (node.name if node else "") or part_type_id,
-        "schema": checklistforms.normalize(draft, "Organizer"),   # drawn as the saved organizer would be
-        "md": md,   # for Copy Markdown — pasted into an existing organizer's note to bring it up to date
+        "rows": table,
+        "tree": any(r["has_children"] for r in table),
         "n_rows": len(rows),
         "status_url": _rev(request, "explore:production_status", args=[part_type_id]),
         "list_url": _rev(request, "explore:production_list", args=[part_type_id]),
-        "organizers": organizers,   # with one present the editor hand-off hides: Copy Markdown + paste keeps the edited one
         "can_edit": inst in settings.HWDB_WRITE_INSTANCES,
     })
+
+
+def _test_types(api, res: dict) -> dict[str, str]:
+    """#213 round 2: checklist name → its test type, loading each QA/QC
+    checklist of ``_type_resources`` (one image read per checklist of ONE
+    type — the items and linked-parts pages, never the overview); "" when
+    the schema sets none or fails to load."""
+    out = {}
+    for c in res["checklists"]:
+        try:
+            cfg = json.loads(api.get_image_response(c["image_id"]).content)
+            out[c["name"]] = checklistforms.normalize(cfg, c["name"])["test_type_name"] if isinstance(cfg, dict) else ""
+        except Exception:
+            out[c["name"]] = ""
+    return out
+
+
+def _filled_map(inst, pids, test_types) -> dict:
+    """``{(pid, test_type_name): newest created}`` off the mirror's test
+    events — which checklists have a record on which item."""
+    tts = [t for t in set(test_types) if t]
+    if not tts or not pids:
+        return {}
+    return {(pid, ttn): when for pid, ttn, when in (
+        HwdbTestEvent.for_instance(inst).filter(part_id__in=list(pids), test_type_name__in=tts)
+        .order_by("created").values_list("part_id", "test_type_name", "created"))}
+
+
+def _es_posted_map(api, pids) -> dict:
+    """``{pid: when}`` — the timestamp in the name of the item's newest
+    ``ExecutiveSummary_<pid>_<YYYYmmdd_HHMMSS>.pdf`` attachment (the
+    summary posted from its ES page), None when none or the fetch failed.
+    One images call per item, in parallel — the ES sub-components pane's
+    check (``_has_es_map``) with the time (Chao 2026-11-10: the items and
+    linked-parts pages say whether a summary is posted, and when; the
+    activity feed can't — it is a rolling window)."""
+    def _check(cli, pid):
+        best, pre = None, f"executivesummary_{pid.lower()}_"
+        for i in (cli.get_images(pid).get("data") or []):
+            n = str(i.get("image_name") or "")
+            if n.lower().startswith(pre):
+                try:
+                    ts = datetime.strptime(n[len(pre):].rsplit(".", 1)[0], execsummary.FILENAME_TS_FMT)
+                except ValueError:
+                    continue
+                best = ts if best is None or ts > best else best
+        return best
+    return parts.fetch_map(api, _check, pids) if pids else {}
+
+
+def _origin(request, inst) -> dict | None:
+    """#213 round 2 (Chao 2026-11-10): the Resources table a visitor came
+    from — ``?from=<consortium type>`` on the Items and Linked-parts pages,
+    carried along so their breadcrumbs lead back to it (a type may sit in
+    several tables, so the page can't know otherwise). None when absent
+    or malformed."""
+    ptid = (request.GET.get("from") or "").strip().upper()
+    if not _PTID_RX.match(ptid):
+        return None
+    node = HierarchyNode.for_instance(inst).filter(level=HierarchyNode.LEVEL_TYPE, part_type_id=ptid).first()
+    return {"ptid": ptid, "name": (node.name if node else "") or ptid,
+            "url": _rev(request, "explore:production_resources", args=[ptid])}
+
+
+def _item_resources(request, pid: str, res: dict, tts: dict, filled: dict, es_posted: dict) -> dict:
+    """One item's row on the items / linked-parts pages: each QA/QC checklist
+    of its type linking THIS item's form, with the date of its record when
+    the mirror has one; the type's procedures; its ES page, with when its
+    summary was posted (``_es_posted_map``) if it was."""
+    tid = pid.rsplit("-", 1)[0]
+    return {
+        "checklists": [{"name": c["name"], "url": _rev(request, "explore:checklist", args=[pid, c["name"]]),
+                        "filled": filled.get((pid, tts.get(c["name"]) or ""))} for c in res["checklists"]],
+        "procedures": [{"name": c["name"], "url": _rev(request, "explore:type_checklist", args=[tid, c["name"]])}
+                       for c in res["procedures"]],
+        "es_url": _rev(request, "explore:exec_summary", args=[pid]),   # every item has one (Hajime's policy), config or not (Chao 2026-11-10)
+        "es_when": es_posted.get(pid),
+        "part_url": _rev(request, "explore:part", args=[pid]),
+        "tree_url": _rev(request, "explore:part_tree", args=[pid]),
+    }
 
 
 @login_not_required
@@ -886,6 +963,136 @@ def explore_type_es_view(request, part_type_id):
         "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
         "has_config": has_config,
         "parts_page": Paginator(rows, 50).get_page(request.GET.get("page")),
+    })
+
+
+
+@login_not_required
+@fnal_login_required
+def explore_type_items_view(request, part_type_id):
+    """#213 round 2 (Hajime 2026-11-10, his table 2): the Items page — the
+    type's items, one line each — PID, serial, status — with every QA/QC
+    checklist of the type linking THIS item's form and ticked with the
+    date when the mirror holds a record, the type's procedures, the
+    item's executive summary when the type has an ES config, and its
+    linked parts. Reached from the Resources table's Items column (Chao
+    2026-11-10: the Exec summaries links keep the plain per-type ES list,
+    ``explore_type_es_view``). One image listing and one read per
+    checklist for the type; the items and their records from the mirror."""
+    inst = instance_of(request)
+    page_url = _rev(request, "explore:type_items", args=[part_type_id])
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(_rev(request, "explore:home"))
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    node = HierarchyNode.for_instance(inst).filter(
+        level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
+    res = _type_resources(api, inst, part_type_id)
+    tts = _test_types(api, res)
+    rows = (HwdbComponentEvent.for_instance(inst)
+            .filter(part_type_id=part_type_id)
+            .order_by(F("updated").desc(nulls_last=True),
+                      F("created").desc(nulls_last=True), "part_id"))
+    parts_page = Paginator(rows, 50).get_page(request.GET.get("page"))
+    pids = [p.part_id for p in parts_page]
+    filled = _filled_map(inst, pids, tts.values())
+    es_posted = _es_posted_map(api, pids)
+    origin = _origin(request, inst)
+    for p in parts_page:
+        p.res = _item_resources(request, p.part_id, res, tts, filled, es_posted)
+        if origin:
+            p.res["tree_url"] += f"?from={origin['ptid']}"   # the trail goes on to Linked parts
+    return render(request, "explore/type_items.html", {
+        "active_nav": "hardware",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "part_type_id": part_type_id,
+        "type_name": (node.name if node else "") or part_type_id,
+        "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
+        "has_config": res["es"],
+        "origin": origin,
+        "parts_page": parts_page,
+    })
+
+
+def _part_tree_rows(request, api, inst, cache: dict, kids: list[dict], level: int) -> list[dict]:
+    """#213 round 2 (Hajime's table 3): one level of an item's linked parts
+    as rows — the manifest's type name and position, and each part's
+    resources (``_item_resources``), the type's listing and schemas read
+    once per type (``cache``), the records from the mirror in one query,
+    the posted summaries one images call per part."""
+    pids = [k["part_id"] for k in kids]
+    for k in kids:
+        tid = k["part_id"].rsplit("-", 1)[0]
+        if tid not in cache:
+            res = _type_resources(api, inst, tid)
+            cache[tid] = (res, _test_types(api, res))
+    filled = _filled_map(inst, pids, [t for res, tts in cache.values() for t in tts.values()])
+    es_posted = _es_posted_map(api, pids)
+    nm = production.names(inst, [k["part_id"].rsplit("-", 1)[0] for k in kids])
+    out = []
+    for k in kids:
+        tid = k["part_id"].rsplit("-", 1)[0]
+        res, tts = cache[tid]
+        out.append({"pid": k["part_id"], "level": level, "label": k.get("type_name") or nm.get(tid) or tid,
+                    "position": k.get("functional_position") or "",
+                    **_item_resources(request, k["part_id"], res, tts, filled, es_posted)})
+    return out
+
+
+@login_not_required
+@fnal_login_required
+def explore_part_tree_view(request, part_id):
+    """#213 round 2 (Hajime 2026-11-10, his table 3): one item's linked
+    parts as a tree with the items page's columns — the item, then its
+    direct sub-components; a row's ▸ loads ITS direct sub-components
+    (``?node=<pid>&level=<n>`` renders those rows alone), one level at a
+    time like the part page's Assembly card, so a top-level item never
+    fans out into the whole detector (Chao). Live: one manifest read per
+    expanded node, one listing and the schemas per new type; the
+    checklist records from the mirror."""
+    inst = instance_of(request)
+    page_url = _rev(request, "explore:part_tree", args=[part_id])
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(_rev(request, "explore:part", args=[part_id]))
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    cache: dict = {}
+    node = (request.GET.get("node") or "").strip().upper()
+    if node:
+        try:
+            level = max(1, min(int(request.GET.get("level") or 1), 30))
+        except ValueError:
+            level = 1
+        kids = [k for k in current_manifest(api.get_subcomponents(node).get("data") or []) if k["part_id"] and not k["peer"]]
+        return render(request, "explore/_part_tree_rows.html", {"rows": _part_tree_rows(request, api, inst, cache, kids, level)})
+    comp = api.get_component(part_id).get("data") or {}
+    tid = part_id.rsplit("-", 1)[0]
+    kids = [k for k in current_manifest(api.get_subcomponents(part_id).get("data") or []) if k["part_id"] and not k["peer"]]
+    root = _part_tree_rows(request, api, inst, cache, [{"part_id": part_id,
+                                                        "type_name": (comp.get("component_type") or {}).get("name"),
+                                                        "functional_position": ""}], 0)
+    rows = root + _part_tree_rows(request, api, inst, cache, kids, 1)
+    return render(request, "explore/part_tree.html", {
+        "active_nav": "hardware",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "part_id": part_id,
+        "part_type_id": tid,
+        "type_name": root[0]["label"],
+        "type_url": navigation.leaf_path_for(inst, tid) or "",
+        "serial": comp.get("serial_number") or "",
+        "origin": _origin(request, inst),
+        "rows": rows,
+        "n_kids": len(kids),
     })
 
 
@@ -4421,6 +4628,9 @@ def explore_checklist_view(request, part_id, name):
         if request.method == "POST" and (request.POST.get("action") or "submit") == "submit":
             return _checklist_pending(request, inst, part_id, name, page_url, msg)   # #151
         raise Http404(msg)
+    if schema["procedure"] or schema["organizer"]:
+        # #213 round 2: a procedure is a page about the type, not a form on this item
+        return redirect(_rev(request, "explore:type_checklist", args=[ptid, name]))
     _default_table_types(api, ptid, schema)   # #153
     _stamp_plans(api, part_id, schema)        # #185
     # This checklist's latest submission on the item pre-fills the form and
@@ -4667,11 +4877,13 @@ def explore_type_checklist_view(request, part_type_id, name):
     bookmarked = ChecklistBookmark.for_instance(inst).filter(
         username=activity.actor_of(request), part_type_id=part_type_id,
         name=name).exists()
-    if schema["organizer"]:
+    if schema["organizer"] or schema["procedure"]:
         # #189: an organizer has no item to choose — its links, selects and
         # sections render right here; the bookmark, the type page's
-        # Checklists row and Link-to-checklist fields all land on this URL
+        # Checklists row and Link-to-checklist fields all land on this URL.
+        # #213 round 2: a procedure (static notes and drawings) the same way.
         return render(request, "explore/checklist_organizer.html", {
+            "kind": "Procedure" if schema["procedure"] and not schema["organizer"] else "Organizer",
             "active_nav": "hardware",
             "sidebar": True,   # the aside shows the organizer's outline (the template's side block), not the type tree
             "part_type_id": part_type_id,
@@ -4994,7 +5206,8 @@ def explore_checklist_config_view(request, part_type_id):
             body = api.post_component_type_image(
                 part_type_id, io.BytesIO(json.dumps(cfg, indent=2).encode()),
                 fname, comments="Consortium checklist schema (Explorer editor)"
-                                + (f" {checklistforms.RETIRED_MARK}" if cfg.get("retired") else ""))
+                                + (f" {checklistforms.RETIRED_MARK}" if cfg.get("retired") else "")
+                                + (f" {checklistforms.PROCEDURE_MARK}" if cfg.get("procedure") else ""))
         except requests.RequestException as e:
             messages.error(request, f"HWDB rejected the schema — {_hwdb_error_detail(e)}")
             return redirect(back)
@@ -5012,14 +5225,6 @@ def explore_checklist_config_view(request, part_type_id):
     cl_name = (request.GET.get("name") or "").strip()
     raw, current_name = (checklistforms.raw_load(api, part_type_id, cl_name)
                          if cl_name else (None, None))
-    if request.GET.get("draft") == "1":
-        # #213: the generated organizer handed over as an unsaved draft — over
-        # the stored schema of that name, which a Save would version
-        draft = request.session.get(f"cl_draft:{part_type_id}")
-        if isinstance(draft, dict):
-            raw = draft
-            messages.info(request, "A draft generated from the component list — nothing is saved until Save to HWDB"
-                                   + (f", which adds a version of {current_name}." if current_name else "."))
     return render(request, "explore/checklist_config.html", {
         "item_field_choices": [(n, checklistforms.ITEM_FIELD_LABELS[n])
                                for n in checklistforms.ITEM_FIELDS],

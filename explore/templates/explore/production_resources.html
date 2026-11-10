@@ -1,0 +1,64 @@
+{% extends 'explore/base.html' %}
+{% load checklist %}
+{% block title %}Resources · {{ type_name }} · HWDB Explorer{% endblock %}
+
+{% block content %}
+{# #213 (Chao 2026-11-05; round 2 Hajime 2026-11-10): the Resources page — a production table's nested component list as a tree table (the status table's indent and fold), generated on each visit, stored nowhere, read-only: a row per component with the type page, its QA/QC checklists (to the PID chooser), its procedures / drawings (checklists flagged Procedure) and its item count linking the Items page, where each item's executive summary is. A consortium's own organizer checklist (its ordering of the work) links this page rather than carrying a copy — the Markdown export and the draft hand-off went (Chao 2026-11-10). Not called Organizer: that is the saved checklist's line on the type page. #}
+<style>
+  .es-page { padding: 22px 30px 56px; max-width: 1280px; }
+  .es-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .es-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .es-crumbs a:hover { text-decoration: underline; }
+  .es-crumbs .sep { color: var(--faint); margin: 0 7px; }
+  .es-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 2px; }
+  .es-sub { color: var(--dim); font-size: 13px; margin: 0 0 12px; }
+  .es-sub a { color: var(--accent-ink); text-decoration: none; }
+  .mono { font-family: var(--font-mono); }
+  .es-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
+  .es-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
+    border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+  .ps-empty { color: var(--dim); font-size: 13.5px; margin: 16px 0; }
+  .rs-table td a { color: var(--accent-ink); text-decoration: none; }
+  .rs-table td a:hover { text-decoration: underline; }
+  .rs-table td.rs-list { line-height: 1.5; }
+  .rs-table td.rs-list a { display: block; }
+  .rs-table .ps-none { color: var(--faint); }
+  .rs-table .cl-rowlab .rs-sub { display: inline; }
+  .rs-table .cl-rowlab .rs-arrow { color: var(--faint); margin-right: 4px; }
+</style>
+{% include "explore/_checklist_style.html" %}
+
+<div class="es-page">
+  <div class="es-crumbs">
+    <a href="{% url 'explore:hierarchy' %}">Detector</a>
+    <span class="sep">›</span><a href="{% url 'explore:production_overview' %}">Production status</a>
+    <span class="sep">›</span><a href="{{ status_url }}">{{ type_name }}</a>
+    <span class="sep">›</span>Resources
+  </div>
+  {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+  <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:6px;">
+    <h1>Resources <span class="mono" style="font-size:.7em; font-weight:400; color:var(--dim);">{{ part_type_id }}</span></h1>
+  </div>
+  <p class="es-sub">{{ type_name }} · built from the <a href="{{ list_url }}?next={{ request.get_full_path|urlencode }}">component list</a> on each visit, stored nowhere: each type’s checklists, procedures and items.</p>
+
+  {% if not n_rows %}
+  <p class="ps-empty">No component list on this type yet{% if can_edit %} — <a href="{{ list_url }}?next={{ request.get_full_path|urlencode }}">add the component types</a> it reports{% endif %}.</p>
+  {% else %}
+  <div class="ps-bar">{% if tree %}<button type="button" class="ps-fold-btn" data-fold="open">Expand all</button><button type="button" class="ps-fold-btn" data-fold="close">Collapse all</button>{% endif %}</div>
+  <div class="tbl-scroll"><table class="cl-table cl-gridlines ps-table rs-table" data-table="rs:{{ part_type_id }}">
+    <thead><tr><th>Component</th><th>Type ID</th><th>QA/QC checklists</th><th>Procedures / Drawings</th><th>Items / Exec summaries</th></tr></thead>
+    <tbody>
+    {% for r in rows %}<tr data-level="{{ r.level }}" data-t="{{ r.type }}">
+      <th scope="row" class="cl-rowlab"{% if r.level %} style="padding-left:{% widthratio r.level 1 18 %}px;"{% endif %}>{% if r.has_children %}<button type="button" class="ps-tog" aria-expanded="true" title="Fold its rows"></button>{% elif tree %}<span class="ps-tog ps-tog-none"></span>{% endif %}{% if r.level %}<span class="rs-arrow" aria-hidden="true">&#8627;</span>{% endif %}<a href="{{ r.type_url }}" title="the type’s page">{{ r.label }}</a></th>
+      <td class="cl-const ps-types"><a href="{{ r.type_url }}" class="mono">{{ r.type }}</a></td>
+      <td class="cl-const rs-list{% if not r.checklists %} ps-none{% endif %}">{% for c in r.checklists %}<a href="{{ c.url }}" title="Pick the item to fill this checklist on">{{ c.name }}</a>{% empty %}—{% endfor %}</td>
+      <td class="cl-const rs-list{% if not r.procedures %} ps-none{% endif %}">{% for c in r.procedures %}<a href="{{ c.url }}">{{ c.name }}</a>{% empty %}—{% endfor %}</td>
+      <td class="cl-const ps-num"><a href="{{ r.items_url }}?from={{ part_type_id }}" title="The type’s items — each one’s checklists, executive summary and linked parts">{{ r.n }} item{{ r.n|pluralize }}</a></td>
+    </tr>{% endfor %}
+    </tbody>
+  </table></div>
+  {% include "explore/_production_tree_script.html" %}
+  {% endif %}
+</div>
+{% include "explore/_lightbox.html" %}
+{% endblock %}

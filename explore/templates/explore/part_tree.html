@@ -1,0 +1,95 @@
+{% extends 'explore/base.html' %}
+{% block title %}Linked parts · {{ part_id }} · HWDB Explorer{% endblock %}
+
+{% block content %}
+{# #213 round 2 (Hajime 2026-11-10, his table 3): one item's linked parts as a tree with the items page's columns — the item, then its direct sub-components; a row's ▸ fetches ITS direct sub-components (the view's ?node= fragment) and the fold then works as on the status table — one level at a time like the part page's Assembly card, so a top-level item never fans out into the whole detector (Chao). #}
+<style>
+  .es-page { padding: 22px 30px 56px; max-width: 1280px; }
+  .es-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .es-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .es-crumbs a:hover { text-decoration: underline; }
+  .es-crumbs .sep { color: var(--faint); margin: 0 7px; }
+  .es-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 2px; }
+  .es-sub { color: var(--dim); font-size: 13px; margin: 0 0 12px; }
+  .es-sub a { color: var(--accent-ink); text-decoration: none; }
+  .mono { font-family: var(--font-mono); }
+  .es-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
+  .es-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
+    border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+  .ps-empty { color: var(--dim); font-size: 13.5px; margin: 16px 0; }
+  .rs-table td a { color: var(--accent-ink); text-decoration: none; }
+  .rs-table td a:hover { text-decoration: underline; }
+  .rs-table td.rs-list { line-height: 1.5; }
+  .rs-table td.rs-list a { display: block; white-space: nowrap; }
+  .rs-table .ps-none { color: var(--faint); }
+  .rs-table .rs-arrow { color: var(--faint); margin-right: 4px; }
+  .rs-table .rs-pos { display: block; font-weight: 400; font-size: 12px; color: var(--dim); margin-left: 22px; }
+  .rs-table a.rs-open { color: var(--dim); }
+  .rs-table a .rs-when { color: var(--good); font-family: var(--font-mono); font-size: 11.5px; margin-left: 4px; }
+  .rs-table .ps-tog.rs-busy::before { content: "\00B7\00B7\00B7"; letter-spacing: -1px; }
+</style>
+{% include "explore/_checklist_style.html" %}
+
+<div class="es-page">
+  <div class="es-crumbs">
+    <a href="{% url 'explore:home' %}">Explorer</a>
+    {% if origin %}<span class="sep">›</span><a href="{{ origin.url }}" title="The Resources table you came from">{{ origin.name }} · Resources</a>{% endif %}
+    <span class="sep">›</span>{% if type_url %}<a href="{{ type_url }}">{{ type_name }}</a>{% else %}{{ type_name }}{% endif %}
+    <span class="sep">›</span><a href="{% url 'explore:type_items' part_type_id=part_type_id %}{% if origin %}?from={{ origin.ptid }}{% endif %}">Items</a>
+    <span class="sep">›</span><a href="{% url 'explore:part' part_id=part_id %}">{{ part_id }}</a>
+    <span class="sep">›</span>Linked parts
+  </div>
+  {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+  <h1>Linked parts <span class="mono" style="font-size:.7em; font-weight:400; color:var(--dim);">{{ part_id }}</span></h1>
+  <p class="es-sub">{{ type_name }}{% if serial %} · SN {{ serial }}{% endif %} · its sub-components as linked in HWDB, one level at a time — a row’s ▸ loads its own.</p>
+
+  {% if not n_kids %}<p class="ps-empty">No sub-components linked to this item.</p>{% endif %}
+  <div class="tbl-scroll"><table class="cl-table cl-gridlines ps-table rs-table" id="pt-table">
+    <thead><tr><th>Linked hierarchy</th><th>Part ID</th><th>QA/QC checklists</th><th>Procedures / Drawings</th><th>Exec summary</th></tr></thead>
+    <tbody>{% include "explore/_part_tree_rows.html" %}</tbody>
+  </table></div>
+</div>
+{% include "explore/_lightbox.html" %}
+<script>
+(function () {
+  // one level at a time: a ▸ that has not loaded fetches the node's direct sub-components as rows and slots them
+  // in under the row; from then on it folds them like the status table (every following row deeper than its own)
+  var tbl = document.getElementById("pt-table"), base = "{% url 'explore:part_tree' part_id=part_id %}";
+  function under(tr) {
+    var out = [], lv = +tr.dataset.level, n = tr.nextElementSibling;
+    while (n && +n.dataset.level > lv) { out.push(n); n = n.nextElementSibling; }
+    return out;
+  }
+  tbl.addEventListener("click", function (e) {
+    var b = e.target.closest(".ps-tog[aria-expanded]"); if (!b) return;
+    var tr = b.closest("tr");
+    if (b.dataset.load) {
+      if (b.classList.contains("rs-busy")) return;
+      b.classList.add("rs-busy");
+      fetch(base + "?node=" + encodeURIComponent(tr.dataset.pid) + "&level=" + (+tr.dataset.level + 1), {headers: {"X-Requested-With": "fetch"}})
+        .then(function (r) { return r.ok ? r.text() : Promise.reject(r.status); })
+        .then(function (html) {
+          b.classList.remove("rs-busy"); delete b.dataset.load;
+          var tmp = document.createElement("tbody"); tmp.innerHTML = html.trim();
+          if (!tmp.children.length) { var s = document.createElement("span"); s.className = "ps-tog ps-tog-none"; b.replaceWith(s); return; }
+          tr.after.apply(tr, Array.prototype.slice.call(tmp.children));
+          b.setAttribute("aria-expanded", "true"); b.title = "Fold its rows";
+        })
+        .catch(function () { b.classList.remove("rs-busy"); b.title = "Could not read its sub-components — try again"; });
+      return;
+    }
+    var open = b.getAttribute("aria-expanded") !== "true";
+    b.setAttribute("aria-expanded", open ? "true" : "false");
+    var hideBelow = null;
+    under(tr).forEach(function (r) {
+      if (!open) { r.hidden = true; return; }
+      // unfolding shows the rows directly under it, and deeper rows only under parents that are open
+      if (hideBelow !== null && +r.dataset.level > hideBelow) { r.hidden = true; return; }
+      hideBelow = null; r.hidden = false;
+      var t = r.querySelector(".ps-tog[aria-expanded]");
+      if (t && t.getAttribute("aria-expanded") !== "true") hideBelow = +r.dataset.level;
+    });
+  });
+})();
+</script>
+{% endblock %}

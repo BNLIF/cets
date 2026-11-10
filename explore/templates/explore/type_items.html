@@ -1,0 +1,67 @@
+{% extends 'explore/base.html' %}
+{% block title %}Items · {{ type_name }} · HWDB Explorer{% endblock %}
+
+{% block content %}
+{# #213 round 2 (Hajime 2026-11-10, his table 2): the Items page — the type's items, each with every QA/QC checklist of the type linking THIS item's form (a tick and date where the mirror holds a record, faint otherwise), the type's procedures, the item's executive summary (every item has one, config or not — Chao 2026-11-10) and its linked parts. Drawn as the Resources and Linked-parts tables are. Reached from the Resources table's Items column; the Exec summaries links keep the plain per-type list (type_es.html, Chao 2026-11-10). #}
+<style>
+  .es-page { padding: 22px 30px 56px; max-width: 1280px; }
+  .es-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .es-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .es-crumbs a:hover { text-decoration: underline; }
+  .es-crumbs .sep { color: var(--faint); margin: 0 7px; }
+  .es-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 2px; }
+  .es-sub { color: var(--dim); font-size: 13px; margin: 0 0 14px; }
+  .es-sub a { color: var(--accent-ink); text-decoration: none; }
+  .mono { font-family: var(--font-mono); }
+  .es-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
+  .es-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
+    border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+  .cell-muted { color: var(--faint); }
+  .rs-table td a { color: var(--accent-ink); text-decoration: none; }
+  .rs-table td a:hover { text-decoration: underline; }
+  .rs-table td.rs-list { line-height: 1.5; }
+  .rs-table td.rs-list a { display: block; white-space: nowrap; }
+  .rs-table .ps-none { color: var(--faint); }
+  .rs-table a.rs-open { color: var(--dim); }
+  .rs-table a .rs-when { color: var(--good); font-family: var(--font-mono); font-size: 11.5px; margin-left: 4px; }
+  .rs-pager { display: flex; gap: 14px; justify-content: center; align-items: center; margin: 4px 0 14px; font-size: 13px; }
+  .rs-pager a { color: var(--accent-ink); text-decoration: none; }
+</style>
+{% include "explore/_checklist_style.html" %}
+
+<div class="es-page">
+  <div class="es-crumbs">
+    <a href="{% url 'explore:home' %}">Explorer</a>
+    {% if origin %}<span class="sep">›</span><a href="{{ origin.url }}" title="The Resources table you came from">{{ origin.name }} · Resources</a>{% endif %}
+    <span class="sep">›</span>{% if type_url %}<a href="{{ type_url }}">{{ type_name }}</a>{% else %}{{ type_name }}{% endif %}
+    <span class="sep">›</span>Items
+  </div>
+  {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+  <h1>Items <span class="mono" style="font-size:.7em; font-weight:400; color:var(--dim);">{{ part_type_id }}</span></h1>
+  <p class="es-sub">{{ type_name }} · each item’s checklists, executive summary and linked parts{% if not has_config %} · <span title="Without an ES config on the type the summary page runs in its default layout">no ES config on this type</span>{% endif %}</p>
+
+  {% if parts_page.paginator.num_pages > 1 %}
+  <div class="rs-pager">
+    {% if parts_page.has_previous %}<a href="?page=1">« First</a><a href="?page={{ parts_page.previous_page_number }}">‹ Prev</a>{% else %}<span class="cell-muted">« First</span><span class="cell-muted">‹ Prev</span>{% endif %}
+    <span class="cell-muted" style="font-variant-numeric:tabular-nums;">Page {{ parts_page.number }} of {{ parts_page.paginator.num_pages }} · {{ parts_page.paginator.count }} items</span>
+    {% if parts_page.has_next %}<a href="?page={{ parts_page.next_page_number }}">Next ›</a><a href="?page={{ parts_page.paginator.num_pages }}">Last »</a>{% else %}<span class="cell-muted">Next ›</span><span class="cell-muted">Last »</span>{% endif %}
+  </div>
+  {% endif %}
+  <div class="tbl-scroll"><table class="cl-table cl-gridlines ps-table rs-table">
+    <thead><tr><th>Part ID</th><th>Serial number</th><th>Status</th><th>QA/QC checklists</th><th>Procedures / Drawings</th><th>Exec summary</th><th>Linked parts</th></tr></thead>
+    <tbody>
+    {% for p in parts_page %}<tr>
+      <th scope="row" class="cl-rowlab"><a href="{{ p.res.part_url }}" class="mono" title="The item’s page">{{ p.part_id }}</a></th>
+      <td class="cl-const mono{% if not p.serial_number %} ps-none{% endif %}">{{ p.serial_number|default:"—" }}</td>
+      <td class="cl-const{% if not p.status %} ps-none{% endif %}">{{ p.status|default:"—" }}</td>
+      <td class="cl-const rs-list{% if not p.res.checklists %} ps-none{% endif %}">{% for c in p.res.checklists %}<a href="{{ c.url }}"{% if c.filled %} title="Recorded {{ c.filled|date:'Y-m-d' }} — open to see or update it"{% else %} class="rs-open" title="No record yet — open to fill it"{% endif %}>{{ c.name }}{% if c.filled %}<span class="rs-when">&#10003; {{ c.filled|date:"Y-m-d" }}</span>{% endif %}</a>{% empty %}—{% endfor %}</td>
+      <td class="cl-const rs-list{% if not p.res.procedures %} ps-none{% endif %}">{% for c in p.res.procedures %}<a href="{{ c.url }}">{{ c.name }}</a>{% empty %}—{% endfor %}</td>
+      <td class="cl-const"><a href="{{ p.res.es_url }}"{% if p.res.es_when %} title="Summary posted {{ p.res.es_when|date:'Y-m-d' }} — open to see or regenerate it"{% else %} class="rs-open" title="No summary posted yet — open to generate it"{% endif %}>View summary{% if p.res.es_when %}<span class="rs-when">&#10003; {{ p.res.es_when|date:"Y-m-d" }}</span>{% endif %}</a></td>
+      <td class="cl-const"><a href="{{ p.res.tree_url }}" title="The item’s linked sub-components, one level at a time">Trace parts</a></td>
+    </tr>{% empty %}
+    <tr><td colspan="7" class="cell-muted">No items mirrored — sync the type first.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}

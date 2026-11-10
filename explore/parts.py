@@ -267,8 +267,10 @@ _FETCH_WORKERS = 8
 def _thread_client(api):
     """A fresh client for a worker thread — one keep-alive Session per
     thread, since a shared Session must not fan out across threads (see
-    FnalDbApiClient). Test doubles pass through as-is."""
-    if isinstance(api, FnalDbApiClient):
+    FnalDbApiClient). Test doubles pass through as-is — by exact type: a
+    mock built on the client's spec passes ``isinstance`` and would be
+    replaced by a real client calling HWDB from the test (2026-11-10)."""
+    if type(api) is FnalDbApiClient:
         bearer = (api.session.headers.get("Authorization") or "")
         return FnalDbApiClient(api.base_url, bearer.removeprefix("Bearer "))
     return api

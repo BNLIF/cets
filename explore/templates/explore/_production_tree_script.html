@@ -1,0 +1,73 @@
+{# the production tree's fold and column ticks — included by _production_table.html and the resources table (#213 round 2), once per table; sets up window.psTree once and initialises every table not yet seen #}
+<script>
+(function () {
+  // #211: fold a parent's rows — every following row deeper than it, up to the next row at its level or above.
+  // The folded parents are remembered per table (localStorage psFold:<table>); Expand all / Collapse all reset them.
+  // Columns (Chao 2026-11-04): a tick per column above the table, the unticked ones remembered per table (psCols:<table>);
+  // until something is stored the markup's defaults hold (Type ID off). autocomplete=off: a reload must not put the
+  // browser's remembered tick back over the stored one after this ran (Chao 2026-11-04, Chrome did).
+  // The overview includes this once per table, each copy running before the next table is parsed — so the handlers
+  // and functions are set up once, and every copy initialises the tables parsed so far that no copy has yet.
+  if (!window.psTree) {
+    function tableOf(el) { return el.closest(".ps-bar").nextElementSibling.querySelector("table"); }
+    function under(tr) {
+      var out = [], lv = +tr.dataset.level, n = tr.nextElementSibling;
+      while (n && +n.dataset.level > lv) { out.push(n); n = n.nextElementSibling; }
+      return out;
+    }
+    function apply(tbl) {
+      var closed = {};
+      tbl.querySelectorAll("tr[data-level]").forEach(function (tr) { tr.hidden = false; });
+      tbl.querySelectorAll(".ps-tog[aria-expanded=false]").forEach(function (b) {
+        var tr = b.closest("tr"); closed[tr.dataset.t] = 1;
+        under(tr).forEach(function (r) { r.hidden = true; });
+      });
+      try { localStorage.setItem("psFold:" + tbl.dataset.table, JSON.stringify(closed)); } catch (e) {}
+    }
+    function restore(tbl) {
+      var closed = {};
+      try { closed = JSON.parse(localStorage.getItem("psFold:" + tbl.dataset.table) || "{}"); } catch (e) {}
+      tbl.querySelectorAll(".ps-tog[aria-expanded]").forEach(function (b) {
+        b.setAttribute("aria-expanded", closed[b.closest("tr").dataset.t] ? "false" : "true");
+      });
+      apply(tbl);
+    }
+    function showCols(bar) {
+      var tbl = tableOf(bar), hide = {};
+      bar.querySelectorAll(".ps-cols input").forEach(function (c) { if (!c.checked) hide[c.dataset.col] = 1; });
+      tbl.querySelectorAll("[data-col]").forEach(function (cell) { cell.hidden = !!hide[cell.dataset.col]; });
+      return hide;
+    }
+    function cols(bar) {
+      var hide = showCols(bar);
+      try { localStorage.setItem("psCols:" + tableOf(bar).dataset.table, JSON.stringify(hide)); } catch (e) {}
+    }
+    function restoreCols(bar) {
+      var raw = null, off = {};
+      try { raw = localStorage.getItem("psCols:" + tableOf(bar).dataset.table); off = JSON.parse(raw || "{}"); } catch (e) {}
+      if (raw) bar.querySelectorAll(".ps-cols input").forEach(function (c) { c.checked = !off[c.dataset.col]; });
+      showCols(bar);   // no store until a tick changes
+    }
+    document.addEventListener("change", function (e) {
+      var c = e.target.closest(".ps-cols input"); if (c) cols(c.closest(".ps-bar"));
+    });
+    document.addEventListener("click", function (e) {
+      var b = e.target.closest(".ps-tog[aria-expanded]");
+      if (b) {
+        b.setAttribute("aria-expanded", b.getAttribute("aria-expanded") === "true" ? "false" : "true");
+        apply(b.closest("table"));
+        return;
+      }
+      var f = e.target.closest(".ps-fold-btn");
+      if (f) {
+        var tbl = tableOf(f);
+        tbl.querySelectorAll(".ps-tog[aria-expanded]").forEach(function (t) { t.setAttribute("aria-expanded", f.dataset.fold === "open" ? "true" : "false"); });
+        apply(tbl);
+      }
+    });
+    window.psTree = {restore: restore, restoreCols: restoreCols};
+  }
+  document.querySelectorAll(".ps-bar:not([data-init])").forEach(function (bar) { bar.dataset.init = "1"; window.psTree.restoreCols(bar); });
+  document.querySelectorAll("table.ps-table[data-table]:not([data-init])").forEach(function (tbl) { tbl.dataset.init = "1"; window.psTree.restore(tbl); });
+})();
+</script>

@@ -211,11 +211,10 @@
         <dt>System</dt><dd>{{ leaf.system_name }} ({{ leaf.system_id }})</dd>
         <dt>Subsystem</dt><dd>{{ leaf.subsystem_name }} ({{ leaf.subsystem_id }})</dd>
         {% if not is_consortium %}
-        <dt>{% if is_shipping %}Boxes in HWDB{% else %}Items in HWDB{% endif %}</dt><dd>{{ leaf.n_components }}</dd>
+        <dt>{% if is_shipping %}Boxes in HWDB{% else %}Items in HWDB{% endif %}</dt><dd>{% if type_items_url %}<a href="{{ type_items_url }}" title="The items — each one’s checklists, executive summary and linked parts">{{ leaf.n_components }}</a>{% else %}{{ leaf.n_components }}{% endif %}</dd>
         <dt>Test events</dt><dd>{{ leaf.n_tests }}</dd>
         {% endif %}
         {# #110: fill-out links for the type's consortium checklists — each opens the PID chooser (scan / items table / new item). Filled lazily so the mirror-only render never waits on HWDB; no checklists = no row. #}
-        {% if type_es_url %}<dt>Exec summaries</dt><dd class="span"><a href="{{ type_es_url }}" title="Every item of the type with a link to its executive summary">by item</a></dd>{% endif %}
         <dt id="cl-names-dt" hidden>Checklists</dt><dd id="cl-names-dd" class="span" hidden
             data-names-url="{% url 'explore:checklist_names' part_type_id=leaf.part_type_id %}"
             data-open-url="{% url 'explore:type_checklist' part_type_id=leaf.part_type_id name='__N__' %}"></dd>
@@ -240,7 +239,7 @@
         {# #199: the consortium's production-status table (its own line — Chao 2026-10-08); #200: the component list it is generated from #}
         <dt>Status</dt><dd class="span"><a href="{{ status_url }}" title="This consortium’s production-status table, read from HWDB">Production status</a>
           <span class="sep">·</span><a href="{{ list_url }}?next={{ request.path|urlencode }}" title="The component types the table reports, one per line (Production_list_{{ leaf.part_type_id }}.json in HWDB)">Component list</a>
-          <span class="sep">·</span><a href="{{ links_url }}" title="The component list as a table of links — each type’s page, checklists and executive summaries — built on each visit">Links</a></dd>
+          <span class="sep">·</span><a href="{{ resources_url }}" title="Each component type’s checklists, procedures and executive summaries, built on each visit from the component list">Resources</a></dd>
         {% endif %}
         {# #200 (Anselmo): the type's production plan, kept on the type in HWDB (Production_plan_<type>.json, every version kept) — the cache here, the plan page to see the history or edit. Chao 2026-10-27: one small table, a row per status tracker whose list carries the type (its own plan, else the plain one), the first batch's dates then the last batch's. #}
         {% if not is_consortium and show_plans %}
