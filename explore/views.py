@@ -39,7 +39,7 @@ from hwdb.fnal import session as fnal_session
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for, verify_link
 
 from . import (activity, charts, checklistforms, checklists, curation, events, p6,
-               execsummary, itemsedit, labels, navigation, ops, parts, plotting, production,
+               execsummary, installation, itemsedit, labels, navigation, ops, parts, plotting, production,
                scanning, sheetupload, watches)
 from .auth import fnal_login_required, provision_and_login
 from .events import physics_date_field, refresh_component_row, sync_test_events
@@ -47,7 +47,7 @@ from .hierarchy import sync_hierarchy, sync_system
 from .instances import instance_of, namespace_of
 from .models import (ChildMintSetting, ConsortiumTypeOverride, 
     ActivityEvent, BoxChecklist, ChecklistBookmark, ChecklistDraft, HierarchyNode,
-    InstitutionPref, P6Activity, ProductionList, ProductionPlan, SheetJob, ShippingTypeOverride,
+    InstallationPlan, InstitutionPref, P6Activity, ProductionList, ProductionPlan, SheetJob, ShippingTypeOverride,
     HierarchySyncState, HwdbComponentEvent, HwdbTestEvent, PackScan, ShipmentItem, TestDateSetting,
 )
 from .queries import (
@@ -847,6 +847,184 @@ def explore_production_resources_view(request, part_type_id):
         "status_url": _rev(request, "explore:production_status", args=[part_type_id]),
         "list_url": _rev(request, "explore:production_list", args=[part_type_id]),
         "can_edit": inst in settings.HWDB_WRITE_INSTANCES,
+    })
+
+
+def _installation_resolve(api, inst, steps: list[dict]) -> list[dict]:
+    """#217: the plan's steps with each part resolved live — ``test_type``
+    (the test type of the checklist the part names, "" when the type has
+    no such checklist or it sets none) and ``own_plan`` (the part's type
+    carries an installation plan of its own). One image listing per
+    distinct part type and one read per named checklist, in parallel."""
+    want: dict[str, set] = {}
+    for s in steps:
+        for p in s["parts"]:
+            want.setdefault(p["type"], set()).add(p["checklist"])
+
+    def _one(cli, tid):
+        listing = production._listing(cli, tid)
+        acts = {c["name"].lower(): c for c in checklistforms.active(cli, tid, rows=listing) if not c["procedure"]}
+        tts = {}
+        for name in want[tid]:
+            c = acts.get(name.lower())
+            tts[name] = ""
+            if c:
+                try:
+                    cfg = json.loads(cli.get_image_response(c["image_id"]).content)
+                    tts[name] = checklistforms.normalize(cfg, c["name"])["test_type_name"] if isinstance(cfg, dict) else ""
+                except Exception:
+                    pass
+        return {"tts": tts, "own_plan": bool(production.versions(listing, installation.plan_name(tid)))}
+
+    got = parts.fetch_map(api, _one, list(want))
+    return [{**s, "parts": [{**p, "test_type": ((got.get(p["type"]) or {}).get("tts") or {}).get(p["checklist"], ""),
+                             "own_plan": bool((got.get(p["type"]) or {}).get("own_plan"))} for p in s["parts"]]}
+            for s in steps]
+
+
+def _installation_rows(request, inst, steps: list[dict]) -> list[dict]:
+    """The steps table of a plan whose parts are resolved, off the mirror."""
+    ids = [p["type"] for s in steps for p in s["parts"]]
+    rows = installation.table(steps, installation.installed(inst, steps), production.names(inst, ids))
+    for r in rows:
+        if r["kind"] == "part":
+            r["type_url"] = _rev(request, "explore:home") + f"?node={r['type']}"
+            r["items_url"] = _rev(request, "explore:type_items", args=[r["type"]])
+            r["plan_url"] = _rev(request, "explore:installation_plan", args=[r["type"]]) if r["own_plan"] else ""
+    return rows
+
+
+@login_not_required
+@fnal_login_required
+def explore_installation_overview_view(request):
+    """#217 (Anselmo + Hajime 2026-11-12): the Installation area's first
+    page — every installation plan as last read (mirror only), its steps
+    done, a link to its page. ``?open=<type id>`` opens that type's plan
+    page, where a first plan is written."""
+    inst = instance_of(request)
+    go = (request.GET.get("open") or "").strip().upper()
+    if go:
+        if _PTID_RX.match(go):
+            return redirect(_rev(request, "explore:installation_plan", args=[go]))
+        messages.error(request, "A type id is a letter and 11 digits.")
+        return redirect(_rev(request, "explore:installation_overview"))
+    plans = list(InstallationPlan.for_instance(inst))
+    nm = production.names(inst, [p.part_type_id for p in plans])
+    return render(request, "explore/installation_overview.html", {
+        "active_nav": "installation",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "plans": [{"part_type_id": p.part_type_id, "name": nm.get(p.part_type_id) or p.part_type_id,
+                   "url": _rev(request, "explore:installation_plan", args=[p.part_type_id]),
+                   "read_at": p.read_at, **installation.summary(_installation_rows(request, inst, p.steps))}
+                  for p in plans],
+        "can_edit": inst in settings.HWDB_WRITE_INSTANCES,
+    })
+
+
+@login_not_required
+@fnal_login_required
+def explore_installation_plan_view(request, part_type_id):
+    """#217: a type's installation plan as a steps table — zone › step ›
+    parts, each part's installed count the items holding a record of the
+    checklist the plan names (mirror), the step's P6 installation start,
+    its state. Read live: the plan off the type, each part's checklist
+    and own plan off the part's type; the read rewrites the cache the
+    overview draws from."""
+    inst = instance_of(request)
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': request.get_full_path(), 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(_rev(request, "explore:installation_overview"))
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    node = HierarchyNode.for_instance(inst).filter(
+        level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
+    steps, vs = installation.read(api, part_type_id)
+    if steps is not None:
+        steps = _installation_resolve(api, inst, steps)
+    installation.cache(inst, part_type_id, steps)
+    rows = _installation_rows(request, inst, steps or [])
+    return render(request, "explore/installation_plan.html", {
+        "active_nav": "installation",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "part_type_id": part_type_id,
+        "type_name": (node.name if node else "") or part_type_id,
+        "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
+        "rows": rows,
+        "has_plan": steps is not None,
+        "n_versions": len(vs),
+        "last": vs[0] if vs else None,
+        "edit_url": _rev(request, "explore:installation_edit", args=[part_type_id]),
+        "can_edit": inst in settings.HWDB_WRITE_INSTANCES,   # the edit page applies the type's roles itself
+        "file_name": installation.plan_name(part_type_id),
+        **installation.summary(rows),
+    })
+
+
+@login_not_required
+@fnal_login_required
+def explore_installation_edit_view(request, part_type_id):
+    """#217: edit a type's installation plan as text — a zone per
+    unindented line, its steps under it, each step's parts under the step
+    (``installation.parse_text``). A save posts a new version of
+    ``Installation_plan_<type>.json`` (the reason is its HWDB comment),
+    rewrites the cache and logs it. Gated on the type's roles."""
+    inst = instance_of(request)
+    page_url = _rev(request, "explore:installation_edit", args=[part_type_id])
+    plan_url = _rev(request, "explore:installation_plan", args=[part_type_id])
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': request.get_full_path(), 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(_rev(request, "explore:installation_overview"))
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    role_gate = _type_role_gate(request, inst, api, part_type_id) if inst in settings.HWDB_WRITE_INSTANCES else None
+    can_edit = inst in settings.HWDB_WRITE_INSTANCES and role_gate is None
+    node = HierarchyNode.for_instance(inst).filter(
+        level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
+    steps, vs = installation.read(api, part_type_id)
+    text, errors = installation.to_text(steps or []), []
+
+    if request.method == "POST":
+        if not can_edit:
+            return HttpResponseForbidden("Editing an installation plan needs one of the type’s HWDB roles, on a write instance.")
+        text = request.POST.get("plan") or ""
+        new, errors = installation.parse_text(text)
+        if not errors:
+            actor, reason = activity.actor_of(request), (request.POST.get("reason") or "").strip()
+            try:
+                body = installation.write(api, part_type_id, new, reason, actor, timezone.localdate().isoformat())
+                if body.get("status") != "OK":
+                    errors = [f"HWDB rejected the plan — {body.get('data') or body}"]
+            except requests.RequestException as e:
+                errors = [f"HWDB rejected the plan — {_hwdb_error_detail(e)}"]
+        if not errors:
+            installation.cache(inst, part_type_id, installation.keep_resolved(inst, part_type_id, new))
+            activity.log(inst, ActivityEvent.KIND_CURATION,
+                         f"Installation plan of {part_type_id}: {len(new)} steps" + (f" — {reason}" if reason else ""),
+                         part_type_id=part_type_id, actor=actor)
+            messages.success(request, f"Plan saved — version {len(vs) + 1} of {installation.plan_name(part_type_id)}.")
+            return redirect(plan_url)
+
+    return render(request, "explore/installation_edit.html", {
+        "active_nav": "installation",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "part_type_id": part_type_id,
+        "type_name": (node.name if node else "") or part_type_id,
+        "text": text,
+        "errors": errors,
+        "n_versions": len(vs),
+        "last": vs[0] if vs else None,
+        "can_edit": can_edit,
+        "role_gate": role_gate,
+        "plan_url": plan_url,
+        "file_name": installation.plan_name(part_type_id),
     })
 
 

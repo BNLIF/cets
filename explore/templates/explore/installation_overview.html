@@ -1,0 +1,46 @@
+{% extends 'explore/base.html' %}
+{% block title %}Installation · HWDB Explorer{% endblock %}
+
+{% block content %}
+{# #217 (Anselmo + Hajime 2026-11-12): the installation plans as last read (the cache, no HWDB call) — one line per plan; a plan's own page reads it live. A first plan is started by its type id. #}
+<style>
+  .hc-page { padding: 26px 30px 56px; }
+  .hc-page h1 { font-size: 1.5rem; color: var(--ink); margin: 0 0 14px; letter-spacing: -0.01em; }
+  .mono { font-family: var(--font-mono); font-size: 12px; color: var(--faint); }
+  .hc-index { border-collapse: collapse; font-size: 13px; margin: 0 0 18px; }
+  .hc-index th { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; text-align: left; padding: 2px 14px 4px 0; border-bottom: 1px solid var(--rule); }
+  .hc-index td { padding: 5px 14px 5px 0; border-bottom: 1px solid var(--rule); color: var(--ink); }
+  .hc-index td.num { text-align: right; font-family: var(--font-mono); }
+  .hc-index a { color: var(--accent-ink); text-decoration: none; }
+  .hc-index a:hover { text-decoration: underline; }
+  .hc-none { color: var(--dim); font-size: 13.5px; }
+  .in-open { display: flex; gap: 8px; align-items: center; margin-top: 18px; }
+  .in-open input { font: inherit; font-size: 13px; font-family: var(--font-mono); color: var(--ink); padding: 5px 8px; width: 170px;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+  .es-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
+  .es-flash.error { color: var(--bad); background: color-mix(in oklch, var(--bad) 8%, var(--page)); border: 1px solid color-mix(in oklch, var(--bad) 35%, var(--rule)); }
+</style>
+
+<div class="hc-page">
+  {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+  <h1>Installation</h1>
+  {% if plans %}
+  <table class="hc-index">
+    <thead><tr><th>Plan</th><th>Steps</th><th>Done</th><th>In progress</th><th>Last read</th></tr></thead>
+    <tbody>
+    {% for p in plans %}
+    <tr><td><a href="{{ p.url }}" title="Read it from HWDB now">{{ p.name }}</a> <span class="mono">{{ p.part_type_id }}</span></td>
+      <td class="num">{{ p.n_steps }}</td><td class="num">{{ p.n_done }}</td><td class="num">{{ p.n_prog }}</td>
+      <td>{{ p.read_at|date:"Y-m-d H:i" }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="hc-none">No installation plan read yet.</p>
+  {% endif %}
+  <form class="in-open" method="get">
+    <input type="text" name="open" placeholder="type id" autocomplete="off" spellcheck="false" aria-label="Type id" required>
+    <button class="btn btn-sm" type="submit" title="Open the installation plan of a type — a detector’s virtual type, or a component’s own">Open plan</button>
+  </form>
+</div>
+{% endblock %}

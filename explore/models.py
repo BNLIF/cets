@@ -840,6 +840,26 @@ class ProductionList(InstanceScoped):
         return f"{self.instance}:{self.part_type_id} list"
 
 
+class InstallationPlan(InstanceScoped):
+    """#217: a type's installation plan — the steps of its
+    ``Installation_plan_<type>.json`` image in HWDB as last read, each
+    part with the test type its checklist resolved to — so the
+    Installation overview draws from the cache alone. Rewritten by a save
+    on the edit page and by a read of the plan's page."""
+
+    part_type_id = models.CharField(max_length=20, db_index=True)
+    steps = models.JSONField(default=list)
+    read_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["part_type_id"]
+        constraints = [models.UniqueConstraint(
+            fields=["instance", "part_type_id"], name="uniq_installation_plan")]
+
+    def __str__(self):
+        return f"{self.instance}:{self.part_type_id} installation plan"
+
+
 class P6Upload(models.Model):
     """#206 (Anselmo 2026-10-20): the project's P6 schedule as last
     uploaded — the monthly ``Float_Chart_Activities_Combined.xlsx`` the

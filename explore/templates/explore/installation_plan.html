@@ -1,0 +1,75 @@
+{% extends 'explore/base.html' %}
+{% block title %}Installation · {{ type_name }} · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .es-page { padding: 22px 30px 56px; max-width: 1400px; }
+  .es-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .es-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .es-crumbs a:hover { text-decoration: underline; }
+  .es-crumbs .sep { color: var(--faint); margin: 0 7px; }
+  .es-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 2px; }
+  .es-sub { color: var(--dim); font-size: 13px; margin: 0 0 12px; }
+  .mono { font-family: var(--font-mono); }
+  .es-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
+  .es-flash.error { color: var(--bad); background: color-mix(in oklch, var(--bad) 8%, var(--page)); border: 1px solid color-mix(in oklch, var(--bad) 35%, var(--rule)); overflow-wrap: anywhere; }
+  .es-flash.success { color: var(--good); background: var(--surface); border: 1px solid var(--rule); }
+  .ps-empty { color: var(--dim); font-size: 13.5px; margin: 16px 0; }
+  .in-table tr[data-kind="zone"] th { background: var(--surface); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); }
+  .in-table .in-no { display: inline-block; min-width: 22px; font-family: var(--font-mono); font-size: 12px; color: var(--dim); }
+  .in-table .in-note { display: block; font-weight: 400; font-size: 12px; color: var(--dim); white-space: normal; max-width: 560px; margin-left: 48px; }
+  .in-table tr[data-kind="part"] th.cl-rowlab { font-weight: 400; }
+  .in-table .in-own { margin-left: 8px; font-size: 12px; }
+  .in-state { font-size: 12px; white-space: nowrap; }
+  .in-state.done { color: var(--good); } .in-state.prog { color: var(--accent-ink); } .in-state.todo { color: var(--faint); }
+  .in-file { color: var(--faint); font-size: 12px; margin-top: 10px; }
+  @media print { .es-crumbs, .btn { display: none; } .es-page { padding: 0; } }
+</style>
+{% include "explore/_checklist_style.html" %}
+{# #217 (Anselmo + Hajime 2026-11-12): a type's installation plan as a steps table — zone › step › parts, folded like the production table; a part's count is the items holding a record of the checklist the plan names (mirror), the date the step's P6 installation start. Read-only: the plan is edited on its own page. #}
+
+<div class="es-page">
+  <div class="es-crumbs">
+    <a href="{% url 'explore:installation_overview' %}">Installation</a>
+    <span class="sep">›</span>{% if type_url %}<a href="{{ type_url }}">{{ type_name }}</a>{% else %}{{ type_name }}{% endif %}
+  </div>
+  {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+  <div style="display:flex; align-items:baseline; gap:12px; flex-wrap:wrap;">
+    <h1>{{ type_name }}</h1>
+    <span class="mono" style="font-size:12px; color:var(--dim);">{{ part_type_id }}</span>
+    {% if can_edit %}<a class="btn btn-sm" style="margin-left:auto;" href="{{ edit_url }}">&#9998; Edit plan</a>{% endif %}
+  </div>
+  {% if has_plan %}
+  <p class="es-sub">Installation plan — {{ n_steps }} step{{ n_steps|pluralize }}, {{ n_done }} done, {{ n_prog }} in progress. Installed counts the items with a record of the part’s checklist.</p>
+  <div class="ps-bar"><button type="button" class="ps-fold-btn" data-fold="open">Expand all</button><button type="button" class="ps-fold-btn" data-fold="close">Collapse all</button></div>
+  <div class="tbl-scroll"><table class="cl-table cl-gridlines ps-table in-table" data-table="inst:{{ part_type_id }}">
+    <thead><tr><th>Step</th><th>Installed</th><th>Needed</th><th>Checklist</th><th>P6 start</th><th>State</th></tr></thead>
+    <tbody>
+    {% for r in rows %}<tr data-level="{{ r.level }}" data-t="{{ r.key }}" data-kind="{{ r.kind }}">
+      {% if r.kind == "zone" %}
+      <th scope="row" class="cl-rowlab" colspan="6"><button type="button" class="ps-tog" aria-expanded="true" title="Fold its steps"></button>{{ r.label }}</th>
+      {% elif r.kind == "step" %}
+      <th scope="row" class="cl-rowlab" style="padding-left:18px;">{% if r.has_children %}<button type="button" class="ps-tog" aria-expanded="true" title="Fold its parts"></button>{% else %}<span class="ps-tog ps-tog-none"></span>{% endif %}<span class="in-no">{{ r.step }}</span>{{ r.label }}{% if r.note %}<span class="in-note">{{ r.note }}</span>{% endif %}</th>
+      <td class="cl-const ps-num{% if r.n is None %} ps-none{% endif %}">{% if r.n is None %}—{% else %}{{ r.n }}{% endif %}</td>
+      <td class="cl-const ps-num{% if not r.count %} ps-none{% endif %}">{{ r.count|default:"—" }}</td>
+      <td class="cl-const ps-none"></td>
+      <td class="cl-const{% if not r.p6_date %} ps-none{% endif %}"{% if r.p6 %} title="P6 {{ r.p6 }}{% if r.p6_name %}: {{ r.p6_name }}{% endif %}"{% endif %}>{% if r.p6_date %}{{ r.p6_date|date:"j M Y" }}{% else %}—{% endif %}{% if r.p6_missing %} <span class="ps-warn" title="{{ r.p6 }} is not in the uploaded P6 schedule as an installation activity">&#9888;</span>{% endif %}</td>
+      <td class="cl-const"><span class="in-state {{ r.state }}">{% if r.state == "done" %}Done{% elif r.state == "prog" %}In progress{% else %}Not started{% endif %}</span>{% if r.warn %} <span class="ps-warn" title="{{ r.warn }}">&#9888;</span>{% endif %}</td>
+      {% else %}
+      <th scope="row" class="cl-rowlab" style="padding-left:36px;"><span class="ps-tog ps-tog-none"></span><a href="{{ r.type_url }}" title="the type’s page">{{ r.label }}</a>{% if r.plan_url %}<a class="in-own" href="{{ r.plan_url }}" title="This component has an installation plan of its own">own plan &#9656;</a>{% endif %}</th>
+      <td class="cl-const ps-num{% if r.n is None %} ps-none{% endif %}">{% if r.n is None %}— <span class="ps-warn" title="{{ r.problem }}">&#9888;</span>{% else %}<a href="{{ r.items_url }}" title="The type’s items and their records">{{ r.n }}</a>{% endif %}</td>
+      <td class="cl-const ps-num">{{ r.count }}</td>
+      <td class="cl-const{% if not r.checklist %} ps-none{% endif %}">{{ r.checklist|default:"—" }}</td>
+      <td class="cl-const ps-none"></td>
+      <td class="cl-const"><span class="in-state {{ r.state }}">{% if r.state == "done" %}Done{% elif r.state == "prog" %}In progress{% else %}Not started{% endif %}</span></td>
+      {% endif %}
+    </tr>{% endfor %}
+    </tbody>
+  </table></div>
+  {% include "explore/_production_tree_script.html" %}
+  <p class="in-file"><span class="mono">{{ file_name }}</span> on the type in HWDB · {{ n_versions }} version{{ n_versions|pluralize }}{% if last.when %} · last saved {{ last.when }}{% endif %}</p>
+  {% else %}
+  <p class="ps-empty">No installation plan on this type yet{% if can_edit %} — <a href="{{ edit_url }}">write one</a>{% endif %}.</p>
+  {% endif %}
+</div>
+{% endblock %}
