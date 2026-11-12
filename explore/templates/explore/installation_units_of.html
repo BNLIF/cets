@@ -1,0 +1,53 @@
+{% extends 'explore/base.html' %}
+{% block title %}{{ comp_name }} units · {{ type_name }} · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .es-page { padding: 22px 30px 56px; max-width: 1700px; }
+  .es-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .es-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .es-crumbs a:hover { text-decoration: underline; }
+  .es-crumbs .sep { color: var(--faint); margin: 0 7px; }
+  .es-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 2px; }
+  .es-sub { color: var(--dim); font-size: 13px; margin: 0 0 12px; }
+  .es-sub a { color: var(--accent-ink); text-decoration: none; }
+  .mono { font-family: var(--font-mono); }
+  .un-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .un-table th, .un-table td { border: 1px solid var(--rule); padding: 5px 10px; text-align: left; white-space: nowrap; }
+  .un-table thead th { font-size: 11.5px; font-weight: 600; color: var(--dim); background: var(--page); }
+  .un-table .un-div { border-left: 2px solid var(--rule-hard); }
+  .un-table td a { color: var(--accent-ink); text-decoration: none; } .un-table td a:hover { text-decoration: underline; }
+  .un-table td .mono { font-size: 12px; }
+  .un-tick { color: var(--good); font-weight: 600; }
+  .un-when { font-size: 11.5px; color: var(--dim); margin-left: 5px; }
+  .un-none { color: var(--faint); }
+  .un-note td { color: var(--dim); font-style: italic; }
+  .un-pages { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 12px 0 0; font-size: 13px; color: var(--dim); }
+  .un-pages a, .un-pages b { padding: 2px 8px; border: 1px solid var(--rule); border-radius: 6px; text-decoration: none; color: var(--accent-ink); }
+  .un-pages b { color: var(--ink); background: var(--surface-2); border-color: var(--rule-hard); }
+</style>
+{# #218: one component's items for a step of an installation plan, a page of the type's live listing at a time — Anselmo's three stages, or one column per step of the component's own plan when it has one #}
+
+<div class="es-page">
+  <div class="es-crumbs">
+    <a href="{% url 'explore:installation_overview' %}">Installation</a>
+    <span class="sep">›</span><a href="{{ plan_url }}">{{ type_name }}</a>
+    <span class="sep">›</span><a href="{{ units_url }}">Units</a>
+    <span class="sep">›</span>{{ comp_name }}
+  </div>
+  <div style="display:flex; align-items:baseline; gap:12px; flex-wrap:wrap;">
+    <h1>{{ comp_name }} units</h1>
+    <span class="mono" style="font-size:12px; color:var(--dim);">{{ part.type }}</span>
+  </div>
+  <p class="es-sub">Step {{ step.n }} · {{ step.name }} — {{ part.count }} needed{% if total is not None %}, {{ total }} in HWDB{% endif %}.{% if comp_url %} <a href="{{ comp_url }}">type page</a>{% endif %}{% if own_plan_url %} · <a href="{{ own_plan_url }}">its own plan &#9656;</a>{% endif %}</p>
+  <div class="tbl-scroll"><table class="un-table">
+    <thead><tr><th>Unit</th><th>Status</th><th>Location</th>{% if cols.0.kind == "before" %}<th>QC before installation</th><th class="un-div">Installed</th><th>Position</th><th>Readout port</th><th>QC after installation</th>{% else %}{% for c in cols %}<th title="{{ c.name }}">{{ c.label }}</th>{% endfor %}<th class="un-div">Position</th><th>Readout port</th>{% endif %}</tr></thead>
+    <tbody>{% if cols.0.kind == "before" %}{% include "explore/_installation_units_rows.html" with standard=True %}{% else %}{% include "explore/_installation_units_rows.html" with standard=False %}{% endif %}</tbody>
+  </table></div>
+  {% if pages > 1 %}<div class="un-pages">
+    {% if page > 1 %}<a href="?page={{ page|add:"-1" }}">&#8249; previous</a>{% endif %}
+    {% if page_range %}{% for n in page_range %}{% if n == page %}<b>{{ n }}</b>{% else %}<a href="?page={{ n }}">{{ n }}</a>{% endif %}{% endfor %}{% else %}page {{ page }} of {{ pages }}{% endif %}
+    {% if page < pages %}<a href="?page={{ page|add:"1" }}">next &#8250;</a>{% endif %}
+  </div>{% endif %}
+</div>
+{% endblock %}

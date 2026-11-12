@@ -29,9 +29,9 @@ Closing
   15 | Close the TCO"""
 STEPS = [
     {"n": 7, "name": "CRP support structures", "zone": "Top drift volume", "after": [6], "p6": "", "note": "", "details": "", "status": "", "status_by": "", "status_on": "",
-     "parts": [{"type": SS, "count": 2, "checklist": "Installation"}]},
+     "parts": [{"type": SS, "count": 2, "checklist": "Installation", "before": "", "after": ""}]},
     {"n": 8, "name": "Top CRPs", "zone": "Top drift volume", "after": [7], "p6": "VD.INS.1", "note": "Two CRUs are joined | then raised.", "details": "", "status": "", "status_by": "", "status_on": "",
-     "parts": [{"type": CRP, "count": 2, "checklist": "installation"}, {"type": SS, "count": 1, "checklist": ""}]},
+     "parts": [{"type": CRP, "count": 2, "checklist": "installation", "before": "", "after": ""}, {"type": SS, "count": 1, "checklist": "", "before": "", "after": ""}]},
     {"n": 15, "name": "Close the TCO", "zone": "Closing", "after": [], "p6": "", "note": "", "details": "", "status": "", "status_by": "", "status_on": "", "parts": []},
 ]
 SUB_TEXT = f"""  1 | Join the CRUs
@@ -128,13 +128,13 @@ class PagesTest(TestCase):
         self.assertIn('<p>Two CRUs are joined | then raised.</p>', html)
         self.assertIn('<a href="#step-7">7 · CRP support structures</a> <span class="in-state todo">Not started</span>', html)
         self.assertIn(f'<span class="in-dim">Procedures: <a href="/hw/dev/checklist/{CRP}/Drawings/">Drawings</a></span>', html)
-        self.assertIn(f'<a href="/hw/dev/?node={CRP}" title="the type’s page">Top CRP</a><a class="in-own" href="/hw/dev/installation/{CRP}/"', html)   # the CRP type has a plan of its own
+        self.assertIn(f'<a href="/hw/dev/?node={CRP}" title="the type’s page">Top CRP</a><a class="in-own" href="/hw/dev/installation/{DET}/units/8-{CRP}/" title="Its items, stage by stage">units &#9656;</a><a class="in-own" href="/hw/dev/installation/{CRP}/"', html)   # the CRP type has a plan of its own
         self.assertIn(f'<a href="/hw/dev/items/{CRP}/" title="The type’s items and their records">2</a>', html)   # "installation" finds the checklist Installation
         self.assertIn('title="No checklist named for this component"', html)
         self.assertIn(f'href="{self.EDIT}">&#9998; Edit plan</a>', html)
         cached = InstallationPlan.objects.get(instance="dev", part_type_id=DET).steps
-        self.assertEqual(cached[1]["parts"][0], {"type": CRP, "count": 2, "checklist": "installation", "test_type": "CRP installed",
-                                                 "used": "Installation", "own_plan": True, "procedures": ["Drawings"]})
+        self.assertEqual(cached[1]["parts"][0], {"type": CRP, "count": 2, "checklist": "installation", "before": "", "after": "", "test_type": "CRP installed",
+                                                 "used": "Installation", "before_tt": "", "after_tt": "", "own_plan": True, "procedures": ["Drawings"]})
         self.assertIn(f'<a href="/hw/dev/checklist/{CRP}/Installation/" title="Choose an item and record it">Installation</a></td>', html)
         html = self.client.get("/hw/dev/installation/").content.decode()   # the overview: the cache and the mirror alone
         self.assertIn(f'<a href="{self.PLAN}" title="Read it from HWDB now">FD-VD installation</a> <span class="mono">{DET}</span>', html)
@@ -160,7 +160,7 @@ class PagesTest(TestCase):
         m1, m2 = _mocked(api)
         with m1, m2:
             own = self.client.get(f"/hw/dev/installation/{CRP}/").content.decode()
-        self.assertNotIn("in-own\"", own)   # no "own plan" link to itself
+        self.assertNotIn("own plan", own)   # no "own plan" link to itself
         self.assertIn("Installation plan — 2 steps, 1 done, 1 in progress.", own)
 
     def test_a_status_set_by_hand_wins_over_the_counts(self):
@@ -182,10 +182,61 @@ class PagesTest(TestCase):
         self.assertEqual(r["Location"], self.PLAN)
         body = json.loads(api.post_component_type_image.call_args[0][1].getvalue())["steps"]
         self.assertEqual((body[2]["status"], body[2]["status_by"]), ("done", "d"))
-        self.assertEqual(set(body[1]["parts"][0]), {"type", "count", "checklist"})   # the file holds the plan alone
+        self.assertEqual(set(body[1]["parts"][0]), {"type", "count", "checklist", "before", "after"})   # the file holds the plan alone
         self.assertEqual(InstallationPlan.objects.get(part_type_id=DET).steps[2]["status"], "done")
         html = self.client.get("/hw/dev/installation/").content.decode()
         self.assertIn('<td class="num">3</td><td class="num">1</td>', html)   # the overview counts it done
+
+    def test_units_page_lists_a_components_items_by_stage(self):
+        # #218: a component may name its QC-before and QC-after checklists
+        steps, errors = installation.parse_text(f"  8 | Top CRPs\n    {CRP} x 2 | Installation | Hang | Drawings")
+        p = steps[0]["parts"][0]
+        self.assertEqual((errors, p["before"], p["after"]), ([], "Hang", "Drawings"))
+        self.assertEqual(installation.to_text(steps), f"  8 | Top CRPs\n    {CRP} x 2 | Installation | Hang | Drawings")
+        self.assertEqual(installation.spec_find([{"DATA": {"Installation": [{"Position": "TCRP R07-C2", "Readout Port": 12}]}}], installation.POSITION_KEYS), "TCRP R07-C2")
+        self.assertEqual(installation.spec_find({"a": {"position": {"x": 1}}}, installation.POSITION_KEYS), "")
+        when = datetime(2026, 11, 3, tzinfo=dt_timezone.utc)
+        HwdbTestEvent.objects.create(instance="dev", part_type_id=CRP, part_id=f"{CRP}-00002", test_type_name="CRP installed", created=when, created_by="Hajime M")
+        HwdbTestEvent.objects.create(instance="dev", part_type_id=CRP, part_id=f"{CRP}-00002", test_type_name="CRP hung", created=when)
+        api = _api(steps=steps)
+        api._make_request.return_value = {"data": [
+            {"part_id": f"{CRP}-00001", "serial_number": "S1", "status": {"id": 100, "name": "Available"}, "location": {"id": 186, "name": "SURF"}, "specifications": [{"DATA": {}}]},
+            {"part_id": f"{CRP}-00002", "serial_number": "", "status": {"id": 100, "name": "Available"}, "location": {"id": 0, "name": "x"},
+             "specifications": [{"DATA": {"Installation": [{"Position": "TCRP R07-C2", "Readout port": "P12"}]}}]}],
+            "pagination": {"pages": 3, "total": 120}}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            plan = self.client.get(self.PLAN).content.decode()
+            self.assertIn(f'<a class="in-tab" aria-selected="false" href="/hw/dev/installation/{DET}/units/">Units</a>', plan)
+            html = self.client.get(self.PLAN + "units/").content.decode()
+            rows = self.client.get(self.PLAN + f"units/?group=8-{CRP}").content.decode()
+            self.assertEqual(self.client.get(self.PLAN + "units/?group=9-nope").status_code, 404)
+            own = self.client.get(self.PLAN + f"units/8-{CRP}/?page=2").content.decode()
+        self.assertEqual(api._make_request.call_args[1]["params"], {"page": 2, "size": 50})   # a page of the listing a call, never the whole type
+        self.assertIn(f'The first 2 of 120 — <a href="/hw/dev/installation/{DET}/units/8-{CRP}/">all its items &#9656;</a>', rows)
+        self.assertIn(f'<a class="in-own" href="/hw/dev/installation/{DET}/units/8-{CRP}/" title="Its items, stage by stage">units &#9656;</a>', plan)
+        self.assertIn("Step 8 · Top CRPs — 2 needed, 120 in HWDB.", own)
+        self.assertIn('<a href="?page=1">1</a><b>2</b><a href="?page=3">3</a>', own)
+        self.assertIn('<th>QC before installation</th><th class="un-div">Installed</th>', own)
+        # the component has a plan of its own: its page shows that plan's steps as the columns
+        sub_steps, _e = installation.parse_text(SUB_TEXT)
+        api2 = _api(steps=steps, sub=sub_steps)
+        api2._make_request.return_value = api._make_request.return_value
+        m1, m2 = _mocked(api2)
+        with m1, m2:
+            self.client.get(self.PLAN)   # the plan page marks the component's own plan
+            own = self.client.get(self.PLAN + f"units/8-{CRP}/").content.decode()
+        self.assertIn('<th title="Installation">1 · Join the CRUs</th><th title="Hang">2 · Hang</th><th class="un-div">Position</th>', own)
+        self.assertIn(f'<a href="/hw/dev/part/{CRP}-00002/checklist/Hang/" title="Hang — open the record"><span class="un-tick">', own)
+        self.assertIn(f'<tbody data-group="8-{CRP}">', html)
+        self.assertIn('<span class="un-step">step 8 · Top CRPs</span>', html)
+        self.assertIn('<span class="in-frac">1 / 2</span>', html)
+        self.assertIn(f'<td class="un-div"><a href="/hw/dev/part/{CRP}-00002/checklist/Installation/" title="Installation — open the record"><span class="un-tick">&#10003;</span><span class="un-when">2026-11-03 · Hajime M</span></a></td>', rows)
+        self.assertIn('<td>TCRP R07-C2</td>\n  <td>P12</td>', rows)
+        self.assertIn('<td>In Transit</td>', rows)
+        self.assertIn(f'<td class="un-div"><a href="/hw/dev/part/{CRP}-00001/checklist/Installation/" title="Installation">Record</a></td>', rows)
+        self.assertIn(f'<a href="/hw/dev/part/{CRP}-00001/checklist/Hang/" title="Hang">Record</a>', rows)
+        self.assertIn(f'href="/hw/dev/part/{CRP}-00001/checklist/Drawings/" title="Drawings — this checklist was not found on the type">Record</a>', rows)   # a procedure is not a record
 
     def test_edit_saves_a_version_caches_and_logs(self):
         api = _api()

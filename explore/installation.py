@@ -22,6 +22,12 @@ type itself as their part (``<own type> x 80 | Hang the CRP``), so every
 step is a record on the item. A detector plan's part of that type names
 the checklist that counts itself, as any part does.
 
+#218 (Anselmo's units table): a part may also name the checklists that
+record its QC before and after installation (``before`` / ``after``); the
+units page lists the type's items with a tick per stage, and the position
+and readout port the installation record left in the item's
+Specifications.
+
 A step's status is worked out from its parts' counts unless someone set
 it by hand (``status``: ``todo`` / ``prog`` / ``done`` / ``hold``, with
 who and when) — a step without parts, or one finished before its records
@@ -42,7 +48,7 @@ PTID_RX = production.PTID_RX
 _PART_RX = re.compile(r"^([A-Za-z]\d{11})\s*[x×]\s*([\d,]+)$")
 _STEP_RX = re.compile(r"^(\d+)\s*\*?$")   # a trailing * was the "installed" mark of the first drafts: read, ignored
 _STATUS_RX = re.compile(r"^status\s*:\s*(.*)$", re.I)
-RESOLVED = ("test_type", "own_plan", "used", "procedures")   # what a live read adds to a part
+RESOLVED = ("test_type", "own_plan", "used", "procedures", "before_tt", "after_tt")   # what a live read adds to a part
 STATUSES = {"todo": "Not started", "prog": "In progress", "done": "Done", "hold": "On hold"}
 _STATUS_OF = {v.lower(): k for k, v in STATUSES.items()} | {k: k for k in STATUSES}
 
@@ -69,7 +75,8 @@ def normalize(raw) -> list[dict]:
             tid = str((p or {}).get("type") or "").strip().upper() if isinstance(p, dict) else ""
             if PTID_RX.match(tid):
                 parts.append({"type": tid, "count": production._int(p.get("count")) or 0,
-                              "checklist": str(p.get("checklist") or "").strip()})
+                              "checklist": str(p.get("checklist") or "").strip(),
+                              "before": str(p.get("before") or "").strip(), "after": str(p.get("after") or "").strip()})
         status = s.get("status") if s.get("status") in STATUSES else ""
         out.append({"n": n, "name": str(s.get("name") or "").strip(), "zone": str(s.get("zone") or "").strip(),
                     "after": [a for a in (production._int(x) for x in s.get("after") or []) if a],
@@ -85,7 +92,7 @@ def parse_text(text: str) -> tuple[list[dict], list[str]]:
     """The edit page's text form → ``(steps, errors)``. A line without
     indentation is a zone; under it a step, ``number | name | after 3, 4 |
     P6 activity | note``; under a step its parts, ``TYPEID x count |
-    checklist``, its details, Markdown, on lines starting ``>`` (the note
+    checklist | QC-before checklist | QC-after checklist``, its details, Markdown, on lines starting ``>`` (the note
     of the step line is the short description), and ``status: Done`` when
     its status is set by hand. What follows the first field may be left
     out."""
@@ -114,7 +121,8 @@ def parse_text(text: str) -> tuple[list[dict], list[str]]:
                 errors.append(f"Line {i}: a component needs a step above it.")
                 continue
             cur["parts"].append({"type": m.group(1).upper(), "count": int(m.group(2).replace(",", "")),
-                                 "checklist": f[1] if len(f) > 1 else ""})
+                                 "checklist": f[1] if len(f) > 1 else "",
+                                 "before": f[2] if len(f) > 2 else "", "after": f[3] if len(f) > 3 else ""})
         elif _STEP_RX.match(f[0]):
             n = int(_STEP_RX.match(f[0]).group(1))
             if not n or any(s["n"] == n for s in steps):
@@ -148,7 +156,11 @@ def to_text(steps: list[dict]) -> str:
         out.append("  " + " | ".join(f))
         if s.get("status"):
             out.append("    status: " + STATUSES[s["status"]])
-        out += [f"    {p['type']} x {p['count']}" + (f" | {p['checklist']}" if p["checklist"] else "") for p in s["parts"]]
+        for p in s["parts"]:
+            f = [f"{p['type']} x {p['count']}", p["checklist"], p.get("before") or "", p.get("after") or ""]
+            while len(f) > 1 and not f[-1]:
+                f.pop()
+            out.append("    " + " | ".join(f))
         out += [("    > " + ln).rstrip() for ln in (s.get("details") or "").splitlines()]
     return "\n".join(out)
 
@@ -266,6 +278,65 @@ def table(steps: list[dict], done: dict, names: dict[str, str]) -> list[dict]:
             late = [a for a in r["after"] if state.get(a, "done") != "done"]
             r["warn"] = ("Started before step " + ", ".join(map(str, late)) + " is done") if late else ""
     return rows
+
+
+POSITION_KEYS, PORT_KEYS = ("position", "geographical location"), ("readout port",)
+
+
+def spec_find(obj, names: tuple[str, ...]) -> str:
+    """The first scalar value under a key named (any case) one of
+    ``names``, anywhere in an item's specifications; "" when none."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if str(k).strip().lower() in names and isinstance(v, (str, int, float)) and str(v).strip():
+                return str(v).strip()
+        obj = list(obj.values())
+    if isinstance(obj, list):
+        for v in obj:
+            got = spec_find(v, names)
+            if got:
+                return got
+    return ""
+
+
+UNITS_PAGE = 50   # items a units table reads and draws at a time
+
+
+def unit_columns(part: dict, own_steps: list[dict] | None = None) -> list[dict]:
+    """#218: the stage columns of a part's units table, in order —
+    ``[{label, name, tt, kind}]``: Anselmo's three (``before`` /
+    ``install`` / ``after``; ``name`` "" when the plan names no checklist
+    for it), or, when the part's type has a plan of its own
+    (``own_steps``, resolved), one per step of that plan recorded on the
+    type itself (``kind`` ``step``)."""
+    own = [{"label": f"{s['n']} · {s['name']}", "name": p.get("used") or p["checklist"], "tt": p.get("test_type") or "", "kind": "step"}
+           for s in own_steps or [] for p in s["parts"] if p["type"] == part["type"] and p["checklist"]]
+    return own or [
+        {"label": "QC before installation", "name": part.get("before") or "", "tt": part.get("before_tt") or "", "kind": "before"},
+        {"label": "Installed", "name": part.get("used") or part["checklist"], "tt": part.get("test_type") or "", "kind": "install"},
+        {"label": "QC after installation", "name": part.get("after") or "", "tt": part.get("after_tt") or "", "kind": "after"}]
+
+
+def units(cols: list[dict], listing: list[dict], records: dict) -> list[dict]:
+    """#218: one page of a type's items as a units table's rows —
+    ``listing`` the type's live component rows (status, location,
+    specifications), ``records`` ``{(pid, test type): (when, by)}`` off
+    the mirror. ``cells`` follow ``cols``: None when the column names no
+    checklist, else ``{name, when, by, known}`` (``when`` None: not
+    recorded; ``known`` False: the checklist was not found on the type)."""
+    out = []
+    for r in listing:
+        pid = r.get("part_id") or ""
+        if not pid:
+            continue
+        cells = []
+        for c in cols:
+            when, by = records.get((pid, c["tt"]), (None, "")) if c["tt"] else (None, "")
+            cells.append({"name": c["name"], "when": when, "by": by, "known": bool(c["tt"]), "kind": c["kind"]} if c["name"] else None)
+        out.append({"pid": pid, "serial": r.get("serial_number") or "", "status": r.get("status"), "location": r.get("location"),
+                    "position": spec_find(r.get("specifications"), POSITION_KEYS),
+                    "port": spec_find(r.get("specifications"), PORT_KEYS), "cells": cells})
+    return out
 
 
 def summary(rows: list[dict]) -> dict:

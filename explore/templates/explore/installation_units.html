@@ -1,0 +1,88 @@
+{% extends 'explore/base.html' %}
+{% block title %}Installation units · {{ type_name }} · HWDB Explorer{% endblock %}
+
+{% block content %}
+<style>
+  .es-page { padding: 22px 30px 56px; max-width: 1700px; }
+  .es-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .es-crumbs a { color: var(--accent-ink); text-decoration: none; }
+  .es-crumbs a:hover { text-decoration: underline; }
+  .es-crumbs .sep { color: var(--faint); margin: 0 7px; }
+  .es-page h1 { font-size: 1.35rem; color: var(--ink); margin: 0 0 2px; }
+  .es-sub { color: var(--dim); font-size: 13px; margin: 0 0 12px; }
+  .mono { font-family: var(--font-mono); }
+  .ps-empty { color: var(--dim); font-size: 13.5px; margin: 16px 0; }
+  .in-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--rule); margin: 10px 0 14px; }
+  .in-tab { font-size: 14px; font-weight: 600; color: var(--dim); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 6px 14px 8px; }
+  .in-tab:hover { color: var(--ink); }
+  .in-tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent-ink); }
+  .un-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .un-table th, .un-table td { border: 1px solid var(--rule); padding: 5px 10px; text-align: left; white-space: nowrap; }
+  .un-table thead th { font-size: 11.5px; font-weight: 600; color: var(--dim); background: var(--page); }
+  .un-table .un-div { border-left: 2px solid var(--rule-hard); }
+  .un-table tr.un-group th { background: var(--surface); font-weight: 600; color: var(--ink); cursor: pointer; }
+  .un-table tr.un-group .mono { font-size: 11.5px; font-weight: 400; color: var(--dim); margin-left: 6px; }
+  .un-table tr.un-group .un-step { font-size: 12px; font-weight: 400; color: var(--dim); margin-left: 10px; }
+  .un-tog { display: inline-block; width: 18px; padding: 0; margin-right: 4px; font: inherit; font-size: 16px; line-height: 1; color: var(--faint); background: none; border: none; cursor: pointer; vertical-align: -1px; }
+  .un-tog[aria-expanded="false"]::before { content: "\25B8"; } .un-tog[aria-expanded="true"]::before { content: "\25BE"; }
+  .in-bar { display: inline-block; width: 90px; height: 7px; border-radius: 999px; background: var(--surface-2); vertical-align: middle; overflow: hidden; margin: 0 8px 0 14px; }
+  .in-bar i { display: block; height: 100%; background: var(--good); border-radius: 999px; }
+  .in-frac { font-variant-numeric: tabular-nums; font-size: 12.5px; font-weight: 400; }
+  .un-table td a { color: var(--accent-ink); text-decoration: none; } .un-table td a:hover { text-decoration: underline; }
+  .un-table td .mono { font-size: 12px; }
+  .un-tick { color: var(--good); font-weight: 600; }
+  .un-when { font-size: 11.5px; color: var(--dim); margin-left: 5px; }
+  .un-none { color: var(--faint); }
+  .un-open { float: right; font-size: 12px; font-weight: 400; color: var(--accent-ink); text-decoration: none; }
+  .un-note td { color: var(--dim); font-style: italic; }
+</style>
+{# #218 (Anselmo's units table, 2026-11): the plan's components as groups of their items, the same columns for all, split before / after installation. A group's rows load when it is opened; a tick links that item's record, "Record" its checklist form. #}
+
+<div class="es-page">
+  <div class="es-crumbs">
+    <a href="{% url 'explore:installation_overview' %}">Installation</a>
+    <span class="sep">›</span>{% if type_url %}<a href="{{ type_url }}">{{ type_name }}</a>{% else %}{{ type_name }}{% endif %}
+  </div>
+  {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+  <div style="display:flex; align-items:baseline; gap:12px; flex-wrap:wrap;">
+    <h1>{{ type_name }}</h1>
+    <span class="mono" style="font-size:12px; color:var(--dim);">{{ part_type_id }}</span>
+  </div>
+  {% if has_plan %}
+  <div class="in-tabs"><a class="in-tab" aria-selected="false" href="{{ plan_url }}">Steps</a><a class="in-tab" aria-selected="true" href="">Units</a></div>
+  <p class="es-sub">Every item of every component. A tick opens the item’s record; Record opens the checklist that records that stage.</p>
+  {% if steps %}
+  <div class="tbl-scroll"><table class="un-table" id="un-table" data-url="{{ units_url }}">
+    <thead><tr><th>Unit</th><th>Status</th><th>Location</th><th>QC before installation</th><th class="un-div">Installed</th><th>Position</th><th>Readout port</th><th>QC after installation</th></tr></thead>
+    {% for s in steps %}{% for p in s.parts %}
+    <tbody data-group="{{ p.key }}">
+      <tr class="un-group"><th colspan="8"><button type="button" class="un-tog" aria-expanded="false" aria-label="Show the items"></button>{{ p.label }}<span class="mono">{{ p.type }}</span><span class="un-step">step {{ s.step }} · {{ s.label }}</span><span class="in-bar"><i style="width:{% if p.count %}{% widthratio p.shown p.count 100 %}{% else %}0{% endif %}%"></i></span><span class="in-frac">{% if p.n is None %}—{% else %}{{ p.n }}{% endif %} / {{ p.count }}</span><a class="un-open" href="{{ p.units_url }}">open &#9656;</a></th></tr>
+    </tbody>
+    {% endfor %}{% endfor %}
+  </table></div>
+  <script>
+  (function () {
+    // a group's rows are fetched the first time it is opened, then just shown or hidden
+    var tbl = document.getElementById("un-table");
+    tbl.addEventListener("click", function (e) {
+      var head = e.target.closest("tr.un-group"); if (!head || e.target.closest("a")) return;
+      var body = head.parentNode, tog = head.querySelector(".un-tog"), open = tog.getAttribute("aria-expanded") !== "true";
+      tog.setAttribute("aria-expanded", open);
+      if (body.dataset.loaded) { body.querySelectorAll("tr:not(.un-group)").forEach(function (r) { r.hidden = !open; }); return; }
+      body.dataset.loaded = "1";
+      head.insertAdjacentHTML("afterend", '<tr class="un-note"><td colspan="8">Reading from HWDB…</td></tr>');
+      fetch(tbl.dataset.url + "?group=" + encodeURIComponent(body.dataset.group), {credentials: "same-origin"})
+        .then(function (r) { if (!r.ok) throw 0; return r.text(); })
+        .then(function (h) { body.querySelector(".un-note").remove(); head.insertAdjacentHTML("afterend", h); if (tog.getAttribute("aria-expanded") !== "true") body.querySelectorAll("tr:not(.un-group)").forEach(function (r) { r.hidden = true; }); })
+        .catch(function () { body.querySelector(".un-note td").textContent = "Could not read the items from HWDB."; delete body.dataset.loaded; });
+    });
+  })();
+  </script>
+  {% else %}
+  <p class="ps-empty">No step of this plan lists a component yet.</p>
+  {% endif %}
+  {% else %}
+  <p class="ps-empty">No installation plan on this type yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

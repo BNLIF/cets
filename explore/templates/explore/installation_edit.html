@@ -54,7 +54,7 @@
   .in-comp { width: 100%; border-collapse: collapse; font-size: 13px; }
   .in-comp td { padding: 4px 8px 4px 0; border-bottom: 1px solid var(--rule-soft); vertical-align: middle; }
   .in-comp td.ty .mono { font-size: 11.5px; color: var(--dim); margin-left: 6px; }
-  .in-comp td.cnt { width: 90px; } .in-comp td.chk { width: 240px; } .in-comp td.btns { text-align: right; white-space: nowrap; width: 110px; }
+  .in-comp td.cnt { width: 80px; } .in-comp td.chk { width: 170px; } .in-comp td.btns { text-align: right; white-space: nowrap; width: 110px; }
   .in-ib { font: inherit; font-size: 12px; line-height: 1; padding: 3px 6px; border-radius: 6px; cursor: pointer; color: var(--dim); background: var(--page); border: 1px solid var(--rule); }
   a.in-ib { text-decoration: none; display: inline-block; }
   .in-ib:hover:not(:disabled) { border-color: var(--rule-hard); color: var(--ink); }
@@ -97,7 +97,7 @@
         <div class="in-out" id="in-out" aria-label="Outline"></div>
         <div class="in-pane" id="in-pane"></div>
       </div>
-      <p class="in-form" id="in-hint" hidden>Zone, then its steps: <span class="mono">number | name | after 3, 4 | P6 activity | short description</span>; under a step its components, <span class="mono">TYPEID x count | checklist</span>, its details on lines starting <span class="mono">&gt;</span>, and <span class="mono">status: Done</span> when its status is set by hand.</p>
+      <p class="in-form" id="in-hint" hidden>Zone, then its steps: <span class="mono">number | name | after 3, 4 | P6 activity | short description</span>; under a step its components, <span class="mono">TYPEID x count | installation checklist | QC-before | QC-after</span>, its details on lines starting <span class="mono">&gt;</span>, and <span class="mono">status: Done</span> when its status is set by hand.</p>
       <textarea class="in-text" name="plan" id="in-text" hidden spellcheck="false" aria-label="Plan as text" placeholder="Top drift volume&#10;  7 | CRP support structures | after 6&#10;    D08100200001 x 80 | Installation&#10;  8 | Top CRPs | after 7 | 13122.A12834 | Two CRUs are joined, raised and cabled.&#10;    D08100100001 x 80 | Installation&#10;    > Drawings: [EDMS](https://…)">{{ text }}</textarea>
       <input type="text" class="in-reason" name="reason" placeholder="reason — kept with this version">
       <div class="in-actions">
@@ -140,14 +140,20 @@
         }).join("") + '<button type="button" class="in-o-add zone" data-add="zone">+ zone</button>';
       }
       function field(k, label, v, extra) { return '<div class="in-f"><label for="in-' + k + '">' + label + '</label><input type="text" id="in-' + k + '" data-k="' + k + '" value="' + esc(v) + '"' + (extra || "") + "></div>"; }
+      function pickC(p, j, k, none, title) {   // one of a component's three checklists, off its type's list
+        var opts = (lists[p.type] || []).slice(); if (p[k] && opts.indexOf(p[k]) < 0) opts.unshift(p[k]);
+        return '<td class="chk"><select data-p="' + j + '" data-k="' + k + '" aria-label="' + title + '" title="' + title + '"><option value="">' + none + "</option>" +
+          opts.map(function (c) { return "<option" + (c === p[k] ? " selected" : "") + ">" + esc(c) + "</option>"; }).join("") + "</select></td>";
+      }
       function drawComps() {
         var s = cur(), box = document.getElementById("in-comps"); if (!s || !box) return;
         box.innerHTML = s.parts.length ? '<table class="in-comp"><tbody>' + s.parts.map(function (p, j) {
-          var has = D.plans.indexOf(p.type) >= 0, opts = (lists[p.type] || []).slice(); if (p.checklist && opts.indexOf(p.checklist) < 0) opts.unshift(p.checklist);
+          var has = D.plans.indexOf(p.type) >= 0;
           return '<tr><td class="ty">' + esc(names[p.type] || "not in the mirror") + '<span class="mono">' + p.type + "</span></td>" +
             '<td class="cnt"><input type="text" inputmode="numeric" data-p="' + j + '" data-k="count" value="' + esc(p.count) + '" aria-label="How many" title="How many"></td>' +
-            '<td class="chk"><select data-p="' + j + '" data-k="checklist" aria-label="Checklist that records it" title="The checklist whose record means installed"><option value="">checklist —</option>' +
-            opts.map(function (c) { return "<option" + (c === p.checklist ? " selected" : "") + ">" + esc(c) + "</option>"; }).join("") + "</select></td>" +
+            pickC(p, j, "before", "QC before —", "The checklist that records its QC before installation") +
+            pickC(p, j, "checklist", "installation —", "The checklist whose record means installed") +
+            pickC(p, j, "after", "QC after —", "The checklist that records its QC after installation") +
             '<td class="btns"><a class="in-ib" target="_blank" rel="noopener" href="' + D.plan.replace("X00000000000", p.type) + '" title="' + (has ? "This component’s own installation plan — opens in a new tab" : "Give this component an installation plan of its own — opens in a new tab") + '">' + (has ? "&#9998; plan" : "+ plan") + "</a> " +
             '<button type="button" class="in-ib" data-do="pdel" data-p="' + j + '" title="Remove the component">&#10005;</button></td></tr>';
         }).join("") + "</tbody></table>" : '<p class="in-none">None yet.</p>';
@@ -257,7 +263,7 @@
         var h = e.target.closest("#in-hits button[data-t]");
         if (h) {
           if (h.dataset.n) names[h.dataset.t] = h.dataset.n;
-          cur().parts.push({type: h.dataset.t, count: 0, checklist: ""});
+          cur().parts.push({type: h.dataset.t, count: 0, checklist: "", before: "", after: ""});
           document.getElementById("in-q").value = ""; document.getElementById("in-hits").hidden = true; drawComps(); document.getElementById("in-q").focus(); return;
         }
         var b = e.target.closest("button[data-do]"); if (!b) return;
@@ -305,7 +311,11 @@
             while (f.length > 2 && !f[f.length - 1]) f.pop();
             o.push("  " + f.join(" | "));
             if (s.status) o.push("    status: " + LAB[s.status]);
-            s.parts.forEach(function (p) { o.push("    " + p.type + " x " + p.count + (p.checklist ? " | " + p.checklist : "")); });
+            s.parts.forEach(function (p) {
+              var g = [p.type + " x " + p.count, p.checklist, p.before || "", p.after || ""];
+              while (g.length > 1 && !g[g.length - 1]) g.pop();
+              o.push("    " + g.join(" | "));
+            });
             if (s.details) s.details.split("\n").forEach(function (ln) { o.push(("    > " + ln).replace(/\s+$/, "")); });
           });
         });
@@ -319,7 +329,7 @@
           var sm = raw.trim().match(/^status\s*:\s*(.*)$/i);
           if (sm && c) { var key = KEY[sm[1].trim().toLowerCase()]; if (key) c.status = key; else ok = false; return; }
           var f = raw.trim().split("|").map(function (x) { return x.trim(); }), m = f[0].match(/^([A-Za-z]\d{11})\s*[x×]\s*([\d,]+)$/), st = f[0].match(/^(\d+)\s*\*?$/);
-          if (m) { if (c) c.parts.push({type: m[1].toUpperCase(), count: parseInt(m[2].replace(/,/g, ""), 10), checklist: f[1] || ""}); else ok = false; }
+          if (m) { if (c) c.parts.push({type: m[1].toUpperCase(), count: parseInt(m[2].replace(/,/g, ""), 10), checklist: f[1] || "", before: f[2] || "", after: f[3] || ""}); else ok = false; }
           else if (st) { c = {n: +st[1], status: "", name: f[1] || "", zone: zone, after: ((f[2] || "").match(/\d+/g) || []).map(Number), p6: f[3] || "", note: f.slice(4).join(" | "), details: "", parts: []}; o.push(c); }
           else if (f.length === 1 && !/^[ \t]/.test(raw)) { zone = f[0]; c = null; }
           else ok = false;

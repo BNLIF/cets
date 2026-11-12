@@ -868,14 +868,14 @@ def _installation_resolve(api, inst, steps: list[dict], plan_type: str = "") -> 
     want: dict[str, set] = {}
     for s in steps:
         for p in s["parts"]:
-            want.setdefault(p["type"], set()).add(p["checklist"])
+            want.setdefault(p["type"], set()).update({p["checklist"], p.get("before") or "", p.get("after") or ""})
 
     def _one(cli, tid):
         listing = production._listing(cli, tid)
         avail = checklistforms.active(cli, tid, rows=listing)
         acts = {c["name"].lower(): c for c in avail if not c["procedure"]}
         out = {}
-        for name in want[tid]:
+        for name in want[tid] - {""}:
             c = acts.get(name.lower())
             tt = ""
             if c:
@@ -889,13 +889,17 @@ def _installation_resolve(api, inst, steps: list[dict], plan_type: str = "") -> 
                 "procedures": [c["name"] for c in avail if c["procedure"]]}
 
     got = parts.fetch_map(api, _one, list(want))
+    def _tt(p, k):
+        return (((got.get(p["type"]) or {}).get("by") or {}).get(p.get(k) or "") or {}).get("test_type", "")
+
     return [{**s, "parts": [{**p, **((got.get(p["type"]) or {}).get("by") or {}).get(p["checklist"], {"test_type": ""}),
+                             "before_tt": _tt(p, "before"), "after_tt": _tt(p, "after"),
                              "own_plan": bool((got.get(p["type"]) or {}).get("own_plan")),
                              "procedures": (got.get(p["type"]) or {}).get("procedures") or []} for p in s["parts"]]}
             for s in steps]
 
 
-def _installation_rows(request, inst, steps: list[dict]) -> list[dict]:
+def _installation_rows(request, inst, steps: list[dict], plan_type: str = "") -> list[dict]:
     """The steps table of a plan whose parts are resolved, off the mirror."""
     ids = [p["type"] for s in steps for p in s["parts"]]
     rows = installation.table(steps, installation.installed(inst, steps), production.names(inst, ids))
@@ -904,6 +908,7 @@ def _installation_rows(request, inst, steps: list[dict]) -> list[dict]:
             r["type_url"] = _rev(request, "explore:home") + f"?node={r['type']}"
             r["items_url"] = _rev(request, "explore:type_items", args=[r["type"]])
             r["plan_url"] = _rev(request, "explore:installation_plan", args=[r["type"]]) if r["own_plan"] else ""
+            r["units_url"] = _rev(request, "explore:installation_units_of", args=[plan_type, r["key"]]) if plan_type else ""
             r["checklist_url"] = _rev(request, "explore:type_checklist", args=[r["type"], r["checklist"]]) if r["checklist"] and r["n"] is not None else ""
             r["procedures"] = [{"name": c, "url": _rev(request, "explore:type_checklist", args=[r["type"], c])} for c in r["procedures"]]
     return rows
@@ -963,7 +968,7 @@ def explore_installation_plan_view(request, part_type_id):
     if steps is not None:
         steps = _installation_resolve(api, inst, steps, part_type_id)
     installation.cache(inst, part_type_id, steps)
-    rows = _installation_rows(request, inst, steps or [])
+    rows = _installation_rows(request, inst, steps or [], part_type_id)
     return render(request, "explore/installation_plan.html", {
         "active_nav": "installation",
         "sidebar": navigation.sidebar_tree(inst, {}),
@@ -976,9 +981,117 @@ def explore_installation_plan_view(request, part_type_id):
         "n_versions": len(vs),
         "last": vs[0] if vs else None,
         "edit_url": _rev(request, "explore:installation_edit", args=[part_type_id]),
+        "units_url": _rev(request, "explore:installation_units", args=[part_type_id]),
         "can_edit": can_edit,   # the edit page applies the type's roles itself
         "file_name": installation.plan_name(part_type_id),
         **installation.summary(rows),
+    })
+
+
+def _installation_units(request, api, inst, part: dict, cols: list[dict], page: int) -> dict:
+    """#218: one page of a component's items for a units table — the
+    type's live listing, ``installation.UNITS_PAGE`` items a call (status,
+    location, specifications), and the mirror's records of the columns'
+    test types for those items. ``{rows, page, pages, total}``; raises
+    what the client raises."""
+    body = api._make_request("GET", f"component-types/{part['type']}/components",
+                             params={"page": page, "size": installation.UNITS_PAGE})
+    listing = body.get("data") or []
+    pag = body.get("pagination") or {}
+    tts = [c["tt"] for c in cols if c["tt"]]
+    records = {(pid, tt): (when, by) for pid, tt, when, by in (
+        HwdbTestEvent.for_instance(inst)
+        .filter(part_id__in=[r.get("part_id") for r in listing], test_type_name__in=tts)
+        .order_by("created").values_list("part_id", "test_type_name", "created", "created_by"))} if tts else {}
+    rows = installation.units(cols, listing, records)
+    for r in rows:
+        r["url"] = _rev(request, "explore:part", args=[r["pid"]])
+        r["status"] = parts.normalize_status(r["status"]) or ""
+        r["location"] = _location_label(r["location"])
+        for c in r["cells"]:
+            if c:
+                c["url"] = _rev(request, "explore:checklist", args=[r["pid"], c["name"]])
+    return {"rows": rows, "page": page, "pages": pag.get("pages") or 1, "total": pag.get("total")}
+
+
+@login_not_required
+@fnal_login_required
+def explore_installation_units_view(request, part_type_id, group=""):
+    """#218 (Anselmo's units table): a plan's components as groups of
+    their items — Unit, HWDB status, location, QC before installation ‖
+    installed, position, readout port, QC after installation. The Units
+    page reads the plan live (as the Steps page does) and lists the
+    groups; a group's first items load when it is opened
+    (``?group=<step>-<type>``, a partial). ``units/<step>-<type>/`` is a
+    component's own page: all its items a page at a time, and, when the
+    type has a plan of its own, one column per step of that plan instead
+    of the three stages. A tick links that item's record, an empty cell
+    its checklist form."""
+    inst = instance_of(request)
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': request.get_full_path(), 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(_rev(request, "explore:installation_overview"))
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    node = HierarchyNode.for_instance(inst).filter(
+        level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
+    base = {"active_nav": "installation", "sidebar": navigation.sidebar_tree(inst, {}), "side_hidden": True,
+            "part_type_id": part_type_id, "type_name": (node.name if node else "") or part_type_id,
+            "plan_url": _rev(request, "explore:installation_plan", args=[part_type_id]),
+            "units_url": _rev(request, "explore:installation_units", args=[part_type_id])}
+    inline = request.GET.get("group") or ""
+    if inline or group:
+        # one component: off the cached (resolved) plan when it is there — the Units and Steps pages have just rewritten it
+        cached = InstallationPlan.for_instance(inst).filter(part_type_id=part_type_id).first()
+        steps = cached.steps if cached else None
+        if steps is None and group:
+            steps, _vs = installation.read(api, part_type_id)
+            steps = _installation_resolve(api, inst, steps, part_type_id) if steps is not None else None
+            installation.cache(inst, part_type_id, steps)
+        found = next(((s, p) for s in steps or [] for p in s["parts"] if f"{s['n']}-{p['type']}" == (inline or group)), None)
+        if found is None:
+            raise Http404("No such component in this plan.")
+        step, part = found
+        own = None
+        if group and part.get("own_plan"):   # its own page shows its own plan's steps as the columns
+            own, _vs = installation.read(api, part["type"])
+            own = _installation_resolve(api, inst, own, part["type"]) if own is not None else None
+            installation.cache(inst, part["type"], own)
+        cols = installation.unit_columns(part, own)
+        try:
+            page = max(1, int(request.GET.get("page") or 1))
+        except ValueError:
+            page = 1
+        try:
+            data = _installation_units(request, api, inst, part, cols, page)
+        except Exception:
+            logger.exception("installation units: listing of %s failed", part["type"])
+            data = {"failed": True, "rows": [], "page": 1, "pages": 1, "total": None}
+        own_url = _rev(request, "explore:installation_units_of", args=[part_type_id, f"{step['n']}-{part['type']}"])
+        if inline:
+            return render(request, "explore/_installation_units_rows.html", {**data, "own_url": own_url, "inline": True, "standard": True, "n_cols": 8})
+        nm = production.names(inst, [part["type"]])
+        return render(request, "explore/installation_units_of.html", {
+            **base, **data, "cols": cols, "n_cols": len(cols) + 5, "step": step, "part": part,
+            "comp_name": nm.get(part["type"]) or part["type"],
+            "comp_url": navigation.leaf_path_for(inst, part["type"]) or "",
+            "own_plan_url": _rev(request, "explore:installation_plan", args=[part["type"]]) if part.get("own_plan") else "",
+            "page_range": range(1, data["pages"] + 1) if data["pages"] <= 12 else None,
+        })
+    steps, _vs = installation.read(api, part_type_id)
+    if steps is not None:
+        steps = _installation_resolve(api, inst, steps, part_type_id)
+    installation.cache(inst, part_type_id, steps)
+    rows = _installation_rows(request, inst, steps or [], part_type_id)
+    return render(request, "explore/installation_units.html", {
+        **base,
+        "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
+        "steps": [r for r in rows if r["kind"] == "step" and r["parts"]],
+        "has_plan": steps is not None,
     })
 
 

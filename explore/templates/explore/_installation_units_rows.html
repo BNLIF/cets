@@ -1,0 +1,19 @@
+{# #218: a page of a component's item rows — rows = installation.units(...) with the URLs added by the view; standard = Anselmo's three stages (QC before ‖ installed, position, port, QC after), else one cell per step of the component's own plan, then position and port; inline = inside the Units page's group, whose last row leads to the component's own page; failed = the type's listing could not be read #}
+{% if failed %}<tr class="un-note"><td colspan="{{ n_cols }}">Could not read the items from HWDB.</td></tr>
+{% else %}{% for r in rows %}<tr>
+  <td><a class="mono" href="{{ r.url }}">{{ r.pid }}</a>{% if r.serial %} <span class="un-when">{{ r.serial }}</span>{% endif %}</td>
+  <td>{{ r.status|default:"—" }}</td>
+  <td>{{ r.location }}</td>
+  {% if standard %}
+  {% include "explore/_installation_units_cell.html" with c=r.cells.0 cls="" %}
+  {% include "explore/_installation_units_cell.html" with c=r.cells.1 cls="un-div" %}
+  <td{% if not r.position %} class="un-none"{% endif %}>{{ r.position|default:"—" }}</td>
+  <td{% if not r.port %} class="un-none"{% endif %}>{{ r.port|default:"—" }}</td>
+  {% include "explore/_installation_units_cell.html" with c=r.cells.2 cls="" %}
+  {% else %}
+  {% for c in r.cells %}{% include "explore/_installation_units_cell.html" with cls="" %}{% endfor %}
+  <td class="un-div{% if not r.position %} un-none{% endif %}">{{ r.position|default:"—" }}</td>
+  <td{% if not r.port %} class="un-none"{% endif %}>{{ r.port|default:"—" }}</td>
+  {% endif %}
+</tr>{% empty %}<tr class="un-note"><td colspan="{{ n_cols }}">No item of this type in HWDB yet.</td></tr>{% endfor %}
+{% if inline and pages > 1 %}<tr class="un-note"><td colspan="{{ n_cols }}">The first {{ rows|length }}{% if total %} of {{ total }}{% endif %} — <a href="{{ own_url }}">all its items &#9656;</a></td></tr>{% endif %}{% endif %}

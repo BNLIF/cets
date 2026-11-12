@@ -43,6 +43,10 @@
   .in-bar i { display: block; height: 100%; background: var(--good); border-radius: 999px; }
   .in-frac { font-variant-numeric: tabular-nums; font-size: 12.5px; }
   .in-panel .in-desc p { margin: 6px 0 0; } .in-panel .in-desc ul, .in-panel .in-desc ol { margin: 6px 0 0; padding-left: 20px; }
+  .in-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--rule); margin: 10px 0 14px; }
+  .in-tab { font-size: 14px; font-weight: 600; color: var(--dim); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 6px 14px 8px; }
+  .in-tab:hover { color: var(--ink); }
+  .in-tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent-ink); }
   .in-state { font-size: 12px; white-space: nowrap; }
   .in-state.done { color: var(--good); } .in-state.prog { color: var(--accent-ink); } .in-state.todo { color: var(--faint); }
   .in-file { color: var(--faint); font-size: 12px; margin-top: 10px; }
@@ -63,6 +67,7 @@
     {% if can_edit %}<a class="btn btn-sm" style="margin-left:auto;" href="{{ edit_url }}">&#9998; Edit plan</a>{% endif %}
   </div>
   {% if has_plan %}
+  <div class="in-tabs"><a class="in-tab" aria-selected="true" href="">Steps</a><a class="in-tab" aria-selected="false" href="{{ units_url }}">Units</a></div>
   <p class="es-sub">Installation plan — {{ n_steps }} step{{ n_steps|pluralize }}, {{ n_done }} done, {{ n_prog }} in progress. Installed counts the items with a record of the component’s checklist.</p>
   <div class="in-cols"><div class="in-main">
   <div class="ps-bar"><button type="button" class="ps-fold-btn" data-fold="open">Expand all</button><button type="button" class="ps-fold-btn" data-fold="close">Collapse all</button></div>
@@ -79,7 +84,7 @@
       <td class="cl-const{% if not r.p6_date %} ps-none{% endif %}"{% if r.p6 %} title="P6 {{ r.p6 }}{% if r.p6_name %}: {{ r.p6_name }}{% endif %}"{% endif %}>{% if r.p6_date %}{{ r.p6_date|date:"j M Y" }}{% else %}—{% endif %}{% if r.p6_missing %} <span class="ps-warn" title="{{ r.p6 }} is not in the uploaded P6 schedule as an installation activity">&#9888;</span>{% endif %}</td>
       <td class="cl-const"><span class="in-state {{ r.state }}"{% if r.status %} title="Set by hand{% if r.status_by %} by {{ r.status_by }}{% endif %}{% if r.status_on %}, {{ r.status_on }}{% endif %}"{% endif %}>{{ r.state_label }}</span>{% if r.warn %} <span class="ps-warn" title="{{ r.warn }}">&#9888;</span>{% endif %}</td>
       {% else %}
-      <th scope="row" class="cl-rowlab" style="padding-left:36px;"><span class="ps-tog ps-tog-none"></span><a href="{{ r.type_url }}" title="the type’s page">{{ r.label }}</a>{% if r.plan_url %}<a class="in-own" href="{{ r.plan_url }}" title="This component has an installation plan of its own">own plan &#9656;</a>{% endif %}</th>
+      <th scope="row" class="cl-rowlab" style="padding-left:36px;"><span class="ps-tog ps-tog-none"></span><a href="{{ r.type_url }}" title="the type’s page">{{ r.label }}</a><a class="in-own" href="{{ r.units_url }}" title="Its items, stage by stage">units &#9656;</a>{% if r.plan_url %}<a class="in-own" href="{{ r.plan_url }}" title="This component has an installation plan of its own">own plan &#9656;</a>{% endif %}</th>
       <td class="cl-const">{% if r.n is None %}<span class="in-bar"></span><span class="in-frac">— / {{ r.count }}</span> <span class="ps-warn" title="{{ r.problem }}">&#9888;</span>{% else %}<span class="in-bar"><i style="width:{% if r.count %}{% widthratio r.shown r.count 100 %}{% else %}0{% endif %}%"></i></span><span class="in-frac"><a href="{{ r.items_url }}" title="The type’s items and their records">{{ r.n }}</a> / {{ r.count }}</span>{% endif %}</td>
       <td class="cl-const{% if not r.checklist %} ps-none{% endif %}">{% if r.checklist_url %}<a href="{{ r.checklist_url }}" title="Choose an item and record it">{{ r.checklist }}</a>{% else %}{{ r.checklist|default:"—" }}{% endif %}</td>
       <td class="cl-const ps-none"></td>
@@ -99,7 +104,7 @@
     {% if r.warn %}<p><span class="ps-warn">&#9888;</span> {{ r.warn }}</p>{% endif %}
     <h3>Components</h3>
     {% for p in r.parts %}<div class="in-comp">
-      <a href="{{ p.type_url }}" title="the type’s page">{{ p.label }}</a> <span class="mono">{{ p.type }}</span>{% if p.plan_url %} · <a href="{{ p.plan_url }}">own plan &#9656;</a>{% endif %}<br>
+      <a href="{{ p.type_url }}" title="the type’s page">{{ p.label }}</a> <span class="mono">{{ p.type }}</span> · <a href="{{ p.units_url }}">units &#9656;</a>{% if p.plan_url %} · <a href="{{ p.plan_url }}">own plan &#9656;</a>{% endif %}<br>
       <span class="in-dim">{% if p.n is None %}&#9888; {{ p.problem }}{% else %}<a href="{{ p.items_url }}" title="The type’s items and their records">{{ p.n }}</a> of {{ p.count }} installed{% endif %}{% if p.checklist %} · recorded by {% if p.checklist_url %}<a href="{{ p.checklist_url }}" title="Choose an item and record it">{{ p.checklist }}</a>{% else %}{{ p.checklist }}{% endif %}{% endif %}</span>
       {% if p.procedures %}<br><span class="in-dim">Procedures: {% for c in p.procedures %}<a href="{{ c.url }}">{{ c.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</span>{% endif %}
     </div>{% empty %}<p class="in-dim">None listed.</p>{% endfor %}
