@@ -408,6 +408,7 @@ def explore_production_overview_view(request):
     return render(request, "explore/production_overview.html", {
         "active_nav": "production",
         "sidebar": navigation.sidebar_tree(inst, {}),
+        "side_hidden": True,
         "status_types": status_types,
         "detectors": detectors if len(detectors) > 1 else [],
         "can_edit": inst in settings.HWDB_WRITE_INSTANCES,   # Chao 2026-11-04: the ✎ on a row without a plan, as on the live page
@@ -425,6 +426,7 @@ def explore_production_schedule_view(request):
     return render(request, "explore/production_schedule.html", {
         "active_nav": "production",
         "sidebar": navigation.sidebar_tree(inst, {}),
+        "side_hidden": True,
         "p6": p6.current(),
         "activities": acts,
         "sheets": sorted({a.sheet for a in acts}),
@@ -563,6 +565,7 @@ def explore_production_status_view(request, part_type_id):
     return render(request, "explore/production_status.html", {
         "active_nav": "production",
         "sidebar": navigation.sidebar_tree(inst, {}),
+        "side_hidden": True,
         "part_type_id": part_type_id,
         "type_name": (node.name if node else "") or part_type_id,
         "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
@@ -677,6 +680,7 @@ def explore_production_plan_view(request, part_type_id):
     return render(request, "explore/production_plan.html", {
         "active_nav": "production",
         "sidebar": navigation.sidebar_tree(inst, {}),
+        "side_hidden": True,
         "part_type_id": part_type_id,
         "type_name": (node.name if node else "") or part_type_id,
         "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
@@ -762,6 +766,7 @@ def explore_production_list_view(request, part_type_id):
     return render(request, "explore/production_list.html", {
         "active_nav": "production",
         "sidebar": navigation.sidebar_tree(inst, {}),
+        "side_hidden": True,
         "part_type_id": part_type_id,
         "type_name": (node.name if node else "") or part_type_id,
         "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
@@ -839,6 +844,7 @@ def explore_production_resources_view(request, part_type_id):
     return render(request, "explore/production_resources.html", {
         "active_nav": "production",
         "sidebar": navigation.sidebar_tree(inst, {}),
+        "side_hidden": True,
         "part_type_id": part_type_id,
         "type_name": (node.name if node else "") or part_type_id,
         "rows": table,
@@ -913,6 +919,7 @@ def explore_installation_overview_view(request):
     return render(request, "explore/installation_overview.html", {
         "active_nav": "installation",
         "sidebar": navigation.sidebar_tree(inst, {}),
+        "side_hidden": True,   # the tree starts folded here — the table wants the width; ☰ shows it (Chao 2026-11-13)
         "plans": [{"part_type_id": p.part_type_id, "name": nm.get(p.part_type_id) or p.part_type_id,
                    "url": _rev(request, "explore:installation_plan", args=[p.part_type_id]),
                    "read_at": p.read_at, **installation.summary(_installation_rows(request, inst, p.steps))}
@@ -950,6 +957,7 @@ def explore_installation_plan_view(request, part_type_id):
     return render(request, "explore/installation_plan.html", {
         "active_nav": "installation",
         "sidebar": navigation.sidebar_tree(inst, {}),
+        "side_hidden": True,   # the tree starts folded here — the table wants the width; ☰ shows it (Chao 2026-11-13)
         "part_type_id": part_type_id,
         "type_name": (node.name if node else "") or part_type_id,
         "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
@@ -1015,6 +1023,7 @@ def explore_installation_edit_view(request, part_type_id):
     return render(request, "explore/installation_edit.html", {
         "active_nav": "installation",
         "sidebar": navigation.sidebar_tree(inst, {}),
+        "side_hidden": True,   # the tree starts folded here — the table wants the width; ☰ shows it (Chao 2026-11-13)
         "part_type_id": part_type_id,
         "type_name": (node.name if node else "") or part_type_id,
         "text": text,

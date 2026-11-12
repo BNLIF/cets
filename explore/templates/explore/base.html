@@ -209,7 +209,7 @@
     {% endif %}
 
     <main class="eh-main">
-        <div class="ex-layout" id="ex-layout">
+        <div class="ex-layout" id="ex-layout"{% if side_hidden %} data-side-hidden{% endif %}>
             {# The aside always renders: on small screens it is the slide-in drawer and carries the main nav (#93); a page without a tree hides it on desktop via .ex-side-bare. #}
             <aside class="ex-side{% if not sidebar %} ex-side-bare{% endif %}" id="ex-side" aria-label="Hierarchy tree">
                 <nav class="ex-side-nav" aria-label="Main">
@@ -287,13 +287,14 @@
     (function () {
       var layout = document.getElementById("ex-layout");
       if (!layout) return;
-      if (localStorage.getItem("exSideCollapsed") === "1") layout.classList.add("collapsed");
+      var startHidden = layout.hasAttribute("data-side-hidden");   // a page that starts with the tree folded: ☰ shows it for this visit, the remembered choice of the other pages untouched
+      if (startHidden || localStorage.getItem("exSideCollapsed") === "1") layout.classList.add("collapsed");
       var narrow = window.matchMedia("(max-width: 900px)");
       var st = document.getElementById("side-toggle");
       if (st) st.addEventListener("click", function () {
         if (narrow.matches) { layout.classList.toggle("drawer-open"); return; }
         var hidden = layout.classList.toggle("collapsed");
-        localStorage.setItem("exSideCollapsed", hidden ? "1" : "0");
+        if (!startHidden) localStorage.setItem("exSideCollapsed", hidden ? "1" : "0");
         window.dispatchEvent(new Event("resize"));  // let charts refit
       });
       var scrim = document.getElementById("ex-scrim");
