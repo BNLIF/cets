@@ -856,12 +856,16 @@ def explore_production_resources_view(request, part_type_id):
     })
 
 
-def _installation_resolve(api, inst, steps: list[dict]) -> list[dict]:
-    """#217: the plan's steps with each part resolved live — ``test_type``
-    (the test type of the checklist the part names, "" when the type has
-    no such checklist or it sets none) and ``own_plan`` (the part's type
-    carries an installation plan of its own). One image listing per
-    distinct part type and one read per named checklist, in parallel."""
+def _installation_resolve(api, inst, steps: list[dict], plan_type: str = "") -> list[dict]:
+    """#217: the plan's steps with each part resolved live — ``used`` (the
+    checklist that counts, as the type names it: the part's own, or, when
+    the part's type carries a plan of its own with a step marked
+    installed, that step's — ``via`` its number), ``test_type`` (that
+    checklist's test type, "" when the type has no such checklist or it
+    sets none), ``own_plan`` and the type's ``procedures``. One image
+    listing per distinct part type, one read per checklist and one per
+    own plan, in parallel. ``plan_type`` is the type the plan sits on: its
+    own-type parts are the plan's own steps, not parts with a sub-plan."""
     want: dict[str, set] = {}
     for s in steps:
         for p in s["parts"]:
@@ -869,22 +873,27 @@ def _installation_resolve(api, inst, steps: list[dict]) -> list[dict]:
 
     def _one(cli, tid):
         listing = production._listing(cli, tid)
-        acts = {c["name"].lower(): c for c in checklistforms.active(cli, tid, rows=listing) if not c["procedure"]}
-        tts = {}
+        avail = checklistforms.active(cli, tid, rows=listing)
+        acts = {c["name"].lower(): c for c in avail if not c["procedure"]}
+        own = tid != plan_type and bool(production.versions(listing, installation.plan_name(tid)))
+        via = installation.installed_checklist(installation.read(cli, tid, rows=listing)[0], tid) if own else None
+        out = {}
         for name in want[tid]:
-            c = acts.get(name.lower())
-            tts[name] = ""
+            c = acts.get((via[1] if via else name).lower())
+            tt = ""
             if c:
                 try:
                     cfg = json.loads(cli.get_image_response(c["image_id"]).content)
-                    tts[name] = checklistforms.normalize(cfg, c["name"])["test_type_name"] if isinstance(cfg, dict) else ""
+                    tt = checklistforms.normalize(cfg, c["name"])["test_type_name"] if isinstance(cfg, dict) else ""
                 except Exception:
                     pass
-        return {"tts": tts, "own_plan": bool(production.versions(listing, installation.plan_name(tid)))}
+            out[name] = {"test_type": tt, "used": c["name"] if c else (via[1] if via else name), "via": via[0] if via else 0}
+        return {"by": out, "own_plan": own, "procedures": [c["name"] for c in avail if c["procedure"]]}
 
     got = parts.fetch_map(api, _one, list(want))
-    return [{**s, "parts": [{**p, "test_type": ((got.get(p["type"]) or {}).get("tts") or {}).get(p["checklist"], ""),
-                             "own_plan": bool((got.get(p["type"]) or {}).get("own_plan"))} for p in s["parts"]]}
+    return [{**s, "parts": [{**p, **((got.get(p["type"]) or {}).get("by") or {}).get(p["checklist"], {"test_type": ""}),
+                             "own_plan": bool((got.get(p["type"]) or {}).get("own_plan")),
+                             "procedures": (got.get(p["type"]) or {}).get("procedures") or []} for p in s["parts"]]}
             for s in steps]
 
 
@@ -897,6 +906,8 @@ def _installation_rows(request, inst, steps: list[dict]) -> list[dict]:
             r["type_url"] = _rev(request, "explore:home") + f"?node={r['type']}"
             r["items_url"] = _rev(request, "explore:type_items", args=[r["type"]])
             r["plan_url"] = _rev(request, "explore:installation_plan", args=[r["type"]]) if r["own_plan"] else ""
+            r["checklist_url"] = _rev(request, "explore:type_checklist", args=[r["type"], r["checklist"]]) if r["checklist"] and r["n"] is not None else ""
+            r["procedures"] = [{"name": c, "url": _rev(request, "explore:type_checklist", args=[r["type"], c])} for c in r["procedures"]]
     return rows
 
 
@@ -951,7 +962,7 @@ def explore_installation_plan_view(request, part_type_id):
         level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
     steps, vs = installation.read(api, part_type_id)
     if steps is not None:
-        steps = _installation_resolve(api, inst, steps)
+        steps = _installation_resolve(api, inst, steps, part_type_id)
     installation.cache(inst, part_type_id, steps)
     rows = _installation_rows(request, inst, steps or [])
     return render(request, "explore/installation_plan.html", {
@@ -998,6 +1009,7 @@ def explore_installation_edit_view(request, part_type_id):
         level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
     steps, vs = installation.read(api, part_type_id)
     text, errors = installation.to_text(steps or []), []
+    cached = InstallationPlan.for_instance(inst).filter(part_type_id=part_type_id).first()   # which components have a plan of their own, as last read
 
     if request.method == "POST":
         if not can_edit:
@@ -1028,6 +1040,15 @@ def explore_installation_edit_view(request, part_type_id):
         "type_name": (node.name if node else "") or part_type_id,
         "text": text,
         "errors": errors,
+        "editor": {"steps": steps or [], "start_text": bool(errors),   # a text that did not parse stays up as text
+                   "names": production.names(inst, [p["type"] for s in steps or [] for p in s["parts"]] + [part_type_id]),
+                   "p6": [a for a in p6.options() if a["kind"] == P6Activity.KIND_INSTALL],
+                   "search": _rev(request, "explore:search_api"),
+                   "summary": _rev(request, "explore:type_summary"),
+                   "checklists": _rev(request, "explore:checklist_names", args=["X00000000000"]),
+                   "plan": _rev(request, "explore:installation_edit", args=["X00000000000"]),   # a component row's "+ plan" / "✎ plan"
+                   "plans": sorted(set(InstallationPlan.for_instance(inst).exclude(part_type_id=part_type_id).values_list("part_type_id", flat=True))
+                                   | {p["type"] for s in (cached.steps if cached else []) for p in s.get("parts") or [] if p.get("own_plan")})},
         "n_versions": len(vs),
         "last": vs[0] if vs else None,
         "can_edit": can_edit,

@@ -29,20 +29,27 @@ Closing
   15 | Close the TCO"""
 STEPS = [
     {"n": 7, "name": "CRP support structures", "zone": "Top drift volume", "after": [6], "p6": "", "note": "",
-     "parts": [{"type": SS, "count": 2, "checklist": "Installation"}]},
+     "parts": [{"type": SS, "count": 2, "checklist": "Installation"}], "installed": False},
     {"n": 8, "name": "Top CRPs", "zone": "Top drift volume", "after": [7], "p6": "VD.INS.1", "note": "Two CRUs are joined | then raised.",
-     "parts": [{"type": CRP, "count": 2, "checklist": "installation"}, {"type": SS, "count": 1, "checklist": ""}]},
-    {"n": 15, "name": "Close the TCO", "zone": "Closing", "after": [], "p6": "", "note": "", "parts": []},
+     "parts": [{"type": CRP, "count": 2, "checklist": "installation"}, {"type": SS, "count": 1, "checklist": ""}], "installed": False},
+    {"n": 15, "name": "Close the TCO", "zone": "Closing", "after": [], "p6": "", "note": "", "parts": [], "installed": False},
 ]
+SUB_TEXT = f"""  1 | Join the CRUs
+    {CRP} x 2 | Installation
+  2* | Hang | after 1
+    {CRP} x 2 | Hang"""
 
 
-def _api(steps=STEPS):
+def _api(steps=STEPS, sub=None):
     api = mock.MagicMock(spec=FnalDbApiClient)
     files = {"plan": {"steps": steps}, "chk": {"name": "Installation", "test_type_name": "CRP installed", "sections": []},
-             "sub": {"steps": []}}
+             "sub": {"steps": sub or []}, "hang": {"name": "Hang", "test_type_name": "CRP hung", "sections": []},
+             "proc": {"name": "Drawings", "sections": []}}
     listing = {DET: [{"image_id": "plan", "image_name": f"Installation_plan_{DET}.json", "created": "2026-11-13T10:00:00", "comments": "first"}] if steps is not None else [],
                SS: [{"image_id": "chk", "image_name": f"Checklist_{SS}_Installation.json", "created": "2026-11-01T00:00:00"}],
                CRP: [{"image_id": "chk", "image_name": f"Checklist_{CRP}_Installation.json", "created": "2026-11-01T00:00:00"},
+                     {"image_id": "hang", "image_name": f"Checklist_{CRP}_Hang.json", "created": "2026-11-01T00:00:00"},
+                     {"image_id": "proc", "image_name": f"Checklist_{CRP}_Drawings.json", "created": "2026-11-01T00:00:00", "comments": "[procedure]"},
                      {"image_id": "sub", "image_name": f"Installation_plan_{CRP}.json", "created": "2026-11-02T00:00:00"}]}
     api.get_component_type_images.side_effect = lambda t: {"data": listing.get(t, [])}
     api.get_image_response.side_effect = lambda iid: mock.Mock(content=json.dumps(files[iid]).encode())
@@ -71,8 +78,8 @@ class EngineTest(TestCase):
     def test_bad_lines_are_named(self):
         steps, errors = installation.parse_text(f"  {SS} x 2\nZone\n  1 | a\n  1 | again\n  what is this\n")
         self.assertEqual([s["n"] for s in steps], [1])
-        self.assertEqual(errors, ["Line 1: a part needs a step above it.", "Line 4: step 1 is already there.",
-                                  "Line 5: write a step as “number | name”, a part as “TYPEID x count | checklist”."])
+        self.assertEqual(errors, ["Line 1: a component needs a step above it.", "Line 4: step 1 is already there.",
+                                  "Line 5: write a step as “number | name”, a component as “TYPEID x count | checklist”."])
 
     def test_table_counts_items_with_a_record(self):
         steps = [{**s, "parts": [{**p, "test_type": "CRP installed" if p["checklist"] else ""} for p in s["parts"]]} for s in STEPS]
@@ -85,7 +92,7 @@ class EngineTest(TestCase):
         self.assertEqual((by["8"]["n"], by["8"]["count"], by["8"]["state"], by["8"]["warn"]), (1, 3, "prog", ""))
         self.assertEqual(by["8"]["p6_date"], date(2028, 3, 1))
         self.assertEqual((by[f"8-{CRP}"]["n"], by[f"8-{CRP}"]["label"]), (1, CRP))
-        self.assertEqual((by[f"8-{SS}"]["n"], by[f"8-{SS}"]["problem"]), (None, "No checklist named for this part"))
+        self.assertEqual((by[f"8-{SS}"]["n"], by[f"8-{SS}"]["problem"]), (None, "No checklist named for this component"))
         self.assertEqual((by["15"]["n"], by["15"]["state"]), (None, "todo"))
         self.assertEqual(installation.summary(rows), {"n_steps": 3, "n_done": 1, "n_prog": 1})
         # a step started while the one before it is unfinished is marked, not locked
@@ -114,10 +121,12 @@ class PagesTest(TestCase):
         self.assertIn('<span class="in-no">8</span>Top CRPs<span class="in-note">Two CRUs are joined | then raised.</span>', html)
         self.assertIn(f'<a href="/hw/dev/?node={CRP}" title="the type’s page">Top CRP</a><a class="in-own" href="/hw/dev/installation/{CRP}/"', html)   # the CRP type has a plan of its own
         self.assertIn(f'<a href="/hw/dev/items/{CRP}/" title="The type’s items and their records">2</a>', html)   # "installation" finds the checklist Installation
-        self.assertIn('title="No checklist named for this part"', html)
+        self.assertIn('title="No checklist named for this component"', html)
         self.assertIn(f'href="{self.EDIT}">&#9998; Edit plan</a>', html)
         cached = InstallationPlan.objects.get(instance="dev", part_type_id=DET).steps
-        self.assertEqual(cached[1]["parts"][0], {"type": CRP, "count": 2, "checklist": "installation", "test_type": "CRP installed", "own_plan": True})
+        self.assertEqual(cached[1]["parts"][0], {"type": CRP, "count": 2, "checklist": "installation", "test_type": "CRP installed",
+                                                 "used": "Installation", "via": 0, "own_plan": True, "procedures": ["Drawings"]})
+        self.assertIn(f'<a href="/hw/dev/checklist/{CRP}/Installation/" title="Choose an item and record it">Installation</a> · <a href="/hw/dev/checklist/{CRP}/Drawings/" title="Procedure">Drawings</a>', html)
         html = self.client.get("/hw/dev/installation/").content.decode()   # the overview: the cache and the mirror alone
         self.assertIn(f'<a href="{self.PLAN}" title="Read it from HWDB now">FD-VD installation</a> <span class="mono">{DET}</span>', html)
         self.assertIn('<td class="num">3</td><td class="num">0</td><td class="num">1</td>', html)
@@ -129,12 +138,32 @@ class PagesTest(TestCase):
         self.assertIn(f'No installation plan on this type yet — <a href="{self.EDIT}">write one</a>.', html)
         self.assertFalse(InstallationPlan.objects.exists())
 
+    def test_a_component_plan_marks_the_step_that_counts(self):
+        sub, errors = installation.parse_text(SUB_TEXT)
+        self.assertEqual((errors, [s["installed"] for s in sub]), ([], [False, True]))
+        self.assertEqual(installation.to_text(sub), SUB_TEXT)
+        self.assertEqual(installation.parse_text("  1* | a\n  2* | b")[1], ["Line 2: only one step can be marked * (installed)."])
+        self.assertEqual(installation.installed_checklist(sub, CRP), (2, "Hang"))
+        _record(CRP, 1), _record(CRP, 2), _record(CRP, 1, "CRP hung")
+        m1, m2 = _mocked(_api(sub=sub))
+        with m1, m2:
+            html = self.client.get(self.PLAN).content.decode()   # the detector plan counts the CRPs by their own plan's marked step
+            own = self.client.get(f"/hw/dev/installation/{CRP}/").content.decode()
+        self.assertIn(f'<a href="/hw/dev/items/{CRP}/" title="The type’s items and their records">1</a>', html)
+        self.assertIn('>Hang</a> <span class="in-via" title="The step its own plan marks as installed">step 2 of its plan</span>', html)
+        # the component's own plan: its steps are records on the type itself, no "own plan" link to itself
+        self.assertIn('<span class="in-no">2</span>Hang <span class="in-mark"', own)
+        self.assertNotIn("in-own\"", own)
+        self.assertIn("Installation plan — 2 steps, 1 done, 1 in progress.", own)
+
     def test_edit_saves_a_version_caches_and_logs(self):
         api = _api()
         m1, m2 = _mocked(api)
         with m1, m2:
             html = self.client.get(self.EDIT).content.decode()
             self.assertIn(f"    {CRP} x 2 | installation\n", html)
+            self.assertIn('<table class="in-ed">', html)   # the row editor over the same text
+            self.assertIn(f'"checklists": "/hw/dev/checklist-names/X00000000000/"', html)
             r = self.client.post(self.EDIT, {"plan": "Zone\n  1 | a\n  nonsense", "reason": "x"})
             self.assertIn("Line 3: write a step as", r.content.decode())
             self.assertIn("  nonsense</textarea>", r.content.decode())   # the typed text stays

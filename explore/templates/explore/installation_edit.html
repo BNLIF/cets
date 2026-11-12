@@ -20,6 +20,32 @@
   .in-actions { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
   .in-file { color: var(--faint); font-size: 12px; margin-top: 10px; }
   .in-form { color: var(--dim); font-size: 12.5px; margin: 0 0 8px; }
+  /* the row editor: a step line, its note line, its parts */
+  .in-ed { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .in-ed th { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; text-align: left; padding: 2px 8px 4px 0; border-bottom: 1px solid var(--rule); }
+  .in-ed td { padding: 4px 8px 4px 0; vertical-align: middle; }
+  .in-ed tr.in-step td { border-top: 1px solid var(--rule); padding-top: 8px; }
+  .in-ed tr.in-part td:first-child { padding-left: 34px; white-space: nowrap; }
+  .in-ed tr.in-part .mono { font-size: 11.5px; color: var(--dim); margin-left: 6px; }
+  .in-ed input[type=text], .in-ed input[type=number], .in-ed select { font: inherit; font-size: 13px; color: var(--ink); padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); width: 100%; }
+  .in-ed .w-no { width: 56px; } .in-ed .w-n { width: 84px; } .in-ed .w-after { width: 90px; } .in-ed .w-p6 { width: 150px; }
+  .in-ed td.in-btns { text-align: right; white-space: nowrap; }
+  .in-ib { font: inherit; font-size: 12px; line-height: 1; padding: 3px 6px; border-radius: 6px; cursor: pointer; color: var(--dim); background: var(--page); border: 1px solid var(--rule); }
+  a.in-ib { text-decoration: none; display: inline-block; }
+  .in-ib:hover:not(:disabled) { border-color: var(--rule-hard); color: var(--ink); }
+  .in-ib:disabled { opacity: .35; cursor: default; }
+  .in-ib[aria-pressed="true"] { color: var(--accent-ink); border-color: var(--accent-ink); background: var(--surface); }
+  .in-add { position: relative; display: flex; gap: 8px; align-items: center; margin: 10px 0; }
+  .in-pick { position: relative; display: inline-block; }
+  .in-ed tr.in-slot td { padding-left: 34px; }
+  .in-pick input { font: inherit; font-size: 13px; color: var(--ink); padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); width: 340px; }
+  .in-hits { position: absolute; top: 100%; left: 0; z-index: 5; min-width: 340px; max-height: 260px; overflow: auto; background: var(--page); border: 1px solid var(--rule); border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.08); }
+  .in-hits button { display: block; width: 100%; text-align: left; font: inherit; font-size: 13px; padding: 6px 10px; border: none; background: none; cursor: pointer; color: var(--ink); }
+  .in-hits button:hover, .in-hits button:focus { background: var(--surface); outline: none; }
+  .in-hits .mono { font-size: 11.5px; color: var(--dim); margin-left: 6px; }
+  .in-modes { margin: 0 0 12px; }
+  .in-modes .btn[aria-pressed="true"] { background: var(--surface-2); border-color: var(--ink); position: relative; z-index: 1; }
+  .in-none { color: var(--dim); font-size: 13px; padding: 8px 0; }
 </style>
 {# #217: a type's installation plan as text — a zone per unindented line, its steps under it, each step's parts under the step; kept as Installation_plan_<type>.json on the type in HWDB (every version kept). The type's roles gate the save. #}
 
@@ -37,16 +63,164 @@
 
   <div class="es-card">
   {% if can_edit %}
-    <form method="post">
+    <form method="post" id="in-form">
       {% csrf_token %}
-      <p class="in-form">Zone, then its steps: <span class="mono">number | name | after 3, 4 | P6 activity | note</span>, then each step’s parts: <span class="mono">TYPEID x count | checklist</span>.</p>
-      <textarea class="in-text" name="plan" spellcheck="false" aria-label="Plan as text" placeholder="Top drift volume&#10;  7 | CRP support structures | after 6&#10;    D08100200001 x 80 | Installation&#10;  8 | Top CRPs | after 7 | 13122.A12834 | Two CRUs are joined, raised and cabled.&#10;    D08100100001 x 80 | Installation">{{ text }}</textarea>
+      <div class="btn-group in-modes" role="group" aria-label="Edit as"><button type="button" class="btn btn-sm" id="in-rows-btn" aria-pressed="true">Rows</button><button type="button" class="btn btn-sm" id="in-text-btn" aria-pressed="false">Text</button></div>
+      <div id="in-editor">
+        <table class="in-ed"><thead><tr><th>No.</th><th title="The step whose record means the component is installed — for a component’s own plan">Inst.</th><th>Step</th><th>Zone</th><th>After</th><th>P6 activity</th><th></th></tr></thead><tbody id="in-body"></tbody></table>
+        <p class="in-none" id="in-none" hidden>No steps yet.</p>
+        <div class="in-add">
+          <button type="button" class="in-ib" id="in-step">+ step</button>
+          <span class="in-pick" id="in-pick" hidden><input type="text" id="in-q" autocomplete="off" spellcheck="false" aria-label="Component type to add"><div class="in-hits" id="in-hits" hidden></div></span>
+        </div>
+        <datalist id="in-p6">{% for a in editor.p6 %}<option value="{{ a.id }}">{{ a.name }}{% if a.date %} · {{ a.date }}{% endif %}</option>{% endfor %}</datalist>
+      </div>
+      <p class="in-form" id="in-hint" hidden>Zone, then its steps: <span class="mono">number | name | after 3, 4 | P6 activity | note</span>, then each step’s components: <span class="mono">TYPEID x count | checklist</span>. <span class="mono">8*</span> marks the step that means installed.</p>
+      <textarea class="in-text" name="plan" id="in-text" hidden spellcheck="false" aria-label="Plan as text" placeholder="Top drift volume&#10;  7 | CRP support structures | after 6&#10;    D08100200001 x 80 | Installation&#10;  8 | Top CRPs | after 7 | 13122.A12834 | Two CRUs are joined, raised and cabled.&#10;    D08100100001 x 80 | Installation">{{ text }}</textarea>
       <input type="text" class="in-reason" name="reason" placeholder="reason — kept with this version">
       <div class="in-actions">
         <button type="submit" class="btn btn-primary">Save plan to HWDB</button>
         <a class="btn" href="{{ plan_url }}">Cancel</a>
       </div>
     </form>
+    {{ editor|json_script:"in-data" }}
+    <script>
+    (function () {
+      // The row editor over the text form: `steps` is the plan; the textarea is the form's value, written from the
+      // steps on submit (and shown in Text mode, parsed back when it closes — the same lines installation.parse_text reads).
+      var D = JSON.parse(document.getElementById("in-data").textContent);
+      var steps = D.steps, names = D.names, lists = {};   // lists: type id → its checklist names, fetched once
+      var body = document.getElementById("in-body"), none = document.getElementById("in-none"), ta = document.getElementById("in-text");
+      var ed = document.getElementById("in-editor"), q = document.getElementById("in-q"), hits = document.getElementById("in-hits"), pick = document.getElementById("in-pick");
+      var hint = document.getElementById("in-hint"), textBtn = document.getElementById("in-text-btn"), rowsBtn = document.getElementById("in-rows-btn");
+      var ID = /^[A-Z]\d{11}$/, addTo = null, textMode = false;
+      function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]; }); }
+      function inp(i, k, v, cls, extra) { return '<input type="text" class="' + (cls || "") + '" data-s="' + i + '" data-k="' + k + '" value="' + esc(v) + '"' + (extra || "") + ">"; }
+      function draw() {
+        none.hidden = steps.length > 0;
+        if (addTo !== null && !steps[addTo]) addTo = null;
+        pick.hidden = true; ed.appendChild(pick);   // parked while the rows are rebuilt, then put under the step it adds to
+        body.innerHTML = steps.map(function (s, i) {
+          return '<tr class="in-step"><td>' + inp(i, "n", s.n, "w-no", ' inputmode="numeric" aria-label="Step number"') + "</td>" +
+            '<td><input type="radio" name="in-inst" data-s="' + i + '" data-k="installed"' + (s.installed ? " checked" : "") + ' title="A record of this step means the component is installed (click again to clear)"></td>' +
+            "<td>" + inp(i, "name", s.name, "", ' aria-label="Step name"') + "</td><td>" + inp(i, "zone", s.zone, "", ' aria-label="Zone"') + "</td>" +
+            "<td>" + inp(i, "after", s.after.join(", "), "w-after", ' placeholder="3, 4" aria-label="After steps"') + "</td>" +
+            "<td>" + inp(i, "p6", s.p6, "w-p6", ' list="in-p6" aria-label="P6 installation activity"') + "</td>" +
+            '<td class="in-btns"><button type="button" class="in-ib" data-do="up" data-s="' + i + '" title="Move up"' + (i ? "" : " disabled") + ">&#9650;</button> " +
+            '<button type="button" class="in-ib" data-do="down" data-s="' + i + '" title="Move down"' + (i < steps.length - 1 ? "" : " disabled") + ">&#9660;</button> " +
+            '<button type="button" class="in-ib" data-do="part" data-s="' + i + '" title="Add a component — pick its type in the box below" aria-pressed="' + (addTo === i) + '">+ component</button> ' +
+            '<button type="button" class="in-ib" data-do="del" data-s="' + i + '" title="Remove the step">&#10005;</button></td></tr>' +
+            '<tr><td></td><td></td><td colspan="4">' + inp(i, "note", s.note, "", ' placeholder="note" aria-label="Note"') + "</td><td></td></tr>" +
+            s.parts.map(function (p, j) {
+              var has = D.plans.indexOf(p.type) >= 0, opts = (lists[p.type] || []).slice(); if (p.checklist && opts.indexOf(p.checklist) < 0) opts.unshift(p.checklist);
+              return '<tr class="in-part"><td colspan="3">' + esc(names[p.type] || "not in the mirror") + '<span class="mono">' + p.type + "</span></td>" +
+                '<td><input type="text" class="w-n" inputmode="numeric" data-s="' + i + '" data-p="' + j + '" data-k="count" value="' + esc(p.count) + '" aria-label="How many"></td>' +
+                '<td colspan="2"><select data-s="' + i + '" data-p="' + j + '" data-k="checklist" aria-label="Checklist that records it"><option value="">checklist —</option>' +
+                opts.map(function (c) { return "<option" + (c === p.checklist ? " selected" : "") + ">" + esc(c) + "</option>"; }).join("") + "</select></td>" +
+                '<td class="in-btns"><a class="in-ib" target="_blank" rel="noopener" href="' + D.plan.replace("X00000000000", p.type) + '" title="' + (has ? "This component’s own installation plan — opens in a new tab" : "Give this component an installation plan of its own — opens in a new tab") + '">' + (has ? "&#9998; plan" : "+ plan") + '</a> <button type="button" class="in-ib" data-do="pdel" data-s="' + i + '" data-p="' + j + '" title="Remove the component">&#10005;</button></td></tr>';
+            }).join("") + (addTo === i ? '<tr class="in-slot"><td colspan="7" id="in-slot"></td></tr>' : "");
+        }).join("");
+        if (addTo !== null) { q.placeholder = "component of step " + steps[addTo].n + " — type name or id"; document.getElementById("in-slot").appendChild(pick); pick.hidden = false; }
+        var need = []; steps.forEach(function (s) { s.parts.forEach(function (p) { if (!(p.type in lists) && need.indexOf(p.type) < 0) need.push(p.type); }); });
+        if (need.length) {
+          need.forEach(function (t) { lists[t] = []; });
+          Promise.all(need.map(function (t) {
+            return fetch(D.checklists.replace("X00000000000", t), {credentials: "same-origin"}).then(function (r) { return r.json(); })
+              .then(function (j) { lists[t] = j.checklists || []; }).catch(function () {});
+          })).then(draw);
+        }
+      }
+      function set(e) {
+        var t = e.target, k = t.dataset.k; if (!k) return;
+        var s = steps[+t.dataset.s];
+        if (t.dataset.p !== undefined) { s.parts[+t.dataset.p][k] = k === "count" ? (parseInt(String(t.value).replace(/,/g, ""), 10) || 0) : t.value; return; }
+        if (k === "n") s.n = parseInt(t.value, 10) || 0;
+        else if (k === "after") s.after = (t.value.match(/\d+/g) || []).map(Number);
+        else if (k !== "installed") s[k] = t.value;
+      }
+      body.addEventListener("input", set); body.addEventListener("change", set);
+      body.addEventListener("click", function (e) {
+        var r = e.target.closest("input[type=radio]");
+        if (r) { var was = steps[+r.dataset.s].installed; steps.forEach(function (s) { s.installed = false; }); steps[+r.dataset.s].installed = !was; draw(); return; }
+        var b = e.target.closest("button[data-do]"); if (!b) return;
+        var i = +b.dataset.s, s = steps[i], d = b.dataset.do;
+        if (d === "part") { addTo = addTo === i ? null : i; draw(); if (addTo !== null) q.focus(); return; }
+        if (d === "del") { steps.splice(i, 1); addTo = null; }
+        if (d === "pdel") s.parts.splice(+b.dataset.p, 1);
+        if (d === "up" || d === "down") { var j = i + (d === "up" ? -1 : 1); steps[i] = steps[j]; steps[j] = s; addTo = null; }
+        draw();
+      });
+      document.getElementById("in-step").addEventListener("click", function () {
+        var last = steps[steps.length - 1];
+        steps.push({n: steps.reduce(function (m, s) { return Math.max(m, s.n); }, 0) + 1, name: "", zone: last ? last.zone : "", after: last ? [last.n] : [], p6: "", note: "", parts: [], installed: false});
+        draw();
+      });
+      // the type picker: the instant search's types, off the mirror
+      var timer = null;
+      q.addEventListener("input", function () {
+        clearTimeout(timer); var v = q.value.trim();
+        if (v.length < 2) { hits.hidden = true; return; }
+        timer = setTimeout(function () {
+          fetch(D.search + "?q=" + encodeURIComponent(v), {credentials: "same-origin"}).then(function (r) { return r.json(); }).then(function (j) {
+            var ts = j.types || [];
+            if (!ts.length && ID.test(v.toUpperCase())) ts = [{part_type_id: v.toUpperCase(), name: ""}];
+            hits.innerHTML = ts.map(function (t) { return '<button type="button" data-t="' + t.part_type_id + '" data-n="' + esc(t.name) + '">' + esc(t.name || t.part_type_id) + '<span class="mono">' + t.part_type_id + "</span></button>"; }).join("");
+            hits.hidden = !ts.length;
+          }).catch(function () { hits.hidden = true; });
+        }, 200);
+      });
+      q.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); var f = hits.querySelector("button"); if (f && !hits.hidden) f.click(); }
+        if (e.key === "Escape") { hits.hidden = true; addTo = null; draw(); }
+      });
+      hits.addEventListener("click", function (e) {
+        var b = e.target.closest("button[data-t]"); if (!b || addTo === null) return;
+        if (b.dataset.n) names[b.dataset.t] = b.dataset.n;
+        steps[addTo].parts.push({type: b.dataset.t, count: 0, checklist: ""});
+        q.value = ""; hits.hidden = true; draw(); q.focus();
+      });
+      document.addEventListener("click", function (e) { if (!e.target.closest(".in-pick")) hits.hidden = true; });
+      function lines() {
+        var out = [], zone = null;
+        steps.forEach(function (s) {
+          if (s.zone !== zone) { zone = s.zone; if (zone) out.push(zone); }
+          var f = [s.n + (s.installed ? "*" : ""), s.name, s.after.length ? "after " + s.after.join(", ") : "", s.p6, s.note];
+          while (f.length > 2 && !f[f.length - 1]) f.pop();
+          out.push("  " + f.join(" | "));
+          s.parts.forEach(function (p) { out.push("    " + p.type + " x " + p.count + (p.checklist ? " | " + p.checklist : "")); });
+        });
+        return out.join("\n");
+      }
+      function parse(text) {   // null when a line does not read — the text stays up, the save names the line
+        var out = [], zone = "", cur = null, ok = true;
+        text.split("\n").forEach(function (raw) {
+          if (!raw.trim()) return;
+          var f = raw.trim().split("|").map(function (x) { return x.trim(); }), m = f[0].match(/^([A-Za-z]\d{11})\s*[x×]\s*([\d,]+)$/), st = f[0].match(/^(\d+)\s*(\*?)$/);
+          if (m) { if (cur) cur.parts.push({type: m[1].toUpperCase(), count: parseInt(m[2].replace(/,/g, ""), 10), checklist: f[1] || ""}); else ok = false; }
+          else if (st) { cur = {n: +st[1], installed: !!st[2], name: f[1] || "", zone: zone, after: ((f[2] || "").match(/\d+/g) || []).map(Number), p6: f[3] || "", note: f.slice(4).join(" | "), parts: []}; out.push(cur); }
+          else if (f.length === 1 && !/^[ \t]/.test(raw)) { zone = f[0]; cur = null; }
+          else ok = false;
+        });
+        return ok ? out : null;
+      }
+      function showText(on) { textMode = on; ta.hidden = hint.hidden = !on; ed.querySelector("table").hidden = on; document.getElementById("in-step").hidden = on; none.hidden = on || steps.length > 0; textBtn.setAttribute("aria-pressed", on); rowsBtn.setAttribute("aria-pressed", !on); }
+      textBtn.addEventListener("click", function () { if (!textMode) { ta.value = lines(); showText(true); } });
+      rowsBtn.addEventListener("click", function () {
+        if (!textMode) return;
+        var got = parse(ta.value);
+        if (!got) { alert("A line does not read as a zone, a step or a part — fix it, or save to see which."); return; }
+        steps = got;
+        var need = []; steps.forEach(function (s) { s.parts.forEach(function (p) { if (!(p.type in names) && need.indexOf(p.type) < 0) need.push(p.type); }); });
+        var calls = []; for (var k = 0; k < need.length; k += 20) calls.push(need.slice(k, k + 20));   // the names endpoint takes 20 ids a call
+        Promise.all(calls.map(function (c) {
+          return fetch(D.summary + "?ids=" + c.join(","), {credentials: "same-origin"}).then(function (r) { return r.json(); }).then(function (j) {
+            (j.types || []).forEach(function (t) { names[t.part_type_id] = t.name || ""; }); }).catch(function () {});
+        })).then(function () { showText(false); draw(); });
+      });
+      document.getElementById("in-form").addEventListener("submit", function () { if (!textMode) ta.value = lines(); });
+      if (D.start_text) showText(true); else draw();
+    })();
+    </script>
   {% elif text %}
     <pre class="mono" style="margin:0; font-size:13px; white-space:pre-wrap;">{{ text }}</pre>
   {% else %}
