@@ -536,9 +536,15 @@ class DetectorPagesTest(TestCase):
 
     def test_detector_pages_link_each_other(self):
         html = self.client.get("/hw/dev/hierarchy/").content.decode()
-        self.assertIn('<a class="hc-tab" aria-selected="true" href="/hw/dev/hierarchy/">Hierarchy chart</a>', html)
-        self.assertIn('<a class="hc-tab" aria-selected="false" href="/hw/dev/status/">Production status</a>', html)
-        self.assertIn('<a class="hc-tab" aria-selected="false" href="/hw/dev/schedule/">P6 schedule</a>', html)
+        self.assertIn('<a class="eh-nav-item active" href="/hw/dev/hierarchy/">Hierarchy</a>', html)   # Anselmo 2026-11-13: Production is a top-level menu, the chart stands alone
+        self.assertIn('<a class="eh-nav-item" href="/hw/dev/status/">Production</a>', html)
+        self.assertNotIn("hc-tab", html)
+        self.assertNotIn(">Browse</a>", html)
+        self.assertIn('<a href="/hw/dev/browse/">Browse</a>', self.client.get("/hw/dev/").content.decode())   # Browse moved onto the Overview page
+        html2 = self.client.get("/hw/dev/schedule/").content.decode()
+        self.assertIn('<a class="eh-nav-item active" href="/hw/dev/status/">Production</a>', html2)
+        self.assertIn('<a class="hc-tab" aria-selected="false" href="/hw/dev/status/">Production status</a>', html2)
+        self.assertNotIn("Hierarchy chart", html2)
         self.assertNotIn("hc-cons", html)
         r = self.client.get("/hw/dev/hierarchy/?tab=status")   # the old tab link
         self.assertEqual(r["Location"], "/hw/dev/status/")

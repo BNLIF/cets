@@ -2,7 +2,7 @@
 {% block title %}P6 schedule · HWDB Explorer{% endblock %}
 
 {% block content %}
-{# #206 / Chao 2026-10-22: the Detector area's third page — the P6 schedule as last uploaded (the monthly activities spreadsheet, parsed into the Explorer's own table), every activity in one filterable table, and the architect's upload form. Plans pick their two activity ids from these rows. #}
+{# #206 / Chao 2026-10-22: the Production area's second page — the P6 schedule as last uploaded (the monthly activities spreadsheet, parsed into the Explorer's own table), every activity in one filterable table, and the architect's upload form. Plans pick their two activity ids from these rows. #}
 <style>
   .hc-page { padding: 26px 30px 56px; }
   .hc-page h1 { font-size: 1.5rem; color: var(--ink); margin: 0 0 14px; letter-spacing: -0.01em; }
@@ -47,7 +47,6 @@
 
 <div class="hc-page">
   <div class="hc-tabs">
-    <a class="hc-tab" aria-selected="false" href="{% url 'explore:hierarchy' %}">Hierarchy chart</a>
     <a class="hc-tab" aria-selected="false" href="{% url 'explore:production_overview' %}">Production status</a>
     <a class="hc-tab" aria-selected="true" href="{% url 'explore:production_schedule' %}">P6 schedule</a>
   </div>

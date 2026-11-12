@@ -26,8 +26,7 @@
 
 <div class="es-page">
   <div class="es-crumbs">
-    <a href="{% url 'explore:hierarchy' %}">Detector</a>
-    <span class="sep">›</span><a href="{% url 'explore:production_overview' %}">Production status</a>
+    <a href="{% url 'explore:production_overview' %}">Production</a>
     <span class="sep">›</span>{% if type_url %}<a href="{{ type_url }}">{{ type_name }}</a>{% else %}{{ type_name }}{% endif %}
   </div>
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}

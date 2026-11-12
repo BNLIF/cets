@@ -406,7 +406,7 @@ def explore_production_overview_view(request):
     present = {c["detector"] for c in status_types}
     detectors = [d for d in ("HD", "VD", "") if d in present]
     return render(request, "explore/production_overview.html", {
-        "active_nav": "detector",
+        "active_nav": "production",
         "sidebar": navigation.sidebar_tree(inst, {}),
         "status_types": status_types,
         "detectors": detectors if len(detectors) > 1 else [],
@@ -423,7 +423,7 @@ def explore_production_schedule_view(request):
     inst = instance_of(request)
     acts = list(P6Activity.objects.order_by("sheet", "pk"))   # pk = the spreadsheet's order within a sheet
     return render(request, "explore/production_schedule.html", {
-        "active_nav": "detector",
+        "active_nav": "production",
         "sidebar": navigation.sidebar_tree(inst, {}),
         "p6": p6.current(),
         "activities": acts,
@@ -561,7 +561,7 @@ def explore_production_status_view(request, part_type_id):
     table = production.table(rows, plans, production.counts(inst, ids),
                              production.names(inst, ids), timezone.localdate())
     return render(request, "explore/production_status.html", {
-        "active_nav": "detector",
+        "active_nav": "production",
         "sidebar": navigation.sidebar_tree(inst, {}),
         "part_type_id": part_type_id,
         "type_name": (node.name if node else "") or part_type_id,
@@ -675,7 +675,7 @@ def explore_production_plan_view(request, part_type_id):
         level=HierarchyNode.LEVEL_TYPE, part_type_id=consortium).first() if consortium else None
 
     return render(request, "explore/production_plan.html", {
-        "active_nav": "explore",
+        "active_nav": "production",
         "sidebar": navigation.sidebar_tree(inst, {}),
         "part_type_id": part_type_id,
         "type_name": (node.name if node else "") or part_type_id,
@@ -760,7 +760,7 @@ def explore_production_list_view(request, part_type_id):
     others = [{"id": lst.part_type_id, "name": lnm.get(lst.part_type_id) or lst.part_type_id,
                "types": sorted({r["type"] for r in lst.rows})} for lst in lists]
     return render(request, "explore/production_list.html", {
-        "active_nav": "detector",
+        "active_nav": "production",
         "sidebar": navigation.sidebar_tree(inst, {}),
         "part_type_id": part_type_id,
         "type_name": (node.name if node else "") or part_type_id,
@@ -837,7 +837,7 @@ def explore_production_resources_view(request, part_type_id):
         r["checklists"] = [{"name": c, "url": _rev(request, "explore:type_checklist", args=[r["type"], c])} for c in r["checklists"]]
         r["procedures"] = [{"name": c, "url": _rev(request, "explore:type_checklist", args=[r["type"], c])} for c in r["procedures"]]
     return render(request, "explore/production_resources.html", {
-        "active_nav": "detector",
+        "active_nav": "production",
         "sidebar": navigation.sidebar_tree(inst, {}),
         "part_type_id": part_type_id,
         "type_name": (node.name if node else "") or part_type_id,
@@ -5781,7 +5781,7 @@ def explore_type_class_view(request, part_type_id):
                                   f"mirror its boxes.")
     elif want == "consortium":
         messages.success(request, f"{part_type_id} is now a consortium type — its production "
-                                  f"status shows on the Detector tab.")
+                                  f"status shows on the Production page.")
     else:
         messages.success(request, f"{part_type_id} has no classification now.")
     return redirect(back)
