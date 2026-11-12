@@ -47,7 +47,7 @@ from .hierarchy import sync_hierarchy, sync_system
 from .instances import instance_of, namespace_of
 from .models import (ChildMintSetting, ConsortiumTypeOverride, 
     ActivityEvent, BoxChecklist, ChecklistBookmark, ChecklistDraft, HierarchyNode,
-    InstallationPlan, InstitutionPref, P6Activity, ProductionList, ProductionPlan, SheetJob, ShippingTypeOverride,
+    InstallationMap, InstallationPlan, InstitutionPref, P6Activity, ProductionList, ProductionPlan, SheetJob, ShippingTypeOverride,
     HierarchySyncState, HwdbComponentEvent, HwdbTestEvent, PackScan, ShipmentItem, TestDateSetting,
 )
 from .queries import (
@@ -982,6 +982,7 @@ def explore_installation_plan_view(request, part_type_id):
         "last": vs[0] if vs else None,
         "edit_url": _rev(request, "explore:installation_edit", args=[part_type_id]),
         "units_url": _rev(request, "explore:installation_units", args=[part_type_id]),
+        "map_url": _installation_map_url(request, part_type_id, steps),
         "can_edit": can_edit,   # the edit page applies the type's roles itself
         "file_name": installation.plan_name(part_type_id),
         **installation.summary(rows),
@@ -1092,6 +1093,116 @@ def explore_installation_units_view(request, part_type_id, group=""):
         "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
         "steps": [r for r in rows if r["kind"] == "step" and r["parts"]],
         "has_plan": steps is not None,
+        "map_url": _installation_map_url(request, part_type_id, steps),
+    })
+
+
+def _installation_map_url(request, part_type_id, steps) -> str:
+    """The Map tab's address — "" for a type without a plan and for a
+    component's own plan (its steps list the type itself): the drawing is
+    the detector's."""
+    if steps is None or any(p["type"] == part_type_id for s in steps for p in s["parts"]):
+        return ""
+    return _rev(request, "explore:installation_map", args=[part_type_id])
+
+
+_MAP_KIND_RX = re.compile(r"^[a-z0-9_-]{1,30}$")
+
+
+@login_not_required
+@fnal_login_required
+def explore_installation_map_view(request, part_type_id):
+    """#219 (Hajime + Anselmo 2026-11-12): the 3D installation map — a
+    schematic model whose positions are the drawing's own (HWDB has none
+    yet), each kind of position linked to a component type. The links are
+    kept locally (``InstallationMap``), restored from the type's newest
+    ``Installation_map_<type>.json`` when there is no row; ``action=link``
+    changes one, ``action=sync`` posts them to HWDB — both gated on the
+    type's roles. ``?status=1`` is the page's status read, JSON: per
+    linked type, the items whose Specifications name a position (one live
+    listing per type, in parallel). Step names come from the cached plan."""
+    inst = instance_of(request)
+    page_url = _rev(request, "explore:installation_map", args=[part_type_id])
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(_rev(request, "explore:installation_overview"))
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    row = InstallationMap.for_instance(inst).filter(part_type_id=part_type_id).first()
+
+    if request.GET.get("status"):
+        tids = sorted(set((row.links if row else {}).values()))
+        got = parts.fetch_map(api, installation.positions, tids)
+        return JsonResponse({"types": {t: got[t] for t in tids if got.get(t) is not None},
+                             "failed": [t for t in tids if got.get(t) is None]})
+
+    role_gate = _type_role_gate(request, inst, api, part_type_id) if inst in settings.HWDB_WRITE_INSTANCES else None
+    can_edit = inst in settings.HWDB_WRITE_INSTANCES and role_gate is None
+    if request.method == "POST":
+        if not can_edit:
+            return HttpResponseForbidden("Linking a map’s positions needs one of the type’s HWDB roles, on a write instance.")
+        actor = activity.actor_of(request)
+        if request.POST.get("action") == "link":
+            kind, tid = request.POST.get("kind") or "", (request.POST.get("type") or "").strip().upper()
+            if not _MAP_KIND_RX.match(kind) or (tid and not _PTID_RX.match(tid)):
+                return HttpResponseBadRequest("A kind and a type id (a letter and 11 digits), or no type to remove the link.")
+            links = {k: v for k, v in {**(row.links if row else {}), kind: tid}.items() if v}
+            InstallationMap.objects.update_or_create(instance=inst, part_type_id=part_type_id,
+                                                     defaults={"links": links, "synced": False, "updated_by": actor})
+            return JsonResponse({"ok": True})
+        links = row.links if row else {}
+        try:
+            body = installation.map_write(api, part_type_id, links, actor, timezone.localdate().isoformat())
+            ok, why = body.get("status") == "OK", body.get("data") or body
+        except requests.RequestException as e:
+            ok, why = False, _hwdb_error_detail(e)
+        if ok:
+            InstallationMap.objects.update_or_create(instance=inst, part_type_id=part_type_id,
+                                                     defaults={"links": links, "synced": True, "updated_by": actor})
+            activity.log(inst, ActivityEvent.KIND_CURATION, f"Installation map of {part_type_id}: {len(links)} kinds linked",
+                         part_type_id=part_type_id, actor=actor)
+            messages.success(request, f"Links saved to HWDB — {installation.map_name(part_type_id)}.")
+        else:
+            messages.error(request, f"HWDB rejected the links — {why}")
+        return redirect(page_url)
+
+    if row is None:
+        stored = installation.map_read(api, part_type_id)
+        if stored is not None:
+            row = InstallationMap.objects.create(instance=inst, part_type_id=part_type_id, links=stored, synced=True)
+    links = row.links if row else {}
+    node = HierarchyNode.for_instance(inst).filter(
+        level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
+    plan = InstallationPlan.for_instance(inst).filter(part_type_id=part_type_id).first()
+    plan_url = _rev(request, "explore:installation_plan", args=[part_type_id])
+    return render(request, "explore/installation_map.html", {
+        "active_nav": "installation",
+        "sidebar": navigation.sidebar_tree(inst, {}),
+        "side_hidden": True,
+        "part_type_id": part_type_id,
+        "type_name": (node.name if node else "") or part_type_id,
+        "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
+        "plan_url": plan_url,
+        "units_url": _rev(request, "explore:installation_units", args=[part_type_id]),
+        "can_edit": can_edit,
+        "role_gate": role_gate,
+        "synced": bool(row and row.synced),
+        "has_row": row is not None,
+        "file_name": installation.map_name(part_type_id),
+        "map": {"links": links, "names": production.names(inst, list(links.values())),
+                "steps": {str(s["n"]): {"name": s["name"], "note": s["note"]} for s in (plan.steps if plan else [])},
+                "plans": sorted(InstallationPlan.for_instance(inst).filter(part_type_id__in=list(links.values()))
+                                .values_list("part_type_id", flat=True)),
+                "plan_url": plan_url,
+                "plan_of": _rev(request, "explore:installation_plan", args=["X00000000000"]),
+                "type_url": _rev(request, "explore:home") + "?node=",
+                "part_url": _rev(request, "explore:part", args=["X00000000000-00000"]),
+                "search": _rev(request, "explore:search_api"),
+                "page_url": page_url, "can_edit": can_edit},
     })
 
 

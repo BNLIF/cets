@@ -13,7 +13,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from explore import installation
-from explore.models import ActivityEvent, HwdbTestEvent, InstallationPlan, P6Activity
+from explore.models import ActivityEvent, HwdbTestEvent, InstallationMap, InstallationPlan, P6Activity
 from explore.tests.test_events import _node
 from hwdb.api_client import FnalDbApiClient
 
@@ -237,6 +237,50 @@ class PagesTest(TestCase):
         self.assertIn(f'<td class="un-div"><a href="/hw/dev/part/{CRP}-00001/checklist/Installation/" title="Installation">Record</a></td>', rows)
         self.assertIn(f'<a href="/hw/dev/part/{CRP}-00001/checklist/Hang/" title="Hang">Record</a>', rows)
         self.assertIn(f'href="/hw/dev/part/{CRP}-00001/checklist/Drawings/" title="Drawings — this checklist was not found on the type">Record</a>', rows)   # a procedure is not a record
+
+    def test_map_links_kinds_reads_positions_and_syncs(self):
+        # #219: kinds of displayed position linked to types locally, the items' positions off the live listing, Sync posts the links
+        MAP = self.PLAN + "map/"
+        api = _api()
+        api.get_component_type.return_value = {"data": {"roles": None}}
+        api._make_request.return_value = {"data": [
+            {"part_id": f"{CRP}-00001", "specifications": [{"DATA": {}}]},
+            {"part_id": f"{CRP}-00002", "specifications": [{"DATA": {"Position": "TCRP R07-C2"}}]}], "pagination": {"pages": 1}}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.assertIn(f'href="{MAP}">Map</a>', self.client.get(self.PLAN).content.decode())
+            html = self.client.get(MAP).content.decode()
+            self.assertIn('"steps": {"7": {"name": "CRP support structures", "note": ""}', html)   # the plan's own step names, off the cache
+            self.assertIn('"links": {}', html)
+            self.assertFalse(InstallationMap.objects.exists())   # nothing stored, nothing made up
+            self.assertEqual(self.client.post(MAP, {"action": "link", "kind": "tcrp", "type": "nope"}).status_code, 400)
+            self.assertEqual(self.client.post(MAP, {"action": "link", "kind": "tcrp", "type": CRP}).json(), {"ok": True})
+            self.client.post(MAP, {"action": "link", "kind": "sst", "type": SS})
+            self.client.post(MAP, {"action": "link", "kind": "sst", "type": ""})   # no type: the link goes
+            row = InstallationMap.objects.get(part_type_id=DET)
+            self.assertEqual((row.links, row.synced), ({"tcrp": CRP}, False))
+            self.assertEqual(self.client.get(MAP + "?status=1").json(), {"types": {CRP: {"TCRP R07-C2": f"{CRP}-00002"}}, "failed": []})
+            html = self.client.get(MAP).content.decode()
+            self.assertIn(f'"names": {{"{CRP}": "Top CRP"}}', html)
+            self.assertIn('<form method="post" id="im-sync">', html)   # links changed: Sync shows
+            self.assertEqual(self.client.post(MAP, {"action": "sync"}).status_code, 302)
+        name, body = api.post_component_type_image.call_args[0][2], json.loads(api.post_component_type_image.call_args[0][1].getvalue())
+        self.assertEqual((name, body["links"]), (f"Installation_map_{DET}.json", {"tcrp": CRP}))
+        self.assertTrue(InstallationMap.objects.get(part_type_id=DET).synced)
+        # no local row: restored from the newest image on the type
+        InstallationMap.objects.all().delete()
+        api.get_component_type_images.side_effect = lambda t: {"data": [{"image_id": "map", "image_name": f"Installation_map_{DET}.json", "created": "2026-11-13T12:00:00"}]}
+        api.get_image_response.side_effect = lambda iid: mock.Mock(content=json.dumps({"links": {"cath": SS}}).encode())
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.get(MAP)
+        row = InstallationMap.objects.get(part_type_id=DET)
+        self.assertEqual((row.links, row.synced), ({"cath": SS}, True))
+        # a type whose roles the account lacks: no linking
+        api.get_component_type.return_value = {"data": {"roles": [{"id": 9, "name": "tester"}]}}
+        m1, m2 = _mocked(api)
+        with m1, m2, mock.patch("explore.views._my_roles", return_value=[]):
+            self.assertEqual(self.client.post(MAP, {"action": "link", "kind": "tcrp", "type": CRP}).status_code, 403)
 
     def test_edit_saves_a_version_caches_and_logs(self):
         api = _api()

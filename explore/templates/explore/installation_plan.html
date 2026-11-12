@@ -67,7 +67,7 @@
     {% if can_edit %}<a class="btn btn-sm" style="margin-left:auto;" href="{{ edit_url }}">&#9998; Edit plan</a>{% endif %}
   </div>
   {% if has_plan %}
-  <div class="in-tabs"><a class="in-tab" aria-selected="true" href="">Steps</a><a class="in-tab" aria-selected="false" href="{{ units_url }}">Units</a></div>
+  <div class="in-tabs"><a class="in-tab" aria-selected="true" href="">Steps</a><a class="in-tab" aria-selected="false" href="{{ units_url }}">Units</a>{% if map_url %}<a class="in-tab" aria-selected="false" href="{{ map_url }}">Map</a>{% endif %}</div>
   <p class="es-sub">Installation plan — {{ n_steps }} step{{ n_steps|pluralize }}, {{ n_done }} done, {{ n_prog }} in progress. Installed counts the items with a record of the component’s checklist.</p>
   <div class="in-cols"><div class="in-main">
   <div class="ps-bar"><button type="button" class="ps-fold-btn" data-fold="open">Expand all</button><button type="button" class="ps-fold-btn" data-fold="close">Collapse all</button></div>

@@ -343,3 +343,50 @@ def summary(rows: list[dict]) -> dict:
     steps = [r for r in rows if r["kind"] == "step"]
     return {"n_steps": len(steps), "n_done": sum(r["state"] == "done" for r in steps),
             "n_prog": sum(r["state"] == "prog" for r in steps)}
+
+
+# ---- the 3D map (#219) ------------------------------------------------------
+
+MAP_PAGES = 4   # listing calls (500 items each) a linked type's positions are read from
+
+
+def map_name(part_type_id: str) -> str:
+    return f"Installation_map_{part_type_id}.json"
+
+
+def map_links(raw) -> dict[str, str]:
+    """``{kind: type id}`` out of a stored map — the drawing's kinds of
+    position, each linked to one component type."""
+    links = raw.get("links") if isinstance(raw, dict) else None
+    return {str(k): str(v) for k, v in links.items() if v} if isinstance(links, dict) else {}
+
+
+def map_read(api, part_type_id: str) -> dict[str, str] | None:
+    """The links of the newest ``Installation_map_<type>.json`` on the
+    type; None when it has none."""
+    vs = production.versions(production._listing(api, part_type_id), map_name(part_type_id))
+    raw = production._load(api, vs[0]["image_id"]) if vs else None
+    return map_links(raw) if raw is not None else None
+
+
+def map_write(api, part_type_id: str, links: dict[str, str], who: str, when: str) -> dict:
+    return api.post_component_type_image(
+        part_type_id, io.BytesIO(json.dumps({"links": links, "updated_by": who, "updated": when}, indent=2).encode()),
+        map_name(part_type_id), comments="Installation map links (Explorer)")
+
+
+def positions(api, part_type_id: str) -> dict[str, str]:
+    """``{position name: part id}`` — the type's items whose
+    Specifications name a position (``POSITION_KEYS``), off its live
+    listing, ``MAP_PAGES`` calls at most."""
+    out = {}
+    for page in range(1, MAP_PAGES + 1):
+        body = api._make_request("GET", f"component-types/{part_type_id}/components", params={"page": page, "size": 500})
+        rows = body.get("data") or []
+        for r in rows:
+            pos = spec_find(r.get("specifications"), POSITION_KEYS)
+            if pos and r.get("part_id"):
+                out[pos] = r["part_id"]
+        if not rows or page >= ((body.get("pagination") or {}).get("pages") or 1):
+            break
+    return out

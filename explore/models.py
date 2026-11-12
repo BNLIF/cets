@@ -860,6 +860,28 @@ class InstallationPlan(InstanceScoped):
         return f"{self.instance}:{self.part_type_id} installation plan"
 
 
+class InstallationMap(InstanceScoped):
+    """#219: the 3D installation map of a type — which HWDB component
+    type each kind of displayed position (``links``: kind → type id) is
+    linked to. Kept here; *Sync to HWDB* posts it as the type's
+    ``Installation_map_<type>.json`` image, and a page with no row
+    restores it from the newest one. ``synced`` False: changed since."""
+
+    part_type_id = models.CharField(max_length=20, db_index=True)
+    links = models.JSONField(default=dict)
+    synced = models.BooleanField(default=False)
+    updated_by = models.CharField(max_length=150, blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["part_type_id"]
+        constraints = [models.UniqueConstraint(
+            fields=["instance", "part_type_id"], name="uniq_installation_map")]
+
+    def __str__(self):
+        return f"{self.instance}:{self.part_type_id} installation map"
+
+
 class P6Upload(models.Model):
     """#206 (Anselmo 2026-10-20): the project's P6 schedule as last
     uploaded — the monthly ``Float_Chart_Activities_Combined.xlsx`` the
