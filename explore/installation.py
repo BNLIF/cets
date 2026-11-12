@@ -9,7 +9,8 @@ save a version, the newest by name the current one, the image comment
 the reason.
 
 A step: its number, name, zone, the earlier steps it comes ``after``
-(advisory), a P6 installation activity, a note, and its parts. A part: a
+(advisory), a P6 installation activity, a one-line note and longer
+Markdown details, and its parts. A part: a
 component type, how many, and the name of the checklist on that type
 whose record means "installed". Progress is then the mirror's test
 events of that checklist's test type — no HWDB call. ``InstallationPlan``
@@ -18,9 +19,14 @@ the overview.
 
 A component's own plan sits on the component's type: its steps list the
 type itself as their part (``<own type> x 80 | Hang the CRP``), so every
-step is a record on the item, and one step is marked ``installed`` (a
-``*`` after its number in the text form). A detector plan's part of that
-type then counts by that step's checklist, whatever it names itself.
+step is a record on the item. A detector plan's part of that type names
+the checklist that counts itself, as any part does.
+
+A step's status is worked out from its parts' counts unless someone set
+it by hand (``status``: ``todo`` / ``prog`` / ``done`` / ``hold``, with
+who and when) — a step without parts, or one finished before its records
+are in, has no other way to read Done. The hand-set status is part of the
+plan file: setting it is a new version.
 """
 
 from __future__ import annotations
@@ -34,8 +40,11 @@ from .models import HwdbTestEvent, InstallationPlan, P6Activity
 
 PTID_RX = production.PTID_RX
 _PART_RX = re.compile(r"^([A-Za-z]\d{11})\s*[x×]\s*([\d,]+)$")
-_STEP_RX = re.compile(r"^(\d+)\s*(\*?)$")
-RESOLVED = ("test_type", "own_plan", "via", "used", "procedures")   # what a live read adds to a part
+_STEP_RX = re.compile(r"^(\d+)\s*\*?$")   # a trailing * was the "installed" mark of the first drafts: read, ignored
+_STATUS_RX = re.compile(r"^status\s*:\s*(.*)$", re.I)
+RESOLVED = ("test_type", "own_plan", "used", "procedures")   # what a live read adds to a part
+STATUSES = {"todo": "Not started", "prog": "In progress", "done": "Done", "hold": "On hold"}
+_STATUS_OF = {v.lower(): k for k, v in STATUSES.items()} | {k: k for k in STATUSES}
 
 
 def plan_name(part_type_id: str) -> str:
@@ -44,9 +53,10 @@ def plan_name(part_type_id: str) -> str:
 
 def normalize(raw) -> list[dict]:
     """The steps as the pages use them, whatever the stored JSON holds:
-    ``[{n, name, zone, after, p6, note, installed, parts: [{type, count,
-    checklist}]}]`` in the stored order; at most one step ``installed``."""
-    out, seen, marked = [], set(), False
+    ``[{n, name, zone, after, p6, note, details, status, status_by,
+    status_on, parts: [{type, count, checklist}]}]`` in the stored order;
+    ``status`` "" = worked out from the counts."""
+    out, seen = [], set()
     for s in (raw.get("steps") if isinstance(raw, dict) else None) or []:
         if not isinstance(s, dict):
             continue
@@ -60,11 +70,14 @@ def normalize(raw) -> list[dict]:
             if PTID_RX.match(tid):
                 parts.append({"type": tid, "count": production._int(p.get("count")) or 0,
                               "checklist": str(p.get("checklist") or "").strip()})
+        status = s.get("status") if s.get("status") in STATUSES else ""
         out.append({"n": n, "name": str(s.get("name") or "").strip(), "zone": str(s.get("zone") or "").strip(),
                     "after": [a for a in (production._int(x) for x in s.get("after") or []) if a],
-                    "p6": str(s.get("p6") or "").strip()[:60], "note": str(s.get("note") or "").strip(),
-                    "parts": parts, "installed": bool(s.get("installed")) and not marked})
-        marked = marked or out[-1]["installed"]
+                    "p6": str(s.get("p6") or "").strip()[:60], "note": " ".join(str(s.get("note") or "").split()),
+                    "details": str(s.get("details") or "").strip(), "status": status,
+                    "status_by": str(s.get("status_by") or "")[:150] if status else "",
+                    "status_on": str(s.get("status_on") or "")[:10] if status else "",
+                    "parts": parts})
     return out
 
 
@@ -72,11 +85,27 @@ def parse_text(text: str) -> tuple[list[dict], list[str]]:
     """The edit page's text form → ``(steps, errors)``. A line without
     indentation is a zone; under it a step, ``number | name | after 3, 4 |
     P6 activity | note``; under a step its parts, ``TYPEID x count |
-    checklist``. What follows the first field may be left out. ``8*``
-    marks the step whose record means the component is installed."""
+    checklist``, its details, Markdown, on lines starting ``>`` (the note
+    of the step line is the short description), and ``status: Done`` when
+    its status is set by hand. What follows the first field may be left
+    out."""
     steps, errors, zone, cur = [], [], "", None
     for i, raw in enumerate((text or "").splitlines(), 1):
         if not raw.strip():
+            continue
+        if raw.strip().startswith(">"):
+            if cur is None:
+                errors.append(f"Line {i}: details need a step above them.")
+            else:
+                cur["details"] += ("\n" if cur["details"] else "") + raw.strip()[1:].removeprefix(" ").rstrip()
+            continue
+        st = _STATUS_RX.match(raw.strip())
+        if st and cur is not None:
+            key = _STATUS_OF.get(st.group(1).strip().lower())
+            if key is None:
+                errors.append(f"Line {i}: a status is one of {', '.join(STATUSES.values())}.")
+            else:
+                cur["status"] = key
             continue
         f = [x.strip() for x in raw.strip().split("|")]
         m = _PART_RX.match(f[0])
@@ -87,17 +116,15 @@ def parse_text(text: str) -> tuple[list[dict], list[str]]:
             cur["parts"].append({"type": m.group(1).upper(), "count": int(m.group(2).replace(",", "")),
                                  "checklist": f[1] if len(f) > 1 else ""})
         elif _STEP_RX.match(f[0]):
-            n, star = int(_STEP_RX.match(f[0]).group(1)), bool(_STEP_RX.match(f[0]).group(2))
-            if star and any(s["installed"] for s in steps):
-                errors.append(f"Line {i}: only one step can be marked * (installed).")
-                star = False
+            n = int(_STEP_RX.match(f[0]).group(1))
             if not n or any(s["n"] == n for s in steps):
                 errors.append(f"Line {i}: step {n} is already there." if n else f"Line {i}: steps count from 1.")
                 cur = None
                 continue
             after = [int(a) for a in re.findall(r"\d+", f[2])] if len(f) > 2 else []
             cur = {"n": n, "name": f[1] if len(f) > 1 else "", "zone": zone, "after": after,
-                   "p6": (f[3] if len(f) > 3 else "")[:60], "note": " | ".join(f[4:]), "parts": [], "installed": star}
+                   "p6": (f[3] if len(f) > 3 else "")[:60], "note": " | ".join(f[4:]), "details": "",
+                   "status": "", "status_by": "", "status_on": "", "parts": []}
             steps.append(cur)
         elif len(f) == 1 and raw[:1] not in " \t":
             zone, cur = f[0], None
@@ -107,19 +134,39 @@ def parse_text(text: str) -> tuple[list[dict], list[str]]:
 
 
 def to_text(steps: list[dict]) -> str:
-    """The steps as the text form (the inverse of ``parse_text``)."""
+    """The steps as the text form (the inverse of ``parse_text``, but for
+    who set a status and when — ``stamp`` carries those over a save)."""
     out, zone = [], None
     for s in steps:
         if s["zone"] != zone:
             zone = s["zone"]
             if zone:
                 out.append(zone)
-        f = [str(s["n"]) + ("*" if s.get("installed") else ""), s["name"], ("after " + ", ".join(map(str, s["after"]))) if s["after"] else "", s["p6"], s["note"]]
+        f = [str(s["n"]), s["name"], ("after " + ", ".join(map(str, s["after"]))) if s["after"] else "", s["p6"], s["note"]]
         while len(f) > 2 and not f[-1]:
             f.pop()
         out.append("  " + " | ".join(f))
+        if s.get("status"):
+            out.append("    status: " + STATUSES[s["status"]])
         out += [f"    {p['type']} x {p['count']}" + (f" | {p['checklist']}" if p["checklist"] else "") for p in s["parts"]]
+        out += [("    > " + ln).rstrip() for ln in (s.get("details") or "").splitlines()]
     return "\n".join(out)
+
+
+def stamp(new: list[dict], old: list[dict] | None, who: str, when: str) -> list[dict]:
+    """``new`` with each hand-set status signed: who and when carried over
+    from ``old`` where the step's status is unchanged, ``who`` / ``when``
+    where it was set or changed in this save."""
+    was = {s["n"]: s for s in old or []}
+    for s in new:
+        o = was.get(s["n"]) or {}
+        if not s.get("status"):
+            s["status_by"] = s["status_on"] = ""
+        elif o.get("status") == s["status"]:
+            s["status_by"], s["status_on"] = o.get("status_by") or "", o.get("status_on") or ""
+        else:
+            s["status_by"], s["status_on"] = who, when
+    return new
 
 
 def read(api, part_type_id: str, rows=None) -> tuple[list[dict] | None, list[dict]]:
@@ -133,8 +180,11 @@ def read(api, part_type_id: str, rows=None) -> tuple[list[dict] | None, list[dic
 
 
 def write(api, part_type_id: str, steps: list[dict], reason: str, who: str = "", when: str = "") -> dict:
+    """Post a plan version onto the type — the plan alone, without what a
+    live read resolved onto its parts."""
+    body = [{**s, "parts": [{k: v for k, v in p.items() if k not in RESOLVED} for p in s["parts"]]} for s in steps]
     return api.post_component_type_image(
-        part_type_id, io.BytesIO(json.dumps({"steps": steps, "updated_by": who, "updated": when}, indent=2).encode()),
+        part_type_id, io.BytesIO(json.dumps({"steps": body, "updated_by": who, "updated": when}, indent=2).encode()),
         plan_name(part_type_id), comments=reason or "Installation plan (Explorer)")
 
 
@@ -146,17 +196,6 @@ def cache(inst: str, part_type_id: str, steps: list[dict] | None) -> None:
         InstallationPlan.objects.filter(instance=inst, part_type_id=part_type_id).delete()
         return
     InstallationPlan.objects.update_or_create(instance=inst, part_type_id=part_type_id, defaults={"steps": steps})
-
-
-def installed_checklist(steps: list[dict] | None, part_type_id: str) -> tuple[int, str] | None:
-    """``(step, checklist)`` of a component's own plan: the step marked
-    installed and the checklist its own-type part names; None without."""
-    for s in steps or []:
-        if s.get("installed"):
-            for p in s["parts"]:
-                if p["type"] == part_type_id and p["checklist"]:
-                    return s["n"], p["checklist"]
-    return None
 
 
 def keep_resolved(inst: str, part_type_id: str, steps: list[dict]) -> list[dict]:
@@ -186,38 +225,44 @@ def installed(inst: str, steps: list[dict]) -> dict[tuple[str, str], int]:
 
 def table(steps: list[dict], done: dict, names: dict[str, str]) -> list[dict]:
     """The steps table's rows — zone (level 0), step (1), part (2) — with
-    each part's installed count, each step's sum, its P6 start and state
-    (``todo`` / ``prog`` / ``done``), and a warning on a started step that
-    comes after an unfinished one."""
+    each part's installed count, each step's sum, its P6 start and status
+    (``state``: the hand-set one, else from the counts — ``auto``), and a
+    warning on a started step that comes after an unfinished one."""
     acts = p6.lookup({s["p6"] for s in steps})
     state, rows, zone = {}, [], None
     for s in steps:
         parts = []
         for p in s["parts"]:
             n = done.get((p["type"], p.get("test_type") or ""), 0) if p.get("test_type") else None
+            pst = "todo" if not n else ("done" if p["count"] and n >= p["count"] else "prog")
             parts.append({"kind": "part", "level": 2, "key": f"{s['n']}-{p['type']}", "type": p["type"],
-                          "label": names.get(p["type"]) or p["type"], "count": p["count"], "n": n,
+                          "label": names.get(p["type"]) or p["type"], "count": p["count"], "n": n, "shown": min(n or 0, p["count"]),
                           "checklist": p.get("used") or p["checklist"], "own_plan": bool(p.get("own_plan")),
-                          "via": p.get("via") or 0, "procedures": p.get("procedures") or [],
-                          "state": "todo" if not n else ("done" if p["count"] and n >= p["count"] else "prog"),
+                          "procedures": p.get("procedures") or [], "state": pst, "state_label": STATUSES[pst],
                           "problem": "" if p.get("test_type") else (
                               f"No checklist “{p['checklist']}” with a test type on this type" if p["checklist"]
                               else "No checklist named for this component")})
         total = sum(p["count"] for p in parts)
         got = sum(min(p["n"] or 0, p["count"]) for p in parts)
-        st = "todo" if not got else ("done" if all(p["state"] == "done" for p in parts) else "prog")
+        auto = "todo" if not got else ("done" if all(p["state"] == "done" for p in parts) else "prog")
+        st = s.get("status") or auto
         state[s["n"]] = st
         act = acts.get((s["p6"], P6Activity.KIND_INSTALL))
         if s["zone"] != zone:
             zone = s["zone"]
             rows.append({"kind": "zone", "level": 0, "key": f"z{s['n']}", "label": zone or "Steps", "has_children": True})
-        rows.append({"kind": "step", "level": 1, "key": str(s["n"]), "step": s["n"], "label": s["name"], "note": s["note"],
-                     "count": total, "n": got if parts else None, "state": st, "after": s["after"], "installed": bool(s.get("installed")),
+        rows.append({"kind": "step", "level": 1, "key": str(s["n"]), "step": s["n"], "label": s["name"], "note": s["note"], "details": s.get("details") or "",
+                     "count": total, "n": got if parts else None, "state": st, "state_label": STATUSES[st], "after": s["after"],
+                     "status": s.get("status") or "", "status_by": s.get("status_by") or "", "status_on": s.get("status_on") or "",
+                     "auto_label": STATUSES[auto],
                      "p6": s["p6"], "p6_date": act.date if act else None, "p6_name": act.name if act else "",
-                     "p6_missing": bool(s["p6"]) and act is None, "has_children": bool(parts)})
+                     "p6_missing": bool(s["p6"]) and act is None, "has_children": bool(parts),
+                     "parts": parts})   # the step's panel lists them
         rows += parts
-    for r in rows:
-        if r["kind"] == "step" and r["state"] != "todo":
+    by = {r["step"]: r for r in rows if r["kind"] == "step"}
+    for r in by.values():
+        r["after_steps"] = [{"n": a, "label": by[a]["label"], "state": by[a]["state"], "state_label": by[a]["state_label"]} for a in r["after"] if a in by]
+        if r["state"] in ("prog", "done"):
             late = [a for a in r["after"] if state.get(a, "done") != "done"]
             r["warn"] = ("Started before step " + ", ".join(map(str, late)) + " is done") if late else ""
     return rows

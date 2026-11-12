@@ -3,7 +3,7 @@
 
 {% block content %}
 <style>
-  .es-page { padding: 22px 30px 56px; max-width: 1280px; }
+  .es-page { padding: 22px 30px 56px; max-width: 1500px; }
   .es-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
   .es-crumbs a { color: var(--accent-ink); text-decoration: none; }
   .es-crumbs a:hover { text-decoration: underline; }
@@ -14,40 +14,67 @@
   .es-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
   .es-flash.error { color: var(--bad); background: color-mix(in oklch, var(--bad) 8%, var(--page)); border: 1px solid color-mix(in oklch, var(--bad) 35%, var(--rule)); overflow-wrap: anywhere; }
   .es-card { border: 1px solid var(--rule); background: var(--page); border-radius: var(--r-lg); padding: 16px 20px; margin: 0 0 18px; }
-  .in-text { width: 100%; min-height: 420px; font-family: var(--font-mono); font-size: 13px; color: var(--ink); padding: 8px 10px;
+  .in-text { width: 100%; min-height: 460px; font-family: var(--font-mono); font-size: 13px; color: var(--ink); padding: 8px 10px;
     border: 1px solid var(--border); border-radius: 6px; background: var(--surface); resize: vertical; white-space: pre; }
-  .in-reason { font: inherit; width: 100%; color: var(--ink); padding: 4px 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); margin-top: 10px; }
+  .in-reason { font: inherit; width: 100%; color: var(--ink); padding: 4px 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); margin-top: 14px; }
   .in-actions { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
   .in-file { color: var(--faint); font-size: 12px; margin-top: 10px; }
   .in-form { color: var(--dim); font-size: 12.5px; margin: 0 0 8px; }
-  /* the row editor: a step line, its note line, its parts */
-  .in-ed { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .in-ed th { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; text-align: left; padding: 2px 8px 4px 0; border-bottom: 1px solid var(--rule); }
-  .in-ed td { padding: 4px 8px 4px 0; vertical-align: middle; }
-  .in-ed tr.in-step td { border-top: 1px solid var(--rule); padding-top: 8px; }
-  .in-ed tr.in-part td:first-child { padding-left: 34px; white-space: nowrap; }
-  .in-ed tr.in-part .mono { font-size: 11.5px; color: var(--dim); margin-left: 6px; }
-  .in-ed input[type=text], .in-ed input[type=number], .in-ed select { font: inherit; font-size: 13px; color: var(--ink); padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); width: 100%; }
-  .in-ed .w-no { width: 56px; } .in-ed .w-n { width: 84px; } .in-ed .w-after { width: 90px; } .in-ed .w-p6 { width: 150px; }
-  .in-ed td.in-btns { text-align: right; white-space: nowrap; }
+  .in-modes { margin: 0 0 12px; }
+  .in-modes .btn[aria-pressed="true"] { background: var(--surface-2); border-color: var(--ink); position: relative; z-index: 1; }
+  /* the workbench: the outline (zones and their steps) on the left, the selected zone or step on the right */
+  .in-wb { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 0; border: 1px solid var(--rule); border-radius: var(--r-md); min-height: 420px; }
+  @media (max-width: 900px) { .in-wb { grid-template-columns: 1fr; } }
+  .in-out { border-right: 1px solid var(--rule); padding: 10px 8px; font-size: 12.5px; background: var(--bg); border-radius: var(--r-md) 0 0 var(--r-md); }
+  .in-o-zone { display: flex; gap: 6px; align-items: center; padding: 5px 8px; border-radius: var(--r-sm); color: var(--ink); font-weight: 600; cursor: pointer; margin-top: 4px; }
+  .in-o-step { display: flex; gap: 8px; padding: 4px 8px 4px 20px; border-radius: var(--r-sm); cursor: pointer; min-width: 0; color: var(--body); }
+  .in-o-step .n { font-family: var(--font-mono); color: var(--faint); width: 22px; flex: none; text-align: right; }
+  .in-o-step .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .in-o-step .dim, .in-o-zone .dim { color: var(--faint); font-style: italic; font-weight: 400; }
+  .in-o-zone:hover, .in-o-step:hover { background: var(--surface); }
+  .in-o-zone.on, .in-o-step.on { background: var(--accent-bg); color: var(--ink); font-weight: 600; }
+  .in-o-add { display: block; width: 100%; text-align: left; font: inherit; font-size: 12px; color: var(--dim); background: none; border: none; cursor: pointer; padding: 3px 8px 3px 50px; }
+  .in-o-add.zone { padding-left: 8px; margin-top: 10px; }
+  .in-o-add:hover { color: var(--accent-ink); }
+  .in-pane { padding: 14px 18px 18px; min-width: 0; }
+  .in-pane h2 { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); margin: 0 0 12px; display: flex; align-items: center; gap: 6px; }
+  .in-pane h2 .sp { flex: 1; }
+  .in-pane h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); margin: 16px 0 6px; }
+  .in-grid { display: grid; grid-template-columns: 70px minmax(0, 1fr) minmax(0, 220px); gap: 10px 12px; }
+  .in-grid.two { grid-template-columns: minmax(0, 150px) minmax(0, 220px); align-items: end; margin-top: 10px; }
+  .in-f label { display: block; font-size: 11.5px; color: var(--dim); margin-bottom: 3px; }
+  .in-f input[type=text], .in-f select, .in-f textarea, .in-comp input[type=text], .in-comp select { font: inherit; font-size: 13px; color: var(--ink); padding: 4px 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); width: 100%; box-sizing: border-box; }
+  .in-f textarea { font-family: var(--font-mono); font-size: 12.5px; min-height: 110px; resize: vertical; }
+  .in-check { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--body); padding-bottom: 5px; }
+  .in-desc { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+  @media (max-width: 1100px) { .in-desc { grid-template-columns: 1fr; } }
+  .in-prev { border: 1px dashed var(--rule-hard); border-radius: 6px; padding: 6px 10px; font-size: 13px; min-height: 110px; overflow-wrap: anywhere; }
+  .in-prev:empty::before { content: "preview"; color: var(--faint); font-style: italic; }
+  .in-prev p { margin: 0 0 6px; } .in-prev ul, .in-prev ol { margin: 0 0 6px; padding-left: 20px; } .in-prev a { color: var(--accent-ink); }
+  .in-comp { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .in-comp td { padding: 4px 8px 4px 0; border-bottom: 1px solid var(--rule-soft); vertical-align: middle; }
+  .in-comp td.ty .mono { font-size: 11.5px; color: var(--dim); margin-left: 6px; }
+  .in-comp td.cnt { width: 90px; } .in-comp td.chk { width: 240px; } .in-comp td.btns { text-align: right; white-space: nowrap; width: 110px; }
   .in-ib { font: inherit; font-size: 12px; line-height: 1; padding: 3px 6px; border-radius: 6px; cursor: pointer; color: var(--dim); background: var(--page); border: 1px solid var(--rule); }
   a.in-ib { text-decoration: none; display: inline-block; }
   .in-ib:hover:not(:disabled) { border-color: var(--rule-hard); color: var(--ink); }
   .in-ib:disabled { opacity: .35; cursor: default; }
-  .in-ib[aria-pressed="true"] { color: var(--accent-ink); border-color: var(--accent-ink); background: var(--surface); }
-  .in-add { position: relative; display: flex; gap: 8px; align-items: center; margin: 10px 0; }
-  .in-pick { position: relative; display: inline-block; }
-  .in-ed tr.in-slot td { padding-left: 34px; }
-  .in-pick input { font: inherit; font-size: 13px; color: var(--ink); padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); width: 340px; }
+  .in-pick { position: relative; display: block; margin-top: 8px; max-width: 360px; }
+  .in-pick input { font: inherit; font-size: 13px; color: var(--ink); padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); width: 100%; box-sizing: border-box; }
   .in-hits { position: absolute; top: 100%; left: 0; z-index: 5; min-width: 340px; max-height: 260px; overflow: auto; background: var(--page); border: 1px solid var(--rule); border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.08); }
   .in-hits button { display: block; width: 100%; text-align: left; font: inherit; font-size: 13px; padding: 6px 10px; border: none; background: none; cursor: pointer; color: var(--ink); }
   .in-hits button:hover, .in-hits button:focus { background: var(--surface); outline: none; }
   .in-hits .mono { font-size: 11.5px; color: var(--dim); margin-left: 6px; }
-  .in-modes { margin: 0 0 12px; }
-  .in-modes .btn[aria-pressed="true"] { background: var(--surface-2); border-color: var(--ink); position: relative; z-index: 1; }
-  .in-none { color: var(--dim); font-size: 13px; padding: 8px 0; }
+  .in-none { color: var(--dim); font-size: 13px; }
+  .p6-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 6px; }
+  .p6-bar select, .p6-bar input, #in-p6sel { font: inherit; font-size: 13px; color: var(--ink); padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+  .p6-bar input { flex: 1; min-width: 160px; }
+  #in-p6sel { width: 100%; box-sizing: border-box; }
+  .p6-res { font-size: 12.5px; color: var(--dim); min-height: 1.2em; margin-top: 4px; }
+  .p6-res b { color: var(--ink); font-weight: 600; }
+  .p6-res.p6-bad { color: var(--warn); }
 </style>
-{# #217: a type's installation plan as text — a zone per unindented line, its steps under it, each step's parts under the step; kept as Installation_plan_<type>.json on the type in HWDB (every version kept). The type's roles gate the save. #}
+{# #217: a type's installation plan — kept as Installation_plan_<type>.json on the type in HWDB (every version kept), the type's roles gating the save. The editor is a workbench in the manner of the checklist editor's (Chao 2026-11-13): the outline of zones and their steps on the left, the selected zone or step on the right — a step's fields, its short description, the P6 activity picker of the production plan page, its Markdown details with a live preview, its components (type search, count, the checklist that records it, the component's own plan). "Text" is the same plan as lines, for pasting a whole one. #}
 
 <div class="es-page">
   <div class="es-crumbs">
@@ -65,18 +92,13 @@
   {% if can_edit %}
     <form method="post" id="in-form">
       {% csrf_token %}
-      <div class="btn-group in-modes" role="group" aria-label="Edit as"><button type="button" class="btn btn-sm" id="in-rows-btn" aria-pressed="true">Rows</button><button type="button" class="btn btn-sm" id="in-text-btn" aria-pressed="false">Text</button></div>
-      <div id="in-editor">
-        <table class="in-ed"><thead><tr><th>No.</th><th title="The step whose record means the component is installed — for a component’s own plan">Inst.</th><th>Step</th><th>Zone</th><th>After</th><th>P6 activity</th><th></th></tr></thead><tbody id="in-body"></tbody></table>
-        <p class="in-none" id="in-none" hidden>No steps yet.</p>
-        <div class="in-add">
-          <button type="button" class="in-ib" id="in-step">+ step</button>
-          <span class="in-pick" id="in-pick" hidden><input type="text" id="in-q" autocomplete="off" spellcheck="false" aria-label="Component type to add"><div class="in-hits" id="in-hits" hidden></div></span>
-        </div>
-        <datalist id="in-p6">{% for a in editor.p6 %}<option value="{{ a.id }}">{{ a.name }}{% if a.date %} · {{ a.date }}{% endif %}</option>{% endfor %}</datalist>
+      <div class="btn-group in-modes" role="group" aria-label="Edit as"><button type="button" class="btn btn-sm" id="in-rows-btn" aria-pressed="true">Editor</button><button type="button" class="btn btn-sm" id="in-text-btn" aria-pressed="false">Text</button></div>
+      <div class="in-wb" id="in-wb">
+        <div class="in-out" id="in-out" aria-label="Outline"></div>
+        <div class="in-pane" id="in-pane"></div>
       </div>
-      <p class="in-form" id="in-hint" hidden>Zone, then its steps: <span class="mono">number | name | after 3, 4 | P6 activity | note</span>, then each step’s components: <span class="mono">TYPEID x count | checklist</span>. <span class="mono">8*</span> marks the step that means installed.</p>
-      <textarea class="in-text" name="plan" id="in-text" hidden spellcheck="false" aria-label="Plan as text" placeholder="Top drift volume&#10;  7 | CRP support structures | after 6&#10;    D08100200001 x 80 | Installation&#10;  8 | Top CRPs | after 7 | 13122.A12834 | Two CRUs are joined, raised and cabled.&#10;    D08100100001 x 80 | Installation">{{ text }}</textarea>
+      <p class="in-form" id="in-hint" hidden>Zone, then its steps: <span class="mono">number | name | after 3, 4 | P6 activity | short description</span>; under a step its components, <span class="mono">TYPEID x count | checklist</span>, its details on lines starting <span class="mono">&gt;</span>, and <span class="mono">status: Done</span> when its status is set by hand.</p>
+      <textarea class="in-text" name="plan" id="in-text" hidden spellcheck="false" aria-label="Plan as text" placeholder="Top drift volume&#10;  7 | CRP support structures | after 6&#10;    D08100200001 x 80 | Installation&#10;  8 | Top CRPs | after 7 | 13122.A12834 | Two CRUs are joined, raised and cabled.&#10;    D08100100001 x 80 | Installation&#10;    > Drawings: [EDMS](https://…)">{{ text }}</textarea>
       <input type="text" class="in-reason" name="reason" placeholder="reason — kept with this version">
       <div class="in-actions">
         <button type="submit" class="btn btn-primary">Save plan to HWDB</button>
@@ -86,79 +108,177 @@
     {{ editor|json_script:"in-data" }}
     <script>
     (function () {
-      // The row editor over the text form: `steps` is the plan; the textarea is the form's value, written from the
-      // steps on submit (and shown in Text mode, parsed back when it closes — the same lines installation.parse_text reads).
+      // The plan lives in `zones` ([{name, steps: [...]}]); the textarea is the form's value, written from it on submit
+      // (and shown in Text mode, parsed back when it closes — the same lines installation.parse_text reads).
       var D = JSON.parse(document.getElementById("in-data").textContent);
-      var steps = D.steps, names = D.names, lists = {};   // lists: type id → its checklist names, fetched once
-      var body = document.getElementById("in-body"), none = document.getElementById("in-none"), ta = document.getElementById("in-text");
-      var ed = document.getElementById("in-editor"), q = document.getElementById("in-q"), hits = document.getElementById("in-hits"), pick = document.getElementById("in-pick");
-      var hint = document.getElementById("in-hint"), textBtn = document.getElementById("in-text-btn"), rowsBtn = document.getElementById("in-rows-btn");
-      var ID = /^[A-Z]\d{11}$/, addTo = null, textMode = false;
+      var names = D.names, lists = {};   // lists: type id → its checklist names, fetched once
+      var P6 = D.p6, pf = {det: "", sheet: "", q: ""}, sheets = [];   // the installation activities and the picker's filter
+      P6.forEach(function (a) { if (a.sheet && sheets.indexOf(a.sheet) < 0) sheets.push(a.sheet); });
+      var LAB = {}, KEY = {}; D.statuses.forEach(function (x) { LAB[x[0]] = x[1]; KEY[x[0]] = KEY[x[1].toLowerCase()] = x[0]; });
+      var out = document.getElementById("in-out"), pane = document.getElementById("in-pane"), wb = document.getElementById("in-wb");
+      var ta = document.getElementById("in-text"), hint = document.getElementById("in-hint");
+      var textBtn = document.getElementById("in-text-btn"), rowsBtn = document.getElementById("in-rows-btn");
+      var csrf = document.querySelector("#in-form input[name=csrfmiddlewaretoken]").value;
+      var ID = /^[A-Z]\d{11}$/, textMode = false, zones = group(D.steps), sel = null;   // sel: {z, s} — s null for the zone itself
+      function group(steps) {
+        var zs = [];
+        steps.forEach(function (s) {
+          if (!zs.length || zs[zs.length - 1].name !== s.zone) zs.push({name: s.zone, steps: []});
+          zs[zs.length - 1].steps.push(s);
+        });
+        return zs;
+      }
+      function all() { var a = []; zones.forEach(function (z) { z.steps.forEach(function (s) { s.zone = z.name; a.push(s); }); }); return a; }
       function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]; }); }
-      function inp(i, k, v, cls, extra) { return '<input type="text" class="' + (cls || "") + '" data-s="' + i + '" data-k="' + k + '" value="' + esc(v) + '"' + (extra || "") + ">"; }
-      function draw() {
-        none.hidden = steps.length > 0;
-        if (addTo !== null && !steps[addTo]) addTo = null;
-        pick.hidden = true; ed.appendChild(pick);   // parked while the rows are rebuilt, then put under the step it adds to
-        body.innerHTML = steps.map(function (s, i) {
-          return '<tr class="in-step"><td>' + inp(i, "n", s.n, "w-no", ' inputmode="numeric" aria-label="Step number"') + "</td>" +
-            '<td><input type="radio" name="in-inst" data-s="' + i + '" data-k="installed"' + (s.installed ? " checked" : "") + ' title="A record of this step means the component is installed (click again to clear)"></td>' +
-            "<td>" + inp(i, "name", s.name, "", ' aria-label="Step name"') + "</td><td>" + inp(i, "zone", s.zone, "", ' aria-label="Zone"') + "</td>" +
-            "<td>" + inp(i, "after", s.after.join(", "), "w-after", ' placeholder="3, 4" aria-label="After steps"') + "</td>" +
-            "<td>" + inp(i, "p6", s.p6, "w-p6", ' list="in-p6" aria-label="P6 installation activity"') + "</td>" +
-            '<td class="in-btns"><button type="button" class="in-ib" data-do="up" data-s="' + i + '" title="Move up"' + (i ? "" : " disabled") + ">&#9650;</button> " +
-            '<button type="button" class="in-ib" data-do="down" data-s="' + i + '" title="Move down"' + (i < steps.length - 1 ? "" : " disabled") + ">&#9660;</button> " +
-            '<button type="button" class="in-ib" data-do="part" data-s="' + i + '" title="Add a component — pick its type in the box below" aria-pressed="' + (addTo === i) + '">+ component</button> ' +
-            '<button type="button" class="in-ib" data-do="del" data-s="' + i + '" title="Remove the step">&#10005;</button></td></tr>' +
-            '<tr><td></td><td></td><td colspan="4">' + inp(i, "note", s.note, "", ' placeholder="note" aria-label="Note"') + "</td><td></td></tr>" +
-            s.parts.map(function (p, j) {
-              var has = D.plans.indexOf(p.type) >= 0, opts = (lists[p.type] || []).slice(); if (p.checklist && opts.indexOf(p.checklist) < 0) opts.unshift(p.checklist);
-              return '<tr class="in-part"><td colspan="3">' + esc(names[p.type] || "not in the mirror") + '<span class="mono">' + p.type + "</span></td>" +
-                '<td><input type="text" class="w-n" inputmode="numeric" data-s="' + i + '" data-p="' + j + '" data-k="count" value="' + esc(p.count) + '" aria-label="How many"></td>' +
-                '<td colspan="2"><select data-s="' + i + '" data-p="' + j + '" data-k="checklist" aria-label="Checklist that records it"><option value="">checklist —</option>' +
-                opts.map(function (c) { return "<option" + (c === p.checklist ? " selected" : "") + ">" + esc(c) + "</option>"; }).join("") + "</select></td>" +
-                '<td class="in-btns"><a class="in-ib" target="_blank" rel="noopener" href="' + D.plan.replace("X00000000000", p.type) + '" title="' + (has ? "This component’s own installation plan — opens in a new tab" : "Give this component an installation plan of its own — opens in a new tab") + '">' + (has ? "&#9998; plan" : "+ plan") + '</a> <button type="button" class="in-ib" data-do="pdel" data-s="' + i + '" data-p="' + j + '" title="Remove the component">&#10005;</button></td></tr>';
-            }).join("") + (addTo === i ? '<tr class="in-slot"><td colspan="7" id="in-slot"></td></tr>' : "");
-        }).join("");
-        if (addTo !== null) { q.placeholder = "component of step " + steps[addTo].n + " — type name or id"; document.getElementById("in-slot").appendChild(pick); pick.hidden = false; }
-        var need = []; steps.forEach(function (s) { s.parts.forEach(function (p) { if (!(p.type in lists) && need.indexOf(p.type) < 0) need.push(p.type); }); });
+      function cur() { return sel && sel.s !== null ? zones[sel.z].steps[sel.s] : null; }
+      function drawOut() {
+        out.innerHTML = zones.map(function (z, i) {
+          return '<div class="in-o-zone' + (sel && sel.z === i && sel.s === null ? " on" : "") + '" data-z="' + i + '">' + (z.name ? esc(z.name) : '<span class="dim">no zone</span>') + "</div>" +
+            z.steps.map(function (s, j) {
+              return '<div class="in-o-step' + (sel && sel.z === i && sel.s === j ? " on" : "") + '" data-z="' + i + '" data-s="' + j + '"><span class="n">' + s.n + '</span><span class="t">' + (s.name ? esc(s.name) : '<span class="dim">unnamed</span>') + "</span></div>";
+            }).join("") + '<button type="button" class="in-o-add" data-add="' + i + '">+ step</button>';
+        }).join("") + '<button type="button" class="in-o-add zone" data-add="zone">+ zone</button>';
+      }
+      function field(k, label, v, extra) { return '<div class="in-f"><label for="in-' + k + '">' + label + '</label><input type="text" id="in-' + k + '" data-k="' + k + '" value="' + esc(v) + '"' + (extra || "") + "></div>"; }
+      function drawComps() {
+        var s = cur(), box = document.getElementById("in-comps"); if (!s || !box) return;
+        box.innerHTML = s.parts.length ? '<table class="in-comp"><tbody>' + s.parts.map(function (p, j) {
+          var has = D.plans.indexOf(p.type) >= 0, opts = (lists[p.type] || []).slice(); if (p.checklist && opts.indexOf(p.checklist) < 0) opts.unshift(p.checklist);
+          return '<tr><td class="ty">' + esc(names[p.type] || "not in the mirror") + '<span class="mono">' + p.type + "</span></td>" +
+            '<td class="cnt"><input type="text" inputmode="numeric" data-p="' + j + '" data-k="count" value="' + esc(p.count) + '" aria-label="How many" title="How many"></td>' +
+            '<td class="chk"><select data-p="' + j + '" data-k="checklist" aria-label="Checklist that records it" title="The checklist whose record means installed"><option value="">checklist —</option>' +
+            opts.map(function (c) { return "<option" + (c === p.checklist ? " selected" : "") + ">" + esc(c) + "</option>"; }).join("") + "</select></td>" +
+            '<td class="btns"><a class="in-ib" target="_blank" rel="noopener" href="' + D.plan.replace("X00000000000", p.type) + '" title="' + (has ? "This component’s own installation plan — opens in a new tab" : "Give this component an installation plan of its own — opens in a new tab") + '">' + (has ? "&#9998; plan" : "+ plan") + "</a> " +
+            '<button type="button" class="in-ib" data-do="pdel" data-p="' + j + '" title="Remove the component">&#10005;</button></td></tr>';
+        }).join("") + "</tbody></table>" : '<p class="in-none">None yet.</p>';
+        var need = s.parts.map(function (p) { return p.type; }).filter(function (t, i, a) { return !(t in lists) && a.indexOf(t) === i; });
         if (need.length) {
           need.forEach(function (t) { lists[t] = []; });
           Promise.all(need.map(function (t) {
             return fetch(D.checklists.replace("X00000000000", t), {credentials: "same-origin"}).then(function (r) { return r.json(); })
               .then(function (j) { lists[t] = j.checklists || []; }).catch(function () {});
-          })).then(draw);
+          })).then(drawComps);
         }
       }
-      function set(e) {
-        var t = e.target, k = t.dataset.k; if (!k) return;
-        var s = steps[+t.dataset.s];
-        if (t.dataset.p !== undefined) { s.parts[+t.dataset.p][k] = k === "count" ? (parseInt(String(t.value).replace(/,/g, ""), 10) || 0) : t.value; return; }
-        if (k === "n") s.n = parseInt(t.value, 10) || 0;
-        else if (k === "after") s.after = (t.value.match(/\d+/g) || []).map(Number);
-        else if (k !== "installed") s[k] = t.value;
+      function drawPane() {
+        if (!sel) { pane.innerHTML = '<p class="in-none">' + (zones.length ? "Choose a zone or a step." : "No steps yet — add a zone, then its steps.") + "</p>"; return; }
+        var z = zones[sel.z], s = cur();
+        if (!s) {
+          pane.innerHTML = '<h2>Zone<span class="sp"></span>' +
+            '<button type="button" class="in-ib" data-do="zup" title="Move the zone up"' + (sel.z ? "" : " disabled") + ">&#9650;</button>" +
+            '<button type="button" class="in-ib" data-do="zdown" title="Move the zone down"' + (sel.z < zones.length - 1 ? "" : " disabled") + ">&#9660;</button>" +
+            '<button type="button" class="in-ib" data-do="zdel" title="' + (z.steps.length ? "Remove its steps first" : "Remove the zone") + '"' + (z.steps.length ? " disabled" : "") + ">&#10005;</button></h2>" +
+            '<div class="in-f" style="max-width:420px;"><label for="in-zname">Name</label><input type="text" id="in-zname" data-k="zname" value="' + esc(z.name) + '"></div>';
+          return;
+        }
+        pane.innerHTML = '<h2>Step<span class="sp"></span>' +
+          '<button type="button" class="in-ib" data-do="up" title="Move up"' + (sel.s || sel.z ? "" : " disabled") + ">&#9650;</button>" +
+          '<button type="button" class="in-ib" data-do="down" title="Move down"' + (sel.s < z.steps.length - 1 || sel.z < zones.length - 1 ? "" : " disabled") + ">&#9660;</button>" +
+          '<button type="button" class="in-ib" data-do="del" title="Remove the step">&#10005;</button></h2>' +
+          '<div class="in-grid">' + field("n", "No.", s.n, ' inputmode="numeric"') + field("name", "Name", s.name) +
+          '<div class="in-f"><label for="in-zone">Zone</label><select id="in-zone" data-k="zone">' + zones.map(function (x, i) { return '<option value="' + i + '"' + (i === sel.z ? " selected" : "") + ">" + esc(x.name || "no zone") + "</option>"; }).join("") + "</select></div></div>" +
+          '<div class="in-grid two">' + field("after", "Prerequisite steps", s.after.join(", "), ' placeholder="3, 4"') +
+          '<div class="in-f"><label for="in-status">Status</label><select id="in-status" data-k="status"><option value="">from the counts</option>' + D.statuses.map(function (x) { return '<option value="' + x[0] + '"' + (x[0] === s.status ? " selected" : "") + ">" + esc(x[1]) + "</option>"; }).join("") + "</select></div></div>" +
+          '<div style="margin-top:10px;">' + field("note", "Short description", s.note) + "</div>" +
+          "<h3>P6 installation activity</h3>" + (P6.length ?
+            '<div class="p6-bar"><select id="p6-det" aria-label="Detector"><option value="">HD and VD</option><option value="HD">HD</option><option value="VD">VD</option></select><select id="p6-sheet" aria-label="Sheet"><option value="">every sheet</option>' +
+            sheets.map(function (x) { return "<option>" + esc(x) + "</option>"; }).join("") + '</select><input type="search" id="p6-q" placeholder="filter by activity name or id" value="' + esc(pf.q) + '"></div>' +
+            '<select id="in-p6sel" data-k="p6" aria-label="P6 installation activity"></select><div class="p6-res" id="in-p6res"></div>'
+            : '<div class="in-f" style="max-width:260px;"><input type="text" id="in-p6" data-k="p6" value="' + esc(s.p6) + '" aria-label="P6 installation activity" placeholder="activity id — no P6 schedule uploaded"></div>') +
+          '<h3>Details</h3><div class="in-desc"><div class="in-f"><textarea id="in-details" data-k="details" spellcheck="true" aria-label="Details, Markdown" placeholder="Markdown: text, lists, [links](https://…)">' + esc(s.details) + '</textarea></div><div class="in-prev" id="in-prev"></div></div>' +
+          '<h3>Components</h3><div id="in-comps"></div>' +
+          '<span class="in-pick"><input type="text" id="in-q" autocomplete="off" spellcheck="false" placeholder="+ component — type name or id" aria-label="Component type to add"><div class="in-hits" id="in-hits" hidden></div></span>';
+        if (P6.length) { document.getElementById("p6-det").value = pf.det; document.getElementById("p6-sheet").value = pf.sheet; fillP6(); }
+        drawComps(); preview();
       }
-      body.addEventListener("input", set); body.addEventListener("change", set);
-      body.addEventListener("click", function (e) {
-        var r = e.target.closest("input[type=radio]");
-        if (r) { var was = steps[+r.dataset.s].installed; steps.forEach(function (s) { s.installed = false; }); steps[+r.dataset.s].installed = !was; draw(); return; }
-        var b = e.target.closest("button[data-do]"); if (!b) return;
-        var i = +b.dataset.s, s = steps[i], d = b.dataset.do;
-        if (d === "part") { addTo = addTo === i ? null : i; draw(); if (addTo !== null) q.focus(); return; }
-        if (d === "del") { steps.splice(i, 1); addTo = null; }
-        if (d === "pdel") s.parts.splice(+b.dataset.p, 1);
-        if (d === "up" || d === "down") { var j = i + (d === "up" ? -1 : 1); steps[i] = steps[j]; steps[j] = s; addTo = null; }
-        draw();
+      // the P6 picker, as on the production plan page: the installation activities, narrowed by the filter bar (kept from
+      // step to step); the chosen one stays listed whatever the filter; its date and name show under it
+      function fillP6() {
+        var s = cur(), selp = document.getElementById("in-p6sel"); if (!s || !selp) return;
+        var words = pf.q.toLowerCase().split(/\s+/).filter(Boolean), found = false;
+        var h = '<option value="">— none —</option>';
+        P6.forEach(function (a) {
+          if (a.id !== s.p6) {
+            if (pf.det && a.detector !== pf.det) return;
+            if (pf.sheet && a.sheet !== pf.sheet) return;
+            var hay = (a.id + " " + a.name + " " + a.component).toLowerCase();
+            if (words.some(function (w) { return hay.indexOf(w) < 0; })) return;
+          } else found = true;
+          h += '<option value="' + esc(a.id) + '">' + esc(a.id + " · " + (a.name || "?") + (a.date ? " · " + a.date : " · no date")) + "</option>";
+        });
+        if (s.p6 && !found) h += '<option value="' + esc(s.p6) + '">' + esc(s.p6) + " · not in the latest P6 schedule</option>";
+        selp.innerHTML = h; selp.value = s.p6; showP6();
+      }
+      function showP6() {
+        var s = cur(), res = document.getElementById("in-p6res"), a = null; if (!s || !res) return;
+        P6.forEach(function (x) { if (x.id === s.p6) a = x; });
+        res.className = "p6-res" + (s.p6 && (!a || !a.date) ? " p6-bad" : "");
+        res.innerHTML = !s.p6 ? "" : !a ? "\u26a0 not in the latest P6 schedule" : (a.date ? "<b>" + esc(a.date) + "</b>" : "\u26a0 no date in P6") + " · " + esc(a.name) + (a.source ? " (" + esc(a.source) + ")" : "") + " · " + esc(a.sheet);
+      }
+      function draw() { if (sel && (!zones[sel.z] || (sel.s !== null && !zones[sel.z].steps[sel.s]))) sel = null; drawOut(); drawPane(); }
+      var pt = null;
+      function preview() {
+        var s = cur(), box = document.getElementById("in-prev"); if (!s || !box) return;
+        clearTimeout(pt);
+        pt = setTimeout(function () {
+          if (!s.details.trim()) { box.innerHTML = ""; return; }
+          var fd = new FormData(); fd.append("text", s.details);
+          fetch(D.preview, {method: "POST", body: fd, credentials: "same-origin", headers: {"X-CSRFToken": csrf}}).then(function (r) { return r.text(); })
+            .then(function (h) { if (cur() === s) box.innerHTML = h; }).catch(function () {});
+        }, 250);
+      }
+      out.addEventListener("click", function (e) {
+        var a = e.target.closest("[data-add]"), r = e.target.closest("[data-z]");
+        if (a && a.dataset.add === "zone") { zones.push({name: "", steps: []}); sel = {z: zones.length - 1, s: null}; draw(); document.getElementById("in-zname").focus(); return; }
+        if (a) {
+          var z = zones[+a.dataset.add], flat = all(), last = z.steps[z.steps.length - 1];
+          z.steps.push({n: flat.reduce(function (m, s) { return Math.max(m, s.n); }, 0) + 1, name: "", zone: z.name, after: last ? [last.n] : [], p6: "", note: "", details: "", status: "", parts: []});
+          sel = {z: +a.dataset.add, s: z.steps.length - 1}; draw(); document.getElementById("in-name").focus(); return;
+        }
+        if (r) { sel = {z: +r.dataset.z, s: r.dataset.s === undefined ? null : +r.dataset.s}; draw(); }
       });
-      document.getElementById("in-step").addEventListener("click", function () {
-        var last = steps[steps.length - 1];
-        steps.push({n: steps.reduce(function (m, s) { return Math.max(m, s.n); }, 0) + 1, name: "", zone: last ? last.zone : "", after: last ? [last.n] : [], p6: "", note: "", parts: [], installed: false});
+      function set(e) {
+        var t = e.target, k = t.dataset.k, s = cur();
+        if (t.id === "p6-det" || t.id === "p6-sheet" || t.id === "p6-q") { pf = {det: document.getElementById("p6-det").value, sheet: document.getElementById("p6-sheet").value, q: document.getElementById("p6-q").value}; fillP6(); return; }
+        if (!k) return;
+        if (k === "zname") { zones[sel.z].name = t.value; drawOut(); return; }
+        if (!s) return;
+        if (t.dataset.p !== undefined) { s.parts[+t.dataset.p][k] = k === "count" ? (parseInt(String(t.value).replace(/,/g, ""), 10) || 0) : t.value; return; }
+        if (k === "n") { s.n = parseInt(t.value, 10) || 0; drawOut(); }
+        else if (k === "name") { s.name = t.value; drawOut(); }
+        else if (k === "after") s.after = (t.value.match(/\d+/g) || []).map(Number);
+        else if (k === "details") { s.details = t.value; preview(); }
+        else if (k === "p6") { s.p6 = t.value; showP6(); }
+        else if (k === "zone") { if (e.type !== "change") return; zones[sel.z].steps.splice(sel.s, 1); zones[+t.value].steps.push(s); sel = {z: +t.value, s: zones[+t.value].steps.length - 1}; draw(); }
+        else s[k] = t.value;
+      }
+      pane.addEventListener("input", set); pane.addEventListener("change", set);
+      pane.addEventListener("click", function (e) {
+        var h = e.target.closest("#in-hits button[data-t]");
+        if (h) {
+          if (h.dataset.n) names[h.dataset.t] = h.dataset.n;
+          cur().parts.push({type: h.dataset.t, count: 0, checklist: ""});
+          document.getElementById("in-q").value = ""; document.getElementById("in-hits").hidden = true; drawComps(); document.getElementById("in-q").focus(); return;
+        }
+        var b = e.target.closest("button[data-do]"); if (!b) return;
+        var d = b.dataset.do, z = zones[sel.z], s = cur(), t;
+        if (d === "pdel") { s.parts.splice(+b.dataset.p, 1); drawComps(); return; }
+        if (d === "del") { z.steps.splice(sel.s, 1); sel = {z: sel.z, s: null}; }
+        if (d === "zdel") { zones.splice(sel.z, 1); sel = null; }
+        if (d === "zup" || d === "zdown") { t = sel.z + (d === "zup" ? -1 : 1); zones[sel.z] = zones[t]; zones[t] = z; sel.z = t; }
+        if (d === "up" || d === "down") {   // within its zone, then on into the neighbouring one
+          t = sel.s + (d === "up" ? -1 : 1);
+          if (t >= 0 && t < z.steps.length) { z.steps[sel.s] = z.steps[t]; z.steps[t] = s; sel.s = t; }
+          else { z.steps.splice(sel.s, 1); var nz = zones[sel.z + (d === "up" ? -1 : 1)]; if (d === "up") nz.steps.push(s); else nz.steps.unshift(s); sel = {z: zones.indexOf(nz), s: nz.steps.indexOf(s)}; }
+        }
         draw();
       });
       // the type picker: the instant search's types, off the mirror
       var timer = null;
-      q.addEventListener("input", function () {
-        clearTimeout(timer); var v = q.value.trim();
+      pane.addEventListener("input", function (e) {
+        if (e.target.id !== "in-q") return;
+        var hits = document.getElementById("in-hits"), v = e.target.value.trim();
+        clearTimeout(timer);
         if (v.length < 2) { hits.hidden = true; return; }
         timer = setTimeout(function () {
           fetch(D.search + "?q=" + encodeURIComponent(v), {credentials: "same-origin"}).then(function (r) { return r.json(); }).then(function (j) {
@@ -169,56 +289,60 @@
           }).catch(function () { hits.hidden = true; });
         }, 200);
       });
-      q.addEventListener("keydown", function (e) {
+      pane.addEventListener("keydown", function (e) {
+        if (e.target.id !== "in-q") { if (e.key === "Enter" && e.target.tagName === "INPUT") e.preventDefault(); return; }   // Enter in a field must not save the plan
+        var hits = document.getElementById("in-hits");
         if (e.key === "Enter") { e.preventDefault(); var f = hits.querySelector("button"); if (f && !hits.hidden) f.click(); }
-        if (e.key === "Escape") { hits.hidden = true; addTo = null; draw(); }
+        if (e.key === "Escape") hits.hidden = true;
       });
-      hits.addEventListener("click", function (e) {
-        var b = e.target.closest("button[data-t]"); if (!b || addTo === null) return;
-        if (b.dataset.n) names[b.dataset.t] = b.dataset.n;
-        steps[addTo].parts.push({type: b.dataset.t, count: 0, checklist: ""});
-        q.value = ""; hits.hidden = true; draw(); q.focus();
-      });
-      document.addEventListener("click", function (e) { if (!e.target.closest(".in-pick")) hits.hidden = true; });
+      document.addEventListener("click", function (e) { var hits = document.getElementById("in-hits"); if (hits && !e.target.closest(".in-pick")) hits.hidden = true; });
       function lines() {
-        var out = [], zone = null;
-        steps.forEach(function (s) {
-          if (s.zone !== zone) { zone = s.zone; if (zone) out.push(zone); }
-          var f = [s.n + (s.installed ? "*" : ""), s.name, s.after.length ? "after " + s.after.join(", ") : "", s.p6, s.note];
-          while (f.length > 2 && !f[f.length - 1]) f.pop();
-          out.push("  " + f.join(" | "));
-          s.parts.forEach(function (p) { out.push("    " + p.type + " x " + p.count + (p.checklist ? " | " + p.checklist : "")); });
+        var o = [];
+        zones.forEach(function (z) {
+          if (z.name && z.steps.length) o.push(z.name);
+          z.steps.forEach(function (s) {
+            var f = [String(s.n), s.name, s.after.length ? "after " + s.after.join(", ") : "", s.p6, s.note];
+            while (f.length > 2 && !f[f.length - 1]) f.pop();
+            o.push("  " + f.join(" | "));
+            if (s.status) o.push("    status: " + LAB[s.status]);
+            s.parts.forEach(function (p) { o.push("    " + p.type + " x " + p.count + (p.checklist ? " | " + p.checklist : "")); });
+            if (s.details) s.details.split("\n").forEach(function (ln) { o.push(("    > " + ln).replace(/\s+$/, "")); });
+          });
         });
-        return out.join("\n");
+        return o.join("\n");
       }
       function parse(text) {   // null when a line does not read — the text stays up, the save names the line
-        var out = [], zone = "", cur = null, ok = true;
+        var o = [], zone = "", c = null, ok = true;
         text.split("\n").forEach(function (raw) {
           if (!raw.trim()) return;
-          var f = raw.trim().split("|").map(function (x) { return x.trim(); }), m = f[0].match(/^([A-Za-z]\d{11})\s*[x×]\s*([\d,]+)$/), st = f[0].match(/^(\d+)\s*(\*?)$/);
-          if (m) { if (cur) cur.parts.push({type: m[1].toUpperCase(), count: parseInt(m[2].replace(/,/g, ""), 10), checklist: f[1] || ""}); else ok = false; }
-          else if (st) { cur = {n: +st[1], installed: !!st[2], name: f[1] || "", zone: zone, after: ((f[2] || "").match(/\d+/g) || []).map(Number), p6: f[3] || "", note: f.slice(4).join(" | "), parts: []}; out.push(cur); }
-          else if (f.length === 1 && !/^[ \t]/.test(raw)) { zone = f[0]; cur = null; }
+          if (raw.trim().charAt(0) === ">") { if (c) c.details += (c.details ? "\n" : "") + raw.trim().slice(1).replace(/^ /, "").replace(/\s+$/, ""); else ok = false; return; }
+          var sm = raw.trim().match(/^status\s*:\s*(.*)$/i);
+          if (sm && c) { var key = KEY[sm[1].trim().toLowerCase()]; if (key) c.status = key; else ok = false; return; }
+          var f = raw.trim().split("|").map(function (x) { return x.trim(); }), m = f[0].match(/^([A-Za-z]\d{11})\s*[x×]\s*([\d,]+)$/), st = f[0].match(/^(\d+)\s*\*?$/);
+          if (m) { if (c) c.parts.push({type: m[1].toUpperCase(), count: parseInt(m[2].replace(/,/g, ""), 10), checklist: f[1] || ""}); else ok = false; }
+          else if (st) { c = {n: +st[1], status: "", name: f[1] || "", zone: zone, after: ((f[2] || "").match(/\d+/g) || []).map(Number), p6: f[3] || "", note: f.slice(4).join(" | "), details: "", parts: []}; o.push(c); }
+          else if (f.length === 1 && !/^[ \t]/.test(raw)) { zone = f[0]; c = null; }
           else ok = false;
         });
-        return ok ? out : null;
+        return ok ? o : null;
       }
-      function showText(on) { textMode = on; ta.hidden = hint.hidden = !on; ed.querySelector("table").hidden = on; document.getElementById("in-step").hidden = on; none.hidden = on || steps.length > 0; textBtn.setAttribute("aria-pressed", on); rowsBtn.setAttribute("aria-pressed", !on); }
+      function showText(on) { textMode = on; ta.hidden = hint.hidden = !on; wb.hidden = on; textBtn.setAttribute("aria-pressed", on); rowsBtn.setAttribute("aria-pressed", !on); }
       textBtn.addEventListener("click", function () { if (!textMode) { ta.value = lines(); showText(true); } });
       rowsBtn.addEventListener("click", function () {
         if (!textMode) return;
         var got = parse(ta.value);
-        if (!got) { alert("A line does not read as a zone, a step or a part — fix it, or save to see which."); return; }
-        steps = got;
-        var need = []; steps.forEach(function (s) { s.parts.forEach(function (p) { if (!(p.type in names) && need.indexOf(p.type) < 0) need.push(p.type); }); });
+        if (!got) { alert("A line does not read as a zone, a step, a component or details — fix it, or save to see which."); return; }
+        zones = group(got); sel = null;
+        var need = []; got.forEach(function (s) { s.parts.forEach(function (p) { if (!(p.type in names) && need.indexOf(p.type) < 0) need.push(p.type); }); });
         var calls = []; for (var k = 0; k < need.length; k += 20) calls.push(need.slice(k, k + 20));   // the names endpoint takes 20 ids a call
         Promise.all(calls.map(function (c) {
           return fetch(D.summary + "?ids=" + c.join(","), {credentials: "same-origin"}).then(function (r) { return r.json(); }).then(function (j) {
             (j.types || []).forEach(function (t) { names[t.part_type_id] = t.name || ""; }); }).catch(function () {});
-        })).then(function () { showText(false); draw(); });
+        })).then(function () { showText(false); first(); });
       });
+      function first() { sel = zones.length && zones[0].steps.length ? {z: 0, s: 0} : (zones.length ? {z: 0, s: null} : null); draw(); }
       document.getElementById("in-form").addEventListener("submit", function () { if (!textMode) ta.value = lines(); });
-      if (D.start_text) showText(true); else draw();
+      if (D.start_text) showText(true); else first();
     })();
     </script>
   {% elif text %}

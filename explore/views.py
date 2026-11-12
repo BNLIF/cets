@@ -858,14 +858,13 @@ def explore_production_resources_view(request, part_type_id):
 
 def _installation_resolve(api, inst, steps: list[dict], plan_type: str = "") -> list[dict]:
     """#217: the plan's steps with each part resolved live — ``used`` (the
-    checklist that counts, as the type names it: the part's own, or, when
-    the part's type carries a plan of its own with a step marked
-    installed, that step's — ``via`` its number), ``test_type`` (that
+    checklist the part names, as the type spells it), ``test_type`` (that
     checklist's test type, "" when the type has no such checklist or it
-    sets none), ``own_plan`` and the type's ``procedures``. One image
-    listing per distinct part type, one read per checklist and one per
-    own plan, in parallel. ``plan_type`` is the type the plan sits on: its
-    own-type parts are the plan's own steps, not parts with a sub-plan."""
+    sets none), ``own_plan`` (the part's type carries a plan of its own)
+    and the type's ``procedures``. One image listing per distinct part
+    type and one read per named checklist, in parallel. ``plan_type`` is
+    the type the plan sits on: its own-type parts are the plan's own
+    steps, not parts with a plan of their own."""
     want: dict[str, set] = {}
     for s in steps:
         for p in s["parts"]:
@@ -875,11 +874,9 @@ def _installation_resolve(api, inst, steps: list[dict], plan_type: str = "") -> 
         listing = production._listing(cli, tid)
         avail = checklistforms.active(cli, tid, rows=listing)
         acts = {c["name"].lower(): c for c in avail if not c["procedure"]}
-        own = tid != plan_type and bool(production.versions(listing, installation.plan_name(tid)))
-        via = installation.installed_checklist(installation.read(cli, tid, rows=listing)[0], tid) if own else None
         out = {}
         for name in want[tid]:
-            c = acts.get((via[1] if via else name).lower())
+            c = acts.get(name.lower())
             tt = ""
             if c:
                 try:
@@ -887,8 +884,9 @@ def _installation_resolve(api, inst, steps: list[dict], plan_type: str = "") -> 
                     tt = checklistforms.normalize(cfg, c["name"])["test_type_name"] if isinstance(cfg, dict) else ""
                 except Exception:
                     pass
-            out[name] = {"test_type": tt, "used": c["name"] if c else (via[1] if via else name), "via": via[0] if via else 0}
-        return {"by": out, "own_plan": own, "procedures": [c["name"] for c in avail if c["procedure"]]}
+            out[name] = {"test_type": tt, "used": c["name"] if c else name}
+        return {"by": out, "own_plan": tid != plan_type and bool(production.versions(listing, installation.plan_name(tid))),
+                "procedures": [c["name"] for c in avail if c["procedure"]]}
 
     got = parts.fetch_map(api, _one, list(want))
     return [{**s, "parts": [{**p, **((got.get(p["type"]) or {}).get("by") or {}).get(p["checklist"], {"test_type": ""}),
@@ -961,6 +959,7 @@ def explore_installation_plan_view(request, part_type_id):
     node = HierarchyNode.for_instance(inst).filter(
         level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
     steps, vs = installation.read(api, part_type_id)
+    can_edit = inst in settings.HWDB_WRITE_INSTANCES
     if steps is not None:
         steps = _installation_resolve(api, inst, steps, part_type_id)
     installation.cache(inst, part_type_id, steps)
@@ -977,7 +976,7 @@ def explore_installation_plan_view(request, part_type_id):
         "n_versions": len(vs),
         "last": vs[0] if vs else None,
         "edit_url": _rev(request, "explore:installation_edit", args=[part_type_id]),
-        "can_edit": inst in settings.HWDB_WRITE_INSTANCES,   # the edit page applies the type's roles itself
+        "can_edit": can_edit,   # the edit page applies the type's roles itself
         "file_name": installation.plan_name(part_type_id),
         **installation.summary(rows),
     })
@@ -1019,6 +1018,7 @@ def explore_installation_edit_view(request, part_type_id):
         if not errors:
             actor, reason = activity.actor_of(request), (request.POST.get("reason") or "").strip()
             try:
+                new = installation.stamp(new, steps, actor, timezone.localdate().isoformat())
                 body = installation.write(api, part_type_id, new, reason, actor, timezone.localdate().isoformat())
                 if body.get("status") != "OK":
                     errors = [f"HWDB rejected the plan — {body.get('data') or body}"]
@@ -1043,9 +1043,11 @@ def explore_installation_edit_view(request, part_type_id):
         "editor": {"steps": steps or [], "start_text": bool(errors),   # a text that did not parse stays up as text
                    "names": production.names(inst, [p["type"] for s in steps or [] for p in s["parts"]] + [part_type_id]),
                    "p6": [a for a in p6.options() if a["kind"] == P6Activity.KIND_INSTALL],
+                   "statuses": list(installation.STATUSES.items()),
                    "search": _rev(request, "explore:search_api"),
                    "summary": _rev(request, "explore:type_summary"),
                    "checklists": _rev(request, "explore:checklist_names", args=["X00000000000"]),
+                   "preview": _rev(request, "explore:text_preview"),   # the description's Markdown, as the plan page renders it
                    "plan": _rev(request, "explore:installation_edit", args=["X00000000000"]),   # a component row's "+ plan" / "✎ plan"
                    "plans": sorted(set(InstallationPlan.for_instance(inst).exclude(part_type_id=part_type_id).values_list("part_type_id", flat=True))
                                    | {p["type"] for s in (cached.steps if cached else []) for p in s.get("parts") or [] if p.get("own_plan")})},
