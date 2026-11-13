@@ -29,7 +29,7 @@ function pidOf(p){ var t=KBY[p.kind].type; return (t&&ITEMS[t]&&ITEMS[t][p.name]
 function stOf(p){ return pidOf(p)?"inst":"pend"; }
 var STL={inst:"Installed",pend:"Pending"};
 
-var mode="status", sel=-1, T=7, cur=-1, playing=false, stopAt=END, dirty=true, openKind={}, pickKind="";
+var mode="status", sel=-1, T=0, cur=-1, playing=false, stopAt=END, dirty=true, openKind={}, pickKind="";
 var reduce=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /* ---------- step bar ---------- */
@@ -37,7 +37,14 @@ var chips=[];
 STEPS.forEach(function(s,i){ var b=document.createElement("button"); b.type="button"; b.className="im-chip"; b.textContent=String(i+1); b.title=stepName(i);
   b.setAttribute("role","listitem"); b.setAttribute("aria-label","Step "+(i+1)+": "+stepName(i));
   b.addEventListener("click",function(){ setMode("plan"); goStep(i); }); $("chips").appendChild(b); chips.push(b); });
-function goStep(i){ if(reduce){ T=i+END; playing=false; } else { T=i; stopAt=i+END; playing=true; } dirty=true; }
+function goStep(i){ if(reduce){ T=i+END; playing=false; } else { T=i; stopAt=i+END; playing=true; } dirty=true; syncPlay(); }
+/* transport: Play runs on through the steps from where the view is, Previous / Next replay one step */
+function syncPlay(){ $("play").textContent=playing?"Pause":(T>=N-1+END-1e-6?"Replay":"Play"); }
+$("play").addEventListener("click",function(){ setMode("plan");
+  if(playing) playing=false; else { if(T>=N-1+END-1e-6) T=0; stopAt=N-1+END; playing=true; }
+  dirty=true; syncPlay(); });
+$("prev").addEventListener("click",function(){ setMode("plan"); goStep(Math.max(0,cur-1)); });
+$("next").addEventListener("click",function(){ setMode("plan"); goStep(Math.min(N-1,cur+1)); });
 function showCap(){
   if(mode==="status"){
     var c={inst:0,pend:0}; POS.forEach(function(p){c[stOf(p)]++});
@@ -49,7 +56,7 @@ function showCap(){
   }
 }
 function setMode(m){ if(mode===m)return; mode=m; $("plan").setAttribute("aria-pressed",String(m==="plan")); $("status").setAttribute("aria-pressed",String(m==="status"));
-  if(m==="status"){ playing=false; goal=view(SVIEW); } else if(cur>=0) goal=view(VIEWS[cur]);
+  if(m==="status"){ playing=false; syncPlay(); goal=view(SVIEW); } else if(cur>=0) goal=view(VIEWS[cur]);
   dirty=true; showCap(); }
 $("plan").addEventListener("click",function(){ setMode("plan"); goStep(Math.max(0,cur)); });
 $("status").addEventListener("click",function(){ setMode("status"); });
@@ -81,6 +88,11 @@ var edgeMat=new THREE.LineBasicMaterial({color:0x1c1812,transparent:true,opacity
 var outline=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(L+1.6,H+1,W+1.6)),edgeMat); outline.position.set(0,(H+1)/2,0); scene.add(outline);
 box(44.5,0.2,3.4,0.25,H+0.9,-(hz+0.8+1.7),mat(0xa39c8c));
 var barracks=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(9.4,3.4,6.4)),edgeMat); barracks.position.set(39.2,1.7,0); scene.add(barracks);
+var greyroom=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(15.2,9,14)),edgeMat); greyroom.position.set(-39.4,4.5,0); scene.add(greyroom);
+var beam=box(10,0.35,0.35,-31,7.5,0,mat(0xd8a21c));   /* TCO hoisting beam, steps 4 to 11 */
+var jib=new THREE.Group();   /* jib crane at the TCO, steps 13 and 14 */
+(function(){ var m=mat(0xd8a21c),a=new THREE.Mesh(BOX,m); a.scale.set(5.5,.25,.25); a.position.set(-30.4,7.2,1.2); jib.add(a);
+  var q=new THREE.Mesh(BOX,m); q.scale.set(.3,7.2,.3); q.position.set(-33,3.6,1.2); jib.add(q); scene.add(jib); })();
 var tco=box(0.8,TH,2*TW,-(hx+0.4),TH/2,0,mat(0x8f8878));
 var argon=new THREE.Mesh(BOX,new THREE.MeshBasicMaterial({color:0x6fb4ea,transparent:true,opacity:.26,depthWrite:false})); scene.add(argon);
 
@@ -92,7 +104,7 @@ var stripes=(function(){ var c=document.createElement("canvas"); c.width=4; c.he
   for(var i=0;i<16;i++){ x.fillStyle=i%2?"#9a9488":"#f0ece2"; x.fillRect(0,i*4,4,4); }
   var t=new THREE.CanvasTexture(c); t.magFilter=THREE.NearestFilter; return t; })();
 var gRack=group(BOX,0x2f5fa8), gSteel=group(CYL,0xb9c2c7), gChim=group(CYL,0xa8b2b8), gCrate=group(BOX,0x2c333a),
-    gHV=group(CYL,0xd5d9dc), gRod=group(CYL,0x7d878d), gPD=group(BOX,0x2f9ac4), gCable=group(BOX,0x8a6fb0), gTray=group(BOX,0x8a9197),
+    gLift=group(BOX,0xe0b422), gHV=group(CYL,0xd5d9dc), gRod=group(CYL,0x7d878d), gPD=group(BOX,0x2f9ac4), gCable=group(BOX,0x8a6fb0), gTray=group(BOX,0x8a9197),
     gSST=group(BOX,0x9aa4aa), gCham=group(CYL,0x77838a), gCRP=group(BOX,0x4f9d72), gCath=group(BOX,0x3d434b), gFloor=group(BOX,0xcdb48e);
 function fcMat(){ return mat(0xffffff,{map:stripes,metalness:.3,roughness:.5}); }
 var gFC={N:group(BOX,0xffffff,fcMat()),S:group(BOX,0xffffff,fcMat()),E:group(BOX,0xffffff,fcMat()),W:group(BOX,0xffffff,fcMat())};
@@ -114,6 +126,10 @@ for(k=0;k<21;k++)for(m=0;m<5;m++){ n=k*5+m; var cx=30-3*k,cz=-6.75+3.375*m,r=(m=
   var tx=5.05+(30-cx)/60*0.78;
   add(gTray,{p:[cx,13.95,cz],s:[2.4,.05,.28],f:[0,-1.5,0],t0:tx+.04,t1:tx+.12,step:5});
 }
+[-1,1].forEach(function(sg){   /* step 4: scissor lifts, working until the top CRPs hang */
+  add(gLift,{p:[0,0.95,0],s:[2.2,.9,1.2],t0:3.1,t1:3.11,out:6.02,step:3,lift:sg});
+  add(gLift,{p:[0,5.4,0],s:[.25,8,.25],t0:3.1,t1:3.11,out:6.02,step:3,lift:sg});
+  add(gLift,{p:[0,9.5,0],s:[2.2,.15,1.2],t0:3.1,t1:3.11,out:6.02,step:3,lift:sg}); });
 p=pos("hv","HV extender",4,[30.65,8,0]);
 add(gHV,{p:[30.65,10.4,0],s:[.22,7,.22],f:[0,-7,0],t0:4.12,t1:4.55,step:4,pos:p});
 add(gHV,{p:[30.65,6.85,0],s:[.42,.3,.42],f:[0,-7,0],t0:4.12,t1:4.55,step:4,pos:p});
@@ -198,7 +214,9 @@ canvas.addEventListener("pointerup",endPtr); canvas.addEventListener("pointercan
 canvas.addEventListener("wheel",function(e){ e.preventDefault(); goal=null; cam.r=Math.max(6,Math.min(260,cam.r*Math.exp(e.deltaY*.001))); },{passive:false});
 
 /* ---------- draw ---------- */
-function clamp(v,a,b){ return v<a?a:(v>b?b:v); } function ease(q){ return q*q*(3-2*q); }
+function clamp(v,a,b){ return v<a?a:(v>b?b:v); } function ease(q){ return q*q*(3-2*q); } function lerp(a,b,q){ return a+(b-a)*clamp(q,0,1); }
+function liftX(t){ return t<3.6?lerp(-35,-22,(t-3.1)/.5):t<4.05?-22:t<4.35?lerp(-22,26,(t-4.05)/.3):t<5.03?26:lerp(26,-26,(t-5.03)/.87); }
+function liftZ(t){ return t<3.35?.9:lerp(.9,5.4,(t-3.35)/.25); }
 var cWork=new THREE.Color(0xc9560f), cSel=new THREE.Color(0x2f55d4), cSt={inst:new THREE.Color(0x4a8a5a),pend:new THREE.Color(0xe2dccb)};
 var M=new THREE.Matrix4(),P=new THREE.Vector3(),Q=new THREE.Quaternion(),S=new THREE.Vector3(),E=new THREE.Euler(),ZERO=new THREE.Matrix4().makeScale(0,0,0);
 function apply(){
@@ -208,13 +226,14 @@ function apply(){
   for(var gi=0;gi<groups.length;gi++){ var g=groups[gi],me=g.mesh;
     for(var q=0;q<g.specs.length;q++){ var s=g.specs[q],x=s.p[0],y=s.p[1],z=s.p[2],sy=s.s[1],col=g.base;
       if(status){
-        s.vis=s.pos>=0||(!s.floor&&s.step<=6);
+        s.vis=s.pos>=0||(!s.floor&&!s.lift&&s.step<=6);
         if(s.pos>=0) col=cSt[stOf(POS[s.pos])];
       } else {
         s.vis=T>s.t0&&T<s.out;
         if(s.vis){ var pr=clamp((T-s.t0)/(s.t1-s.t0),0,1),e=ease(pr);
           if(s.hang!==undefined){ var qq=pr*3; if(qq<s.hang-1e-6)s.vis=false; else y-=fcH*clamp(3-qq,0,3); }
           else if(s.grow){ sy=Math.max(.001,s.s[1]*e); y=(s.p[1]-s.s[1]/2)+sy/2; }
+          else if(s.lift){ x=liftX(T); z=s.lift*liftZ(T); }
           else { x+=s.f[0]*(1-e); y+=s.f[1]*(1-e); z+=s.f[2]*(1-e); }
           if(s.step===cur) col=cWork; }
       }
@@ -225,6 +244,7 @@ function apply(){
     }
     me.instanceMatrix.needsUpdate=true; if(me.instanceColor)me.instanceColor.needsUpdate=true;
   }
+  greyroom.visible=status||T>3.04; beam.visible=!status&&T>3.25&&T<11.06; jib.visible=!status&&T>12.04&&T<14.04;
   tco.visible=!status&&T>14.2; tco.position.x=-(hx+0.4)-4*(1-ease(clamp((T-14.2)/.36,0,1)));
   var lv=status?0:13.7*clamp((T-14.62)/.36,0,1); argon.visible=lv>0; argon.scale.set(L-.05,Math.max(.01,lv),W-.05); argon.position.set(0,lv/2,0);
 }
@@ -232,13 +252,17 @@ function fade(mt,on,op){ if(mt.transparent!==on){ mt.transparent=on; mt.depthWri
 function cutaway(){ var c=camera.position;
   fade(mN,c.z<-hz,.1); fade(mS,c.z>hz,.1); fade(mE,c.x>hx,.1); fade(mWw,c.x<-hx,.1);
   fade(gFC.N.mat,c.z<-6.9,.2); fade(gFC.S.mat,c.z>6.9,.2); fade(gFC.E.mat,c.x>30.2,.2); fade(gFC.W.mat,c.x<-30.2,.2);
-  fade(mRoof,mode==="status"||cur>=3,.13); }
+  var see=roofUser===null?(mode==="status"||cur>=3):roofUser;
+  if(see!==roofSee){ roofSee=see; $("roof").setAttribute("aria-pressed",String(see)); }
+  fade(mRoof,see,.13); }
+var roofUser=null, roofSee=null;
+$("roof").addEventListener("click",function(){ roofUser=!roofSee; });
 var cw=0,ch=0;
 function resize(){ var w=stage.clientWidth,h=stage.clientHeight; if(!w||!h||(w===cw&&h===ch))return; var first=!cw; cw=w; ch=h;
   renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); if(first){ goal=view(SVIEW); applyGoal(1); goal=null; } }
 var last=null;
 function frame(now){ var dt=last===null?0:Math.min(.1,(now-last)/1000); last=now; resize();
-  if(playing){ T+=dt/STEP_SEC; if(T>=stopAt){ T=stopAt; playing=false; } dirty=true; }
+  if(playing){ T+=dt/STEP_SEC; if(T>=stopAt){ T=stopAt; playing=false; syncPlay(); } dirty=true; }
   if(dirty){ apply(); dirty=false; }
   if(goal){ if(reduce){ applyGoal(1); goal=null; } else { applyGoal(1-Math.exp(-dt*2.6)); if(Math.abs(goal.r-cam.r)<.02&&Math.abs(goal.th-cam.th)<.001&&goal.t.distanceTo(cam.t)<.02)goal=null; } }
   placeCamera(); camera.updateMatrixWorld(); cutaway(); renderer.render(scene,camera); requestAnimationFrame(frame); }

@@ -248,7 +248,7 @@ class PagesTest(TestCase):
             {"part_id": f"{CRP}-00002", "specifications": [{"DATA": {"Position": "TCRP R07-C2"}}]}], "pagination": {"pages": 1}}
         m1, m2 = _mocked(api)
         with m1, m2:
-            self.assertIn(f'href="{MAP}">Map</a>', self.client.get(self.PLAN).content.decode())
+            self.assertIn(f'href="{MAP}">3D Map</a>', self.client.get(self.PLAN).content.decode())
             html = self.client.get(MAP).content.decode()
             self.assertIn('"steps": {"7": {"name": "CRP support structures", "note": ""}', html)   # the plan's own step names, off the cache
             self.assertIn('"links": {}', html)

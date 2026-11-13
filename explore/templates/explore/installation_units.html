@@ -49,7 +49,7 @@
     <span class="mono" style="font-size:12px; color:var(--dim);">{{ part_type_id }}</span>
   </div>
   {% if has_plan %}
-  <div class="in-tabs"><a class="in-tab" aria-selected="false" href="{{ plan_url }}">Steps</a><a class="in-tab" aria-selected="true" href="">Units</a>{% if map_url %}<a class="in-tab" aria-selected="false" href="{{ map_url }}">Map</a>{% endif %}</div>
+  <div class="in-tabs"><a class="in-tab" aria-selected="false" href="{{ plan_url }}">Steps</a><a class="in-tab" aria-selected="true" href="">Units</a>{% if map_url %}<a class="in-tab" aria-selected="false" href="{{ map_url }}">3D Map</a>{% endif %}</div>
   <p class="es-sub">Every item of every component. A tick opens the item’s record; Record opens the checklist that records that stage.</p>
   {% if steps %}
   <div class="tbl-scroll"><table class="un-table" id="un-table" data-url="{{ units_url }}">

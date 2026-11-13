@@ -21,11 +21,13 @@
   .im-left { display: grid; grid-template-rows: minmax(0,1fr) auto; min-height: 0; min-width: 0; }
   #im-stage { position: relative; min-height: 260px; overflow: hidden; background: var(--bg); }
   #im-gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  .im-roof { position: absolute; top: 10px; right: 10px; } .im-roof[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
   .im-hint { position: absolute; left: 12px; bottom: 8px; font-size: 12px; color: var(--dim); pointer-events: none; }
   #im-nogl[hidden] { display: none; }
   #im-nogl { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; background: var(--bg); }
   .im-dock { border-top: 1px solid var(--rule); background: var(--page); padding: 8px 12px 10px; display: grid; gap: 6px; font-size: 13.5px; }
-  .im-chips { display: flex; gap: 4px; overflow-x: auto; padding-block: 2px; }
+  .im-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; } #im-play { min-width: 64px; justify-content: center; text-align: center; }
+  .im-chips { display: flex; min-width: 0; gap: 4px; overflow-x: auto; padding-block: 2px; }
   .im-chip { flex: 0 0 auto; min-width: 30px; height: 26px; border-radius: 4px; border: 1px solid var(--rule-hard); background: transparent; font-family: var(--font-mono); font-size: 12px; cursor: pointer; }
   .im-chip.done { border-color: var(--accent); color: var(--accent-ink); }
   .im-chip[aria-current="step"] { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -81,18 +83,20 @@
     <h1>{{ type_name }}</h1>
     <span class="mono" style="font-size:12px; color:var(--dim);">{{ part_type_id }}</span>
   </div>
-  <div class="in-tabs"><a class="in-tab" aria-selected="false" href="{{ plan_url }}">Steps</a><a class="in-tab" aria-selected="false" href="{{ units_url }}">Units</a><a class="in-tab" aria-selected="true" href="">Map</a>
+  <div class="in-tabs"><a class="in-tab" aria-selected="false" href="{{ plan_url }}">Steps</a><a class="in-tab" aria-selected="false" href="{{ units_url }}">Units</a><a class="in-tab" aria-selected="true" href="">3D Map</a>
     <div class="btn-group im-modes" role="group" aria-label="View"><button type="button" class="btn btn-sm" id="im-plan" aria-pressed="false">Plan</button><button type="button" class="btn btn-sm" id="im-status" aria-pressed="true">Status</button></div>
   </div>
   <div class="im-main">
     <div class="im-left">
       <div id="im-stage">
         <canvas id="im-gl" aria-label="3D model of the FD-VD cryostat. Drag to orbit, scroll to zoom, click a part to select its position."></canvas>
+        <button type="button" class="btn btn-sm im-roof" id="im-roof" aria-pressed="false">See-through roof</button>
         <div class="im-hint">Drag to orbit · scroll to zoom · right-drag to pan · click a part</div>
         <div id="im-nogl" hidden>This model needs WebGL, which is not available in this browser.</div>
       </div>
       <div class="im-dock">
-        <div class="im-chips" id="im-chips" role="list" aria-label="Installation steps"></div>
+        <div class="im-bar"><span class="btn-group"><button type="button" class="btn btn-sm" id="im-prev">Previous</button><button type="button" class="btn btn-sm" id="im-play">Play</button><button type="button" class="btn btn-sm" id="im-next">Next</button></span>
+          <div class="im-chips" id="im-chips" role="list" aria-label="Installation steps"></div></div>
         <div id="im-cap" aria-live="polite"></div>
       </div>
     </div>
