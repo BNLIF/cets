@@ -1192,8 +1192,8 @@ class LeafPartsTableTest(TestCase):
         self.assertIn(f"/hw/part/{self.leaf.part_type_id}-00054/", html)  # row → part page
         self.assertIn('target="_blank"', html)                                 # opens new tab
         self.assertIn("SN-00054", html)                                        # serial column
-        self.assertIn("<th>Serial number</th>", html)
-        self.assertIn("<th>Created by</th>", html)                             # creator column
+        self.assertIn('href="?sort=serial" hx-get="?sort=serial">Serial number</a></th>', html)
+        self.assertIn(">Created by</a></th>", html)                             # creator column
         self.assertIn("Alex Wagner", html)
         self.assertNotIn("<th>Created</th>", html)                             # created date dropped
         self.assertIn("Page 1 of 2", html)

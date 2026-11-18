@@ -74,8 +74,8 @@
         {% for p in positions %}
           <tr>
             <td><input form="pos-f{{ forloop.counter }}" name="new_name" class="mono bt-name"
-                       required maxlength="40" pattern="[A-Za-z0-9 _.\-]{1,40}" data-own="{{ p.name }}"
-                       title="Letters, digits, spaces, _ . - only — HWDB rejects parentheses and other punctuation"
+                       required maxlength="40" pattern="{{ name_pattern }}" data-own="{{ p.name }}"
+                       title="{{ name_rule|capfirst }}"
                        value="{{ p.name }}"></td>
             <td><input form="pos-f{{ forloop.counter }}" name="child_type" class="mono"
                        required pattern="[A-Za-z]\d{11}(\s*,\s*[A-Za-z]\d{11})*" list="bt-child-options" value="{{ p.child }}"
@@ -110,8 +110,8 @@
     <h2>Add positions</h2>
     <div class="bt-grid">
       <label>Name
-        <input name="name" class="bt-name" required maxlength="40" pattern="[A-Za-z0-9 _.\-]{1,40}"
-               title="Letters, digits, spaces, _ . - only — HWDB rejects parentheses and other punctuation"
+        <input name="name" class="bt-name" required maxlength="40" pattern="{{ name_pattern }}"
+               title="{{ name_rule|capfirst }}"
                placeholder="e.g. H2 Type, or FEMB for a batch" value="{{ request.POST.name }}"></label>
       <label>How many
         <input name="count" type="number" required min="1" max="200" value="1"></label>
@@ -124,8 +124,7 @@
     </datalist>
     <p class="bt-dup" id="bt-dup-add"></p>
     <p class="pk-hint" style="margin:10px 0 0;">One position takes the name exactly as typed. More than one
-      numbers it: with FEMB1…FEMB10 present, 2 × “FEMB” adds FEMB11 and FEMB12. Letters, digits, spaces,
-      _ . - only — HWDB rejects parentheses. The accepting type can be any component type id;
+      numbers it: with FEMB1…FEMB10 present, 2 × “FEMB” adds FEMB11 and FEMB12. {{ name_rule|capfirst }}. The accepting type can be any component type id;
       several, comma-separated, make a position that takes any of them.</p>
     <button type="submit" class="pk-submit"{% if not can_edit %} disabled{% endif %}>Add to the type in HWDB</button>
   </form>

@@ -19,7 +19,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_not_required
 from django.core.cache import cache
 from django.core.paginator import Paginator
-from django.db.models import Count, F, Q
+from django.db.models import Count, F, OuterRef, Q, Subquery
 from django.http import (
     Http404, HttpResponse, HttpResponseBadRequest, HttpResponseForbidden,
     JsonResponse,
@@ -307,11 +307,7 @@ def explore_view(request, trail=None):
     parts_page = None
     breakdowns, qc_flags = [], []
     if leaf and leaf.tests_synced_at and not is_consortium:
-        part_rows = (HwdbComponentEvent.for_instance(inst)
-                     .filter(part_type_id=leaf.part_type_id)
-                     .order_by(F("updated").desc(nulls_last=True),
-                               F("created").desc(nulls_last=True), "part_id"))
-        parts_page = Paginator(part_rows, 50).get_page(request.GET.get("page"))
+        parts_page = _items_page(request, inst, leaf.part_type_id)
         # Mirror-only categorical breakdowns (status / manufacturer / institution)
         # + binary QC flags (#51).
         breakdowns = component_breakdowns(inst, leaf.part_type_id)
@@ -1385,10 +1381,6 @@ def explore_type_es_view(request, part_type_id):
     node = HierarchyNode.for_instance(inst).filter(
         level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
     has_config = execsummary._newest_config_row(production._listing(api, part_type_id), part_type_id) is not None
-    rows = (HwdbComponentEvent.for_instance(inst)
-            .filter(part_type_id=part_type_id)
-            .order_by(F("updated").desc(nulls_last=True),
-                      F("created").desc(nulls_last=True), "part_id"))
     return render(request, "explore/type_es.html", {
         "active_nav": "hardware",
         "sidebar": navigation.sidebar_tree(inst, {}),
@@ -1396,9 +1388,36 @@ def explore_type_es_view(request, part_type_id):
         "type_name": (node.name if node else "") or part_type_id,
         "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
         "has_config": has_config,
-        "parts_page": Paginator(rows, 50).get_page(request.GET.get("page")),
+        "parts_page": _items_page(request, inst, part_type_id),
     })
 
+
+
+# The items tables' sortable columns (Cathode group via Chao, 2026-11-18):
+# ?sort=<key> ascending, ?sort=-<key> descending.
+_ITEM_SORTS = {"pid": "part_id", "serial": "serial_number", "status": "status",
+               "by": "created_by", "updated": "updated"}
+
+
+def _items_page(request, inst, part_type_id, annotations=None):
+    """One page (50) of a type's mirrored items for the items tables — the
+    type page, the checklist chooser, the ES list, the Items page — sorted
+    by the column ``?sort=`` names, newest update first without one.
+    ``annotations`` adds sortable columns of the caller's own. The page
+    carries ``sort`` and ``sort_qs`` (what its pager links append)."""
+    cols = {**_ITEM_SORTS, **{k: k for k in annotations or {}}}
+    sort = request.GET.get("sort") or ""
+    if sort.lstrip("-") not in cols:
+        sort = "-updated"
+    col = F(cols[sort.lstrip("-")])
+    rows = (HwdbComponentEvent.for_instance(inst)
+            .filter(part_type_id=part_type_id).annotate(**(annotations or {}))
+            .order_by(col.desc(nulls_last=True) if sort.startswith("-") else col.asc(nulls_last=True),
+                      F("created").desc(nulls_last=True), "part_id"))
+    page = Paginator(rows, 50).get_page(request.GET.get("page"))
+    page.sort = sort
+    page.sort_qs = "" if sort == "-updated" else f"&sort={sort}"
+    return page
 
 
 @login_not_required
@@ -1428,11 +1447,7 @@ def explore_type_items_view(request, part_type_id):
         level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
     res = _type_resources(api, inst, part_type_id)
     tts = _test_types(api, res)
-    rows = (HwdbComponentEvent.for_instance(inst)
-            .filter(part_type_id=part_type_id)
-            .order_by(F("updated").desc(nulls_last=True),
-                      F("created").desc(nulls_last=True), "part_id"))
-    parts_page = Paginator(rows, 50).get_page(request.GET.get("page"))
+    parts_page = _items_page(request, inst, part_type_id)
     pids = [p.part_id for p in parts_page]
     filled = _filled_map(inst, pids, tts.values())
     es_posted = _es_posted_map(api, pids)
@@ -3625,12 +3640,17 @@ def explore_scan_outcome_view(request):
                                    for r in rows]})
 
 
-# What HWDB takes as a position name (Hajime 2026-11-03, #209: "1 (H2 type)"
-# was refused by HWDB, "1 H2 type" accepted). The same pattern sits on the
-# page's name inputs so the browser refuses it before the round trip.
-_POSITION_NAME = r"[A-Za-z0-9 _.-]{1,40}"
-_POSITION_NAME_RULE = ("Position names take letters, digits, spaces, _ . - only, up to 40 "
-                       "characters — HWDB rejects parentheses and other punctuation.")
+def _position_name(category: str = "") -> tuple[str, str]:
+    """What HWDB takes as a position name on a type of this category, as
+    ``(pattern, rule in words)``. Hajime 2026-11-18, agreed with Vladimir
+    (#209): parentheses are fine after all; a colon is fine on a generic type
+    but not on a cable type, whose ends are written with it. The same pattern
+    sits on the pages' name inputs (escaped for the browser's ``v`` flag) so
+    the browser refuses a name before the round trip."""
+    if category == "cable":
+        return (r"[A-Za-z0-9 _.\(\)\-]{1,40}",
+                "letters, digits, spaces, _ . - ( ) only, no colon on a cable type")
+    return r"[A-Za-z0-9 _.:\(\)\-]{1,40}", "letters, digits, spaces, _ . - ( ) : only"
 
 
 def _next_position_names(existing, prefix: str, count: int) -> list[str]:
@@ -3955,6 +3975,8 @@ def explore_box_type_view(request, part_type_id):
         return redirect(_rev(request, "explore:home"))
     connectors = dict(record.get("connectors") or {})
     accepts = {p: parts.accepted_types(v) for p, v in connectors.items()}   # the set a PUT sends
+    name_pattern, name_rule = _position_name(record.get("category") or "")
+    name_refused = f"Position names take {name_rule}, up to 40 characters."
 
     if request.method == "POST" and (request.POST.get("action") or "extend") == "clone":
         if not can_clone:
@@ -3973,8 +3995,8 @@ def explore_box_type_view(request, part_type_id):
         elif request.POST.get("op") == "delete":
             rest = {k: v for k, v in accepts.items() if k != pos}
             _put_type_positions(request, api, part_type_id, rest, f"Deleted position {pos}.")
-        elif not re.fullmatch(_POSITION_NAME, new_name):
-            messages.error(request, _POSITION_NAME_RULE)
+        elif not re.fullmatch(name_pattern, new_name):
+            messages.error(request, name_refused)
         elif not child:
             messages.error(request, f"“{(request.POST.get('child_type') or '').strip()}” {_CHILD_TYPE_RULE}")
         elif new_name != pos and new_name in accepts:
@@ -3998,8 +4020,8 @@ def explore_box_type_view(request, part_type_id):
             count = int(request.POST.get("count") or "0")
         except ValueError:
             count = 0
-        if not re.fullmatch(_POSITION_NAME, name):
-            messages.error(request, _POSITION_NAME_RULE)
+        if not re.fullmatch(name_pattern, name):
+            messages.error(request, name_refused)
         elif not 1 <= count <= 200:
             messages.error(request, "Count must be between 1 and 200.")
         elif not child:
@@ -4034,6 +4056,7 @@ def explore_box_type_view(request, part_type_id):
              for pos, types in accepts.items()), key=lambda p: p["name"]),
         "child_options": [{"id": c, "name": child_names.get(c, "")} for c in child_ids],
         "position_names": sorted(connectors),
+        "name_pattern": name_pattern, "name_rule": name_rule,
         "leaf_path": navigation.leaf_path_for(inst, part_type_id) if leaf else None,
         "can_edit": can_edit, "can_clone": can_clone,
     })
@@ -5341,11 +5364,14 @@ def explore_type_checklist_view(request, part_type_id, name):
     # The type view's items table (mirror-backed, same ordering/page size),
     # plus per row the date THIS checklist's test type was last recorded —
     # mirror data, so it reflects the last sync, not this minute.
-    rows = (HwdbComponentEvent.for_instance(inst)
-            .filter(part_type_id=part_type_id)
-            .order_by(F("updated").desc(nulls_last=True),
-                      F("created").desc(nulls_last=True), "part_id"))
-    parts_page = Paginator(rows, 50).get_page(request.GET.get("page"))
+    last = {}   # sortable by this checklist's newest record on the item
+    if schema["test_type_name"]:
+        last["filled"] = Subquery(
+            HwdbTestEvent.for_instance(inst)
+            .filter(part_type_id=part_type_id, test_type_name=schema["test_type_name"],
+                    part_id=OuterRef("part_id"))
+            .order_by("-created").values("created")[:1])
+    parts_page = _items_page(request, inst, part_type_id, last)
     filled = {}   # part_id → (when, by) of this checklist's newest record (#203: by)
     if schema["test_type_name"]:
         for pid, when, by in (
@@ -5567,10 +5593,10 @@ CHECKLIST_SKELETON = {
 }
 
 
-def _bad_position_names(cfg: dict) -> list[str]:
+def _bad_position_names(cfg: dict, pattern: str) -> list[str]:
     """Hajime 2026-11-03 (#209): the names a checklist would hand HWDB as
     functional positions — a linking image map's slot labels, a link field's
-    position — that HWDB would refuse ("1 (H2 type)"). The editor warns as
+    position — that HWDB would refuse ("1/2", a colon on a cable type). The editor warns as
     they are typed; this is the backstop for a schema pasted as JSON."""
     bad = []
     for sec in cfg.get("sections") or []:
@@ -5583,7 +5609,7 @@ def _bad_position_names(cfg: dict) -> list[str]:
                          if isinstance(sl, dict)]
             elif f.get("type") == "link" and f.get("position"):
                 names = [str(f["position"])]
-            bad += [n for n in names if not re.fullmatch(_POSITION_NAME, n)]
+            bad += [n for n in names if not re.fullmatch(pattern, n)]
     return bad
 
 
@@ -5612,6 +5638,10 @@ def explore_checklist_config_view(request, part_type_id):
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
     page_url = _rev(request, "explore:checklist_config", args=[part_type_id])
     next_url = request.POST.get("next") or request.GET.get("next") or ""
+    # the type's category from the mirror: a cable type's positions take no colon
+    leaf = navigation.H.for_instance(inst).filter(
+        level=navigation.H.LEVEL_TYPE, part_type_id=part_type_id).first()
+    pos_pattern, pos_rule = _position_name(getattr(leaf, "category", ""))
 
     if request.method == "POST":
         cl_name = (request.POST.get("cl_name") or "").strip()
@@ -5630,10 +5660,10 @@ def explore_checklist_config_view(request, part_type_id):
         if not isinstance(cfg, dict):
             messages.error(request, "The schema must be a JSON object.")
             return redirect(back)
-        bad = _bad_position_names(cfg)
+        bad = _bad_position_names(cfg, pos_pattern)
         if bad:
-            messages.error(request, "These names can’t be HWDB positions — letters, digits, "
-                                    "spaces, _ . - only, no parentheses: " + ", ".join(bad))
+            messages.error(request, f"These names can’t be HWDB positions — {pos_rule}: "
+                                    + ", ".join(bad))
             return redirect(back)
         fname = f"Checklist_{part_type_id}_{cl_name}.json"
         try:
@@ -5666,8 +5696,8 @@ def explore_checklist_config_view(request, part_type_id):
         "sidebar": None if request.GET.get("ui") == "wb" else navigation.sidebar_tree(inst, {}),
         "part_type_id": part_type_id,
         "type_url": navigation.leaf_path_for(inst, part_type_id) or next_url,   # the breadcrumb's type link
-        "type_name": getattr(navigation.H.for_instance(inst).filter(
-            level=navigation.H.LEVEL_TYPE, part_type_id=part_type_id).first(), "name", "") or part_type_id,
+        "type_name": getattr(leaf, "name", "") or part_type_id,
+        "pos_pattern": pos_pattern, "pos_rule": pos_rule,
         "cl_name": cl_name,
         "current_name": current_name,
         "next": next_url,

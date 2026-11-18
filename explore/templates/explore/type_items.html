@@ -42,13 +42,13 @@
 
   {% if parts_page.paginator.num_pages > 1 %}
   <div class="rs-pager">
-    {% if parts_page.has_previous %}<a href="?page=1">« First</a><a href="?page={{ parts_page.previous_page_number }}">‹ Prev</a>{% else %}<span class="cell-muted">« First</span><span class="cell-muted">‹ Prev</span>{% endif %}
+    {% if parts_page.has_previous %}<a href="?page=1{{ parts_page.sort_qs }}">« First</a><a href="?page={{ parts_page.previous_page_number }}{{ parts_page.sort_qs }}">‹ Prev</a>{% else %}<span class="cell-muted">« First</span><span class="cell-muted">‹ Prev</span>{% endif %}
     <span class="cell-muted" style="font-variant-numeric:tabular-nums;">Page {{ parts_page.number }} of {{ parts_page.paginator.num_pages }} · {{ parts_page.paginator.count }} items</span>
-    {% if parts_page.has_next %}<a href="?page={{ parts_page.next_page_number }}">Next ›</a><a href="?page={{ parts_page.paginator.num_pages }}">Last »</a>{% else %}<span class="cell-muted">Next ›</span><span class="cell-muted">Last »</span>{% endif %}
+    {% if parts_page.has_next %}<a href="?page={{ parts_page.next_page_number }}{{ parts_page.sort_qs }}">Next ›</a><a href="?page={{ parts_page.paginator.num_pages }}{{ parts_page.sort_qs }}">Last »</a>{% else %}<span class="cell-muted">Next ›</span><span class="cell-muted">Last »</span>{% endif %}
   </div>
   {% endif %}
   <div class="tbl-scroll"><table class="cl-table cl-gridlines ps-table rs-table">
-    <thead><tr><th>Part ID</th><th>Serial number</th><th>Status</th><th>QA/QC checklists</th><th>Procedures / Drawings</th><th>Exec summary</th><th>Linked parts</th></tr></thead>
+    <thead><tr>{% include "explore/_sort_th.html" with key="pid" label="Part ID" %}{% include "explore/_sort_th.html" with key="serial" label="Serial number" %}{% include "explore/_sort_th.html" with key="status" label="Status" %}<th>QA/QC checklists</th><th>Procedures / Drawings</th><th>Exec summary</th><th>Linked parts</th></tr></thead>
     <tbody>
     {% for p in parts_page %}<tr>
       <th scope="row" class="cl-rowlab"><a href="{{ p.res.part_url }}" class="mono" title="The item’s page">{{ p.part_id }}</a></th>

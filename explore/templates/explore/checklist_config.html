@@ -684,9 +684,10 @@
   var IMG_PROXY = "{% url 'explore:shipment_image' image_id='IMGID000' %}";
   // Hajime 2026-11-03: what HWDB takes as a position name — a linking map's
   // slot labels and a link field's position are warned as they are typed,
-  // and Save is held while one is off ("1 (H2 type)" is refused by HWDB).
-  var POS_OK = /^[A-Za-z0-9 _.-]{1,40}$/;
-  var POS_RULE = "letters, digits, spaces, _ . - only, no parentheses";
+  // and Save is held while one is off. 2026-11-18: parentheses are fine, a
+  // colon too except on a cable type — the view picks the pattern by category.
+  var POS_OK = new RegExp("^(?:{{ pos_pattern|escapejs }})$");
+  var POS_RULE = "{{ pos_rule|escapejs }}";
   function badPositionNames() {
     var bad = [];
     $$(".clc-fld").forEach(function (r) {

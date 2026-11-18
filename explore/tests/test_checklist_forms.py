@@ -892,25 +892,30 @@ class ChecklistEditorTest(TestCase):
 
     def test_save_refuses_names_hwdb_takes_no_position_by(self):
         """Hajime 2026-11-03 (#209): a linking map's slot label or a link
-        field's position with parentheses never reaches HWDB; the same label
-        on a map that doesn't link is just a label."""
+        field's position HWDB would refuse never reaches it; the same label
+        on a map that doesn't link is just a label. Parentheses and a colon
+        pass since 2026-11-18."""
         api = _api()
         m1, m2 = _mocked(api)
-        slot = {"label": "1 (H2 type)", "x": 1, "y": 2}
+        slot = {"label": "1/2 H2 type", "x": 1, "y": 2}
         linking = {"name": "A", "test_type_name": "T", "sections": [{"title": "S", "fields": [
             {"label": "Map", "type": "imagemap", "link": True, "slots": [slot]}]}]}
         plain = {"name": "A", "test_type_name": "T", "sections": [{"title": "S", "fields": [
             {"label": "Map", "type": "imagemap", "slots": [slot]}]}]}
         link = {"name": "A", "test_type_name": "T", "sections": [{"title": "S", "fields": [
-            {"label": "L", "type": "link", "position": "1 (H2 type)"}]}]}
+            {"label": "L", "type": "link", "position": "1/2 H2 type"}]}]}
+        fine = {"name": "A", "test_type_name": "T", "sections": [{"title": "S", "fields": [
+            {"label": "L", "type": "link", "position": "1 (H2 type):a"}]}]}
         with m1, m2:
             resp = self.client.post(CONFIG_PAGE, {"cl_name": "ok", "config_json": json.dumps(linking)}, follow=True)
             self.assertIn("can’t be HWDB positions", resp.content.decode())
-            self.assertIn("1 (H2 type)", resp.content.decode())
+            self.assertIn("1/2 H2 type", resp.content.decode())
             self.client.post(CONFIG_PAGE, {"cl_name": "ok", "config_json": json.dumps(link)})
             api.post_component_type_image.assert_not_called()
             self.client.post(CONFIG_PAGE, {"cl_name": "ok", "config_json": json.dumps(plain)})
             api.post_component_type_image.assert_called_once()
+            self.client.post(CONFIG_PAGE, {"cl_name": "ok", "config_json": json.dumps(fine)})
+            self.assertEqual(api.post_component_type_image.call_count, 2)
             html = self.client.get(CONFIG_PAGE).content.decode()
         self.assertIn("badPositionNames()", html)
         self.assertIn('class="ec-hint ff-posbad"', html)
@@ -1742,6 +1747,55 @@ class TypeChecklistTest(TestCase):
         self.assertIn('id="clp-pane"', html)
         self.assertNotIn("<html", html)                # the pane only
         self.assertIn("Page 2 of 2", html)
+
+    def test_table_sorts_by_a_clicked_column_and_shows_status(self):
+        """Cathode group via Chao 2026-11-18: a header click sorts the items
+        table (?sort=key, again ?sort=-key), the pager keeps the order, and
+        the HWDB status has a column; Last checklist sorts by this
+        checklist's newest record."""
+        from django.utils import timezone as tz
+        from explore.models import HwdbComponentEvent, HwdbTestEvent
+        a, b, c = (f"{PTID}-0000{i}" for i in (1, 2, 3))
+        for pid, status, day in ((a, "Passed", 3), (b, "Failed", 1), (c, "Available", 2)):
+            HwdbComponentEvent.objects.create(
+                instance="dev", part_type_id=PTID, part_id=pid, status=status,
+                updated=tz.make_aware(tz.datetime(2026, 8, day)))
+        HwdbTestEvent.objects.create(
+            instance="dev", part_type_id=PTID, part_id=b,
+            test_type_name=SCHEMA["test_type_name"],
+            created=tz.make_aware(tz.datetime(2026, 8, 20)))
+
+        def order(**q):
+            m1, m2 = _mocked(_api())
+            with m1, m2:
+                html = self.client.get(self.TYPE_PAGE, q).content.decode()
+            return html, sorted((a, b, c), key=lambda pid: html.index(f'"mono"><a href="/hw/dev/part/{pid}/'))
+
+        html, pids = order()
+        self.assertEqual(pids, [a, c, b])                          # newest update first
+        self.assertIn("<td>Passed</td>", html)
+        self.assertIn('href="?sort=status"', html)
+        self.assertIn("Updated &#9660;", html)
+        html, pids = order(sort="status")
+        self.assertEqual(pids, [c, b, a])
+        self.assertIn('href="?sort=-status"', html)                # the next click reverses
+        self.assertIn("Status &#9650;", html)
+        self.assertEqual(order(sort="-status")[1], [a, b, c])
+        self.assertEqual(order(sort="updated")[1], [b, c, a])
+        self.assertEqual(order(sort="-filled")[1][0], b)           # the one with a record
+        self.assertEqual(order(sort="nonsense")[1], [a, c, b])
+
+    def test_pager_keeps_the_sort(self):
+        from explore.models import HwdbComponentEvent
+        for i in range(60):
+            HwdbComponentEvent.objects.create(
+                instance="dev", part_type_id=PTID, part_id=f"{PTID}-{i:05d}")
+        m1, m2 = _mocked(_api())
+        with m1, m2:
+            html = self.client.get(self.TYPE_PAGE, {"sort": "pid"}).content.decode()
+        self.assertIn('href="?page=2&amp;sort=pid"', html)
+        self.assertLess(html.index(f"{PTID}-00000/"), html.index(f"{PTID}-00049/"))
+        self.assertNotIn(f"{PTID}-00050/", html)
 
     def test_submit_appends_the_test_event_to_the_mirror(self):
         # the "Last checklist" column must see a submission without waiting

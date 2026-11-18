@@ -41,14 +41,14 @@
   <div id="es-pane">
     {% if parts_page.paginator.num_pages > 1 %}
     <div style="display:flex;gap:14px;justify-content:center;align-items:center;margin:4px 0 14px;font-size:13px;">
-        {% if parts_page.has_previous %}<a style="color:var(--accent-ink);text-decoration:none;" href="?page=1">« First</a><a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.previous_page_number }}">‹ Prev</a>{% else %}<span class="cell-muted">« First</span><span class="cell-muted">‹ Prev</span>{% endif %}
+        {% if parts_page.has_previous %}<a style="color:var(--accent-ink);text-decoration:none;" href="?page=1{{ parts_page.sort_qs }}">« First</a><a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.previous_page_number }}{{ parts_page.sort_qs }}">‹ Prev</a>{% else %}<span class="cell-muted">« First</span><span class="cell-muted">‹ Prev</span>{% endif %}
         <span class="cell-muted" style="font-variant-numeric:tabular-nums;">Page {{ parts_page.number }} of {{ parts_page.paginator.num_pages }} · {{ parts_page.paginator.count }} items</span>
-        {% if parts_page.has_next %}<a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.next_page_number }}">Next ›</a><a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.paginator.num_pages }}">Last »</a>{% else %}<span class="cell-muted">Next ›</span><span class="cell-muted">Last »</span>{% endif %}
+        {% if parts_page.has_next %}<a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.next_page_number }}{{ parts_page.sort_qs }}">Next ›</a><a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.paginator.num_pages }}{{ parts_page.sort_qs }}">Last »</a>{% else %}<span class="cell-muted">Next ›</span><span class="cell-muted">Last »</span>{% endif %}
     </div>
     {% endif %}
     <div class="tbl-scroll">
     <table class="ship-table">
-        <thead><tr><th>Part ID</th><th>Serial number</th><th>Status</th><th>Updated</th></tr></thead>
+        <thead><tr>{% include "explore/_sort_th.html" with key="pid" label="Part ID" %}{% include "explore/_sort_th.html" with key="serial" label="Serial number" %}{% include "explore/_sort_th.html" with key="status" label="Status" %}{% include "explore/_sort_th.html" with key="updated" label="Updated" %}</tr></thead>
         <tbody>
         {% for p in parts_page %}
             <tr class="ship-row" onclick="if(!getSelection().toString())location.href='{% url 'explore:exec_summary' part_id=p.part_id %}'" title="Open the executive summary of {{ p.part_id }}">
