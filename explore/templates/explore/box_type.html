@@ -74,7 +74,7 @@
         {% for p in positions %}
           <tr>
             <td><input form="pos-f{{ forloop.counter }}" name="new_name" class="mono bt-name"
-                       required maxlength="40" pattern="{{ name_pattern }}" data-own="{{ p.name }}"
+                       required maxlength="40"{% if not p.kept %} pattern="{{ name_pattern }}"{% endif %} data-own="{{ p.name }}"
                        title="{{ name_rule|capfirst }}"
                        value="{{ p.name }}"></td>
             <td><input form="pos-f{{ forloop.counter }}" name="child_type" class="mono"
@@ -88,7 +88,7 @@
                 <button type="submit" class="bt-mini" name="op" value="save"{% if not can_edit %} disabled{% endif %}
                         title="Rename the position and/or change what it accepts">Save</button>
                 <button type="submit" class="bt-mini bt-danger" name="op" value="delete" formnovalidate{% if not can_edit %} disabled{% endif %}
-                        onclick="return confirm('Delete position {{ p.name }} from every item of this type?')">Delete</button>
+                        onclick="return confirm('Delete position {{ p.name|escapejs }} from every item of this type?')">Delete</button>
               </form>
             </td>
           </tr>

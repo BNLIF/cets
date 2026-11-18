@@ -189,31 +189,49 @@ class BoxTypeViewTest(TestCase):
                                     "child_type": "not-a-type"})
             self.client.post(PAGE, {"name": "", "count": "1",
                                     "child_type": "D05700300001"})
-            # #209: punctuation HWDB refuses is refused here, by name
-            resp = self.client.post(PAGE, {"name": "1/2 H2 type", "count": "1",
-                                           "child_type": "D05700300001"}, follow=True)
+            # #209: what HWDB refuses in a name is refused here, by name
+            for name in ("H2.1", "a, b", 'the "top"', "top’s"):
+                resp = self.client.post(PAGE, {"name": name, "count": "1",
+                                               "child_type": "D05700300001"}, follow=True)
         api.put_component_type_connectors.assert_not_called()
-        self.assertIn("Position names take letters, digits, spaces, _ . - ( ) : only",
+        self.assertIn("Position names: no period, comma or quotation mark, up to 40 characters.",
                       resp.content.decode())
 
     def test_parentheses_everywhere_colon_except_on_a_cable_type(self):
-        """Hajime 2026-11-18 (#209): "1 (H2 type)" and "A:1" are position
-        names on a generic type; a cable type takes the first only."""
+        """Hajime 2026-11-18 (#209): "1 (H2 type)", "A:1" and "1/2 #3" are
+        position names on a generic type; a cable type takes no colon."""
         api = _api()
         m1, m2 = _mocked(api)
         with m1, m2:
-            for name in ("1 (H2 type)", "A:1"):
+            for name in ("1 (H2 type)", "A:1", "1/2 #3"):
                 self.client.post(PAGE, {"name": name, "count": "1",
                                         "child_type": "D05700300001"})
-            self.assertEqual(api.put_component_type_connectors.call_count, 2)
+            self.assertEqual(api.put_component_type_connectors.call_count, 3)
             api.get_component_type.return_value = {"data": {**TYPE_RECORD, "category": "cable"}}
             resp = self.client.post(PAGE, {"name": "A:1", "count": "1",
                                            "child_type": "D05700300001"}, follow=True)
-            self.assertEqual(api.put_component_type_connectors.call_count, 2)
-            self.assertIn("no colon on a cable type", resp.content.decode())
+            self.assertEqual(api.put_component_type_connectors.call_count, 3)
+            self.assertIn("no period, comma, quotation mark or colon", resp.content.decode())
             self.client.post(PAGE, {"name": "1 (H2 type)", "count": "1",
                                     "child_type": "D05700300001"})
-        self.assertEqual(api.put_component_type_connectors.call_count, 3)
+        self.assertEqual(api.put_component_type_connectors.call_count, 4)
+
+    def test_a_name_already_on_the_type_is_kept_as_it_is(self):
+        """An older position the rule would now refuse ("H2.1") can still
+        change what it accepts — only a new or changed name is checked."""
+        api = _api()
+        api.get_component_type.return_value = {"data": {
+            **TYPE_RECORD, "connectors": {"H2.1": "D05700300001", "FEB1": "D05700300001"}}}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(PAGE).content.decode()
+            self.assertEqual(html.count("pattern=\"[^.,"), 2)     # FEB1's box and the Add form's — not H2.1's
+            self.client.post(PAGE, {"action": "edit", "op": "save", "position": "H2.1",
+                                    "new_name": "H2.1", "child_type": "D05700300002"})
+            api.put_component_type_connectors.assert_called_once()
+            self.client.post(PAGE, {"action": "edit", "op": "save", "position": "H2.1",
+                                    "new_name": "H2.2", "child_type": "D05700300002"})
+            api.put_component_type_connectors.assert_called_once()   # a changed name is checked
 
     def test_one_position_takes_the_name_as_typed(self):
         """#209: count 1 adds "H2 Type", not "H2 Type1"; a name the type has
@@ -239,7 +257,7 @@ class BoxTypeViewTest(TestCase):
             html = self.client.get(PAGE).content.decode()
         self.assertIn('id="bt-names"', html)
         self.assertIn('["FEB1", "FEB2"]', html)
-        self.assertIn('pattern="[A-Za-z0-9 _.:\\(\\)\\-]{1,40}"', html)
+        self.assertIn('pattern="[^.,&quot;&#x27;“”‘’\\x00-\\x1f]{1,40}"', html)
 
     def test_hwdb_rejection_is_reported(self):
         api = _api()

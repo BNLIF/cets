@@ -3731,15 +3731,17 @@ def explore_scan_outcome_view(request):
 
 def _position_name(category: str = "") -> tuple[str, str]:
     """What HWDB takes as a position name on a type of this category, as
-    ``(pattern, rule in words)``. Hajime 2026-11-18, agreed with Vladimir
-    (#209): parentheses are fine after all; a colon is fine on a generic type
-    but not on a cable type, whose ends are written with it. The same pattern
-    sits on the pages' name inputs (escaped for the browser's ``v`` flag) so
-    the browser refuses a name before the round trip."""
+    ``(pattern, rule in words)``. Hajime 2026-11-18 (#209), a list of what
+    is refused rather than of what is allowed: a period (it parts a PID from
+    a position, and the names of a full name), a comma and quotation marks
+    (straight or curly — they break the parsing of names) on every type, and
+    a colon on a cable type, whose ends are written with it (agreed with
+    Vladimir: a generic type may use one). Control characters are refused
+    too. The same pattern sits on the pages' name inputs so the browser
+    refuses a name before the round trip."""
     if category == "cable":
-        return (r"[A-Za-z0-9 _.\(\)\-]{1,40}",
-                "letters, digits, spaces, _ . - ( ) only, no colon on a cable type")
-    return r"[A-Za-z0-9 _.:\(\)\-]{1,40}", "letters, digits, spaces, _ . - ( ) : only"
+        return r"""[^.,:"'“”‘’\x00-\x1f]{1,40}""", "no period, comma, quotation mark or colon"
+    return r"""[^.,"'“”‘’\x00-\x1f]{1,40}""", "no period, comma or quotation mark"
 
 
 def _next_position_names(existing, prefix: str, count: int) -> list[str]:
@@ -4065,7 +4067,7 @@ def explore_box_type_view(request, part_type_id):
     connectors = dict(record.get("connectors") or {})
     accepts = {p: parts.accepted_types(v) for p, v in connectors.items()}   # the set a PUT sends
     name_pattern, name_rule = _position_name(record.get("category") or "")
-    name_refused = f"Position names take {name_rule}, up to 40 characters."
+    name_refused = f"Position names: {name_rule}, up to 40 characters."
 
     if request.method == "POST" and (request.POST.get("action") or "extend") == "clone":
         if not can_clone:
@@ -4084,8 +4086,8 @@ def explore_box_type_view(request, part_type_id):
         elif request.POST.get("op") == "delete":
             rest = {k: v for k, v in accepts.items() if k != pos}
             _put_type_positions(request, api, part_type_id, rest, f"Deleted position {pos}.")
-        elif not re.fullmatch(name_pattern, new_name):
-            messages.error(request, name_refused)
+        elif new_name != pos and not re.fullmatch(name_pattern, new_name):
+            messages.error(request, name_refused)   # a name already on the type is HWDB's own, kept as it is
         elif not child:
             messages.error(request, f"“{(request.POST.get('child_type') or '').strip()}” {_CHILD_TYPE_RULE}")
         elif new_name != pos and new_name in accepts:
@@ -4141,6 +4143,7 @@ def explore_box_type_view(request, part_type_id):
         "type_name": (leaf.name if leaf else record.get("full_name")) or part_type_id,
         "positions": sorted(
             ({"name": pos, "child": ", ".join(types),
+              "kept": not re.fullmatch(name_pattern, pos),   # an older name the rule would refuse: no pattern on its box
               "child_name": ", ".join(n for n in (child_names.get(t, "") for t in types) if n)}
              for pos, types in accepts.items()), key=lambda p: p["name"]),
         "child_options": [{"id": c, "name": child_names.get(c, "")} for c in child_ids],
@@ -5685,7 +5688,7 @@ CHECKLIST_SKELETON = {
 def _bad_position_names(cfg: dict, pattern: str) -> list[str]:
     """Hajime 2026-11-03 (#209): the names a checklist would hand HWDB as
     functional positions — a linking image map's slot labels, a link field's
-    position — that HWDB would refuse ("1/2", a colon on a cable type). The editor warns as
+    position — that HWDB would refuse ("H2.1", a colon on a cable type). The editor warns as
     they are typed; this is the backstop for a schema pasted as JSON."""
     bad = []
     for sec in cfg.get("sections") or []:
@@ -5751,7 +5754,7 @@ def explore_checklist_config_view(request, part_type_id):
             return redirect(back)
         bad = _bad_position_names(cfg, pos_pattern)
         if bad:
-            messages.error(request, f"These names can’t be HWDB positions — {pos_rule}: "
+            messages.error(request, f"These names can’t be HWDB positions ({pos_rule}): "
                                     + ", ".join(bad))
             return redirect(back)
         fname = f"Checklist_{part_type_id}_{cl_name}.json"
