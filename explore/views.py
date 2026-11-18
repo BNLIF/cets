@@ -1401,35 +1401,53 @@ def explore_type_es_view(request, part_type_id):
 
 # The items tables' sortable columns (Cathode group via Chao, 2026-11-18):
 # ?sort=<key> ascending, ?sort=-<key> descending.
+_NO_STATUS = "(none)"
 _ITEM_SORTS = {"pid": "part_id", "type": "part_type_id", "serial": "serial_number",
                "status": "status", "by": "created_by", "updated": "updated"}
 
 
-def _items_page(request, inst, part_type_id, annotations=None):
+def _items_page(request, inst, part_type_id, annotations=None, type_names=None):
     """One page (50) of a type's mirrored items for the items tables — the
     type page, the checklist chooser, the ES list, the Items page — sorted
     by the column ``?sort=`` names, newest update first without one;
-    ``?status=`` keeps the items of one status. ``part_type_id`` may be a
-    list of types (#221, a subsystem's). ``annotations`` adds sortable
-    columns of the caller's own. The page carries ``sort``, ``status`` and
-    what its links append: ``sort_qs`` (pager), ``filter_qs`` (headers),
-    ``sort_only`` (status links)."""
+    ``?status=`` keeps the items of one status, ``?type=`` those of one of
+    the types, ``?q=`` those whose PID (so the type id), serial number,
+    status, creator or type name (``type_names``, id → name) contains the
+    text. ``part_type_id`` may be a list of types (#221, a subsystem's).
+    ``annotations`` adds sortable columns of the caller's own. The page
+    carries ``sort``, ``status``, ``only_type``, ``q``, ``conds`` and what its links
+    append: ``sort_qs`` (pager), ``filter_qs`` (headers), ``sort_only``."""
     cols = {**_ITEM_SORTS, **{k: k for k in annotations or {}}}
     sort = request.GET.get("sort") or ""
     if sort.lstrip("-") not in cols:
         sort = "-updated"
     col = F(cols[sort.lstrip("-")])
     types = [part_type_id] if isinstance(part_type_id, str) else list(part_type_id)
-    status = request.GET.get("status") or ""
+    conds = {}   # the filters in force, by name — a list's counts leave its own out
+    status = request.GET.get("status") or ""   # _NO_STATUS = the items with none
+    if status:
+        conds["status"] = Q(status="" if status == _NO_STATUS else status)
+    only = request.GET.get("type") or ""
+    if only not in types:
+        only = ""
+    if only:
+        conds["type"] = Q(part_type_id=only)
+    q = (request.GET.get("q") or "").strip()
+    if q:
+        named = [t for t, n in (type_names or {}).items() if q.lower() in n.lower()]
+        conds["q"] = (Q(part_id__icontains=q) | Q(serial_number__icontains=q)
+                      | Q(status__icontains=q) | Q(created_by__icontains=q)
+                      | Q(part_type_id__in=named))
     rows = (HwdbComponentEvent.for_instance(inst)
-            .filter(part_type_id__in=types, **({"status": status} if status else {}))
+            .filter(part_type_id__in=types, *conds.values())
             .annotate(**(annotations or {}))
             .order_by(col.desc(nulls_last=True) if sort.startswith("-") else col.asc(nulls_last=True),
                       F("created").desc(nulls_last=True), "part_id"))
     page = Paginator(rows, 50).get_page(request.GET.get("page"))
-    page.sort, page.status = sort, status
+    page.sort, page.status, page.only_type, page.q, page.conds = sort, status, only, q, conds
     page.sort_only = "" if sort == "-updated" else f"&sort={sort}"
-    page.filter_qs = "&" + urlencode({"status": status}) if status else ""
+    kept = {k: v for k, v in (("type", only), ("status", status), ("q", q)) if v}
+    page.filter_qs = "&" + urlencode(kept) if kept else ""
     page.sort_qs = page.sort_only + page.filter_qs
     return page
 
@@ -1438,7 +1456,14 @@ def _subsystem_items(request, inst, ctx):
     """#221 (Cathode group via Hajime, 2026-11-18): every mirrored item of a
     subsystem's types on the subsystem's page — ``(page, facts)``, or
     ``(None, None)`` for a subsystem whose types hold no items. Mirror only:
-    a type never synced has no rows, so the page names those."""
+    a type never synced has no rows, so the page names those, and a synced
+    type the hierarchy counts more items for than the mirror holds
+    (``behind`` — as of the last hierarchy refresh). Each row carries
+    ``tests``: how many test types are recorded on the item (no "of how
+    many" — not every item takes every test, Chao 2026-11-18; the mirror
+    keeps no pass / fail). ``refresh`` lists the
+    synced types' listing sweeps (``type_locations``, one call per 500
+    items), which the page's Refresh status runs to re-stamp the statuses."""
     leaves = [l for l in HierarchyNode.for_instance(inst).filter(
         level=HierarchyNode.LEVEL_TYPE, project=ctx["project"],
         system_id=ctx["system_id"], subsystem_id=ctx["subsystem_id"]).order_by("name")]
@@ -1447,18 +1472,40 @@ def _subsystem_items(request, inst, ctx):
         return None, None
     urls = {l.part_type_id: navigation.leaf_path_for(inst, l.part_type_id) for l in leaves}
     names = {l.part_type_id: l.name for l in leaves}
-    page = _items_page(request, inst, list(names))
+    page = _items_page(request, inst, list(names), type_names=names)
+    tests = HwdbTestEvent.for_instance(inst).filter(part_type_id__in=list(names))
+    recorded = dict(tests.filter(part_id__in=[p.part_id for p in page]).values("part_id")
+                    .annotate(n=Count("test_type_name", distinct=True)).values_list("part_id", "n"))
     for p in page:
         p.type_name, p.type_url = names[p.part_type_id], urls[p.part_type_id]
+        p.tests = recorded.get(p.part_id, 0)
     synced = [l.tests_synced_at for l in with_items if l.tests_synced_at]
+    def under(skip):   # the subsystem's items under every filter in force but one
+        return HwdbComponentEvent.for_instance(inst).filter(
+            part_type_id__in=list(names), *(c for k, c in page.conds.items() if k != skip))
+    statuses = list(under("status").values("status").annotate(n=Count("id")).order_by("status"))
+    for s in statuses:
+        s["status"] = s["status"] or _NO_STATUS
+    if page.status and page.status not in [s["status"] for s in statuses]:
+        statuses.append({"status": page.status, "n": 0})   # the one picked stays listed
+    of_type = dict(under("type").values("part_type_id").annotate(n=Count("id"))
+                   .values_list("part_type_id", "n"))
+    mirrored = dict(HwdbComponentEvent.for_instance(inst).filter(part_type_id__in=list(names))
+                    .values("part_type_id").annotate(n=Count("id")).values_list("part_type_id", "n"))
     return page, {
         "n_types": len(with_items), "n_synced": len(synced),
         "oldest": min(synced, default=None),
         "unsynced": [{"name": l.name, "url": urls[l.part_type_id]}
                      for l in with_items if not l.tests_synced_at],
-        "statuses": list(HwdbComponentEvent.for_instance(inst)
-                         .filter(part_type_id__in=list(names)).exclude(status="")
-                         .values("status").annotate(n=Count("id")).order_by("status")),
+        "types": [{"id": l.part_type_id, "name": l.name, "n": of_type.get(l.part_type_id, 0)}
+                  for l in with_items],
+        "behind": [{"name": l.name, "url": urls[l.part_type_id],
+                    "n": l.n_components - mirrored.get(l.part_type_id, 0)}
+                   for l in with_items
+                   if l.tests_synced_at and l.n_components > mirrored.get(l.part_type_id, 0)],
+        "statuses": sorted(statuses, key=lambda s: s["status"] == _NO_STATUS),
+        "refresh": [{"name": l.name, "url": _rev(request, "explore:type_locations", args=[l.part_type_id])}
+                    for l in with_items if l.tests_synced_at],
     }
 
 

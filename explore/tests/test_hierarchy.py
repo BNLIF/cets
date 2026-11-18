@@ -370,7 +370,8 @@ class NavigationTest(TestCase):
         self.assertIn("2 of 3 types synced", html)
         self.assertIn(">Never Synced</a>", html.split("not synced:")[1].split("</p>")[0])
         self.assertNotIn("D08100100003-00001", html)
-        self.assertIn("Passed (1)", html)
+        self.assertIn('<option value="Passed">Passed (1)</option>', html)
+        self.assertIn('<option value="D05700200003">Carrier · D05700200003 (1)</option>', html)
         self.assertLess(html.index("D05700200001-00001/"), html.index("D05700200003-00001/"))
         html = self._html(url + "?sort=status")              # Failed before Passed
         self.assertLess(html.index("D05700200003-00001/"), html.index("D05700200001-00001/"))
@@ -381,8 +382,49 @@ class NavigationTest(TestCase):
         self.assertIn("Items (1)", pane)
         self.assertNotIn("D05700200001-00001/", pane)
         self.assertIn('href="?sort=pid&amp;status=Failed"', pane)   # a header keeps the filter
+        self.assertIn('<option value="Failed" selected>', pane)
+        # a list's counts follow the other filters, not its own
+        self.assertIn("AMC · D05700200001 (0)", pane)
+        self.assertIn("Carrier · D05700200003 (1)", pane)
+        self.assertIn(">Passed (1)</option>", pane)
+        typed = self._html(url + "?type=D05700200003")
+        self.assertIn(">Failed (1)</option>", typed)
+        self.assertNotIn(">Passed (", typed)
+        self.assertIn("AMC · D05700200001 (1)", typed)
+
+        def pids(**q):                                        # type / text filters
+            got = self._html(url + "?" + "&".join(f"{k}={v}" for k, v in q.items()))
+            return [p for p in ("D05700200001-00001", "D05700200003-00001") if f"{p}/" in got]
+        self.assertEqual(pids(type="D05700200003"), ["D05700200003-00001"])
+        self.assertEqual(pids(q="carrier"), ["D05700200003-00001"])      # a type's name
+        self.assertEqual(pids(q="00200001"), ["D05700200001-00001"])     # a type id, in the PID
+        self.assertEqual(pids(q="pass"), ["D05700200001-00001"])         # a status
+        self.assertEqual(pids(q="pass", type="D05700200003"), [])
+        self.assertEqual(len(pids(type="D08100100003")), 2)              # not this subsystem's — ignored
+        # how many test types are recorded on the item
+        from explore.models import HwdbTestEvent as T
+        for pid, name in (("D05700200001-00001", "QC"), ("D05700200001-00001", "QC"),
+                          ("D05700200001-00002", "QC"), ("D05700200001-00002", "Reception")):
+            T.objects.create(instance="prod", part_type_id="D05700200001", part_id=pid,
+                             test_type_name=name, created=now)
+        C.objects.create(instance="prod", part_type_id="D05700200001", part_id="D05700200001-00002")
+        html = self._html(url)
+        self.assertIn(">Tests</th>", html)
+        self.assertIn('<td class="mono">1</td>', html)
+        self.assertIn('<td class="mono">2</td>', html)
+        self.assertIn('<td class="mono">—</td>', html)          # Carrier's item has none
+        # AMC: the hierarchy counts 3956 items, the mirror holds 2
+        self.assertIn(">AMC</a> (3954)", html.split("not mirrored:")[1].split("</p>")[0])
+        self.assertIn("(none) (1)</option>", html)                     # the item with no status
+        pane = self._html(url + "?status=(none)")
+        self.assertIn("Items (1)", pane)
+        self.assertIn("D05700200001-00002/", pane)
+        # Refresh status runs the synced types' listing sweeps
+        self.assertIn('id="sub-refresh"', html)
+        self.assertIn("/hw/type-locations/D05700200001/", html)
+        self.assertNotIn("/hw/type-locations/D05700200002/", html)   # never synced — its own page syncs it
         # a subsystem with no items carries no table
-        self.assertNotIn("sub-items-pane", self._html(navigation.node_path("prod", "FD", "FD-VD", system_id=57)))
+        self.assertNotIn('id="sub-items-pane"', self._html(navigation.node_path("prod", "FD", "FD-VD", system_id=57)))
 
     def test_drill_system_subsystem_leaf(self):
         sub = self._html(navigation.node_path("prod", "FD", "FD-VD", system_id=57))

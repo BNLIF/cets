@@ -1,14 +1,21 @@
 {% comment %} #221: every mirrored item of a subsystem's types in one table — paged, sorted by a clicked header, filtered by status. Mirror only; the pager, headers and status links swap just this pane via htmx. {% endcomment %}
 <div id="sub-items-pane" hx-target="#sub-items-pane" hx-swap="outerHTML" hx-push-url="true" style="margin-top: 28px;">
     <h2 style="font-size: 16px; margin: 0 0 6px;">Items ({{ parts_page.paginator.count }})</h2>
-    <p class="cell-muted" style="margin: 0 0 10px; font-size: 12px;">Mirrored from HWDB · {{ sub_items.n_synced }} of {{ sub_items.n_types }} types synced{% if sub_items.oldest %}, the oldest {{ sub_items.oldest|date:"Y-m-d" }}{% endif %}{% if sub_items.unsynced %} · not synced: {% for t in sub_items.unsynced %}<a href="{{ t.url }}">{{ t.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}</p>
-    {% if sub_items.statuses %}
-    <div style="display:flex;flex-wrap:wrap;gap:6px 14px;margin:0 0 12px;font-size:13px;">
-        <span class="cell-muted">Status</span>
-        {% if parts_page.status %}<a style="color:var(--accent-ink);text-decoration:none;" href="?page=1{{ parts_page.sort_only }}" hx-get="?page=1{{ parts_page.sort_only }}">All</a>{% else %}<strong>All</strong>{% endif %}
-        {% for s in sub_items.statuses %}{% if s.status == parts_page.status %}<strong>{{ s.status }} ({{ s.n }})</strong>{% else %}<a style="color:var(--accent-ink);text-decoration:none;" href="?page=1&amp;status={{ s.status|urlencode }}{{ parts_page.sort_only }}" hx-get="?page=1&amp;status={{ s.status|urlencode }}{{ parts_page.sort_only }}">{{ s.status }} ({{ s.n }})</a>{% endif %}{% endfor %}
-    </div>
-    {% endif %}
+    <p class="cell-muted" style="margin: 0 0 10px; font-size: 12px;">Mirrored from HWDB · {{ sub_items.n_synced }} of {{ sub_items.n_types }} types synced{% if sub_items.oldest %}, the oldest {{ sub_items.oldest|date:"Y-m-d" }}{% endif %}{% if sub_items.unsynced %} · not synced: {% for t in sub_items.unsynced %}<a href="{{ t.url }}">{{ t.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}{% if sub_items.behind %} · new in HWDB, not mirrored: {% for t in sub_items.behind %}<a href="{{ t.url }}">{{ t.name }}</a> ({{ t.n }}){% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}{% if sub_items.refresh %} · <button class="btn btn-sm" type="button" id="sub-refresh" title="Re-read each synced type’s listing from HWDB for the current statuses">Refresh status</button> <span id="sub-refresh-note"></span>{% endif %}</p>
+    {% if sub_items.refresh %}{{ sub_items.refresh|json_script:"sub-refresh-types" }}{% endif %}
+    <form method="get" action="{{ request.path }}" hx-get="{{ request.path }}" hx-trigger="submit, change, input changed delay:500ms from:#sub-q" class="si-filter">
+        {% if parts_page.sort_only %}<input type="hidden" name="sort" value="{{ parts_page.sort }}">{% endif %}
+        <select name="type" aria-label="Type">
+            <option value="">All types</option>
+            {% for t in sub_items.types %}<option value="{{ t.id }}"{% if t.id == parts_page.only_type %} selected{% endif %}>{{ t.name }} · {{ t.id }} ({{ t.n }})</option>{% endfor %}
+        </select>
+        <select name="status" aria-label="Status">
+            <option value="">All statuses</option>
+            {% for s in sub_items.statuses %}<option value="{{ s.status }}"{% if s.status == parts_page.status %} selected{% endif %}>{{ s.status }} ({{ s.n }})</option>{% endfor %}
+        </select>
+        <input type="search" name="q" id="sub-q" value="{{ parts_page.q }}" placeholder="Search" aria-label="Search">
+        {% if parts_page.filter_qs %}<a href="?page=1{{ parts_page.sort_only }}" hx-get="?page=1{{ parts_page.sort_only }}">Clear</a>{% endif %}
+    </form>
     {% if parts_page.paginator.num_pages > 1 %}
     <div style="display:flex;gap:14px;justify-content:center;align-items:center;margin:4px 0 14px;font-size:13px;">
         {% if parts_page.has_previous %}<a style="color:var(--accent-ink);text-decoration:none;" href="?page=1{{ parts_page.sort_qs }}" hx-get="?page=1{{ parts_page.sort_qs }}">« First</a><a style="color:var(--accent-ink);text-decoration:none;" href="?page={{ parts_page.previous_page_number }}{{ parts_page.sort_qs }}" hx-get="?page={{ parts_page.previous_page_number }}{{ parts_page.sort_qs }}">‹ Prev</a>{% else %}<span class="cell-muted">« First</span><span class="cell-muted">‹ Prev</span>{% endif %}
@@ -18,7 +25,7 @@
     {% endif %}
 <div class="tbl-scroll">
     <table class="ship-table">
-        <thead><tr>{% include "explore/_sort_th.html" with key="pid" label="Part ID" hx=1 %}{% include "explore/_sort_th.html" with key="type" label="Type" hx=1 %}{% include "explore/_sort_th.html" with key="serial" label="Serial number" hx=1 %}{% include "explore/_sort_th.html" with key="status" label="Status" hx=1 %}{% include "explore/_sort_th.html" with key="updated" label="Updated" hx=1 %}</tr></thead>
+        <thead><tr>{% include "explore/_sort_th.html" with key="pid" label="Part ID" hx=1 %}{% include "explore/_sort_th.html" with key="type" label="Type" hx=1 %}{% include "explore/_sort_th.html" with key="serial" label="Serial number" hx=1 %}{% include "explore/_sort_th.html" with key="status" label="Status" hx=1 %}<th title="Test types recorded on the item">Tests</th>{% include "explore/_sort_th.html" with key="updated" label="Updated" hx=1 %}</tr></thead>
         <tbody>
         {% for p in parts_page %}
             <tr>
@@ -26,10 +33,11 @@
                 <td>{% if p.type_url %}<a href="{{ p.type_url }}">{{ p.type_name }}</a>{% else %}{{ p.type_name }}{% endif %}</td>
                 <td class="mono">{{ p.serial_number|default:"—" }}</td>
                 <td>{{ p.status|default:"—" }}</td>
+                <td class="mono">{{ p.tests|default:"—" }}</td>
                 <td class="mono">{% if p.updated %}{{ p.updated|date:"Y-m-d" }}{% else %}—{% endif %}</td>
             </tr>
         {% empty %}
-            <tr><td colspan="5" class="cell-muted">No items mirrored.</td></tr>
+            <tr><td colspan="6" class="cell-muted">No items mirrored.</td></tr>
         {% endfor %}
         </tbody>
     </table>

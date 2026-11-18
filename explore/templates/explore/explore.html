@@ -114,6 +114,15 @@
   .nb-hint { font-size: 11.5px; color: var(--faint); margin-top: 8px; }
   .nb-existing { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 12px;
     padding-top: 10px; border-top: 1px solid var(--rule); font-size: 12.5px; color: var(--dim); }
+  /* #221: the subsystem items' filter bar — the Shipments search box, the page's selects */
+  .si-filter { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; font-size: 13px; }
+  .si-filter select { font: inherit; font-size: 13px; color: var(--ink); background: var(--page); max-width: 100%;
+    border: 1px solid var(--rule); border-radius: 999px; padding: 7px 12px; }
+  .si-filter input[type=search] { font: inherit; font-size: 13px; color: var(--ink); flex: 1 1 180px; max-width: 320px;
+    background: var(--page); border: 1px solid var(--rule); border-radius: 999px; padding: 7px 15px; }
+  .si-filter select:focus, .si-filter input:focus { outline: none; border-color: var(--accent); }
+  .si-filter input::placeholder { color: var(--faint); }
+  .si-filter a { color: var(--accent-ink); text-decoration: none; }
   .nb-existing select { font: inherit; font-size: 12.5px; color: var(--ink); background: var(--surface);
     border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 5px 7px; }
   .nb-existing button { font: inherit; font-size: 12.5px; font-weight: 600; color: var(--dim);
@@ -669,6 +678,29 @@
             document.getElementById("cl-names-dt").hidden = false;
         })
         .catch(function () {});
+
+    // #221: Refresh status on a subsystem's items — each synced type's listing
+    // sweep in turn (it re-stamps the mirror's statuses), then the pane again.
+    document.addEventListener("click", async function (e) {
+        var btn = e.target.closest("#sub-refresh"); if (!btn) return;
+        var types = JSON.parse(document.getElementById("sub-refresh-types").textContent);
+        var note = document.getElementById("sub-refresh-note"), fresh = [], failed = [];
+        btn.disabled = true;
+        for (var i = 0; i < types.length; i++) {
+            note.textContent = (i + 1) + " / " + types.length + " · " + types[i].name;
+            try {
+                var r = await fetch(types[i].url);
+                var d = await r.json();
+                if (!r.ok) failed.push(types[i].name);
+                else if (d.new_items) fresh.push(types[i].name + " (" + d.new_items + ")");
+            } catch (err) { failed.push(types[i].name); }
+        }
+        var said = (failed.length ? "failed: " + failed.join(", ") + " " : "") +
+            (fresh.length ? "new items, not mirrored: " + fresh.join(", ") : "");
+        await htmx.ajax("GET", location.href, { target: "#sub-items-pane", swap: "outerHTML" });
+        var after = document.getElementById("sub-refresh-note");
+        if (after) after.textContent = said || "refreshed";
+    });
 
     var nodeLog = document.getElementById("node-sync-log");
     var syncBtns = document.querySelectorAll(".node-sync-btn");
