@@ -60,6 +60,8 @@
   .tr-comp.zero { color: var(--faint); background: transparent; }
   .tr-comp.is-synced { color: var(--good); border-color: color-mix(in oklab, var(--good) 30%, var(--rule)); }
   .tr-ptid { font-family: var(--font-mono); font-size: 11px; font-weight: 500; color: var(--faint); white-space: nowrap; }
+  .tr-open { color: var(--faint); text-decoration: none; padding: 0 8px; }
+  .tr-open:hover { color: var(--accent-ink); }
   .tr-id { font-family: var(--font-mono); font-size: 11px; color: var(--faint); margin-left: 6px; white-space: nowrap; }
   /* 0-component nodes greyed, like the sidebar */
   .tr-row.tr-empty .tr-nm { color: var(--faint); font-weight: 500; }
@@ -224,7 +226,9 @@
       "<span class='" + compCls + "'>" + fmt(n.n) + "</span></span>";  // count chip rightmost, like other rows
     else meta = "<span class='tr-meta'>" + (expandable ? "<span class='tr-kc'>" + childCount(n) + "</span>" : "") +
       "<span class='" + compCls + "'>" + fmt(n.n) + "</span></span>";
-    return lead + name + sub + "<span class='tr-grow'></span>" + meta;
+    // a folder's row only expands — this opens its own page (a subsystem's lists its items, #221)
+    var open = expandable && n.url ? "<a class='tr-open' href='" + esc(n.url) + "' title='Open page'>&rarr;</a>" : "";
+    return lead + name + sub + open + "<span class='tr-grow'></span>" + meta;
   }
   function build(n, familyColor) {
     var branch = document.createElement("div");
@@ -272,10 +276,10 @@
     b.classList.toggle("collapsed");
     window.exTree.set(b.dataset.key, !b.classList.contains("collapsed"));
   }
-  tree.addEventListener("click", function (e) { var r = e.target.closest(".tr-row.expandable"); if (r) toggle(r); });
+  tree.addEventListener("click", function (e) { var r = e.target.closest(".tr-row.expandable"); if (r && !e.target.closest(".tr-open")) toggle(r); });
   tree.addEventListener("keydown", function (e) {
     if (e.key !== "Enter" && e.key !== " ") return;
-    var r = e.target.closest(".tr-row.expandable"); if (r) { e.preventDefault(); toggle(r); }
+    var r = e.target.closest(".tr-row.expandable"); if (r && !e.target.closest(".tr-open")) { e.preventDefault(); toggle(r); }
   });
   // Follow expand/collapse made in the sidebar (same page, same key space).
   document.addEventListener("extree:set", function (e) {

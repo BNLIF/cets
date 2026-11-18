@@ -349,6 +349,41 @@ class NavigationTest(TestCase):
         self.assertIn("LArASIC", html)            # subsystem card directly under family
         self.assertNotIn(">System<", html)        # no System-tier card
 
+    def test_subsystem_page_lists_its_types_items(self):
+        """#221: a subsystem's page lists the mirrored items of all its types
+        — sortable, filtered by status — and names the types not synced."""
+        from django.utils import timezone as tz
+        from explore.models import HwdbComponentEvent as C
+        now = tz.now()
+        H.objects.filter(part_type_id="D05700200001").update(tests_synced_at=now)
+        _chain("D05700200002", tname="Never Synced", n_components=4, tests_synced_at=None)
+        _chain("D05700200003", tname="Carrier", n_components=1, tests_synced_at=now)
+        C.objects.create(instance="prod", part_type_id="D05700200001", part_id="D05700200001-00001",
+                         status="Passed", updated=now)
+        C.objects.create(instance="prod", part_type_id="D05700200003", part_id="D05700200003-00001",
+                         status="Failed", updated=now - tz.timedelta(days=1))
+        C.objects.create(instance="prod", part_type_id="D08100100003", part_id="D08100100003-00001",
+                         status="Passed")                    # another subsystem
+        url = navigation.node_path("prod", "FD", "FD-VD", system_id=57, subsystem_id=2)
+        html = self._html(url)
+        self.assertIn("Items (2)", html)
+        self.assertIn("2 of 3 types synced", html)
+        self.assertIn(">Never Synced</a>", html.split("not synced:")[1].split("</p>")[0])
+        self.assertNotIn("D08100100003-00001", html)
+        self.assertIn("Passed (1)", html)
+        self.assertLess(html.index("D05700200001-00001/"), html.index("D05700200003-00001/"))
+        html = self._html(url + "?sort=status")              # Failed before Passed
+        self.assertLess(html.index("D05700200003-00001/"), html.index("D05700200001-00001/"))
+        self.assertIn('href="?sort=-status"', html)
+        pane = self.client.get(url, {"status": "Failed"}, HTTP_HX_REQUEST="true",
+                               HTTP_HX_TARGET="sub-items-pane").content.decode()
+        self.assertNotIn("<html", pane)
+        self.assertIn("Items (1)", pane)
+        self.assertNotIn("D05700200001-00001/", pane)
+        self.assertIn('href="?sort=pid&amp;status=Failed"', pane)   # a header keeps the filter
+        # a subsystem with no items carries no table
+        self.assertNotIn("sub-items-pane", self._html(navigation.node_path("prod", "FD", "FD-VD", system_id=57)))
+
     def test_drill_system_subsystem_leaf(self):
         sub = self._html(navigation.node_path("prod", "FD", "FD-VD", system_id=57))
         self.assertIn("Digital electronics", sub)

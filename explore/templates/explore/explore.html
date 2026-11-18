@@ -616,6 +616,7 @@
         {% if c.url %}</a>{% else %}</div>{% endif %}
         {% endfor %}
     </div>
+    {% if sub_items %}{% include "explore/_subsystem_items.html" %}{% endif %}
     {% else %}
     <div class="explore-empty"><p>Nothing here yet.</p><p class="cell-muted">Click <strong>Refresh hierarchy</strong> to walk the curated systems from HWDB (requires an FNAL link).</p></div>
     {% endif %}

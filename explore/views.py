@@ -312,16 +312,21 @@ def explore_view(request, trail=None):
         # + binary QC flags (#51).
         breakdowns = component_breakdowns(inst, leaf.part_type_id)
         qc_flags = component_qc_flags(inst, leaf.part_type_id)
+    sub_items = None
+    if view["kind"] == "subsystem":   # #221: the subsystem's items, all its types in one table
+        parts_page, sub_items = _subsystem_items(request, inst, view["ctx"])
 
     # htmx pager clicks swap just their pane (keyed by hx-target), so the page
     # keeps its scroll position instead of reloading and jumping to the top.
     if getattr(request, "htmx", False):
         fragment = {"parts-pane": "explore/_parts_table.html",
                     "empty-boxes-pane": "explore/_empty_boxes_table.html",
+                    "sub-items-pane": "explore/_subsystem_items.html",
                     }.get(request.htmx.target)
         if fragment:
             return render(request, fragment, {
-                "parts_page": parts_page, "empty_boxes_page": empty_boxes_page})
+                "parts_page": parts_page, "empty_boxes_page": empty_boxes_page,
+                "sub_items": sub_items})
 
     return render(
         request,
@@ -335,6 +340,7 @@ def explore_view(request, trail=None):
                 part_type_id=leaf.part_type_id),
             "charts": charts,
             "parts_page": parts_page,
+            "sub_items": sub_items,
             "breakdowns": breakdowns,
             "qc_flags": qc_flags,
             "is_shipping": is_shipping,
@@ -1395,29 +1401,65 @@ def explore_type_es_view(request, part_type_id):
 
 # The items tables' sortable columns (Cathode group via Chao, 2026-11-18):
 # ?sort=<key> ascending, ?sort=-<key> descending.
-_ITEM_SORTS = {"pid": "part_id", "serial": "serial_number", "status": "status",
-               "by": "created_by", "updated": "updated"}
+_ITEM_SORTS = {"pid": "part_id", "type": "part_type_id", "serial": "serial_number",
+               "status": "status", "by": "created_by", "updated": "updated"}
 
 
 def _items_page(request, inst, part_type_id, annotations=None):
     """One page (50) of a type's mirrored items for the items tables — the
     type page, the checklist chooser, the ES list, the Items page — sorted
-    by the column ``?sort=`` names, newest update first without one.
-    ``annotations`` adds sortable columns of the caller's own. The page
-    carries ``sort`` and ``sort_qs`` (what its pager links append)."""
+    by the column ``?sort=`` names, newest update first without one;
+    ``?status=`` keeps the items of one status. ``part_type_id`` may be a
+    list of types (#221, a subsystem's). ``annotations`` adds sortable
+    columns of the caller's own. The page carries ``sort``, ``status`` and
+    what its links append: ``sort_qs`` (pager), ``filter_qs`` (headers),
+    ``sort_only`` (status links)."""
     cols = {**_ITEM_SORTS, **{k: k for k in annotations or {}}}
     sort = request.GET.get("sort") or ""
     if sort.lstrip("-") not in cols:
         sort = "-updated"
     col = F(cols[sort.lstrip("-")])
+    types = [part_type_id] if isinstance(part_type_id, str) else list(part_type_id)
+    status = request.GET.get("status") or ""
     rows = (HwdbComponentEvent.for_instance(inst)
-            .filter(part_type_id=part_type_id).annotate(**(annotations or {}))
+            .filter(part_type_id__in=types, **({"status": status} if status else {}))
+            .annotate(**(annotations or {}))
             .order_by(col.desc(nulls_last=True) if sort.startswith("-") else col.asc(nulls_last=True),
                       F("created").desc(nulls_last=True), "part_id"))
     page = Paginator(rows, 50).get_page(request.GET.get("page"))
-    page.sort = sort
-    page.sort_qs = "" if sort == "-updated" else f"&sort={sort}"
+    page.sort, page.status = sort, status
+    page.sort_only = "" if sort == "-updated" else f"&sort={sort}"
+    page.filter_qs = "&" + urlencode({"status": status}) if status else ""
+    page.sort_qs = page.sort_only + page.filter_qs
     return page
+
+
+def _subsystem_items(request, inst, ctx):
+    """#221 (Cathode group via Hajime, 2026-11-18): every mirrored item of a
+    subsystem's types on the subsystem's page — ``(page, facts)``, or
+    ``(None, None)`` for a subsystem whose types hold no items. Mirror only:
+    a type never synced has no rows, so the page names those."""
+    leaves = [l for l in HierarchyNode.for_instance(inst).filter(
+        level=HierarchyNode.LEVEL_TYPE, project=ctx["project"],
+        system_id=ctx["system_id"], subsystem_id=ctx["subsystem_id"]).order_by("name")]
+    with_items = [l for l in leaves if l.n_components]
+    if not with_items:
+        return None, None
+    urls = {l.part_type_id: navigation.leaf_path_for(inst, l.part_type_id) for l in leaves}
+    names = {l.part_type_id: l.name for l in leaves}
+    page = _items_page(request, inst, list(names))
+    for p in page:
+        p.type_name, p.type_url = names[p.part_type_id], urls[p.part_type_id]
+    synced = [l.tests_synced_at for l in with_items if l.tests_synced_at]
+    return page, {
+        "n_types": len(with_items), "n_synced": len(synced),
+        "oldest": min(synced, default=None),
+        "unsynced": [{"name": l.name, "url": urls[l.part_type_id]}
+                     for l in with_items if not l.tests_synced_at],
+        "statuses": list(HwdbComponentEvent.for_instance(inst)
+                         .filter(part_type_id__in=list(names)).exclude(status="")
+                         .values("status").annotate(n=Count("id")).order_by("status")),
+    }
 
 
 @login_not_required
