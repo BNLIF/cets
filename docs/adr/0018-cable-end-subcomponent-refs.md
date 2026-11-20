@@ -264,6 +264,42 @@ side. Checked on dev with the probe flange `Z00100300037-00006` and the free
 - **Not here**: connecting every free position in one step, swapping two
   cables, and anything on the other side.
 
+## Update 2026-11-20: the type's picture and its editor (#228)
+
+A picture of the endpoint device over the connections list, a numbered
+marker on each position. It belongs to the device's **type** and is
+prepared once.
+
+- **Stored on the type in HWDB**, as a checklist's pictures are:
+  `Cable_map_<type id>.json` among the type's images, the newest version
+  read — `{"image_id": …, "slots": [{"label", "x", "y"}]}`, the checklist
+  image map's slot shape, `label` a position name, `x` / `y` in percent of
+  the picture. The picture is another of the type's images, uploaded
+  through the checklist editor's endpoint (`ChecklistImage_<type>_<time>`).
+  Another Explorer or tool reads both with the type's image listing.
+- **The editor** (`cables/picture/<type id>/`) lists the type's positions
+  that accept a cable type, numbered as the page numbers them. A position
+  is picked, a click on the picture drops its marker and the next position
+  not yet placed is picked; a marker is moved by a drag and removed from
+  the list. A stored marker whose position the type no longer has is
+  flagged there and can only be removed.
+- **Who may save**: anyone on a write instance, HWDB arbitrating by the
+  type's roles — as for the type's checklists. The role banner says so
+  beforehand, and the page links to the editor only for an account that
+  holds one of the roles.
+- **The page** shows a marker per slot named like one of its rows, with the
+  row's number and status colour; a slot with no row is left off. A marker
+  stands for its row: a tap is the row's Connect or View, and each lights
+  the other up. A type with no picture shows the list alone.
+- **Zoom**: fitted to the width and at most 42% of the window's height;
+  − / + / Fit buttons, a two-finger pinch, Ctrl + wheel (a plain wheel
+  scrolls the page), a drag to pan once zoomed. Markers keep their size.
+- **Reads**: two more per page — the type's image listing and the map
+  file. The picture itself goes through the image proxy.
+- **Not checked against HWDB**: an upload and a save were run with mocked
+  answers only — posting onto a sandbox type on dev would have left files
+  on a type that is not ours. The read side was run on dev.
+
 ## Consequences
 
 - `receive_box` now posts arrival locations to base PIDs (previously a

@@ -1,0 +1,189 @@
+{% extends 'explore/base.html' %}
+{% block title %}Cable picture · {{ type_name }} · HWDB Explorer{% endblock %}
+
+{% block content %}
+{# #228: the cable connection editor — a picture of an endpoint device's type and a marker per position that takes a cable. Placing follows the checklist editor's image map: a click drops a marker, in percent of the picture. #}
+{% include "explore/_es_style.html" %}
+<style>
+  .cm-page { max-width: 1180px; }
+  .cm-page .mono { font-family: var(--font-mono); font-size: .93em; }
+  .cm-page .es-btn { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
+  .cm-page a.es-btn { text-decoration: none; }
+  .cm-page [hidden] { display: none; }   /* the classes above set display, which would show a hidden one */
+  .cm-sub { font-size: 14px; font-weight: 400; color: var(--dim); margin-left: 8px; }
+  .cm-hint { font-size: 12.5px; color: var(--dim); }
+  .cm-bar { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; margin: 10px 0 14px; }
+  .cm-grow { flex: 1 1 0; }
+  .cm-cols { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: start; }
+  .cm-frame { min-height: 160px; border: 1px solid var(--rule); border-radius: var(--r-md); background: var(--surface);
+    display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .cm-pic { position: relative; display: inline-block; max-width: 100%; touch-action: none; }
+  .cm-pic img { display: block; max-width: 100%; user-select: none; -webkit-user-drag: none; }
+  .cm-pic.placing { cursor: crosshair; }
+  /* a marker: the position's number, as on the Cable connections page */
+  .cm-mk { position: absolute; transform: translate(-50%, -50%); width: 28px; height: 28px; padding: 0; border-radius: 50%;
+    font: inherit; font-size: 13px; font-weight: 600; color: var(--ink); background: #fff; border: 2px solid var(--ink);
+    cursor: grab; touch-action: none; }
+  .cm-mk.sel { outline: 3px solid var(--accent); outline-offset: 1px; }
+  .cm-mk.stale { border-style: dashed; border-color: var(--bad); color: var(--bad); }
+  .cm-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--rule); border-radius: var(--r-md); background: var(--page); }
+  .cm-list li { display: flex; align-items: center; gap: 6px; padding: 0 6px 0 0; border-top: 1px solid var(--rule); }
+  .cm-list li:first-child { border-top: 0; }
+  .cm-list li.sel { background: var(--surface); }
+  .cm-pos { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 10px;
+    font: inherit; font-size: 14px; text-align: left; color: var(--ink); background: none; border: 0; cursor: pointer; }
+  .cm-pos b { font-weight: 600; }
+  .cm-n { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%;
+    font-size: 13px; font-weight: 600; border: 2px solid var(--dim); background: #fff; color: var(--ink); }
+  li.placed .cm-n { border-color: var(--ink); }
+  li.stale .cm-n { border-style: dashed; border-color: var(--bad); color: var(--bad); }
+  .cm-page .cm-del { min-width: 44px; padding: 0; }
+  @media (max-width: 800px) { .cm-cols { grid-template-columns: minmax(0, 1fr); } }
+</style>
+
+<div class="es-page cm-page">
+  <div class="es-crumbs">
+    <a href="{% url 'explore:home' %}">Explorer</a>
+    {% if item %}<span class="sep">›</span><a class="mono" href="{% url 'explore:part' part_id=item %}">{{ item }}</a>
+    <span class="sep">›</span><a href="{{ back_url }}">Cable connections</a>{% endif %}
+    <span class="sep">›</span>Picture
+  </div>
+  {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
+  <h1>Cable picture<span class="cm-sub">{% if type_name != part_type_id %}{{ type_name }} · {% endif %}<span class="mono">{{ part_type_id }}</span></span></h1>
+  {% include "explore/_role_gate.html" %}
+
+  {% if not editor.positions and not editor.map.slots %}
+  <p>This type has no position that takes a cable.</p>
+  {% else %}
+  <form method="post" id="cm-form">{% csrf_token %}
+    <input type="hidden" name="map" id="cm-map"><input type="hidden" name="item" value="{{ item }}">
+    <div class="cm-bar">
+      <label class="es-btn quiet" for="cm-file">Upload picture</label>
+      <input type="file" id="cm-file" accept="image/png,image/jpeg,image/gif" hidden>
+      <span class="cm-hint" id="cm-status" aria-live="polite"></span>
+      <span class="cm-grow"></span>
+      <a class="es-btn quiet" href="{{ back_url }}">Cancel</a>
+      <button type="submit" class="es-btn" id="cm-save" title="Stored on the type in HWDB — every item of the type shows it">Save</button>
+    </div>
+    <div class="cm-cols">
+      <div class="cm-frame">
+        <span class="cm-hint" id="cm-empty">No picture yet.</span>
+        <div class="cm-pic" id="cm-pic" hidden><img id="cm-img" alt="{{ type_name }}" draggable="false"></div>
+      </div>
+      <div>
+        <p class="cm-hint" style="margin: 0 0 6px;">Pick a position, then tap the picture. Drag a marker to move it.</p>
+        <ol class="cm-list" id="cm-list"></ol>
+      </div>
+    </div>
+  </form>
+  {{ editor|json_script:"cm-data" }}
+  <script>
+  (function () {
+    function byId(id) { return document.getElementById(id); }
+    var D = JSON.parse(byId("cm-data").textContent), pic = byId("cm-pic"), img = byId("cm-img"), list = byId("cm-list"),
+        status = byId("cm-status"), imageId = D.map.image_id, slots = {}, sel = null, drag = null;
+    D.map.slots.forEach(function (s) { slots[s.label] = { x: s.x, y: s.y }; });
+    function stale() { return Object.keys(slots).filter(function (l) { return D.positions.indexOf(l) < 0; }); }
+    function nextFree(after) {
+      var i = D.positions.indexOf(after), order = D.positions.slice(i + 1).concat(D.positions.slice(0, i + 1));
+      return order.filter(function (p) { return !slots[p]; })[0] || null;
+    }
+    function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+    function render() {
+      list.textContent = "";
+      D.positions.concat(stale()).forEach(function (label) {
+        var n = D.positions.indexOf(label) + 1, gone = !n, li = el("li", (slots[label] ? "placed " : "") + (gone ? "stale " : "") + (label === sel ? "sel" : "")),
+            b = el("button", "cm-pos"), del = el("button", "es-btn quiet cm-del", "✕");
+        b.type = del.type = "button";
+        b.setAttribute("data-label", label);
+        b.appendChild(el("span", "cm-n", gone ? "!" : n));
+        var name = el("span");
+        name.appendChild(el("b", "", label));
+        name.appendChild(el("span", "cm-hint", gone ? " · no longer a position of this type" : slots[label] ? "" : " · not placed"));
+        b.appendChild(name);
+        del.setAttribute("data-del", label);
+        del.setAttribute("aria-label", "Remove the marker of " + label);
+        del.hidden = !slots[label];
+        li.appendChild(b); li.appendChild(del);
+        list.appendChild(li);
+      });
+      Array.prototype.slice.call(pic.querySelectorAll(".cm-mk")).forEach(function (m) { m.remove(); });
+      Object.keys(slots).forEach(function (label) {
+        var n = D.positions.indexOf(label) + 1, m = el("button", "cm-mk" + (n ? "" : " stale") + (label === sel ? " sel" : ""), n || "!");
+        m.type = "button";
+        m.title = label;
+        m.setAttribute("data-label", label);
+        m.style.left = slots[label].x + "%"; m.style.top = slots[label].y + "%";
+        pic.appendChild(m);
+      });
+      pic.hidden = !imageId;
+      byId("cm-empty").hidden = !!imageId;
+      pic.classList.toggle("placing", !!sel && D.positions.indexOf(sel) >= 0);
+      byId("cm-save").disabled = !imageId;
+    }
+    function at(e) {     // the pointer in percent of the picture, kept on it
+      var r = img.getBoundingClientRect();
+      return { x: Math.min(100, Math.max(0, (e.clientX - r.left) / r.width * 100)),
+               y: Math.min(100, Math.max(0, (e.clientY - r.top) / r.height * 100)) };
+    }
+    function show(id) { imageId = id; if (id) img.src = D.image.replace("IMGID000", encodeURIComponent(id)); }
+
+    list.addEventListener("click", function (e) {
+      var d = e.target.closest("[data-del]"), b = e.target.closest("[data-label]");
+      if (d) { var l = d.getAttribute("data-del"); delete slots[l]; sel = D.positions.indexOf(l) >= 0 ? l : nextFree(""); }
+      else if (b) sel = b.getAttribute("data-label");
+      else return;
+      render();
+    });
+    // a click on the picture drops the picked position's marker there and moves on to the next one not placed
+    img.addEventListener("click", function (e) {
+      if (!sel || D.positions.indexOf(sel) < 0) return;
+      var p = at(e);
+      slots[sel] = { x: +p.x.toFixed(2), y: +p.y.toFixed(2) };
+      sel = nextFree(sel) || sel;
+      render();
+    });
+    // a marker is picked by a press and moved by a drag
+    pic.addEventListener("pointerdown", function (e) {
+      var m = e.target.closest(".cm-mk");
+      if (!m) return;
+      sel = m.getAttribute("data-label");
+      render();
+      drag = pic.querySelector('.cm-mk[data-label="' + sel.replace(/["\\]/g, "\\$&") + '"]');
+      e.preventDefault();
+    });
+    window.addEventListener("pointermove", function (e) {
+      if (!drag) return;
+      var p = at(e), l = drag.getAttribute("data-label");
+      slots[l] = { x: +p.x.toFixed(2), y: +p.y.toFixed(2) };
+      drag.style.left = p.x + "%"; drag.style.top = p.y + "%";
+    });
+    ["pointerup", "pointercancel"].forEach(function (t) { window.addEventListener(t, function () { drag = null; }); });
+
+    byId("cm-file").addEventListener("change", function () {
+      var input = this, file = input.files && input.files[0], fd = new FormData();
+      if (!file) return;
+      status.textContent = "uploading…";
+      fd.append("image", file);
+      fd.append("csrfmiddlewaretoken", document.querySelector("#cm-form [name=csrfmiddlewaretoken]").value);
+      fetch(D.upload, { method: "POST", body: fd, credentials: "same-origin" })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (j.image_id) { show(String(j.image_id)); status.textContent = "uploaded — Save keeps it"; render(); }
+          else status.textContent = j.error || "upload failed";
+        })
+        .catch(function () { status.textContent = "upload failed"; })
+        .then(function () { input.value = ""; });
+    });
+    byId("cm-form").addEventListener("submit", function () {
+      byId("cm-map").value = JSON.stringify({ image_id: imageId, slots: D.positions.concat(stale()).filter(function (l) { return slots[l]; })
+        .map(function (l) { return { label: l, x: slots[l].x, y: slots[l].y }; }) });
+    });
+    show(imageId);
+    sel = nextFree("");
+    render();
+  })();
+  </script>
+  {% endif %}
+</div>
+{% endblock %}

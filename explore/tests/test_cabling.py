@@ -9,6 +9,7 @@ country / institution codes off.
 
 from __future__ import annotations
 
+import json
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -69,11 +70,28 @@ def _api():
         "functional_position": "Inner (SH)", "operation": "mount", "created": "2026-07-19"}]
         if pid in (INSTALLED, ONE_END, FREE) else []}
     api.patch_subcomponents.return_value = {"status": "OK", "data": "Updated"}
+    api.get_component_type_images.return_value = {"data": []}             # no picture of the type
+    api.post_component_type_image.return_value = {"status": "OK", "image_id": "777"}
     api.get_component.side_effect = lambda pid: {"data": {
         "category": "cable" if pid.rsplit("-", 1)[0] in (WARM, BUNDLE4) else "generic",
         "component_type": {"name": "Bias FT flange" if pid == FLANGE else "Top CRP bias warm cable"}}}
     api.get_component_type.side_effect = lambda t: {"data": types[t]}
     api.get_subcomponents.side_effect = lambda pid: {"data": rows.get(pid, [])}
+    return api
+
+
+def _with_picture(api, slots=None):
+    """The flange's type gets a picture (image 55) with a marker per slot —
+    two versions of the file on the type, the newer one the one read."""
+    slots = slots if slots is not None else [
+        {"label": "ISH", "x": 10, "y": 20}, {"label": "ICO", "x": 55.5, "y": 80},
+        {"label": "Gone", "x": 1, "y": 1}, {"label": "Board", "x": 2, "y": 2}]
+    api.get_component_type_images.return_value = {"data": [
+        {"image_id": "90", "image_name": "Cable_map_Z00100300064.json", "created": "2026-11-01T10:00:00"},
+        {"image_id": "91", "image_name": "Cable_map_Z00100300064.json", "created": "2026-11-20T10:00:00"},
+        {"image_id": "55", "image_name": "ChecklistImage_Z00100300064_x.jpg", "created": "2026-11-20T09:00:00"}]}
+    files = {"91": {"image_id": "55", "slots": slots, "updated_by": "k"}, "90": {"image_id": "1", "slots": []}}
+    api.get_image_response.side_effect = lambda image_id: mock.Mock(content=json.dumps(files[image_id]).encode())
     return api
 
 
@@ -209,6 +227,27 @@ class DeviceConnectionsTest(TestCase):
         self.assertTrue(cabling.offer_bundle(api, "dev", device, TRAY)["offered"])
         self.assertEqual({r["prefill"] for r in device["rows"] if r["accepts"] == [WARM]}, {""})
         self.assertEqual([r.get("candidates") for r in device["rows"] if r["position"] == "FCT.T"], [[]])   # another type
+
+    def test_a_stored_picture_is_read_as_slots_in_percent(self):
+        self.assertEqual(cabling.normalize_map({"image_id": 55, "slots": [
+            {"label": " ISH ", "x": "10.123", "y": 20}, {"label": "ISH", "x": 1, "y": 1},     # named twice
+            {"label": "Off", "x": 101, "y": 5}, {"label": "", "x": 5, "y": 5}, {"label": "Bad", "x": "a", "y": 5}, "junk"]}),
+            {"image_id": "55", "slots": [{"label": "ISH", "x": 10.12, "y": 20.0}]})
+        self.assertEqual(cabling.normalize_map(None), {"image_id": "", "slots": []})
+        self.assertIsNone(cabling.read_map(self.api, "Z00100300064"))     # the type has no picture
+        self.assertEqual(cabling.read_map(_with_picture(_api()), "Z00100300064")["image_id"], "55")   # the newer file
+
+    def test_the_picture_gets_a_marker_per_slot_named_like_a_row(self):
+        device = cabling.device_connections(_with_picture(_api()), "dev", FLANGE)
+        self.assertEqual(device["picture"]["image_id"], "55")
+        self.assertEqual([(m["row"]["n"], m["row"]["position"], m["row"]["status"], m["x"], m["y"])
+                          for m in device["picture"]["markers"]],
+                         [(1, "ISH", "installed", 10.0, 20.0), (4, "ICO", "available", 55.5, 80.0)])   # no row: left off
+        self.assertIsNone(self.device["picture"])
+
+    def test_the_editor_offers_the_positions_that_take_a_cable(self):
+        connectors = self.api.get_component_type("Z00100300064")["data"]["connectors"]
+        self.assertEqual(cabling.cable_positions(self.api, "dev", connectors), ["ISH", "OSH", "FCT.T", "ICO"])
 
     def test_a_cable_has_no_rows_of_its_own(self):
         api = _api()
@@ -479,3 +518,75 @@ class PartPageLinkTest(TestCase):
 
     def test_a_cables_own_page_does_not(self):
         self.assertNotIn(">Cable connections</a>", self._page(INSTALLED))
+
+
+class CablePictureTest(TestCase):
+    """#228: the type's picture over the list, and its editor."""
+
+    EDITOR = "/hw/dev/cables/picture/Z00100300064/"
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("k", "k@k.io", "pw"))
+        self.api = _api()
+
+    def _call(self, method, url, data=None, **kw):
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=self.api):
+            return getattr(self.client, method)(url, data or {}, **kw)
+
+    def test_the_page_shows_the_picture_with_the_rows_numbers_and_statuses(self):
+        _with_picture(self.api)
+        html = self._call("get", PAGE).content.decode()
+        self.assertIn('<img src="/hw/dev/shipment-image/55/"', html)
+        self.assertIn('class="cc-mk cc-installed" data-row="1" style="left: 10%; top: 20%;" title="ISH"', html)
+        self.assertIn('class="cc-mk cc-available" data-row="4" style="left: 55.5%; top: 80%;" title="ICO"', html)
+        self.assertEqual(html.count('class="cc-mk '), 2)                  # "Gone" and "Board" have no row
+        self.assertIn('<tr class="cc-installed" data-row="1">', html)
+        self.assertIn(f'href="{self.EDITOR}?item={FLANGE}" title="The picture and markers of this type — every item of the type shows them">Edit picture</a>', html)
+
+    def test_a_type_with_no_picture_shows_the_list_alone_and_a_link_to_the_editor(self):
+        html = self._call("get", PAGE).content.decode()
+        self.assertNotIn('id="cc-map"', html)
+        self.assertIn("3 / 4 connected", html)
+        self.assertIn(f'href="{self.EDITOR}?item={FLANGE}"', html)
+        self.assertIn(">Add picture</a>", html)
+        self.assertLess(html.index(">Add picture</a>"), html.index('<table class="cc-table">'))   # where the picture would be
+
+    def test_the_link_is_for_those_who_may_edit(self):
+        inner = self.api.get_component_type.side_effect
+        self.api.get_component_type.side_effect = lambda t: {"data": {**inner(t)["data"], "roles": [{"id": 3, "name": "type-manager"}]}}
+        with mock.patch("explore.views._my_roles", return_value=[]):
+            self.assertNotIn("cables/picture/", self._call("get", PAGE).content.decode())
+        with override_settings(HWDB_WRITE_INSTANCES=[]):
+            self.assertNotIn("cables/picture/", self._call("get", PAGE).content.decode())
+            self.assertEqual(self._call("get", self.EDITOR).status_code, 403)
+
+    def test_the_editor_lists_the_cable_positions_and_the_stored_markers(self):
+        _with_picture(self.api)
+        r = self._call("get", self.EDITOR, {"item": FLANGE})
+        ed = r.context["editor"]
+        self.assertEqual(ed["positions"], ["ISH", "OSH", "FCT.T", "ICO"])
+        self.assertEqual([s["label"] for s in ed["map"]["slots"]], ["ISH", "ICO", "Gone", "Board"])   # the stale ones too, to be flagged
+        self.assertEqual((ed["image"], ed["upload"]), ("/hw/dev/shipment-image/IMGID000/",
+                                                       "/hw/dev/checklist-config/Z00100300064/asset/"))
+        html = r.content.decode()
+        self.assertIn('id="cm-data"', html)
+        self.assertIn(f'href="/hw/dev/part/{FLANGE}/cables/">Cancel</a>', html)
+
+    def test_save_posts_the_markers_onto_the_type_and_goes_back_to_the_device(self):
+        posted = {"image_id": "55", "slots": [{"label": "ISH", "x": 12.345, "y": 20}, {"label": "Off", "x": 300, "y": 2}]}
+        r = self._call("post", self.EDITOR, {"map": json.dumps(posted), "item": FLANGE})
+        self.assertRedirects(r, PAGE, fetch_redirect_response=False)
+        ptid, fileobj, fname = self.api.post_component_type_image.call_args.args
+        self.assertEqual((ptid, fname), ("Z00100300064", "Cable_map_Z00100300064.json"))
+        saved = json.loads(fileobj.getvalue())
+        self.assertEqual((saved["image_id"], saved["slots"], saved["updated_by"]),
+                         ("55", [{"label": "ISH", "x": 12.35, "y": 20.0}], "k"))
+
+    def test_save_needs_a_picture_and_shows_hwdbs_refusal(self):
+        html = self._call("post", self.EDITOR, {"map": json.dumps({"image_id": "", "slots": []})}, follow=True).content.decode()
+        self.assertIn("Upload a picture first.", html)
+        self.api.post_component_type_image.assert_not_called()
+        self.api.post_component_type_image.return_value = {"status": "ERROR", "data": "Not authorized"}
+        html = self._call("post", self.EDITOR, {"map": json.dumps({"image_id": "55", "slots": []})}, follow=True).content.decode()
+        self.assertIn("HWDB refused the picture’s markers — Not authorized", html)

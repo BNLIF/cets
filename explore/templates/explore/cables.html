@@ -2,7 +2,7 @@
 {% block title %}Cable connections{% if device %} · {{ device.part_id }}{% endif %} · HWDB Explorer{% endblock %}
 
 {% block content %}
-{# #226, #227: the Cable connections page — the list-under-the-picture layout picked on #225 (Hajime's mock-up, ten columns folded). One row per position of the endpoint device that takes a cable; View shows one connection with both sides; on an instance open to writes, Connect and Remove write the working side. The picture, the device location and labels come with the later cabling tickets. #}
+{# #226, #227: the Cable connections page — the list-under-the-picture layout picked on #225 (Hajime's mock-up, ten columns folded). One row per position of the endpoint device that takes a cable; View shows one connection with both sides; on an instance open to writes, Connect and Remove write the working side. #228: the type's picture over the list, a numbered marker per position. The device location and labels come with the last cabling ticket. #}
 {% include "explore/_es_style.html" %}
 <style>
   .cc-page { max-width: 1180px; }
@@ -42,7 +42,24 @@
   .cc-connected .cc-num, .cc-chip.cc-connected { background: color-mix(in oklch, var(--good) 18%, var(--page));
     border-color: var(--good); color: color-mix(in oklch, var(--good) 70%, black); }
   .cc-chip.cc-connected { border-color: transparent; }
-  .cc-installed .cc-num, .cc-chip.cc-installed { background: var(--good); border-color: var(--good); color: #fff; }
+  .cc-installed .cc-num, .cc-chip.cc-installed, .cc-mk.cc-installed { background: var(--good); border-color: var(--good); color: #fff; }
+
+  /* the type's picture: fitted to the width, never taller than the list needs to stay in view */
+  .cc-map { margin-bottom: 14px; }
+  .cc-map-frame { display: flex; justify-content: center; overflow: hidden;
+    border: 1px solid var(--rule); border-radius: var(--r-md); background: var(--surface); }
+  .cc-map-in { position: relative; display: inline-block; max-width: 100%; touch-action: pan-y; transform-origin: 50% 50%; }
+  .cc-map.zoomed .cc-map-in { touch-action: none; cursor: grab; }
+  .cc-map-in img { display: block; max-width: 100%; max-height: 42vh; user-select: none; -webkit-user-drag: none; }
+  /* a marker keeps its size while the picture zooms */
+  .cc-mk { position: absolute; transform: translate(-50%, -50%) scale(calc(1 / var(--k, 1))); width: 30px; height: 30px; padding: 0;
+    border-radius: 50%; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+    background: #fff; border: 2px solid var(--dim); color: var(--ink); box-shadow: 0 0 0 2px rgba(255, 255, 255, .7); }
+  .cc-mk.cc-connected { background: color-mix(in oklch, var(--good) 18%, #fff); border-color: var(--good); color: color-mix(in oklch, var(--good) 70%, black); }
+  .cc-mk.hot { outline: 3px solid var(--accent); outline-offset: 2px; z-index: 1; }
+  .cc-table tr.hot td { background: var(--surface); }
+  .cc-map-zoom { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
+  .cc-page .cc-map-zoom .es-btn { min-width: 44px; padding: 0 10px; }
 
   .cc-dlg { border: 1px solid var(--rule-hard); border-radius: var(--r-lg); background: var(--page); color: var(--body);
     padding: 0; width: min(420px, 94vw); }
@@ -58,6 +75,7 @@
   .cc-list > :first-child { border-top: 0; }
   .cc-list button { font: inherit; text-align: left; color: var(--ink); background: none; border-width: 1px 0 0; border-style: solid; border-color: var(--rule); cursor: pointer; }
   .cc-list button.on { background: var(--surface); }
+  .cc-list[hidden] { display: none; }
   #cc-c-cands { max-height: 38vh; overflow: auto; }
   .cc-list button.done { color: var(--dim); }
   .cc-df { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 16px; border-top: 1px solid var(--rule); }
@@ -131,6 +149,23 @@
   {% elif device and not device.rows %}
   <p><a class="mono" href="{% url 'explore:part' part_id=device.part_id %}">{{ device.part_id }}</a> ({{ device.type_name }}) has no position that takes a cable.</p>
   {% elif device %}
+  {% if device.picture %}
+  <div class="cc-map" id="cc-map">
+    <div class="cc-map-frame"><div class="cc-map-in">
+      <img src="{% url 'explore:shipment_image' image_id=device.picture.image_id %}" alt="{{ device.type_name }}" draggable="false">
+      {% for m in device.picture.markers %}<button type="button" class="cc-mk cc-{{ m.row.status }}" data-row="{{ m.row.n }}" style="left: {{ m.x|stringformat:"g" }}%; top: {{ m.y|stringformat:"g" }}%;" title="{{ m.row.position }}" aria-label="Position {{ m.row.n }}, {{ m.row.position }}{% if m.row.cable %}, {{ m.row.status }}{% else %}, free{% endif %}">{{ m.row.n }}</button>{% endfor %}
+    </div></div>
+    <div class="cc-map-zoom">
+      {% if can_edit_map %}<a class="es-btn quiet" href="{% url 'explore:cable_map' part_type_id=device.part_type_id %}?item={{ device.part_id }}" title="The picture and markers of this type — every item of the type shows them">Edit picture</a>{% endif %}
+      <span class="cc-grow"></span>
+      <button type="button" class="es-btn quiet" data-zoom="out" aria-label="Zoom out">−</button>
+      <button type="button" class="es-btn quiet" data-zoom="in" aria-label="Zoom in">+</button>
+      <button type="button" class="es-btn quiet" data-zoom="reset" title="Back to the whole picture">Fit</button>
+    </div>
+  </div>
+  {% elif can_edit_map %}
+  <div class="cc-map"><a class="es-btn quiet" href="{% url 'explore:cable_map' part_type_id=device.part_type_id %}?item={{ device.part_id }}" title="A picture of this type with a marker on each position — every item of the type shows it">Add picture</a></div>
+  {% endif %}
   <div class="cc-bar-row">
     <h2>Connections</h2>
     <span>{{ device.n_connected }} / {{ device.rows|length }} connected</span>
@@ -144,7 +179,7 @@
     <thead><tr><th>#</th><th>Position</th><th>Cable · END : connector</th><th>Other side</th><th>Status</th><th class="cc-bun">Bundle / tray</th><th></th></tr></thead>
     <tbody>
     {% for r in device.rows %}
-      <tr class="cc-{{ r.status }}">
+      <tr class="cc-{{ r.status }}" data-row="{{ r.n }}">
         <td class="cc-n"><span class="cc-num">{{ r.n }}</span></td>
         <td class="cc-pos">{{ r.position }}</td>
         <td class="cc-cable">{% if r.cable %}<a class="mono" href="{% url 'explore:part' part_id=r.cable %}">{{ r.cable }}</a><span class="cc-l2 mono">{{ r.end|default:"no END" }}</span>{% if r.bundle %}<span class="cc-l2 cc-bun-in">Bundle / tray <a class="mono" href="{% url 'explore:part' part_id=r.bundle.part_id %}">{{ r.bundle.part_id }}</a>{% if r.bundle.also %} · also at {{ r.bundle.also|join:", " }}{% endif %}</span>{% endif %}{% else %}Not connected<span class="cc-l2">Expected: {{ r.expected|join:" or " }}</span>{% endif %}</td>
@@ -307,6 +342,81 @@
       if (cpid.value) lookup();
     });
   }
+  // the picture: a marker stands for its row — a tap is the row's Connect or View, and each lights the other up
+  var map = byId("cc-map");
+  if (map) {
+    var frame = map.querySelector(".cc-map-frame"), inner = map.querySelector(".cc-map-in"), k = 1, tx = 0, ty = 0, pts = {}, drag = null, pinch = null, moved = false, hot = null;
+    function light(n) {
+      if (n === hot) return;
+      [hot, n].forEach(function (x, i) {
+        if (x) Array.prototype.forEach.call(document.querySelectorAll('[data-row="' + x + '"]'), function (el) { el.classList.toggle("hot", !!i); });
+      });
+      hot = n;
+    }
+    ["mouseover", "focusin"].forEach(function (t) {
+      document.addEventListener(t, function (e) { var el = e.target.closest && e.target.closest("[data-row]"); light(el ? el.getAttribute("data-row") : null); });
+    });
+    document.addEventListener("click", function (e) {
+      var m = e.target.closest(".cc-mk");
+      if (!m) return;
+      var b = document.querySelector('.cc-table tr[data-row="' + m.getAttribute("data-row") + '"] .cc-act button:not([name])');
+      if (b) b.click();
+    });
+    // zoom: the buttons, a pinch, Ctrl + wheel; a drag pans once zoomed; the picture never leaves its frame
+    function apply() {
+      var mx = (k - 1) * inner.offsetWidth / 2, my = (k - 1) * inner.offsetHeight / 2;
+      tx = Math.min(mx, Math.max(-mx, tx)); ty = Math.min(my, Math.max(-my, ty));
+      inner.style.transform = "translate(" + tx + "px," + ty + "px) scale(" + k + ")";
+      inner.style.setProperty("--k", k);
+      map.classList.toggle("zoomed", k > 1);
+    }
+    function centre() { var r = frame.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
+    function zoom(to, px, py) {     // keep the picture's point under (px, py) — offsets from the frame's centre — where it is
+      to = Math.min(6, Math.max(1, to));
+      tx = px - (px - tx) * to / k; ty = py - (py - ty) * to / k;
+      k = to;
+      apply();
+    }
+    map.addEventListener("click", function (e) {
+      var z = e.target.closest("[data-zoom]");
+      if (!z) return;
+      z = z.getAttribute("data-zoom");
+      if (z === "reset") { k = 1; tx = ty = 0; apply(); } else zoom(k * (z === "in" ? 1.5 : 1 / 1.5), 0, 0);
+    });
+    frame.addEventListener("wheel", function (e) {
+      if (!e.ctrlKey && !e.metaKey) return;          // a plain wheel scrolls the page
+      e.preventDefault();
+      var c = centre();
+      zoom(k * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX - c.x, e.clientY - c.y);
+    }, { passive: false });
+    function two() { var ids = Object.keys(pts); return ids.length === 2 ? [pts[ids[0]], pts[ids[1]]] : null; }
+    inner.addEventListener("pointerdown", function (e) {
+      pts[e.pointerId] = { x: e.clientX, y: e.clientY };
+      moved = false;
+      var p = two();
+      if (p) { pinch = { d: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1, k: k }; drag = null; }
+      else if (k > 1) drag = { x: e.clientX - tx, y: e.clientY - ty, x0: e.clientX, y0: e.clientY };
+    });
+    window.addEventListener("pointermove", function (e) {
+      if (!pts[e.pointerId]) return;
+      pts[e.pointerId] = { x: e.clientX, y: e.clientY };
+      var p = two(), c;
+      if (pinch && p) {
+        c = centre(); moved = true;
+        zoom(pinch.k * Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) / pinch.d, (p[0].x + p[1].x) / 2 - c.x, (p[0].y + p[1].y) / 2 - c.y);
+      } else if (drag) {
+        if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > 5) moved = true;
+        tx = e.clientX - drag.x; ty = e.clientY - drag.y; apply();
+      }
+    });
+    ["pointerup", "pointercancel"].forEach(function (t) {
+      window.addEventListener(t, function (e) { delete pts[e.pointerId]; pinch = null; drag = null; });
+    });
+    // the tap that ends a drag or a pinch is not a tap on a marker
+    inner.addEventListener("click", function (e) { if (moved) { e.stopPropagation(); moved = false; } }, true);
+    window.addEventListener("resize", apply);
+  }
+
   document.addEventListener("click", function (e) {
     var c = e.target.closest("[data-close]");
     if (c) c.closest("dialog").close();

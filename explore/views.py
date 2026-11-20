@@ -1832,6 +1832,7 @@ def explore_cables_view(request, part_id=None):
     if can_write and device["rows"]:
         ctx.update(can_write=True, typed_bundle=typed_bundle,
                    role_gate=_type_role_gate(request, inst, api, device["part_type_id"], device["type_record"]))
+        ctx["can_edit_map"] = ctx["role_gate"] is None   # the picture is the type's: its roles, as for its checklists
         if bundle_id:
             try:
                 ctx["bundle"] = cabling.offer_bundle(api, inst, device, bundle_id)
@@ -1840,6 +1841,78 @@ def explore_cables_view(request, part_id=None):
         elif typed_bundle:
             messages.error(request, f"“{typed_bundle}” doesn’t look like a PID.")
     return render(request, "explore/cables.html", ctx)
+
+
+@login_not_required
+@fnal_login_required
+def explore_cable_map_view(request, part_type_id):
+    """#228: the cable connection editor — a picture of an endpoint device's
+    type with a marker on each position that takes a cable, prepared once
+    for the type; every item's Cable connections page then shows it. The
+    picture goes onto the type's HWDB images as a checklist's reference
+    picture does (``checklist_asset``); a save posts a version of
+    ``Cable_map_<type>.json`` (``cabling.write_map``). On a write instance,
+    HWDB arbitrating by the type's roles as for its checklists — the banner
+    says so beforehand. ``?item=<PID>`` is the device to go back to."""
+    inst = instance_of(request)
+    if inst not in settings.HWDB_WRITE_INSTANCES:
+        return HttpResponseForbidden("The cable picture can only be edited on a write instance.")
+    item = scanning.extract_pid((request.POST.get("item") or request.GET.get("item") or "").upper()) or ""
+    page_url = _rev(request, "explore:cable_map", args=[part_type_id]) + (f"?{urlencode({'item': item})}" if item else "")
+    back_url = (_rev(request, "explore:cable_connections", args=[item]) if item
+                else navigation.leaf_path_for(inst, part_type_id) or _rev(request, "explore:home"))
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return redirect(back_url)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+
+    if request.method == "POST":
+        try:
+            cmap = cabling.normalize_map(json.loads(request.POST.get("map") or ""))
+        except ValueError:
+            cmap = {"image_id": "", "slots": []}
+        if not cmap["image_id"]:
+            messages.error(request, "Upload a picture first.")
+            return redirect(page_url)
+        try:
+            body = cabling.write_map(api, part_type_id, cmap, activity.actor_of(request),
+                                     timezone.localdate().isoformat())
+            ok, detail = body.get("status") == "OK", body.get("data") or body
+        except requests.RequestException as e:
+            ok, detail = False, _hwdb_error_detail(e)
+        if not ok:
+            messages.error(request, f"HWDB refused the picture’s markers — {detail}")
+            return redirect(page_url)
+        activity.log(inst, ActivityEvent.KIND_CURATION,
+                     f"Cable picture of {part_type_id}: {len(cmap['slots'])} markers",
+                     part_type_id=part_type_id, actor=activity.actor_of(request))
+        messages.success(request, f"Saved {len(cmap['slots'])} marker{'s' if len(cmap['slots']) != 1 else ''} "
+                                  f"as {cabling.map_name(part_type_id)}.")
+        return redirect(back_url if item else page_url)
+
+    try:
+        record = api.get_component_type(part_type_id).get("data") or {}
+        positions = cabling.cable_positions(api, inst, record.get("connectors") or {})
+    except requests.RequestException as e:
+        messages.error(request, f"Couldn’t read the type {part_type_id} — {_hwdb_error_detail(e)}")
+        return redirect(back_url)
+    leaf = HierarchyNode.for_instance(inst).filter(level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
+    return render(request, "explore/cable_map.html", {
+        "active_nav": "hardware",
+        "part_type_id": part_type_id,
+        "type_name": (leaf.name if leaf else "") or (record.get("full_name") or "").split(".", 3)[-1] or part_type_id,
+        "item": item, "back_url": back_url,
+        "role_gate": _type_role_gate(request, inst, api, part_type_id, record),
+        "editor": {"positions": positions,
+                   "map": cabling.read_map(api, part_type_id) or {"image_id": "", "slots": []},
+                   "image": _rev(request, "explore:shipment_image", args=["IMGID000"]),
+                   "upload": _rev(request, "explore:checklist_asset", args=[part_type_id])},
+    })
 
 
 @login_not_required

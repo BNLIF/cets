@@ -6,13 +6,22 @@ link on the device only (``<cable PID>.<END>:<n>`` at a position); the cable's
 own rows say what else it is connected to (ADR-0018).
 
 Reads are bounded by the device: its record, its type and its positions once,
-each connected cable's rows and container once, each cable type's record once.
-No sweep over a type, nothing written, nothing added to the mirror.
+each connected cable's rows and container once, each cable type's record once,
+the type's picture (its image listing and one small file). No sweep over a
+type, nothing written, nothing added to the mirror.
+
+The picture (#228) belongs to the device's **type**: ``Cable_map_<type>.json``
+among the type's HWDB images names a picture (another of those images) and a
+marker per position — the checklist image map's shape, ``slots`` of ``label``,
+``x``, ``y`` in percent of the picture.
 """
 
 from __future__ import annotations
 
-from . import parts
+import io
+import json
+
+from . import parts, production
 from .models import HierarchyNode
 from .shipments import current_manifest
 
@@ -44,6 +53,54 @@ def type_facts(api, inst: str, type_ids) -> dict:
     return facts
 
 
+def map_name(part_type_id: str) -> str:
+    return f"Cable_map_{part_type_id}.json"
+
+
+def normalize_map(raw) -> dict:
+    """``{image_id, slots}`` out of a stored or posted map: each slot a
+    ``label`` (a position name) with ``x``, ``y`` in percent; a slot off the
+    picture, unnamed or named twice is dropped."""
+    raw = raw if isinstance(raw, dict) else {}
+    slots, seen = [], set()
+    for s in raw.get("slots") or []:
+        if not isinstance(s, dict):
+            continue
+        label = str(s.get("label") or "").strip()
+        try:
+            x, y = float(s.get("x")), float(s.get("y"))
+        except (TypeError, ValueError):
+            continue
+        if label and label not in seen and 0 <= x <= 100 and 0 <= y <= 100:
+            seen.add(label)
+            slots.append({"label": label, "x": round(x, 2), "y": round(y, 2)})
+    return {"image_id": str(raw.get("image_id") or "").strip(), "slots": slots}
+
+
+def read_map(api, part_type_id: str) -> dict | None:
+    """The newest ``Cable_map_<type>.json`` on the type, normalised; None
+    when the type has none or it names no picture. Two reads."""
+    vs = production.versions(production._listing(api, part_type_id), map_name(part_type_id))
+    raw = production._load(api, vs[0]["image_id"]) if vs else None
+    cmap = normalize_map(raw) if raw is not None else None
+    return cmap if cmap and cmap["image_id"] else None
+
+
+def write_map(api, part_type_id: str, cmap: dict, who: str, when: str) -> dict:
+    """Post a version of the type's picture and markers. Raises what the client raises."""
+    return api.post_component_type_image(
+        part_type_id, io.BytesIO(json.dumps({**cmap, "updated_by": who, "updated": when}, indent=2).encode()),
+        map_name(part_type_id), comments="Cable connections picture and markers (Explorer)")
+
+
+def cable_positions(api, inst: str, connectors: dict) -> list[str]:
+    """The type's positions that accept a cable type, in its order — the ones
+    the picture's editor offers a marker for."""
+    facts = type_facts(api, inst, parts.child_types(connectors))
+    return [pos for pos, accepted in connectors.items()
+            if any(facts.get(t, ("", ""))[1] == "cable" for t in parts.accepted_types(accepted))]
+
+
 def _tray(container, device) -> dict | None:
     """A cable's bundle / tray from its current container; not the device itself."""
     if not container or container["part_id"] == device:
@@ -73,6 +130,9 @@ def device_connections(api, inst: str, part_id: str) -> dict:
       in none, or held that way by this very device;
     - ``accepts`` per row — the type ids the position takes;
     - ``type_record`` — the device type's record, for the role banner;
+    - ``picture`` — the type's picture: ``image_id`` and ``markers``, one per
+      slot named like a row's position (``row``, ``x``, ``y``); a slot whose
+      position the page has no row for is left off. None without a picture;
     - ``n_connected`` — rows connected or installed;
     - ``others`` — the distinct items on the other side, each with the number
       of this device's cables going there, for Change working device.
@@ -87,7 +147,7 @@ def device_connections(api, inst: str, part_id: str) -> dict:
     out = {"part_id": part_id, "part_type_id": ptid,
            "type_name": (comp.get("component_type") or {}).get("name") or ptid,
            "is_cable": comp.get("category") == "cable",
-           "rows": [], "n_connected": 0, "others": [], "type_record": {}}
+           "rows": [], "n_connected": 0, "others": [], "type_record": {}, "picture": None}
     if out["is_cable"]:
         return out
     out["type_record"] = api.get_component_type(ptid).get("data") or {}
@@ -153,6 +213,12 @@ def device_connections(api, inst: str, part_id: str) -> dict:
         if row["bundle"]:
             row["bundle"]["also"] = [r["n"] for r in out["rows"] if r is not row and r["bundle"]
                                      and r["bundle"]["part_id"] == row["bundle"]["part_id"]]
+    cmap = read_map(api, ptid) if out["rows"] else None
+    if cmap:
+        by_pos = {r["position"]: r for r in out["rows"]}
+        out["picture"] = {"image_id": cmap["image_id"],
+                          "markers": [{"row": by_pos[s["label"]], "x": s["x"], "y": s["y"]}
+                                      for s in cmap["slots"] if s["label"] in by_pos]}
     out["n_connected"] = sum(r["status"] in ("connected", "installed") for r in out["rows"])
     out["others"] = [{**d, "cables": len(d["cables"])} for d in there.values()]
     return out

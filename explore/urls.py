@@ -138,6 +138,7 @@ urlpatterns = [
     path("assembly/<str:part_id>/", views.explore_assembly_view, name="assembly"),
     path("cables/", views.explore_cables_view, name="cables"),   # #226: the way into the Cable connections page, ?pid= typed or scanned
     path("part/<str:part_id>/cables/", views.explore_cables_view, name="cable_connections"),   # #226: one endpoint device's cable connections
+    path("cables/picture/<str:part_type_id>/", views.explore_cable_map_view, name="cable_map"),   # #228: a type's picture and markers
     path("part/<str:part_id>/parts/", views.explore_part_tree_view, name="part_tree"),   # #213 round 2: the item's linked parts, one level at a time
     path("items/<str:part_type_id>/", views.explore_type_items_view, name="type_items"),   # #213 round 2: the type's items with each one's checklists, ES and linked parts
     # The box page is now the generic part page (ADR-0014); keep old links working.
