@@ -2,13 +2,14 @@
 {% block title %}Cable connections{% if device %} · {{ device.part_id }}{% endif %} · HWDB Explorer{% endblock %}
 
 {% block content %}
-{# #226: the Cable connections page, read-only — the list-under-the-picture layout picked on #225 (Hajime's mock-up, ten columns folded). One row per position of the endpoint device that takes a cable; View shows one connection with both sides. Connecting, the picture, the device location and labels come with the later cabling tickets. #}
+{# #226, #227: the Cable connections page — the list-under-the-picture layout picked on #225 (Hajime's mock-up, ten columns folded). One row per position of the endpoint device that takes a cable; View shows one connection with both sides; on an instance open to writes, Connect and Remove write the working side. The picture, the device location and labels come with the later cabling tickets. #}
 {% include "explore/_es_style.html" %}
 <style>
   .cc-page { max-width: 1180px; }
   .cc-page .mono { font-family: var(--font-mono); font-size: .93em; }
   .cc-page a { color: var(--accent-ink); text-decoration: none; }
   .cc-page a:hover { text-decoration: underline; }
+  .cc-page a.mono { white-space: nowrap; }
   .cc-page .es-btn { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
   .cc-page a.es-btn:hover { text-decoration: none; }
   .cc-l2 { display: block; font-size: 12.5px; color: var(--dim); }
@@ -28,7 +29,9 @@
   .cc-table th { text-align: left; font-size: 11.5px; font-weight: 500; color: var(--dim); padding: 6px 8px; white-space: nowrap; }
   .cc-table td { padding: 6px 8px; border-top: 1px solid var(--rule); vertical-align: middle; }
   .cc-pos { font-weight: 600; color: var(--ink); }
-  .cc-act { text-align: right; }
+  .cc-act { text-align: right; white-space: nowrap; }
+  .cc-act .es-btn + .es-btn { margin-left: 6px; }
+  .cc-bun-in { display: none; }
   .cc-side + .cc-side { margin-top: 4px; }
   .cc-side { display: block; }
   /* position number and status: free, connected, installed — told apart by lightness as well as hue */
@@ -48,21 +51,33 @@
   .cc-dh h2 { margin: 0; font-size: 16px; color: var(--ink); }
   .cc-db { display: grid; gap: 12px; padding: 14px 16px 16px; font-size: 14px; }
   .cc-box { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--rule); border-radius: var(--r-md); background: var(--bg); }
-  .cc-box h3, .cc-db > h3 { margin: 0; font-size: 11.5px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
+  .cc-box h3, .cc-db > h3, .cc-ends h3 { margin: 0; font-size: 11.5px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
   .cc-box b { color: var(--ink); }
   .cc-list { display: grid; }
-  .cc-list a { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; padding: 6px 4px; border-top: 1px solid var(--rule); }
-  .cc-list a:first-child { border-top: 0; }
+  .cc-list > * { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; padding: 6px 4px; border-top: 1px solid var(--rule); }
+  .cc-list > :first-child { border-top: 0; }
+  .cc-list button { font: inherit; text-align: left; color: var(--ink); background: none; border-width: 1px 0 0; border-style: solid; border-color: var(--rule); cursor: pointer; }
+  .cc-list button.on { background: var(--surface); }
+  #cc-c-cands { max-height: 38vh; overflow: auto; }
+  .cc-list button.done { color: var(--dim); }
+  .cc-df { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 16px; border-top: 1px solid var(--rule); }
+  .cc-dlg .cc-in input { width: auto; flex: 1 1 0; min-width: 0; }
+  .cc-ends { display: grid; gap: 2px; }
+  .cc-ends label { display: flex; gap: 8px; align-items: center; min-height: 44px; font-family: var(--font-mono); color: var(--ink); }
+  .cc-ends label.used { color: var(--dim); }
+  .cc-err { color: var(--bad); }
+  /* under 900px the Bundle / tray column folds into the cable's cell */
+  @media (max-width: 899px) { .cc-table .cc-bun { display: none; } .cc-bun-in { display: block; } }
 
   /* a phone: one card per position */
   @media (max-width: 640px) {
     .es-page.cc-page { padding: 14px 12px 40px; }
     .cc-page .cc-in input { width: auto; flex: 1 1 0; min-width: 0; }
-    .cc-head > .cc-f:first-child { flex: 1 1 100%; }
+    .cc-head > form.cc-f { flex: 1 1 100%; }
     .cc-table thead { display: none; }
     .cc-table, .cc-table tbody { display: block; }
     .cc-table tr { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 8px; align-items: center;
-      grid-template-areas: "n pos st" "cable cable act" "other other act";
+      grid-template-areas: "n pos st" "cable cable cable" "other other other" "act act act";
       padding: 10px 12px; margin-bottom: 8px; border: 1px solid var(--rule); border-radius: var(--r-md); background: var(--page); }
     .cc-table td { display: block; padding: 0; border: 0; }
     .cc-table td.cc-n { grid-area: n; } .cc-table td.cc-pos { grid-area: pos; } .cc-table td.cc-st { grid-area: st; }
@@ -80,24 +95,36 @@
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
   <h1>Cable connections</h1>
 
-  <form class="cc-head" id="cc-form" method="get" action="{% url 'explore:cables' %}">
-    <div class="cc-f">
+  {% include "explore/_role_gate.html" %}
+  <div class="cc-head">
+    <form class="cc-f" id="cc-form" method="get" action="{% url 'explore:cables' %}">
       <label for="cc-pid">Endpoint device (working side)</label>
       <span class="cc-in">
         <input type="text" id="cc-pid" name="pid" value="{{ typed }}" placeholder="Scan or type its PID" autocomplete="off" autocapitalize="characters" spellcheck="false">
         <button type="button" class="es-btn quiet cl-scan" data-target="cc-pid">Scan</button>
         <button type="submit" class="es-btn quiet">Open</button>
       </span>
-    </div>
+    </form>
     {% if device and not device.is_cable %}
     <div class="cc-f">Type<span class="cc-val">{{ device.type_name }}</span></div>
     {# typed and saved with the device-location ticket; blank until then #}
     <div class="cc-f">Device location<span class="cc-val cc-none">—</span></div>
+    {% if can_write %}
+    {# optional: its cables are then offered at the free positions, nothing linked until Connect #}
+    <form class="cc-f" id="cc-bform" method="get">
+      <label for="cc-bundle">Bundle / tray (optional)</label>
+      <span class="cc-in">
+        <input type="text" id="cc-bundle" name="bundle" value="{{ typed_bundle }}" placeholder="Scan or type its PID" autocomplete="off" autocapitalize="characters" spellcheck="false">
+        <button type="button" class="es-btn quiet cl-scan" data-target="cc-bundle">Scan</button>
+        {% if bundle %}<a class="es-btn quiet" href="{% url 'explore:cable_connections' part_id=device.part_id %}">Clear</a>{% else %}<button type="submit" class="es-btn quiet" title="Offer this bundle’s cables at the free positions — nothing is linked">List cables</button>{% endif %}
+      </span>
+    </form>
+    {% endif %}
     <span class="cc-grow"></span>
     {# always the same dialog: the devices on the other side, and the scanner #}
     <button type="button" class="es-btn quiet" data-open="cc-others">Change working device</button>
     {% endif %}
-  </form>
+  </div>
 
   {% if device.is_cable %}
   <p><span class="mono">{{ device.part_id }}</span> is a cable. Its connections are made from the item it plugs into — see <a href="{% url 'explore:part' part_id=device.part_id %}">its item page</a>.</p>
@@ -108,22 +135,28 @@
     <h2>Connections</h2>
     <span>{{ device.n_connected }} / {{ device.rows|length }} connected</span>
     <div class="cc-bar" aria-hidden="true"><i style="width: {% widthratio device.n_connected device.rows|length 100 %}%"></i></div>
+    <span class="cc-grow"></span>
+    {% if can_write and device.n_connected %}<button type="button" class="es-btn quiet" data-open="cc-rm-all">Remove all</button>{% endif %}
   </div>
+  {% if bundle %}<p class="cc-l2">Bundle / tray <a class="mono" href="{% url 'explore:part' part_id=bundle.part_id %}">{{ bundle.part_id }}</a> · {{ bundle.type_name }} · {% if bundle.cables %}{{ bundle.cables|length }} cable{{ bundle.cables|pluralize }}, {% if bundle.offered %}offered at the free positions{% else %}none of a type a free position takes{% endif %}{% else %}holds no cables{% endif %}</p>{% endif %}
+  {% if can_write %}<form method="post" id="cc-rm">{% csrf_token %}<input type="hidden" name="bundle" value="{{ bundle.part_id }}">{% endif %}
   <table class="cc-table">
-    <thead><tr><th>#</th><th>Position</th><th>Cable · END : connector</th><th>Other side</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>#</th><th>Position</th><th>Cable · END : connector</th><th>Other side</th><th>Status</th><th class="cc-bun">Bundle / tray</th><th></th></tr></thead>
     <tbody>
     {% for r in device.rows %}
       <tr class="cc-{{ r.status }}">
         <td class="cc-n"><span class="cc-num">{{ r.n }}</span></td>
         <td class="cc-pos">{{ r.position }}</td>
-        <td class="cc-cable">{% if r.cable %}<a class="mono" href="{% url 'explore:part' part_id=r.cable %}">{{ r.cable }}</a><span class="cc-l2 mono">{{ r.end|default:"no END" }}</span>{% else %}Not connected<span class="cc-l2">Expected: {{ r.expected|join:" or " }}</span>{% endif %}</td>
+        <td class="cc-cable">{% if r.cable %}<a class="mono" href="{% url 'explore:part' part_id=r.cable %}">{{ r.cable }}</a><span class="cc-l2 mono">{{ r.end|default:"no END" }}</span>{% if r.bundle %}<span class="cc-l2 cc-bun-in">Bundle / tray <a class="mono" href="{% url 'explore:part' part_id=r.bundle.part_id %}">{{ r.bundle.part_id }}</a>{% if r.bundle.also %} · also at {{ r.bundle.also|join:", " }}{% endif %}</span>{% endif %}{% else %}Not connected<span class="cc-l2">Expected: {{ r.expected|join:" or " }}</span>{% endif %}</td>
         <td class="cc-other">{% if not r.cable %}<span class="cc-none">—</span>{% elif r.unread %}<span class="cc-none">couldn’t be read</span>{% else %}{% for o in r.others %}<span class="cc-side"><b>{{ o.connections.0.position }}{% if o.connections|length > 1 %}, {{ o.connections.1.position }}{% endif %}</b>{% if o.connections|length > 2 %} + {{ o.connections|length|add:"-2" }} more{% endif %}<span class="cc-l2">{% if o.here %}this device{% else %}<a class="mono" href="{% url 'explore:cable_connections' part_id=o.part_id %}" title="Work from this device">{{ o.part_id }}</a>{% if o.type_name %} · {{ o.type_name }}{% endif %}{% endif %}</span></span>{% empty %}<span class="cc-none">not connected yet</span>{% endfor %}{% endif %}</td>
         <td class="cc-st">{% if r.status == "installed" %}<span class="cc-chip cc-installed" title="Every END : connector of the cable is connected">Installed</span>{% elif r.status == "connected" %}<span class="cc-chip cc-connected" title="Connected here; the cable has connectors still free">Connected</span>{% elif r.status == "noend" %}<span class="cc-chip" title="Linked without an END: this device is the cable’s bundle / tray">No END</span>{% else %}<span class="cc-chip">Available</span>{% endif %}</td>
-        <td class="cc-act">{% if r.cable %}<button type="button" class="es-btn quiet" data-open="cc-view-{{ r.n }}">View</button>{% endif %}</td>
+        <td class="cc-bun">{% if r.bundle %}<a class="mono" href="{% url 'explore:part' part_id=r.bundle.part_id %}">{{ r.bundle.part_id }}</a><span class="cc-l2">{{ r.bundle.type_name }}{% if r.bundle.also %} · also at {{ r.bundle.also|join:", " }}{% endif %}</span>{% else %}<span class="cc-none">—</span>{% endif %}</td>
+        <td class="cc-act">{% if r.cable %}<button type="button" class="es-btn quiet" data-open="cc-view-{{ r.n }}">View</button>{% if can_write %}<button type="submit" class="es-btn" name="remove" value="{{ r.position }}" title="Remove this connection — on this device only">Remove</button>{% endif %}{% elif can_write %}<button type="button" class="es-btn quiet" data-connect="{{ r.position }}" data-n="{{ r.n }}" data-types="{{ r.accepts|join:"," }}" data-names='[{% for e in r.expected %}"{{ e|escapejs }}"{% if not forloop.last %},{% endif %}{% endfor %}]' data-expected="{{ r.expected|join:" or " }}" data-prefill="{{ r.prefill }}">Connect</button>{% if r.candidates %}<template id="cc-cands-{{ r.n }}">{% for c in r.candidates %}<button type="button" data-pid="{{ c.part_id }}"{% if not c.open %} class="done"{% endif %}><span><span class="mono">{{ c.part_id }}</span><span class="cc-l2">{{ c.held_at }}</span></span><span class="cc-l2">{% if c.here %}connected at {{ c.here|join:", " }}{% elif c.connected %}{{ c.connected }} of {{ c.connectors }} connected{% else %}free{% endif %}</span></button>{% endfor %}</template>{% endif %}{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
+  {% if can_write %}</form>{% endif %}
 
   {% for r in device.rows %}{% if r.cable %}
   <dialog class="cc-dlg" id="cc-view-{{ r.n }}">
@@ -148,10 +181,42 @@
       {% empty %}
       <span class="cc-none">{% if r.unread %}The cable’s connections couldn’t be read.{% else %}Other side not connected yet.{% endif %}</span>
       {% endfor %}
+      {% if r.bundle %}<span class="cc-l2">Bundle / tray <a class="mono" href="{% url 'explore:part' part_id=r.bundle.part_id %}">{{ r.bundle.part_id }}</a> · {{ r.bundle.type_name }}{% if r.bundle.also %} · also at {{ r.bundle.also|join:", " }}{% endif %}</span>{% endif %}
       <a href="{% url 'explore:part' part_id=r.cable %}">Open the cable’s item page</a>
     </div>
   </dialog>
   {% endif %}{% endfor %}
+
+  {% if can_write %}
+  <dialog class="cc-dlg" id="cc-connect">
+    <form method="post">{% csrf_token %}
+      <input type="hidden" name="connect"><input type="hidden" name="bundle" value="{{ bundle.part_id }}">
+      <div class="cc-dh"><h2>Connect at <span id="cc-c-at"></span></h2><button type="button" class="es-btn quiet" data-close aria-label="Close">✕</button></div>
+      <div class="cc-db">
+        <span class="cc-l2">Expected: <span id="cc-c-exp"></span></span>
+        <div class="cc-list" id="cc-c-cands" hidden></div>
+        <span class="cc-in">
+          <input type="text" id="cc-c-pid" name="pid" placeholder="Cable PID" aria-label="Cable PID" autocomplete="off" autocapitalize="characters" spellcheck="false">
+          <button type="button" class="es-btn quiet cl-scan" data-target="cc-c-pid">Scan</button>
+          <button type="button" class="es-btn quiet cl-pick" id="cc-c-list" data-target="cc-c-pid" title="Items of the expected type — search by PID or serial number">List</button>
+        </span>
+        <div class="cc-ends" id="cc-c-ends" aria-live="polite"></div>
+      </div>
+      <div class="cc-df">
+        <button type="button" class="es-btn quiet" data-close>Cancel</button>
+        <button type="submit" class="es-btn" id="cc-c-go" disabled>Connect</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog class="cc-dlg" id="cc-rm-all">
+    <div class="cc-dh"><h2>Remove all</h2><button type="button" class="es-btn quiet" data-close aria-label="Close">✕</button></div>
+    <div class="cc-db">Remove the {{ device.n_connected }} connection{{ device.n_connected|pluralize }} on this device? Each cable’s other side stays connected.</div>
+    <div class="cc-df">
+      <button type="button" class="es-btn quiet" data-close>Cancel</button>
+      <button type="submit" class="es-btn" form="cc-rm" name="remove_all" value="1">Remove all</button>
+    </div>
+  </dialog>
+  {% endif %}
   {% endif %}
 
   {% if device and not device.is_cable %}
@@ -175,11 +240,73 @@
 </div>
 
 {% include "explore/_checklist_scan.html" %}
+{% if can_write %}{% include "explore/_checklist_pick.html" %}{% endif %}
 <script>
 (function () {
-  var form = document.getElementById("cc-form"), pid = document.getElementById("cc-pid");
-  // the scanner fills the box and fires "input" itself: go at once (typing waits for Enter or Open)
-  pid.addEventListener("input", function (e) { if (!e.isTrusted && pid.value.trim()) form.submit(); });
+  function byId(id) { return document.getElementById(id); }
+  // the scanner fills a box and fires "input" itself: go at once (typing waits for Enter or the button)
+  ["cc-pid", "cc-bundle"].forEach(function (id) {
+    var box = byId(id);
+    if (box) box.addEventListener("input", function (e) { if (!e.isTrusted && box.value.trim()) box.form.submit(); });
+  });
+
+  // Connect: name the cable (a bundle's cable, a scan, the list, a typed PID), then its END : connector
+  var cd = byId("cc-connect");
+  if (cd) {
+    var cpid = byId("cc-c-pid"), ends = byId("cc-c-ends"), go = byId("cc-c-go"), cands = byId("cc-c-cands"),
+        seq = 0, timer = null;
+    function esc(t) { var d = document.createElement("div"); d.textContent = t; return d.innerHTML.replace(/"/g, "&quot;"); }
+    function lookup() {
+      var v = cpid.value.trim(), n = ++seq;
+      clearTimeout(timer);
+      go.disabled = true;
+      Array.prototype.forEach.call(cands.children, function (b) { b.classList.toggle("on", b.getAttribute("data-pid") === v.toUpperCase()); });
+      if (!v) { ends.textContent = ""; return; }
+      ends.textContent = "Reading the cable…";
+      fetch("?slots=" + encodeURIComponent(v) + "&pos=" + encodeURIComponent(cd.querySelector("[name=connect]").value),
+            { credentials: "same-origin" })
+        .then(function (r) { return r.json(); })
+        .catch(function () { return { error: "Couldn’t read the cable." }; })
+        .then(function (d) {
+          if (n !== seq) return;                       // a newer cable superseded this one
+          if (d.error) { ends.innerHTML = '<span class="cc-err">' + esc(d.error) + "</span>"; return; }
+          cpid.value = d.pid;
+          var free = d.slots.filter(function (s) { return !s.used; });
+          // a connector in use cannot be chosen; a single free one is chosen already
+          ends.innerHTML = "<h3>END : connector</h3>" + d.slots.map(function (s) {
+            return '<label' + (s.used ? ' class="used"' : "") + '><input type="radio" name="end" required value="' + esc(s.name) + '"' +
+              (s.used ? " disabled" : free.length === 1 ? " checked" : "") + "> " + esc(s.name) + (s.used ? " · in use" : "") + "</label>";
+          }).join("") + (free.length ? "" : '<span class="cc-err">Every connector of this cable is in use.</span>');
+          go.disabled = !free.length;
+        });
+    }
+    cpid.addEventListener("input", function (e) {
+      if (!e.isTrusted) return lookup();               // filled by the scanner or the list
+      clearTimeout(timer);
+      go.disabled = true;
+      if (/[A-Za-z]\d{11}-\d{5}/.test(cpid.value)) timer = setTimeout(lookup, 400);
+    });
+    cpid.addEventListener("keydown", function (e) { if (e.key === "Enter" && go.disabled) { e.preventDefault(); lookup(); } });
+    cd.querySelector("form").addEventListener("submit", function () { setTimeout(function () { go.disabled = true; }); });
+    document.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-connect]"), c = e.target.closest("#cc-c-cands button");
+      if (c) { cpid.value = c.getAttribute("data-pid"); lookup(); }
+      if (!b) return;
+      var n = b.getAttribute("data-n"), mine = byId("cc-cands-" + n), list = byId("cc-c-list");
+      cd.querySelector("[name=connect]").value = b.getAttribute("data-connect");
+      byId("cc-c-at").textContent = n + " · " + b.getAttribute("data-connect");
+      byId("cc-c-exp").textContent = b.getAttribute("data-expected");
+      list.setAttribute("data-type-id", b.getAttribute("data-types"));
+      list.setAttribute("data-type-names", b.getAttribute("data-names"));
+      cands.innerHTML = mine ? mine.innerHTML : "";
+      cands.hidden = !mine;
+      cpid.value = b.getAttribute("data-prefill") || "";   // a bundle's one open cable for this position
+      ends.textContent = "";
+      go.disabled = true;
+      cd.showModal();
+      if (cpid.value) lookup();
+    });
+  }
   document.addEventListener("click", function (e) {
     var c = e.target.closest("[data-close]");
     if (c) c.closest("dialog").close();

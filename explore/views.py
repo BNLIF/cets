@@ -1673,18 +1673,124 @@ def explore_part_tree_view(request, part_id):
     })
 
 
+def _cable_fit_error(api, inst, connectors, pos, pid) -> str | None:
+    """Why the item ``pid`` cannot go at ``pos`` by its type, naming the
+    type(s) the position expects — said before any write (#227). The names
+    are the mirror's, a type record read for a type it lacks."""
+    if pos not in connectors:
+        return f"There is no “{pos}” position." if pos else "Pick a position."
+    takes, ctid = parts.accepted_types(connectors[pos]), pid.rsplit("-", 1)[0]
+    if ctid in takes:
+        return None
+    names = {t: name for t, (name, _category) in cabling.type_facts(api, inst, [*takes, ctid]).items()}
+    return (f"“{pos}” takes {' or '.join(names.get(t) or t for t in takes)}, "
+            f"not {names.get(ctid) or ctid}.")
+
+
+def _cable_choices(api, inst, part_id, typed, pos) -> dict:
+    """The Connect dialog's second step (#227): the cable named by ``typed``
+    (a PID, an HWDB URL, a label) and its END : connector slots, those in use
+    marked — or ``error``. Three reads: the device's type, the cable's type,
+    the cable's own rows."""
+    pid = scanning.extract_pid((typed or "").upper())
+    if not pid:
+        return {"error": f"“{typed}” doesn’t look like a PID."}
+    try:
+        err = _cable_fit_error(api, inst, _box_connectors(api, part_id.rsplit("-", 1)[0]), pos, pid)
+        if err:
+            return {"error": err}
+        slots = _cable_slots(api, pid)
+    except requests.RequestException as e:
+        return {"error": f"Couldn’t read {pid} — {_hwdb_error_detail(e)}"}
+    if slots is None:
+        return {"error": f"{pid} is not a cable."}
+    return {"pid": pid, "slots": slots}
+
+
+def _cables_write(request, api, inst, part_id) -> None:
+    """One write of the Cable connections page (#227), its outcome flashed:
+    ``connect=<position>`` with ``pid`` and ``end`` links that END : connector
+    of the cable there; ``remove=<position>`` empties it; ``remove_all``
+    empties every position holding a cable end. The working side only — the
+    cable's other connections are other items' positions. Like Link items,
+    the PATCH carries the device's complete positions, each as read (#224)."""
+    ptid = part_id.rsplit("-", 1)[0]
+    try:
+        connectors = _box_connectors(api, ptid)
+        current = {pos: None for pos in connectors}
+        for m in current_manifest(api.get_subcomponents(part_id).get("data")):
+            if m["functional_position"] in current and not m["peer"]:
+                current[m["functional_position"]] = position_ref(m)
+    except requests.RequestException as e:
+        messages.error(request, f"Couldn’t read {part_id} — {_hwdb_error_detail(e)}")
+        return
+
+    pos = (request.POST.get("connect") or "").strip()
+    if pos:
+        typed = (request.POST.get("pid") or "").strip()
+        pid = scanning.extract_pid(typed.upper()) or ""
+        end = (request.POST.get("end") or "").strip()
+        err = (None if pid else f"“{typed}” doesn’t look like a PID.") \
+            or _cable_fit_error(api, inst, connectors, pos, pid) \
+            or _placement_error(inst, connectors, current, pos, pid)
+        if not err:
+            try:
+                slots = _cable_slots(api, pid)
+            except requests.RequestException as e:
+                slots, err = [], f"Couldn’t read {pid} — {_hwdb_error_detail(e)}"
+            if slots is None:
+                err = f"{pid} is not a cable."
+            elif not err and end not in {s["name"] for s in slots}:
+                err = f"{pid} has no “{end}”." if end else "Pick the cable’s END : connector."
+        if err:
+            messages.error(request, err)
+            return
+        after, done = {**current, pos: f"{pid}.{end}"}, f"Connected {pid} · {end} at “{pos}”."
+    elif request.POST.get("remove_all"):
+        ends = [p for p, ref in current.items() if split_subcomp_ref(ref)[1]]
+        if not ends:
+            messages.error(request, "Nothing is connected here.")
+            return
+        after = {**current, **{p: None for p in ends}}
+        done = f"Removed {len(ends)} connection{'s' if len(ends) != 1 else ''} from {part_id}."
+    else:
+        pos = (request.POST.get("remove") or "").strip()
+        if not current.get(pos):
+            messages.error(request, f"“{pos}” holds nothing to remove.")
+            return
+        after, done = {**current, pos: None}, f"Removed {current[pos]} from “{pos}”."
+
+    try:
+        body = api.patch_subcomponents(part_id, {"component": {"part_id": part_id}, "subcomponents": after})
+        ok, detail = body.get("status") == "OK", body.get("data") or body
+    except requests.RequestException as e:
+        logger.warning("cables: write to %s failed: %s", part_id, e)
+        ok, detail = False, _hwdb_error_detail(e)
+    if not ok:
+        messages.error(request, f"HWDB refused — {detail}")    # shown as it comes: it names the connector and where it is in use
+        return
+    _after_subcomponent_write(api, inst, ptid, part_id, after)
+    messages.success(request, done)
+
+
 @login_not_required
 @fnal_login_required
 def explore_cables_view(request, part_id=None):
     """#226 (Hajime's Cable Connections mock-up, the list-under-the-picture
     layout Chao picked on #225): one endpoint device — its positions that
     take a cable, what is connected at each and where that cable goes on
-    its other side(s). Read-only here: connecting, the picture, the device
-    location and the labels are the later cabling tickets (#227–#229).
+    its other side(s). The picture, the device location and the labels are
+    the later cabling tickets (#228, #229).
 
     ``cables/`` is the way in: ``?pid=`` (typed, or filled by the scanner —
     a bare PID, an HWDB URL, a label) goes to that item's page. The page
-    reads HWDB live and bounded by the device (``cabling.device_connections``)."""
+    reads HWDB live and bounded by the device (``cabling.device_connections``).
+
+    #227, on an instance open to writes: a POST connects a cable at a free
+    position or removes connections (``_cables_write``), then comes back to
+    the page; ``?slots=<cable>&pos=<position>`` answers the Connect dialog
+    with the cable's END : connector slots as JSON; ``?bundle=<PID>`` offers
+    that bundle / tray's cables at the free positions."""
     inst = instance_of(request)
     ctx = {"active_nav": "hardware", "typed": part_id or ""}
     if part_id is None:
@@ -1695,7 +1801,14 @@ def explore_cables_view(request, part_id=None):
         if typed:
             messages.error(request, f"“{typed}” doesn’t look like a PID.")
         return render(request, "explore/cables.html", {**ctx, "typed": typed})
+    can_write = inst in settings.HWDB_WRITE_INSTANCES
+    typed_bundle = (request.POST.get("bundle") or request.GET.get("bundle") or "").strip()
+    bundle_id = scanning.extract_pid(typed_bundle.upper())
     page_url = _rev(request, "explore:cable_connections", args=[part_id])
+    if bundle_id:
+        page_url += f"?{urlencode({'bundle': bundle_id})}"
+    if request.method == "POST" and not can_write:
+        return HttpResponseForbidden("Writes are not enabled here.")
     try:
         bearer = mint_for(request)
     except FnalLinkRequired:
@@ -1703,12 +1816,29 @@ def explore_cables_view(request, part_id=None):
         return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
     except FnalUnavailable:
         messages.error(request, FNAL_UNAVAILABLE)
-        return render(request, "explore/cables.html", ctx)
+        return redirect(page_url) if request.method == "POST" else render(request, "explore/cables.html", ctx)
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    if request.method == "POST":
+        _cables_write(request, api, inst, part_id)
+        return redirect(page_url)
+    if "slots" in request.GET:
+        return JsonResponse(_cable_choices(api, inst, part_id, request.GET.get("slots"),
+                                           (request.GET.get("pos") or "").strip()))
     try:
-        ctx["device"] = cabling.device_connections(api, inst, part_id)
+        device = ctx["device"] = cabling.device_connections(api, inst, part_id)
     except requests.RequestException as e:
         messages.error(request, f"Couldn’t read {part_id} — {_hwdb_error_detail(e)}")
+        return render(request, "explore/cables.html", ctx)
+    if can_write and device["rows"]:
+        ctx.update(can_write=True, typed_bundle=typed_bundle,
+                   role_gate=_type_role_gate(request, inst, api, device["part_type_id"], device["type_record"]))
+        if bundle_id:
+            try:
+                ctx["bundle"] = cabling.offer_bundle(api, inst, device, bundle_id)
+            except requests.RequestException as e:
+                messages.error(request, f"Couldn’t read the bundle / tray {bundle_id} — {_hwdb_error_detail(e)}")
+        elif typed_bundle:
+            messages.error(request, f"“{typed_bundle}” doesn’t look like a PID.")
     return render(request, "explore/cables.html", ctx)
 
 

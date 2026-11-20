@@ -1,5 +1,6 @@
-"""The Cable connections page (#226): one endpoint device, its positions that
-take a cable, and where each connected cable goes. HWDB is mocked with rows
+"""The Cable connections page (#226, #227): one endpoint device, its positions
+that take a cable, where each connected cable goes, and connecting and
+removing on the working side. HWDB is mocked with rows
 shaped as dev answers them since 2026-11-20, the client having taken the
 country / institution codes off.
 
@@ -11,7 +12,7 @@ from __future__ import annotations
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from explore import cabling
 from explore.models import HierarchyNode as H
@@ -20,13 +21,15 @@ FLANGE = "Z00100300064-00004"
 WARM, BUNDLE4, BOARD = "Z00100300073", "Z00100300035", "D08100100004"
 INSTALLED, ONE_END, MANY = f"{WARM}-00020", f"{WARM}-00021", f"{BUNDLE4}-00001"
 SHIELD, FCT, FILTER = "Z00100300061-00001", "Z00100300066-00003", "Z00100300068-00012"
+TRAY, FREE = "Z00100300072-00004", f"{WARM}-00022"
 PAGE = f"/hw/dev/part/{FLANGE}/cables/"
 
 
 def _api():
     """A flange with five positions: one cable connected at both its ENDs,
     one connected here alone, one 4-END cable going to two other devices,
-    one free cable position, and a position that takes a board."""
+    one free cable position, and a position that takes a board. A bundle
+    holds the two warm cables and a third, unconnected one."""
     types = {
         "Z00100300064": {"category": "generic", "connectors": {
             "ISH": WARM, "OSH": WARM, "FCT.T": BUNDLE4, "ICO": WARM, "Board": BOARD}},
@@ -35,6 +38,8 @@ def _api():
         BUNDLE4: {"category": "cable", "full_name": "Z.Sandbox.Test.HVS Test Bundle 4 Ends",
                   "connectors": {"Flange:7": None, "FC Termination:1": None, "Inner CRP:1": None, "Outer CRP:1": None}},
         BOARD: {"category": "generic", "full_name": "D.FD CE.Chips.LArASIC", "connectors": {}},
+        "Z00100300072": {"category": "generic", "full_name": "Z.Sandbox.Test.Top CRP bias warm cable bundle",
+                         "connectors": {"Inner (SH)": WARM, "Outer (SH)": WARM, "Outer (CO)": WARM}},
     }
     rows = {
         FLANGE: [
@@ -55,8 +60,15 @@ def _api():
             {"part_id": f"{FLANGE}.FCT.T", "type_name": "Bias FT flange", "cable_connector": "Flange:7", "operation": "mount"},
             {"part_id": f"{FCT}.IN", "type_name": "FC termination board", "cable_connector": "FC Termination:1", "operation": "mount"},
             {"part_id": f"{FILTER}.FB2", "type_name": "Filter box", "cable_connector": "Inner CRP:1", "operation": "mount"}],
+        TRAY: [{"part_id": pid, "type_name": "Top CRP bias warm cable", "functional_position": pos, "operation": "mount"}
+               for pid, pos in ((INSTALLED, "Inner (SH)"), (ONE_END, "Outer (SH)"), (FREE, "Outer (CO)"))],
     }
     api = mock.MagicMock()
+    api.get_container.side_effect = lambda pid: {"data": [{
+        "container": {"part_id": TRAY, "component_type": {"name": "Top CRP bias warm cable bundle"}},
+        "functional_position": "Inner (SH)", "operation": "mount", "created": "2026-07-19"}]
+        if pid in (INSTALLED, ONE_END, FREE) else []}
+    api.patch_subcomponents.return_value = {"status": "OK", "data": "Updated"}
     api.get_component.side_effect = lambda pid: {"data": {
         "category": "cable" if pid.rsplit("-", 1)[0] in (WARM, BUNDLE4) else "generic",
         "component_type": {"name": "Bias FT flange" if pid == FLANGE else "Top CRP bias warm cable"}}}
@@ -161,6 +173,43 @@ class DeviceConnectionsTest(TestCase):
         self.assertEqual((r["status"], r["cable"], r["end"]), ("noend", ONE_END, None))
         self.assertEqual(device["n_connected"], 0)
 
+    def test_a_row_names_the_cables_bundle_and_the_other_rows_of_the_same_one(self):
+        self.assertEqual(self.rows["ISH"]["bundle"],
+                         {"part_id": TRAY, "type_name": "Top CRP bias warm cable bundle", "also": [2]})
+        self.assertEqual(self.rows["OSH"]["bundle"]["also"], [1])
+        self.assertIsNone(self.rows["FCT.T"]["bundle"])                   # in no bundle
+        self.assertIsNone(self.rows["ICO"]["bundle"])
+        self.assertEqual(sorted(c.args[0] for c in self.api.get_container.call_args_list),
+                         sorted([INSTALLED, ONE_END, MANY]))              # each connected cable once
+
+    def test_a_cable_this_device_holds_as_its_tray_has_no_bundle_column(self):
+        api = _api()
+        rows = [{"part_id": ONE_END, "type_name": "Top CRP bias warm cable", "functional_position": "ICO", "operation": "mount"}]
+        api.get_subcomponents.side_effect = lambda pid: {"data": rows if pid == FLANGE else []}
+        api.get_container.side_effect = lambda pid: {"data": [{"container": {"part_id": FLANGE}, "operation": "mount"}]}
+        device = cabling.device_connections(api, "dev", FLANGE)
+        self.assertIsNone({r["position"]: r for r in device["rows"]}["ICO"]["bundle"])
+
+    def test_a_scanned_bundle_offers_its_cables_at_the_free_positions(self):
+        bundle = cabling.offer_bundle(self.api, "dev", self.device, TRAY)
+        self.assertEqual((bundle["part_id"], bundle["type_name"]), (TRAY, "Top CRP bias warm cable bundle"))
+        self.assertEqual([(c["part_id"], c["held_at"], c["connected"], c["connectors"], c["here"], c["open"])
+                          for c in bundle["cables"]],
+                         [(INSTALLED, "Inner (SH)", 2, 2, [1], False), (ONE_END, "Outer (SH)", 1, 2, [2], False),
+                          (FREE, "Outer (CO)", 0, 2, [], True)])
+        free = self.rows["ICO"]
+        self.assertEqual([c["part_id"] for c in free["candidates"]], [INSTALLED, ONE_END, FREE])
+        self.assertEqual(free["prefill"], FREE)                           # the one cable still open
+        self.assertNotIn("candidates", self.rows["ISH"])                  # a connected row is offered nothing
+
+    def test_a_bundle_with_several_open_cables_prefills_none(self):
+        api = _api()
+        api.get_subcomponents.side_effect = lambda pid: {"data": _api().get_subcomponents(TRAY)["data"] if pid == TRAY else []}
+        device = cabling.device_connections(api, "dev", FLANGE)
+        self.assertTrue(cabling.offer_bundle(api, "dev", device, TRAY)["offered"])
+        self.assertEqual({r["prefill"] for r in device["rows"] if r["accepts"] == [WARM]}, {""})
+        self.assertEqual([r.get("candidates") for r in device["rows"] if r["position"] == "FCT.T"], [[]])   # another type
+
     def test_a_cable_has_no_rows_of_its_own(self):
         api = _api()
         device = cabling.device_connections(api, "dev", INSTALLED)
@@ -177,6 +226,11 @@ class CablesPageTest(TestCase):
         with mock.patch("explore.views.mint_for", return_value="bearer"), \
              mock.patch("explore.views.FnalDbApiClient", return_value=api or _api()):
             return self.client.get(url)
+
+    def _post(self, url, data, api):
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            return self.client.post(url, data)
 
     def test_page_lists_the_positions_with_cable_other_side_and_status(self):
         html = self._get(PAGE).content.decode()
@@ -256,10 +310,154 @@ class CablesPageTest(TestCase):
         self.assertIn(f"Couldn’t read {FLANGE}", html)
         self.assertIn(f'value="{FLANGE}"', html)
 
-    def test_page_is_read_only_and_works_on_prod(self):
-        html = self._get(f"/hw/part/{FLANGE}/cables/").content.decode()
+    def test_page_works_on_prod(self):
+        self.assertIn("3 / 4 connected", self._get(f"/hw/part/{FLANGE}/cables/").content.decode())
+
+    @override_settings(HWDB_WRITE_INSTANCES=[])
+    def test_an_instance_closed_to_writes_gets_the_page_read_only(self):
+        html = self._get(PAGE).content.decode()
         self.assertIn("3 / 4 connected", html)
-        self.assertNotIn("<form method=\"post\"", html)
+        for gone in ('id="cc-rm"', 'id="cc-connect"', 'data-connect="', 'name="remove"', "cc-rm-all", 'id="cc-bundle"'):
+            self.assertNotIn(gone, html)
+        api = _api()
+        self.assertEqual(self._post(PAGE, {"remove": "ISH"}, api).status_code, 403)
+        api.patch_subcomponents.assert_not_called()
+
+
+class CableWritesTest(TestCase):
+    """#227: connect and remove on the working side, the bundle / tray."""
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("k", "k@k.io", "pw"))
+        self.api = _api()
+
+    def _get(self, url, data=None):
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=self.api):
+            return self.client.get(url, data or {})
+
+    def _post(self, data, follow=True):
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=self.api):
+            return self.client.post(PAGE, data, follow=follow)
+
+    # what the device holds, as read — every write sends the rest back unchanged
+    AS_READ = {"ISH": f"{INSTALLED}.FCP Flange:1", "OSH": f"{ONE_END}.FCP Flange:1", "FCT.T": f"{MANY}.Flange:7",
+               "ICO": None, "Board": f"{BOARD}-00009"}
+
+    def _written(self):
+        self.api.patch_subcomponents.assert_called_once()
+        pid, payload = self.api.patch_subcomponents.call_args.args
+        self.assertEqual((pid, payload["component"]), (FLANGE, {"part_id": FLANGE}))
+        return payload["subcomponents"]
+
+    def test_rows_get_connect_or_remove_and_the_bundle_column(self):
+        html = self._get(PAGE).content.decode()
+        self.assertIn(f'data-connect="ICO" data-n="4" data-types="{WARM}"', html)
+        self.assertIn('data-expected="Top CRP bias warm cable"', html)
+        self.assertEqual(html.count('name="remove" value='), 3)
+        self.assertIn('data-open="cc-rm-all">Remove all</button>', html)
+        self.assertIn("Remove the 3 connections on this device?", html)
+        self.assertIn(f'<td class="cc-bun"><a class="mono" href="/hw/dev/part/{TRAY}/">{TRAY}</a>'
+                      '<span class="cc-l2">Top CRP bias warm cable bundle · also at 2</span></td>', html)
+        self.assertIn('id="cc-bundle" name="bundle" value=""', html)
+        self.assertNotIn("<template", html)                               # no bundle scanned: nothing offered
+
+    def test_the_role_banner_shows_as_on_the_other_linking_pages(self):
+        inner = self.api.get_component_type.side_effect
+        self.api.get_component_type.side_effect = lambda t: {"data": {
+            **inner(t)["data"], "roles": [{"id": 3, "name": "type-manager"}]}}
+        with mock.patch("explore.views._my_roles", return_value=[]):
+            html = self._get(PAGE).content.decode()
+        self.assertIn("need one of the HWDB roles <b>type-manager</b>", html)
+
+    def test_the_dialog_asks_for_a_cables_end_with_those_in_use_marked(self):
+        d = self._get(PAGE, {"slots": ONE_END.lower(), "pos": "ICO"}).json()
+        self.assertEqual(d, {"pid": ONE_END, "slots": [{"name": "FCP Flange:1", "used": True},
+                                                       {"name": "HVS PS:1", "used": False}]})
+        self.api.patch_subcomponents.assert_not_called()
+
+    def test_a_cable_of_another_type_is_refused_naming_the_expected_type(self):
+        said = "“ICO” takes Top CRP bias warm cable, not HVS Test Bundle 4 Ends."   # named off the type records
+        self.assertEqual(self._get(PAGE, {"slots": MANY, "pos": "ICO"}).json(), {"error": said})
+        html = self._post({"connect": "ICO", "pid": MANY, "end": "Flange:7"}).content.decode()
+        self.assertIn(said, html)
+        self.api.patch_subcomponents.assert_not_called()                  # before any write
+
+    def test_a_non_cable_or_a_non_pid_is_refused(self):
+        self.assertEqual(self._get(PAGE, {"slots": f"{BOARD}-00003", "pos": "Board"}).json(),
+                         {"error": f"{BOARD}-00003 is not a cable."})
+        self.assertEqual(self._get(PAGE, {"slots": "nonsense", "pos": "ICO"}).json(),
+                         {"error": "“nonsense” doesn’t look like a PID."})
+
+    def test_connect_writes_the_end_at_the_position_and_leaves_the_others(self):
+        r = self._post({"connect": "ICO", "pid": FREE, "end": "HVS PS:1"}, follow=False)
+        self.assertRedirects(r, PAGE, fetch_redirect_response=False)
+        self.assertEqual(self._written(), {**self.AS_READ, "ICO": f"{FREE}.HVS PS:1"})
+
+    def test_connect_keeps_the_bundle_on_the_way_back(self):
+        r = self._post({"connect": "ICO", "pid": FREE, "end": "HVS PS:1", "bundle": TRAY}, follow=False)
+        self.assertRedirects(r, f"{PAGE}?bundle={TRAY}", fetch_redirect_response=False)
+
+    def test_connect_needs_an_end_the_cable_has_and_a_free_position(self):
+        for data, said in (
+                ({"connect": "ICO", "pid": FREE, "end": ""}, "Pick the cable’s END : connector."),
+                ({"connect": "ICO", "pid": FREE, "end": "Nope:1"}, f"{FREE} has no “Nope:1”."),
+                ({"connect": "ISH", "pid": FREE, "end": "HVS PS:1"}, "“ISH” already holds"),
+                ({"connect": "Nowhere", "pid": FREE, "end": "HVS PS:1"}, "There is no “Nowhere” position.")):
+            self.assertIn(said, self._post(data).content.decode())
+        self.api.patch_subcomponents.assert_not_called()
+
+    def test_hwdbs_refusal_is_shown_as_it_comes_and_nothing_changes(self):
+        import requests as _rq
+        resp = mock.Mock(status_code=409)
+        resp.json.return_value = {"status": "ERROR", "data": f"The component '{FREE}.HVS PS:1' is already in use in 'X/Y'"}
+        self.api.patch_subcomponents.side_effect = _rq.exceptions.HTTPError("409", response=resp)
+        html = self._post({"connect": "ICO", "pid": FREE, "end": "HVS PS:1"}).content.decode()
+        self.assertIn(f"HWDB refused — The component &#x27;{FREE}.HVS PS:1&#x27; is already in use in &#x27;X/Y&#x27;", html)
+        self.assertIn("3 / 4 connected", html)
+
+    def test_remove_empties_that_position_alone(self):
+        html = self._post({"remove": "OSH"}).content.decode()
+        self.assertEqual(self._written(), {**self.AS_READ, "OSH": None})
+        self.assertIn(f"Removed {ONE_END}.FCP Flange:1 from “OSH”.", html)
+
+    def test_remove_all_empties_every_cable_end_and_keeps_the_rest(self):
+        html = self._post({"remove_all": "1"}).content.decode()
+        self.assertEqual(self._written(), {"ISH": None, "OSH": None, "FCT.T": None, "ICO": None,
+                                           "Board": f"{BOARD}-00009"})
+        self.assertIn(f"Removed 3 connections from {FLANGE}.", html)
+
+    def test_removing_nothing_writes_nothing(self):
+        self.assertIn("“ICO” holds nothing to remove.", self._post({"remove": "ICO"}).content.decode())
+        self.api.patch_subcomponents.assert_not_called()
+
+    def test_a_scanned_bundle_fills_each_free_positions_list(self):
+        html = self._get(PAGE, {"bundle": TRAY.lower()}).content.decode()
+        self.assertIn(f'id="cc-bundle" name="bundle" value="{TRAY.lower()}"', html)
+        self.assertIn("3 cables, offered at the free positions", html)
+        self.assertIn(f'data-prefill="{FREE}"', html)
+        cands = html.split('<template id="cc-cands-4">', 1)[1].split("</template>", 1)[0]
+        self.assertEqual(cands.count("<button"), 3)
+        self.assertIn(f'<button type="button" data-pid="{INSTALLED}" class="done">', cands)
+        self.assertIn("connected at 1", cands)
+        self.assertIn(f'<button type="button" data-pid="{FREE}">', cands)
+        self.assertIn(">free<", cands)
+        self.assertIn(f'<input type="hidden" name="bundle" value="{TRAY}">', html)
+        self.api.patch_subcomponents.assert_not_called()                  # nothing linked until Connect
+
+    def test_an_unreadable_bundle_keeps_the_page(self):
+        import requests as _rq
+        inner = self.api.get_subcomponents.side_effect
+
+        def subs(pid):
+            if pid == TRAY:
+                raise _rq.exceptions.HTTPError("404 NOT FOUND")
+            return inner(pid)
+        self.api.get_subcomponents.side_effect = subs
+        html = self._get(PAGE, {"bundle": TRAY}).content.decode()
+        self.assertIn(f"Couldn’t read the bundle / tray {TRAY}", html)
+        self.assertIn("3 / 4 connected", html)
 
 
 class PartPageLinkTest(TestCase):

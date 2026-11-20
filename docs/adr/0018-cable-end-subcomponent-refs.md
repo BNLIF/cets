@@ -224,6 +224,46 @@ in for a typed or scanned PID.
   an instance open to writes, where its positions are read anyway — one of
   them accepts a cable type by the mirror's word. No read is added for it.
 
+## Update 2026-11-20: connecting and removing on the page (#227)
+
+On an instance open to writes the Cable connections page writes the working
+side. Checked on dev with the probe flange `Z00100300037-00006` and the free
+`Z00100300035-00002`, both left unlinked again.
+
+- **Connect is one dialog for every free position.** The cable is named by
+  a scan, by the pick list of the position's types (mirror rows; its search
+  takes a PID or a serial number) or by a typed PID; the page then asks
+  HWDB for that cable's END : connector slots (`?slots=<cable>&pos=`: the
+  device's type, the cable's type, the cable's own rows) and shows them as
+  one choice, those in use not pickable, a single free one chosen already.
+  Which END goes here is the installer's to say — nothing tells it until
+  the other side is connected.
+- **A cable of a type the position does not take is refused before any
+  write**, by the dialog's read and again by the POST, naming the expected
+  type(s) — the mirror's names, the type record for a type it lacks.
+- **Remove empties one position; Remove all asks once and empties every
+  position holding a cable end.** A cable held by plain PID (the device is
+  its bundle / tray) and every non-cable item stay. The other side is never
+  written: it is another item's position.
+- **The write is Link items' write** (the complete positions, each as
+  read, #224), the status rule and the occupied-position check included;
+  HWDB's refusal is shown as it comes and the page is read again.
+- **Bundle / tray of a cable = its current container** (`/container`, the
+  newest row that is not an unmount): the item holding it by plain PID. One
+  read per connected cable. The column shows it with the device's other
+  rows whose cable sits in the same one ("also at 2"); under 900px it folds
+  into the cable's cell.
+- **A bundle / tray scanned first offers its cables** (`?bundle=<PID>`):
+  the items it holds by plain PID whose type is a cable type, each at the
+  free positions that take its type, with the bundle's own position name
+  and whether it is connected (here, elsewhere, or free). A position with
+  exactly one cable still open — not connected here, a connector free — has
+  it filled in when its dialog opens. Nothing is written until Connect.
+  Reads: the bundle's positions, each of its cables' rows, a cable type's
+  record.
+- **Not here**: connecting every free position in one step, swapping two
+  cables, and anything on the other side.
+
 ## Consequences
 
 - `receive_box` now posts arrival locations to base PIDs (previously a
