@@ -37,6 +37,16 @@
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
   <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:6px;">
     <h1>Resources <span class="mono" style="font-size:.7em; font-weight:400; color:var(--dim);">{{ part_type_id }}</span></h1>
+    <form method="post" action="{% url 'explore:checklist_bookmark' %}" style="margin:0 0 0 auto;">
+      {% csrf_token %}
+      <input type="hidden" name="part_type_id" value="{{ part_type_id }}">
+      <input type="hidden" name="resources" value="1">
+      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+      <button class="es-btn quiet" type="submit"
+              {% if bookmarked %}style="color:var(--good); border-color:var(--good); background:var(--good-bg);"{% endif %}
+              title="{% if bookmarked %}Remove from My checklists on your profile{% else %}Add to My checklists on your profile{% endif %}">
+        {% if bookmarked %}&#9733; Bookmarked{% else %}&#9734; Bookmark{% endif %}</button>
+    </form>
   </div>
   <p class="es-sub">{{ type_name }} · built from the <a href="{{ list_url }}?next={{ request.get_full_path|urlencode }}">component list</a> on each visit, stored nowhere: each type’s checklists, procedures and items.</p>
 

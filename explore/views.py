@@ -855,6 +855,8 @@ def explore_production_resources_view(request, part_type_id):
         "status_url": _rev(request, "explore:production_status", args=[part_type_id]),
         "list_url": _rev(request, "explore:production_list", args=[part_type_id]),
         "can_edit": inst in settings.HWDB_WRITE_INSTANCES,
+        "bookmarked": ChecklistBookmark.for_instance(inst).filter(   # a row with no checklist name (Hajime 2026-11-20)
+            username=activity.actor_of(request), part_type_id=part_type_id, name="").exists(),
     })
 
 
@@ -5587,21 +5589,24 @@ def explore_type_checklist_view(request, part_type_id, name):
 @require_POST
 def explore_checklist_bookmark_view(request):
     """#111: bookmark/unbookmark a checklist — a quick link on the profile
-    page to its PID chooser. Local-only, like watches."""
+    page to its PID chooser. Local-only, like watches. ``resources`` (Hajime
+    2026-11-20) bookmarks the type's Resources page instead: a row with no
+    checklist name."""
     inst = instance_of(request)
     ptid = (request.POST.get("part_type_id") or "").strip()
-    name = (request.POST.get("name") or "").strip()
-    if not ptid or not name:
+    name = "" if request.POST.get("resources") else (request.POST.get("name") or "").strip()
+    if not ptid or not (name or request.POST.get("resources")):
         return HttpResponseBadRequest("Nothing to bookmark.")
     actor = activity.actor_of(request)
     row, created = ChecklistBookmark.objects.get_or_create(
         instance=inst, username=actor, part_type_id=ptid, name=name)
+    what = f"“{name}”" if name else "Resources"
     if created:
-        messages.success(request, f"Bookmarked “{name}” — it's listed on "
+        messages.success(request, f"Bookmarked {what} — it's listed on "
                                   f"your profile page.")
     else:
         row.delete()
-        messages.success(request, f"Removed the “{name}” bookmark.")
+        messages.success(request, f"Removed the {what} bookmark.")
     return redirect(_safe_next(request, _rev(request, "explore:profile")))
 
 
@@ -8624,12 +8629,18 @@ def explore_profile_view(request):
         level=HierarchyNode.LEVEL_TYPE,
         part_type_id__in={b.part_type_id for b in bms})}
     bm_groups: dict[str, list] = {}
+    warm = []   # #157: the chooser and blank form of each, cached for offline
     for b in bms:
         n = nodes.get(b.part_type_id)
-        b.url = _rev(request, "explore:type_checklist",
-                     args=[b.part_type_id, b.name])
-        b.blank_url = _rev(request, "explore:checklist_blank",   # #157: cached for offline
-                           args=[b.part_type_id, b.name])
+        if b.name:
+            b.label = b.name
+            b.url = _rev(request, "explore:type_checklist",
+                         args=[b.part_type_id, b.name])
+            warm += [b.url, _rev(request, "explore:checklist_blank",
+                                 args=[b.part_type_id, b.name])]
+        else:   # no checklist name: the type's Resources page (Hajime 2026-11-20) — live, so not cached
+            b.label = f"Resources · {n.name}" if n and n.name else "Resources"
+            b.url = _rev(request, "explore:production_resources", args=[b.part_type_id])
         key = (f"{n.system_name} › {n.subsystem_name}" if n and n.subsystem_name
                else (n.system_name if n else ""))
         bm_groups.setdefault(key, []).append(b)
@@ -8642,6 +8653,7 @@ def explore_profile_view(request):
         "initials": initials,
         "watch_subs": subs,
         "bookmark_groups": sorted(bm_groups.items()),
+        "bookmark_warm": warm,
         "watch_events": list(watches.watched_events(inst, actor)[:20]),
         "unread_ids": unread_ids,
         "unread_total": len(unread_ids),

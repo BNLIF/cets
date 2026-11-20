@@ -160,12 +160,13 @@
       {% if group %}<div class="pf-watch-meta" style="padding-top:10px;">{{ group }}</div>{% endif %}
       {% for b in marks %}
       <div class="pf-watch-row">
-        <a class="pf-watch-name" href="{{ b.url }}">{{ b.name }}</a>
+        <a class="pf-watch-name" href="{{ b.url }}">{{ b.label }}</a>
         <span class="pf-watch-meta mono">{{ b.part_type_id }}</span>
         <form method="post" action="{% url 'explore:checklist_bookmark' %}" class="pf-unwatch-form" style="margin-left:auto;">
           {% csrf_token %}
           <input type="hidden" name="part_type_id" value="{{ b.part_type_id }}">
           <input type="hidden" name="name" value="{{ b.name }}">
+          {% if not b.name %}<input type="hidden" name="resources" value="1">{% endif %}
           <input type="hidden" name="next" value="{{ request.get_full_path }}">
           <button class="pf-unwatch" type="submit" title="Remove this bookmark">remove</button>
         </form>
@@ -174,13 +175,13 @@
       {% endfor %}
     </div>
     {% else %}
-    <p class="pf-nowatch">Nothing yet — hit “☆ Bookmark” on a checklist page.</p>
+    <p class="pf-nowatch">Nothing yet — hit “☆ Bookmark” on a checklist or Resources page.</p>
     {% endif %}
   </div>
-  {% if bookmark_groups %}
+  {% if bookmark_warm %}
   {# #157: the bookmarked checklists' chooser and blank form go into the offline cache #}
   {% include "explore/_checklist_offline.html" %}
-  <script>window.clWarm([{% for group, marks in bookmark_groups %}{% for b in marks %}"{{ b.url|escapejs }}", "{{ b.blank_url|escapejs }}"{% if not forloop.last or not forloop.parentloop.last %}, {% endif %}{% endfor %}{% endfor %}]);</script>
+  <script>window.clWarm([{% for u in bookmark_warm %}"{{ u|escapejs }}"{% if not forloop.last %}, {% endif %}{% endfor %}]);</script>
   {% endif %}
 
   </div>

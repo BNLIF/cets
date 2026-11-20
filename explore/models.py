@@ -614,7 +614,8 @@ class ChecklistBookmark(InstanceScoped):
     """One user's bookmarked checklist (#111) — a quick link on the profile
     page to the type's PID chooser (#110), grouped there by System/Subsystem.
     Local-only, like watches; ``username`` is the FNAL credkey
-    (``activity.actor_of``). ``name`` is the checklist's (file)name."""
+    (``activity.actor_of``). ``name`` is the checklist's (file)name; a row
+    with no name bookmarks the type's Resources page (Hajime 2026-11-20)."""
 
     username = models.CharField(max_length=150, db_index=True)
     part_type_id = models.CharField(max_length=20)

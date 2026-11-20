@@ -705,6 +705,27 @@ class ResourcesPageTest(TestCase):
         self.assertEqual(api.get_component_type_images.call_count, 3)   # the type's own listing, one per distinct listed type
         self.assertEqual(api.get_image_response.call_count, 1)   # the list; none of the listed types' checklists
 
+    def test_bookmark_lists_the_page_on_the_profile(self):
+        """Hajime 2026-11-20: ☆ Bookmark on the Resources page — a bookmark row with no checklist name, listed among My checklists on the profile and not cached for offline."""
+        from explore.models import ChecklistBookmark
+        from explore.tests.test_profile import _api as profile_api
+        from explore.tests.test_profile import _mocked as profile_mocked
+        m1, m2 = _mocked(self._api())
+        with m1, m2:
+            html = self.client.get(self.URL).content.decode()
+            self.assertIn('<input type="hidden" name="resources" value="1">', html)
+            self.assertIn("&#9734; Bookmark", html)
+            self.client.post("/hw/dev/checklist-bookmark/", {"part_type_id": PTID, "resources": "1"})
+            self.assertEqual(ChecklistBookmark.objects.get(instance="dev", username="o", part_type_id=PTID).name, "")
+            self.assertIn("&#9733; Bookmarked", self.client.get(self.URL).content.decode())
+        m1, m2 = profile_mocked(profile_api())
+        with m1, m2:
+            html = self.client.get("/hw/dev/profile/").content.decode()
+        self.assertIn(f'<a class="pf-watch-name" href="{self.URL}">Resources · FDVD CRP</a>', html)
+        self.assertNotIn("window.clWarm(", html)   # a live page: nothing to cache
+        self.client.post("/hw/dev/checklist-bookmark/", {"part_type_id": PTID, "resources": "1"})
+        self.assertFalse(ChecklistBookmark.objects.exists())
+
     def test_no_list_and_read_only(self):
         api = self._api(lst={"rows": []})
         m1, m2 = _mocked(api)
