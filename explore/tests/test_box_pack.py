@@ -719,3 +719,200 @@ class PackPostTest(TestCase):
         html = resp.content.decode()
         self.assertIn(f"{GOOD} was not added", html)
         self.assertIn("already attached elsewhere", html)
+
+
+FLANGE = "Z00100300037-00005"
+CABLE_TYPE = "Z00100300035"
+CABLE = f"{CABLE_TYPE}-00002"
+OTHER_CABLE = f"{CABLE_TYPE}-00003"
+FLANGE_PACK = f"/hw/dev/part/{FLANGE}/pack/"
+
+
+def _cable_api():
+    """A flange with one cable end linked ("Cold FC Bot" ← CABLE's
+    Flange:7), as dev answers since 2026-11-20 once the client has taken
+    the country / institution codes off."""
+    api = _api()
+    types = {
+        "Z00100300037": {"category": "generic", "connectors": {
+            "Cold FC Bot": CABLE_TYPE, "Cold FC Top": CABLE_TYPE, "Side": CHILD_TYPE}},
+        CABLE_TYPE: {"category": "cable", "connectors": {
+            "Flange:7": None, "Flange:8": None, "Other:1": None}},
+    }
+    rows = {
+        FLANGE: [{"part_id": f"{CABLE}.Flange:7", "type_name": "Bundle",
+                  "functional_position": "Cold FC Bot", "operation": "mount"}],
+        CABLE: [{"part_id": f"{FLANGE}.Cold FC Bot", "type_name": "Flange",
+                 "cable_connector": "Flange:7", "operation": "mount"}],
+    }
+    api.get_component_type.side_effect = lambda t: {"status": "OK", "data": types.get(
+        t, {"category": "generic", "connectors": {}})}
+    api.get_subcomponents.side_effect = lambda p: {"data": rows.get(p, [])}
+    return api
+
+
+class CableLinkTest(TestCase):
+    """#224: a cable end is written and kept as ``<PID>.<END>:<n>``; a cable
+    linked by its plain PID makes the item its bundle / tray."""
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("k", "k@k.io", "pw"))
+        _mirror_items()
+        for pid in (CABLE, OTHER_CABLE):
+            HwdbComponentEvent.objects.create(
+                instance="dev", part_type_id=CABLE_TYPE, part_id=pid, status_id=120,
+                qaqc_uploaded=True, certified_qaqc=True)
+
+    def _post(self, data, api=None, **extra):
+        api = api or _cable_api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            return api, self.client.post(FLANGE_PACK, data, **extra)
+
+    def _sent(self, api):
+        api.patch_subcomponents.assert_called_once()
+        return api.patch_subcomponents.call_args.args[1]["subcomponents"]
+
+    def test_adding_another_item_sends_the_cable_end_back_whole(self):
+        api, _ = self._post({"pid": [GOOD]})
+        self.assertEqual(self._sent(api), {
+            "Cold FC Bot": f"{CABLE}.Flange:7", "Cold FC Top": None, "Side": GOOD})
+
+    def test_unlinking_another_item_sends_the_cable_end_back_whole(self):
+        api = _cable_api()
+        rows = api.get_subcomponents(FLANGE)["data"] + [
+            {"part_id": GOOD, "functional_position": "Side", "operation": "mount"}]
+        api.get_subcomponents.side_effect = lambda p: {"data": rows if p == FLANGE else []}
+        api, _ = self._post({"unlink": "Side"}, api)
+        self.assertEqual(self._sent(api), {
+            "Cold FC Bot": f"{CABLE}.Flange:7", "Cold FC Top": None, "Side": None})
+
+    def test_a_scan_sends_the_cable_end_back_whole(self):
+        api = _cable_api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            body = self.client.post("/hw/dev/scan/submit/", {"text": GOOD, "box": FLANGE}).json()
+        self.assertTrue(body["ok"], body)
+        self.assertEqual(self._sent(api), {
+            "Cold FC Bot": f"{CABLE}.Flange:7", "Cold FC Top": None, "Side": GOOD})
+
+    def test_moving_a_cable_end_keeps_the_end(self):
+        api, r = self._post({"move": "Cold FC Bot", "to-Cold FC Bot": "Cold FC Top"}, follow=True)
+        self.assertEqual(self._sent(api), {
+            "Cold FC Bot": None, "Cold FC Top": f"{CABLE}.Flange:7", "Side": None})
+        self.assertIn(f"Moved {CABLE}.Flange:7 from “Cold FC Bot” to “Cold FC Top”", r.content.decode())
+
+    def test_a_cable_typed_at_a_position_is_asked_for_its_end(self):
+        api, r = self._post({"place": "Cold FC Top", "pid-Cold FC Top": CABLE}, HTTP_HX_REQUEST="true")
+        api.patch_subcomponents.assert_not_called()
+        html = r.content.decode()
+        self.assertIn('name="end-Cold FC Top"', html)
+        self.assertIn(f'name="pid-Cold FC Top" value="{CABLE}"', html)
+        self.assertIn('<option value="Flange:7" disabled>Flange:7 · in use</option>', html)
+        self.assertIn('<option value="Flange:8">Flange:8</option>', html)
+        self.assertIn('<option value="*">No END — bundle / tray</option>', html)
+
+    def test_a_cable_picked_in_the_list_is_linked_in_one_step(self):
+        """Chao 2026-11-20: the list's cable, the position and the END are
+        chosen together under the list — nothing to type at the position."""
+        api, r = self._post({"place": "Cold FC Top", "place_pid": CABLE, "end": "Flange:8"},
+                            HTTP_HX_REQUEST="true")
+        self.assertEqual(self._sent(api), {
+            "Cold FC Bot": f"{CABLE}.Flange:7", "Cold FC Top": f"{CABLE}.Flange:8", "Side": None})
+        self.assertIn(f"Linked {CABLE}.Flange:8 into “Cold FC Top”", r.content.decode())
+
+    def test_a_cable_picked_in_the_list_without_an_end_is_asked_at_the_position(self):
+        api, r = self._post({"place": "Cold FC Top", "place_pid": CABLE}, HTTP_HX_REQUEST="true")
+        api.patch_subcomponents.assert_not_called()
+        html = r.content.decode()
+        self.assertIn('name="end-Cold FC Top"', html)
+        self.assertIn(f'name="pid-Cold FC Top" value="{CABLE}"', html)
+
+    def test_a_cable_is_not_given_the_first_free_position(self):
+        """Ticked candidates, Add by PID and a phone scan pick the position
+        themselves — which END they could not say."""
+        api, r = self._post({"manual": CABLE}, follow=True)
+        self.assertIn(f"{CABLE} was not added — a cable is linked at a position", r.content.decode())
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            body = self.client.post("/hw/dev/scan/submit/", {"text": CABLE, "box": FLANGE}).json()
+        self.assertFalse(body["ok"])
+        self.assertIn("a cable is linked at a position", body["message"])
+        api.patch_subcomponents.assert_not_called()
+
+    def test_the_chosen_end_is_written_as_a_cable_end_ref(self):
+        api, r = self._post({"place": "Cold FC Top", "pid-Cold FC Top": CABLE,
+                             "end-Cold FC Top": "Flange:8"}, HTTP_HX_REQUEST="true")
+        self.assertEqual(self._sent(api), {
+            "Cold FC Bot": f"{CABLE}.Flange:7", "Cold FC Top": f"{CABLE}.Flange:8", "Side": None})
+        html = r.content.decode()
+        self.assertIn(f"Linked {CABLE}.Flange:8 into “Cold FC Top”", html)
+        self.assertIn('<span class="pk-conn" title="Cable end · END name : connector #">.Flange:8</span>', html)
+        # connected at an END is not inside: the mirror keeps the cable free
+        self.assertEqual(HwdbComponentEvent.objects.get(part_id=CABLE).parent_part_id, "")
+
+    def test_no_end_links_the_plain_pid_and_the_item_is_its_parent(self):
+        api, r = self._post({"place": "Cold FC Top", "pid-Cold FC Top": OTHER_CABLE,
+                             "end-Cold FC Top": "*"}, follow=True)
+        self.assertEqual(self._sent(api), {
+            "Cold FC Bot": f"{CABLE}.Flange:7", "Cold FC Top": OTHER_CABLE, "Side": None})
+        self.assertEqual(HwdbComponentEvent.objects.get(part_id=OTHER_CABLE).parent_part_id, FLANGE)
+        self.assertEqual(HwdbComponentEvent.objects.get(part_id=CABLE).parent_part_id, "")
+
+    def test_an_end_the_cable_does_not_have_is_not_sent(self):
+        api, r = self._post({"place": "Cold FC Top", "pid-Cold FC Top": CABLE,
+                             "end-Cold FC Top": "Nope:1"}, follow=True)
+        api.patch_subcomponents.assert_not_called()
+        self.assertIn(f"{CABLE} has no “Nope:1”", r.content.decode())
+
+    def test_hwdbs_refusal_of_an_end_is_shown_as_it_comes(self):
+        import requests as _rq
+        refusal = (f"The component '{CABLE}-US186.Flange:7' is already in use in "
+                   f"'{FLANGE}-US186/Cold FC Bot'")
+        resp = mock.Mock()
+        resp.json.return_value = {"data": refusal, "status": "ERROR"}
+        api = _cable_api()
+        api.patch_subcomponents.side_effect = _rq.exceptions.HTTPError("409", response=resp)
+        api, r = self._post({"place": "Cold FC Top", "pid-Cold FC Top": CABLE,
+                             "end-Cold FC Top": "Flange:8"}, api, follow=True)
+        from django.utils.html import escape
+        self.assertIn(escape(f"{CABLE}.Flange:8 was not linked — {refusal}"), r.content.decode())
+        api.get_container.assert_not_called()
+
+    def test_page_shows_the_end_and_still_offers_the_connected_cable(self):
+        from explore.models import HierarchyNode as H
+        H.objects.create(instance="dev", level=H.LEVEL_TYPE, system_id=1, system_name="S",
+                         subsystem_id=3, subsystem_name="SS", name="Bundle",
+                         part_type_id=CABLE_TYPE, category="cable",
+                         cable_ends=[{"name": "Flange", "connectors": 2}, {"name": "Other", "connectors": 1}])
+        api = _cable_api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(FLANGE_PACK).content.decode()
+        self.assertIn(f'{CABLE}</a><span class="pk-conn" title="Cable end · END name : connector #">.Flange:7</span>', html)
+        # one END connected: still a candidate — one cable picked, its position and END under the list
+        self.assertIn(f'<input type="radio" name="place_pid" required value="{CABLE}"', html)
+        self.assertIn('<option value="">position…</option><option>Cold FC Top</option></select>', html)
+        self.assertIn('<option>Flange:1</option><option>Flange:2</option><option>Other:1</option>', html)
+        self.assertIn('<option value="*">No END — bundle / tray</option>', html)
+        self.assertNotIn(f'name="pid" value="{CABLE}"', html)
+        self.assertIn(f'<input type="checkbox" name="pid" value="{GOOD}"', html)   # another type keeps its tick boxes
+        self.assertEqual(html.count('class="pk-submit">Link</button>'), 1)
+
+    def test_a_cable_has_no_link_items_page(self):
+        api = _cable_api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.assertEqual(self.client.get(f"/hw/dev/part/{CABLE}/pack/").status_code, 403)
+            self.assertEqual(self.client.post(f"/hw/dev/part/{CABLE}/pack/", {"pid": [GOOD]}).status_code, 403)
+        api.patch_subcomponents.assert_not_called()
+
+    def test_a_cables_own_page_offers_no_link_items(self):
+        api = _cable_api()
+        api.get_container.return_value = {"data": []}
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.assertIn("Link items…", self.client.get(f"/hw/dev/part/{FLANGE}/").content.decode())
+            api.get_component.return_value = {"data": {
+                "category": "cable", "component_type": {"name": "Bundle"}}}
+            self.assertNotIn("Link items…", self.client.get(f"/hw/dev/part/{CABLE}/").content.decode())

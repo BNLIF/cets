@@ -2626,6 +2626,31 @@ class ImageMapLinkTest(TestCase):
             row.refresh_from_db()
             self.assertEqual(row.parent_part_id, "")
 
+    def test_a_cable_end_already_linked_goes_back_as_read(self):
+        """#224: these writes send every position back as HWDB answered it,
+        so a cable end keeps its END : connector — a bare PID in its place
+        would turn it into a bundle link (dev 2026-11-20)."""
+        end, feb = "D08100100003-00009.End A:1", "D05700300001-00011"
+        api = self._api()
+        api.get_subcomponents.return_value = {"data": [{"functional_position": "CBL1", "part_id": end}]}
+
+        def sent():
+            out = api.patch_subcomponents.call_args.args[1]["subcomponents"]
+            api.patch_subcomponents.reset_mock()
+            return out
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(f"/hw/dev/checklist-map/{PART}/",       # a link field, or one slot linked live
+                             {"action": "link", "slot": "FEB1", "pid": feb})
+            self.assertEqual(sent(), {"FEB1": feb, "FEB2": None, "CBL1": end})
+            self.client.post(PAGE, {"f0-0-m0": feb})                 # the map at submit (a table's link column too)
+            self.assertEqual(sent(), {"FEB1": feb, "FEB2": None, "CBL1": end})
+            api.get_subcomponents.return_value = {"data": [
+                {"functional_position": "CBL1", "part_id": end},
+                {"functional_position": "FEB1", "part_id": feb}]}
+            self.client.post(f"/hw/dev/checklist-map/{PART}/", {"action": "unlink", "pid": feb})
+            self.assertEqual(sent(), {"FEB1": None, "FEB2": None, "CBL1": end})
+
     def test_link_field_links_live_like_one_slot(self):
         """#135: a link field on an item's page carries the state URL, a
         link/unlink button keyed on its position, and (no type_id) a pick

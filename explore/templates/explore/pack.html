@@ -27,6 +27,7 @@
   .pk-act input, .pk-act select { font: inherit; font-size: 12px; color: var(--ink); background: var(--surface);
     border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 3px 6px; margin-right: 6px; }
   .pk-act input { font-family: var(--font-mono); width: 150px; }
+  .pk-act select[name^="end-"] { width: 150px; }
   @media (max-width: 1000px) { .pk-cols { grid-template-columns: 1fr; } .pk-contents { position: static; } }
 
   .pk-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
@@ -69,6 +70,7 @@
     border-radius: var(--r-sm); padding: 7px 17px; cursor: pointer; }
   .pk-submit:hover { border-color: var(--accent); }
   .pk-hint { font-size: 11.5px; color: var(--faint); }
+  .pk-conn { color: var(--faint); font-size: 11px; }
   .pk-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
   .pk-sync-btns { display: flex; gap: 6px; flex-shrink: 0; }
   /* mirror syncs write nothing to HWDB — the quiet look: dark outline, bold, page background */

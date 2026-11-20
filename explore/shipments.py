@@ -134,6 +134,16 @@ def current_manifest(subs: list[dict] | None) -> list[dict]:
     return out
 
 
+def position_ref(m: dict) -> str | None:
+    """What sits in a position, as a write must send it back — from a
+    ``current_manifest`` row: the plain PID, or for a cable end the whole
+    ``<PID>.<END>:<n>``. A bare PID in a cable end's place turns the end
+    into a bundle / tray link, HWDB answering OK (dev 2026-11-20, #224)."""
+    if m.get("connection") and not m.get("peer"):
+        return f"{m['part_id']}.{m['connection']}"
+    return m.get("part_id")
+
+
 # The FD shipping workflow writes these checklists into the box item's
 # free-form spec DATA blob (see the Python dashboard); the Receiving one is
 # ours (Hajime 2026-11-06). Each is (HWDB key, display title); we render all

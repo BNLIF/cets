@@ -120,6 +120,73 @@ What changed here:
 - **"Inside" reads "Bundle / tray"** on a cable whose container is not a
   shipping box.
 
+## Update 2026-11-20: writing cable links (#224)
+
+Hajime's second email (cable links are written from the non-cable item
+only: `<PID>.<END>:<n>` for one end, the plain `<PID>` when the item is the
+cable's bundle / tray, `null` to remove) and a write probe on dev with two
+new flanges (`Z00100300037-00005`, `-00006`) and the unconnected
+`Z00100300035-00002`, all left unlinked again. Prod was not probed.
+
+What dev answers to `PATCH components/<PID>/subcomponents`:
+
+- **It merges.** A position not named keeps what it holds; naming two
+  positions and then a third leaves all three linked.
+- **A ref with the country / institution codes is accepted**
+  (`…-00002-US186.Flange:2`), and so is one without.
+- **A complete dict with every ref as read answers "No changes".**
+- **A bare PID where a cable end sits is taken, with OK**: the end is
+  dropped ("replaces …Flange:7" in the cable's `/container` comment), the
+  item becomes the cable's parent — a bundle link. This is what the Link
+  items page and the scan link would have done on any write to an item
+  holding a cable end, since they rebuilt the dict from base PIDs.
+- **Whole cable**: the plain PID makes the item the cable's
+  `parent_part_id` and newest `/container` row. The cable's ends can still
+  be connected, also to that same item.
+- **Refusals**: a connector in use → 409 "The component
+  '…-US186.Flange:7' is already in use in '<item>/<position>'"; an END the
+  type lacks → 400 "the cable '…' has no end 'Nope:1'"; the whole cable a
+  second time → 409 "already in use in …".
+- **A cable item cannot be created over the API with the type's empty
+  spec template** (`{}` → "A 'specifications' object matching the
+  ComponentType difinition is required!"). Not pursued.
+
+What changed here:
+
+- **Still the complete dict, now with refs.** `shipments.position_ref()`
+  gives a manifest row back as the write wants it; the Link items page and
+  the scan link build their state from it. The checklist link field, the
+  linking image map (and a table's link column), the map's unlink and the
+  sheet upload already sent each `part_id` back as read, which since #223
+  is the ref without codes. Child minting writes only to an item created a
+  moment before. Sending the changed positions alone would also do on
+  dev; it was left, prod being unprobed.
+- **A cable is linked at a position its user names, and is asked for its
+  END : connector there** — the type's connectors in order, those in use
+  not pickable (two reads: the cable's type, its own rows), or "No END —
+  bundle / tray" for the plain PID. That is the PID typed at the
+  position's row ("Link here").
+- **From the candidate list a cable is linked in one step** (Chao
+  2026-11-20): one cable picked by a radio button, the position and the
+  END : connector chosen under the list, "Link". That END list is the
+  type's, from the mirrored `cable_ends` — no HWDB call, so a connector
+  in use is not marked there and HWDB's refusal says where it is used.
+  With no END chosen (or no ends mirrored) the position's row asks as
+  above.
+- **No first free position for a cable.** Ticked candidates, Add by PID
+  and a phone scan pick the position themselves and could only write the
+  plain PID — a bundle link nobody asked for on a flange. A cable type's
+  list has no tick boxes, and the three paths refuse a cable (one type
+  read each). A shipping box is excepted: it just holds the cable.
+- **Only a plain link stamps the mirror parent.** A cable connected at an
+  END stays among the candidates, as HWDB itself keeps its
+  `parent_part_id` empty.
+- **A cable has no Link items page** (403), and its part page no "Link
+  items…".
+- **Not changed**: a checklist link field or image-map slot given a cable
+  item links its plain PID, as before (open in #222); the image map's
+  contents table shows a cable end's whole ref as the item.
+
 ## Consequences
 
 - `receive_box` now posts arrival locations to base PIDs (previously a

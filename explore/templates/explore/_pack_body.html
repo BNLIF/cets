@@ -55,7 +55,8 @@ without a page reload. {% endcomment %}
                   {% comment %}#84 (Hajime 2026-07-29): only the procedure's four linkable
                   statuses get a checkbox — the rest (listed under "show all items")
                   are display-only.{% endcomment %}
-                  <td>{% if c.linkable %}<input type="checkbox" name="pid" value="{{ c.part_id }}" id="c-{{ c.part_id }}">{% else %}<span class="pk-noadd" title="Display only — the Shipping Procedure doesn’t allow linking this status. Re-sync refreshes statuses the mirror hasn’t captured yet.">—</span>{% endif %}</td>
+                  {# #224: a cable goes to a position its user names, so one cable is picked (a radio) and the position and END chosen under the list #}
+                  <td>{% if c.linkable %}<input type="{% if g.at_position %}radio" name="place_pid" required{% else %}checkbox" name="pid"{% endif %} value="{{ c.part_id }}" id="c-{{ c.part_id }}">{% else %}<span class="pk-noadd" title="Display only — the Shipping Procedure doesn’t allow linking this status. Re-sync refreshes statuses the mirror hasn’t captured yet.">—</span>{% endif %}</td>
                   <td class="mono">{% if c.linkable %}<label for="c-{{ c.part_id }}">{{ c.part_id }}</label>{% else %}{{ c.part_id }}{% endif %}
                     <a class="pk-open" href="{% url 'explore:part' part_id=c.part_id %}" target="_blank" rel="noopener" title="Open {{ c.part_id }} (new tab)">&#x2197;</a></td>
                   <td>{{ c.status }}</td>
@@ -67,7 +68,16 @@ without a page reload. {% endcomment %}
             </table>
           </div>
           <div class="pk-actions">
+            {% if g.at_position %}
+            {# the END list is the type's, from the mirror: a connector in use is refused by HWDB, which says where; with no END chosen the position's row asks, in-use ones marked #}
+            <span class="pk-act"><select name="place" required title="The position the picked cable is linked at">
+              <option value="">position…</option>{% for p in g.positions %}<option>{{ p }}</option>{% endfor %}</select>{% if g.ends %}<select name="end" title="Which END : connector of the cable connects there">
+              <option value="">END : connector…</option>{% for e in g.ends %}<option>{{ e }}</option>{% endfor %}
+              <option value="*">No END — bundle / tray</option></select>{% endif %}</span>
+            <button type="submit" class="pk-submit">Link</button>
+            {% else %}
             <button type="submit" class="pk-submit">Add to {{ noun }}</button>
+            {% endif %}
           </div>
           {% else %}
           <div class="pk-empty">No candidates in the mirror yet — sync this type’s items first, or add by PID below.</div>
@@ -114,16 +124,23 @@ without a page reload. {% endcomment %}
         <thead><tr><th>Type</th><th>Position</th><th>Item</th><th></th></tr></thead>
         <tbody>
         {% for c in contents %}
-          <tr{% if c.part_id and c.part_id in just_added %} class="pk-added"{% endif %}>
+          <tr{% if c.part_id and c.part_id in just_added or ask and ask.position == c.position %} class="pk-added"{% endif %}>
             <td>{{ c.type_name }}</td>
             <td>{{ c.position }}</td>
             {% if c.part_id %}
-            <td class="mono"><a href="{% url 'explore:part' part_id=c.part_id %}" target="_blank" rel="noopener">{{ c.part_id }}</a></td>
+            <td class="mono"><a href="{% url 'explore:part' part_id=c.part_id %}" target="_blank" rel="noopener">{{ c.part_id }}</a>{% if c.connection %}<span class="pk-conn" title="Cable end · END name : connector #">.{{ c.connection }}</span>{% elif c.no_end %} <span class="pk-conn" title="Linked without an END: this {{ noun }} is the cable’s bundle / tray">no END</span>{% endif %}</td>
             <td class="pk-act"><button class="pk-unlink" name="unlink" value="{{ c.position }}"
                         title="Remove {{ c.part_id }} from this {{ noun }}">Unlink</button>{% if not is_box and c.move_to %}
               {# positions of one type aren't always interchangeable (F1 ≠ B2): move the occupant to a specific free one #}
               <select name="to-{{ c.position }}" title="Move {{ c.part_id }} to another position" onchange="if (this.value) { this.form.elements.move.value = '{{ c.position|escapejs }}'; this.form.requestSubmit(); }">
                 <option value="">move to…</option>{% for p in c.move_to %}<option>{{ p }}</option>{% endfor %}</select>{% endif %}</td>
+            {% elif ask and ask.position == c.position %}
+            {# #224: a cable was picked or typed for this position — its END : connector, the ones in use not pickable, or none #}
+            <td class="mono">{{ ask.pid }}<input type="hidden" name="pid-{{ c.position }}" value="{{ ask.pid }}"></td>
+            <td class="pk-act"><select name="end-{{ c.position }}" title="Which end of {{ ask.pid }} connects at “{{ c.position }}”">
+                <option value="">END : connector…</option>{% for s in ask.slots %}
+                <option value="{{ s.name }}"{% if s.used %} disabled{% endif %}>{{ s.name }}{% if s.used %} · in use{% endif %}</option>{% endfor %}
+                <option value="*">No END — bundle / tray</option></select><button class="pk-unlink" name="place" value="{{ c.position }}" title="Link {{ ask.pid }} into “{{ c.position }}”">Link here</button></td>
             {% else %}
             <td class="pk-slot-empty">— empty</td>
             <td class="pk-act">{% if not is_box %}<input name="pid-{{ c.position }}" placeholder="{{ c.types.0 }}-00000" autocomplete="off" autocapitalize="characters" spellcheck="false" title="Link a specific item into “{{ c.position }}”"><button class="pk-unlink" name="place" value="{{ c.position }}" title="Link the typed item into “{{ c.position }}”">Link here</button>{% endif %}</td>

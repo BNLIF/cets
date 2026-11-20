@@ -153,6 +153,9 @@ the part-type ID. For LArASIC P5B Prod, `D08100100003` decodes as:
   ref (`<PID>-US186.<END>:<n>`), which the API client strips, and a cable's
   own row names its connector in `cable_connector`. A generic item holding
   a cable by plain PID is the cable's **bundle / tray**.
+  Cable links are written from the non-cable item only, and a position
+  holding a cable end must go back as the whole ref — a bare PID in its
+  place makes the item the cable's bundle / tray.
   See [[0018-cable-end-subcomponent-refs]].
 - **Component Type**: the leaf type with its own QC test-types and components
   (e.g. `AMC`, `LArASIC P5B Prod`). HWDB exposes a `full_name` like

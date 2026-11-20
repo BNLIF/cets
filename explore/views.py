@@ -55,8 +55,8 @@ from .queries import (
     component_update_filters, component_update_progress,
 )
 from .parts import assembly_children, current_container, part_detail, subtree_rows, test_summary
-from .shipments import (_mirror_box_parent, _spec_data, current_manifest, refresh_box,
-                        shipped_received, sync_shipments)
+from .shipments import (_mirror_box_parent, _spec_data, current_manifest, position_ref, refresh_box,
+                        shipped_received, sync_shipments, split_subcomp_ref)
 
 logger = logging.getLogger(__name__)
 FNAL_UNAVAILABLE = "FNAL authentication service is unavailable. Please try again later."
@@ -2563,7 +2563,8 @@ def explore_part_view(request, part_id):
     # #136: any other item whose type defines positions links sub-components
     # on the same page — the Assembly card offers it (no second card).
     link_items_url = None
-    if not is_shipping and inst in settings.HWDB_WRITE_INSTANCES:
+    # a cable is linked from the item it connects to, never from its own page (#224)
+    if not is_shipping and not detail["is_cable"] and inst in settings.HWDB_WRITE_INSTANCES:
         try:
             if _box_connectors(api, ptid):
                 link_items_url = _rev(request, "explore:box_pack", args=[part_id])
@@ -3076,6 +3077,10 @@ def _pack_groups(instance, connectors, manifest, show_all=False) -> list[dict]:
             level=HierarchyNode.LEVEL_TYPE, part_type_id=ctid).first()
         groups.append({
             "type_id": ctid, "name": leaf.name if leaf else ctid,
+            "is_cable": bool(leaf and leaf.category == "cable"),
+            # a cable type's END : connector slots, from the mirrored ends (#72) — no HWDB call
+            "ends": [f"{e['name']}:{i}" for e in (leaf.cable_ends if leaf else None) or []
+                     for i in range(1, e["connectors"] + 1)],
             # Deep link to the type's leaf page (None when uncurated —
             # the pane header falls back to plain text).
             "type_url": navigation.leaf_path_for(instance, ctid),
@@ -3152,25 +3157,36 @@ def explore_pid_list_view(request, part_type_id):
 
 
 def _pack_body_context(instance, part_id, ptid, connectors, current,
-                       just_added=(), show_all=False):
+                       just_added=(), show_all=False, ask=None):
     """Context for the pack page's two-column body (``_pack_body.html``):
     the left column's candidate groups and the right column's contents,
-    both derived from ``current`` (position → occupant or None).
+    both derived from ``current`` (position → what HWDB holds there: a
+    PID, a cable end's ``PID.END:n``, or None).
     ``just_added`` pids get highlighted in the contents table; ``show_all``
-    also lists display-only candidates (#84)."""
-    manifest = [{"functional_position": pos, "part_id": pid}
-                for pos, pid in current.items() if pid]
-    type_names = dict(
-        HierarchyNode.for_instance(instance)
-        .filter(level=HierarchyNode.LEVEL_TYPE,
-                part_type_id__in=parts.child_types(connectors))
-        .values_list("part_type_id", "name"))
+    also lists display-only candidates (#84); ``ask`` is a cable waiting
+    for its END : connector (#224) — ``{position, pid, slots}``."""
+    is_box = curation.is_shipping_type(instance, ptid)
+    held = {pos: split_subcomp_ref(ref) for pos, ref in current.items()}
+    # a cable connected here at an END is not inside the item: its position
+    # is taken, the cable itself stays among the candidates
+    manifest = [{"functional_position": pos, "part_id": None if conn else pid}
+                for pos, (pid, conn) in held.items() if pid]
+    leaves = {t: (name, category) for t, name, category in
+              HierarchyNode.for_instance(instance)
+              .filter(level=HierarchyNode.LEVEL_TYPE,
+                      part_type_id__in=parts.child_types(connectors))
+              .values_list("part_type_id", "name", "category")}
     contents = []
     for pos in sorted(current, key=str):
         types = parts.accepted_types(connectors.get(pos))
+        pid, conn = held[pos]
         contents.append({"position": pos, "types": types,
-                         "type_name": ", ".join(type_names.get(t) or t for t in types),
-                         "part_id": current[pos]})
+                         "type_name": ", ".join(leaves.get(t, (t,))[0] or t for t in types),
+                         "part_id": pid, "connection": conn,
+                         # a cable held by its plain PID: the item is its bundle / tray
+                         # (in a shipping box it is contents like any other item)
+                         "no_end": bool(pid and not conn and not is_box and leaves.get(
+                             pid.rsplit("-", 1)[0], ("", ""))[1] == "cable")})
     # #136: where a filled position's occupant could move — the free
     # positions accepting its type (the contents pane's "move to" picker)
     free_of = {}
@@ -3180,17 +3196,22 @@ def _pack_body_context(instance, part_id, ptid, connectors, current,
                 free_of.setdefault(t, []).append(c["position"])
     for c in contents:
         c["move_to"] = free_of.get(c["part_id"].rsplit("-", 1)[0], []) if c["part_id"] else []
-    is_box = curation.is_shipping_type(instance, ptid)
+    groups = _pack_groups(instance, connectors, manifest, show_all)
+    for g in groups:
+        # #224: a cable is linked at a position its user names, with the END
+        # — one cable picked, the position and END chosen under the list
+        g["at_position"] = g.pop("is_cable") and not is_box
     return {
         "part_id": part_id,
         "part_type_id": ptid,
         "is_box": is_box,
         "noun": "box" if is_box else "item",
-        "groups": _pack_groups(instance, connectors, manifest, show_all),
+        "groups": groups,
         "contents": contents,
         "n_filled": sum(1 for c in contents if c["part_id"]),
         "just_added": list(just_added),
         "show_all": show_all,
+        "ask": ask,
     }
 
 
@@ -3265,7 +3286,7 @@ def _scan_link(api, inst, box_pid, pid) -> tuple[bool, str]:
     current = {pos: None for pos in connectors}
     for m in manifest:
         if m["functional_position"] in current:
-            current[m["functional_position"]] = m["part_id"]
+            current[m["functional_position"]] = position_ref(m)   # a cable end goes back whole (#224)
     noun = "box" if curation.is_shipping_type(inst, ptid) else "item"
     if pid in current.values():
         return False, f"{pid} is already in this {noun}."
@@ -3276,6 +3297,8 @@ def _scan_link(api, inst, box_pid, pid) -> tuple[bool, str]:
             if current[pos] is None and ctid in parts.accepted_types(connectors.get(pos))]
     if not free:
         return False, f"no free position left for {ctid} items."
+    if noun == "item" and _is_cable_type(api, ctid):
+        return False, _CABLE_AT_POSITION
     block = _procedure_status_block(inst, pid)
     if block:
         return False, f"not added — {block}."
@@ -3292,6 +3315,28 @@ def _scan_link(api, inst, box_pid, pid) -> tuple[bool, str]:
         return False, f"not added — {_refusal_detail(api, pid, detail)}"
     _after_subcomponent_write(api, inst, ptid, box_pid, {**current, pos: pid})
     return True, f"added to “{pos}”"
+
+
+# #224: which END of a cable a position takes is the user's to say, so the
+# paths that pick the first free position themselves (ticked candidates, Add
+# by PID, a phone scan) do not link a cable. A shipping box just holds it.
+_CABLE_AT_POSITION = "a cable is linked at a position — “link to position…” in its list, or “Link here”."
+
+
+def _is_cable_type(api, part_type_id) -> bool:
+    """HWDB's word on the type's category (one read)."""
+    return (api.get_component_type(part_type_id).get("data") or {}).get("category") == "cable"
+
+
+def _cable_slots(api, pid) -> list[dict] | None:
+    """A cable's END : connector slots in its type's order, each ``{name,
+    used}`` — ``used`` from the cable's own rows (dev names the connector
+    on each, #223). None when ``pid``'s type is not a cable type. Two reads."""
+    record = api.get_component_type(pid.rsplit("-", 1)[0]).get("data") or {}
+    if record.get("category") != "cable":
+        return None
+    used = {m["via"] for m in current_manifest(api.get_subcomponents(pid).get("data")) if m.get("via")}
+    return [{"name": s, "used": s in used} for s in (record.get("connectors") or {})]
 
 
 def _shipping_checklists(request, api, inst, part_id, ptid) -> list[dict]:
@@ -3359,14 +3404,17 @@ def explore_box_pack_view(request, part_id):
 
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
     try:
-        connectors = _box_connectors(api, ptid)
+        record = api.get_component_type(ptid).get("data") or {}
+        connectors = record.get("connectors") or {}
+        if record.get("category") == "cable":   # its "positions" are its connectors (#224)
+            return HttpResponseForbidden("A cable is linked from the item it connects to.")
         if not connectors and not is_box:
             return HttpResponseForbidden("This type defines no functional positions.")
         manifest = current_manifest(api.get_subcomponents(part_id).get("data"))
         current = {pos: None for pos in connectors}
         for m in manifest:
             if m["functional_position"] in current:
-                current[m["functional_position"]] = m["part_id"]
+                current[m["functional_position"]] = position_ref(m)   # a cable end goes back whole (#224)
     except requests.RequestException as e:
         logger.warning("packing: state fetch for %s failed: %s", part_id, e)
         messages.error(request, f"Couldn’t read the {noun}’s current state — {e}")
@@ -3427,11 +3475,11 @@ def explore_box_pack_view(request, part_id):
     # the page updates without a reload.
     is_htmx = bool(getattr(request, "htmx", False))
 
-    def _body(state_, just_added=()):
+    def _body(state_, just_added=(), ask=None):
         return render(request, "explore/_pack_body.html",
                       _pack_body_context(inst, part_id, ptid, connectors,
                                          state_, just_added=just_added,
-                                         show_all=show_all))
+                                         show_all=show_all, ask=ask))
 
     def _mirror(state_):
         _after_subcomponent_write(api, inst, ptid, part_id, state_)
@@ -3464,22 +3512,48 @@ def explore_box_pack_view(request, part_id):
     place = (request.POST.get("place") or "").strip()
     move = (request.POST.get("move") or "").strip()
     if place or move:
+        # ``ref`` is what the position will hold: the PID, or a cable end's
+        # ``PID.END:n`` (#224); ``pid`` stays the item, for the checks.
         if place:
-            pos, pid = place, (request.POST.get(f"pid-{place}") or "").strip().upper()
-            after, what = {**current, pos: pid}, f"Linked {pid} into “{pos}”."
+            pos, pid = place, (request.POST.get(f"pid-{place}")
+                               or request.POST.get("place_pid") or "").strip().upper()
+            ref = pid
         else:
-            pos, pid = (request.POST.get(f"to-{move}") or "").strip(), current.get(move) or ""
-            after, what = {**current, move: None, pos: pid}, f"Moved {pid} from “{move}” to “{pos}”."
+            pos, ref = (request.POST.get(f"to-{move}") or "").strip(), current.get(move) or ""
+            pid = split_subcomp_ref(ref)[0] or ""
         err = _placement_error(inst, connectors, current, pos, pid, moving=bool(move))
+        if place and not err:
+            # a cable goes in by one END : connector, or with none (the item
+            # is then its bundle / tray): ask before writing
+            end = (request.POST.get(f"end-{place}") or request.POST.get("end") or "").strip()
+            try:
+                slots = _cable_slots(api, pid)
+            except requests.RequestException as e:
+                slots, err = None, f"Couldn’t read {pid} — {_hwdb_error_detail(e)}"
+            if slots is not None and not end:
+                if not is_htmx:
+                    messages.error(request, f"{pid} is a cable — pick its END : connector.")
+                    return redirect(pack_url)
+                return _body(current, ask={"position": pos, "pid": pid, "slots": slots})
+            if slots is not None and end != "*":
+                if end not in {s["name"] for s in slots}:
+                    err = f"{pid} has no “{end}”."
+                ref = f"{pid}.{end}"
+        if place:
+            after, what = {**current, pos: ref}, f"Linked {ref} into “{pos}”."
+        else:
+            after, what = {**current, move: None, pos: ref}, f"Moved {ref} from “{move}” to “{pos}”."
         if not err:
             try:
                 body = api.patch_subcomponents(part_id, {"component": {"part_id": part_id},
                                                          "subcomponents": after})
                 ok, detail = body.get("status") == "OK", body.get("data")
             except requests.RequestException as e:
-                logger.warning("packing: place %s into %s failed: %s", pid, part_id, e)
+                logger.warning("packing: place %s into %s failed: %s", ref, part_id, e)
                 ok, detail = False, _hwdb_error_detail(e)
-            err = None if ok else f"{pid} was not linked — {_refusal_detail(api, pid, detail)}"
+            # a cable end's refusal names the connector and where it is in use: shown as it comes
+            err = None if ok else (f"{ref} was not linked — "
+                                   f"{detail if ref != pid else _refusal_detail(api, pid, detail)}")
         if err:
             messages.error(request, err)
             return _body(current) if is_htmx else redirect(pack_url)
@@ -3506,7 +3580,7 @@ def explore_box_pack_view(request, part_id):
         if current[pos] is None:
             for t in parts.accepted_types(connectors.get(pos)):
                 free_by_type.setdefault(t, []).append(pos)
-    changes = {}
+    changes, cable_types = {}, {}
     for pid in picked:
         if not re.fullmatch(r"[A-Z]\d{11}-\d{5}", pid):
             messages.error(request, f"“{pid}” doesn’t look like a PID.")
@@ -3519,6 +3593,16 @@ def explore_box_pack_view(request, part_id):
             messages.error(request,
                            f"This {noun} has no positions for {ctid} items ({pid}).")
             return _fail()
+        if not is_box:
+            try:
+                if ctid not in cable_types:
+                    cable_types[ctid] = _is_cable_type(api, ctid)
+            except requests.RequestException as e:
+                messages.error(request, f"Couldn’t read the type of {pid} — {_hwdb_error_detail(e)}")
+                return _fail()
+            if cable_types[ctid]:
+                messages.error(request, f"{pid} was not added — {_CABLE_AT_POSITION}")
+                return _fail()
         # a position taking several types (#210) is free until any pick takes it
         free = [p for p in free_by_type[ctid] if p not in changes]
         if not free:
