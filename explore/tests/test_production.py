@@ -176,6 +176,54 @@ class EngineTest(TestCase):
         self.assertEqual(production.to_lines(rows), f"{SIPM}  SiPM boards\n  {PDS}@{PTID}  PDS modules\n  {SIPM}  x\n  {PDS}")
         self.assertEqual(production.plan_key(rows[1]), f"{PDS}@{PTID}")
 
+    def test_folders(self):
+        # #232: a folder row — a name and a level, no type; [Name] in the text form; the totals of the type rows under it
+        rows = production.normalize_list({"rows": [{"folder": True, "label": " Frames ", "level": 0}, {"type": SIPM, "level": 1},
+                                                   {"folder": True, "level": 5}, {"type": PDS, "level": 2}]})
+        self.assertEqual(rows, [{"type": "", "label": "Frames", "level": 0, "plan_of": "", "folder": True},
+                                {"type": SIPM, "label": "", "level": 1, "plan_of": ""},
+                                {"type": "", "label": "Folder", "level": 2, "plan_of": "", "folder": True},
+                                {"type": PDS, "label": "", "level": 2, "plan_of": ""}])
+        self.assertEqual(production.type_ids(rows), [SIPM, PDS])
+        text = f"[Cathode [north]]\n  {SIPM}\n  [Sub]\n    {PDS}  PDS"
+        parsed, bad = production.parse_lines(text + "\n[ ]")
+        self.assertEqual(parsed, [{"folder": True, "label": "Cathode [north]", "level": 0}, {"type": SIPM, "label": "", "level": 1},
+                                  {"folder": True, "label": "Sub", "level": 1}, {"type": PDS, "label": "PDS", "level": 2}])
+        self.assertEqual(bad, ["[ ]"])   # a folder needs a name
+        self.assertEqual(production.to_lines(parsed), text)
+        self.assertEqual(production.normalize_list({"rows": parsed})[2], {"type": "", "label": "Sub", "level": 1, "plan_of": "", "folder": True})
+
+    def test_folder_totals(self):
+        # #232: needed and the count summed, the first dates the earliest, the last dates the latest, the smallest float;
+        # a type listed twice under the folder counts once; a folder in a folder is in its totals
+        rows = production.normalize_list({"rows": [
+            {"folder": True, "label": "HVS", "level": 0},
+            {"folder": True, "label": "Cathode", "level": 1}, {"type": SIPM, "level": 2}, {"type": SIPM, "level": 2},
+            {"folder": True, "label": "Cathode", "level": 1}, {"type": PDS, "level": 2},
+            {"folder": True, "label": "Empty", "level": 0}, {"type": PTID, "level": 0}]})
+        plans = {SIPM: {**production.normalize_plan(PLAN), "first_completed_by": "2026-03", "first_needed_by": "2027-01"},
+                 PDS: {**production.normalize_plan({"needed": 100, "needed_by": "2028-04", "first_completed_by": "2025-11",
+                                                    "first_needed_by": "2027-06"}), "completed_by": "2028-01-15"},   # a P6 date
+                 PTID: production.normalize_plan({"needed": 5})}
+        cnt = {SIPM: {"n": 3, "by_status": [("available", 2), ("in QC", 1)]}, PDS: {"n": 4, "by_status": [("available", 4)]}}
+        t = production.table(rows, plans, cnt, {}, date(2026, 10, 8))
+        hvs, cathode, sipm, _dup, cathode2, _pds, empty, own = t
+        self.assertEqual((hvs["folder"], hvs["type"], hvs["has_children"], hvs["has_plan"], hvs["n_types"]), (True, "", True, False, 2))
+        self.assertEqual((hvs["needed"], hvs["n"], hvs["by_status"]), ("48,100", "7", "6 available, 1 in QC"))
+        self.assertEqual((hvs["first_completed_by"], hvs["first_needed_by"], hvs["completed_by"], hvs["needed_by"], hvs["float"]),
+                         ("Nov 2025", "Jan 2027", "15 Jan 2028", "May 2028", "3"))   # PDS's float of 3 under the SiPM boards' 17
+        self.assertTrue(hvs["first_completed_past"])
+        self.assertFalse(hvs["completed_past"])
+        self.assertEqual((cathode["needed"], cathode["n"], cathode["float"], cathode["n_types"]), ("48,000", "3", "17", 1))   # the type twice: once
+        self.assertEqual((hvs["key"], cathode["key"], cathode2["key"], sipm["key"]), ("f:HVS", "f:HVS/Cathode", "f:HVS/Cathode", SIPM))
+        self.assertEqual((empty["needed"], empty["n"], empty["completed_by"], empty["float"], empty["has_children"]), ("", "0", "", "", False))
+        self.assertEqual((own["folder"], own["needed"]), (False, "5"))
+        self.assertEqual(production.summary(rows, plans, date(2026, 10, 8))["n"], 4)   # the types, not the folders
+        # a part in a folder under its assembly is still checked against the assembly
+        rows = production.normalize_list({"rows": [{"type": PDS}, {"folder": True, "label": "Parts", "level": 1}, {"type": SIPM, "level": 2}]})
+        t = production.table(rows, {PDS: production.normalize_plan({"completed_by": "2026-06"}), SIPM: production.normalize_plan(PLAN)}, {}, {PDS: "PDS module"})
+        self.assertEqual((t[1]["dep_warn"], t[2]["dep_warn"]), ("", "Last completed by Dec 2026 is after PDS module’s Jun 2026"))
+
     def test_read_plan_and_list_take_the_newest_version(self):
         api = _api()
         plan, vs = production.read_plan(api, SIPM)
@@ -355,6 +403,27 @@ class StatusPageTest(TestCase):
         self.assertIn('data-fold="close">Collapse all</button>', html)
         self.assertIn('<td data-col="needed" class="cl-const ps-num">7</td>', html)
 
+    def test_folder_row(self):
+        # #232: a folder draws its name and totals, folds, and costs no HWDB call
+        lst = {"rows": [{"folder": True, "label": "Photon <detectors>", "level": 0}, {"type": SIPM, "level": 1}, {"type": PDS, "level": 1}]}
+        api = _api(lst=lst)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(self.URL).content.decode()
+        self.assertIn('<tr data-level="0" data-t="f:Photon &lt;detectors&gt;" class="ps-folder">\n    <th scope="row" class="cl-rowlab"><button type="button" class="ps-tog" aria-expanded="true" title="Fold its rows"></button>'
+                      '<span title="Totals of the 2 types under it: needed and in HWDB summed, the earliest first dates, the latest last dates, the smallest float">Photon &lt;detectors&gt;</span></th>\n'
+                      '    <td data-col="type" class="cl-const ps-types"></td>\n    <td data-col="needed" class="cl-const ps-num">48,000</td>\n'
+                      '    <td data-col="n" class="cl-const ps-num" title="3 available">3</td>', html)
+        self.assertIn(f'<tr data-level="1" data-t="{SIPM}">', html)
+        self.assertEqual(html.count('class="ps-plan"'), 2)   # the two types' pencils; the folder has no plan
+        self.assertEqual(ProductionList.for_instance("dev").get(part_type_id=PTID).rows[0],
+                         {"type": "", "label": "Photon <detectors>", "level": 0, "plan_of": "", "folder": True})
+        self.assertEqual(api.get_component_type_images.call_count, 3)   # the list's type and the two listed types — none for the folder
+        with m1, m2:   # the overview, off the caches
+            ConsortiumTypeOverride.objects.create(instance="dev", part_type_id=PTID)
+            html = self.client.get("/hw/dev/status/").content.decode()
+        self.assertIn('data-t="f:Photon &lt;detectors&gt;" class="ps-folder">', html)
+
     def test_no_list_says_so_and_keeps_the_mark(self):
         ConsortiumTypeOverride.objects.create(instance="prod", part_type_id="D05700200099")
         api = _api(images={PTID: [], "D05700200099": []})
@@ -487,6 +556,49 @@ class ListPageTest(TestCase):
         self.assertEqual(json.loads(a.args[1].getvalue()), {"rows": [{"type": PDS, "label": "PDS modules", "level": 0},
                                                                      {"type": SIPM, "label": "SiPM boards", "level": 1, "plan_of": "Z00100600003"}]})
         self.assertEqual(ProductionList.for_instance("dev").get(part_type_id=PTID).rows[0]["type"], PDS)
+
+    def test_folders_and_groups(self):
+        # #232: a folder line saves as a folder row; the editor gets the folder rows and the groups endpoint
+        lst = {"rows": [{"folder": True, "label": "Boards", "level": 0}, {"type": SIPM, "level": 1}]}
+        api = _api(lst=lst)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(self.URL).content.decode()
+            data = json.loads(html.split('<script id="pl-data" type="application/json">')[1].split("</script>")[0])
+            self.assertEqual(data["rows"][0], {"type": "", "label": "Boards", "level": 0, "plan_of": "", "folder": True, "name": ""})
+            self.assertEqual(data["groups"], "/hw/dev/plan-list/groups/")
+            self.assertIn(f">[Boards]\n  {SIPM}</textarea>", html)
+            self.assertIn('id="pl-folder" title="Add a folder — a name to group rows under, with their totals">+ folder</button>', html)
+            self.client.post(self.URL, {"rows": f"[Cathode]\n  [Frames]\n    {SIPM}\n"})
+        self.assertEqual(json.loads(api.post_component_type_image.call_args.args[1].getvalue()),
+                         {"rows": [{"folder": True, "label": "Cathode", "level": 0}, {"folder": True, "label": "Frames", "level": 1},
+                                   {"type": SIPM, "label": "", "level": 2}]})
+
+    def test_groups_endpoint(self):
+        # #232: the mirror's systems and subsystems by name, and one's types — a system's by subsystem
+        from explore.models import HierarchyNode as H
+        kw = {"instance": "dev", "system_id": 80, "system_name": "FD-VD HVS"}
+        sys_ = H.objects.create(level=H.LEVEL_SYSTEM, name="FD-VD HVS", **kw)
+        subs = [H.objects.create(level=H.LEVEL_SUBSYSTEM, parent=sys_, subsystem_id=i, subsystem_name=n, name=n, **kw)
+                for i, n in ((1, "Cathode plane"), (2, "Field cage"), (3, "Nothing yet"))]
+        for sub, tid, n in ((subs[0], "D08000100002", "Frame"), (subs[0], "D08000100001", "Mesh"), (subs[1], "D08000200001", "Profile")):
+            H.objects.create(level=H.LEVEL_TYPE, parent=sub, subsystem_id=sub.subsystem_id, subsystem_name=sub.name, name=n, part_type_id=tid, **kw)
+        H.objects.create(level=H.LEVEL_SYSTEM, name="FD-VD HVS", instance="prod", system_id=80, system_name="FD-VD HVS")   # another instance: not listed
+        url, search = "/hw/dev/plan-list/groups/", "/hw/dev/search/api/"
+        self.assertNotIn("groups", self.client.get(search, {"q": "hvs"}).json())   # the instant search box asks for none
+        self.assertEqual(self.client.get(search, {"q": "hvs", "groups": 1}).json()["groups"],
+                         [{"node": sys_.pk, "name": "FD-VD HVS", "sub": "system D.080"}])
+        self.assertEqual(self.client.get(search, {"q": "cathode", "groups": 1}).json()["groups"],
+                         [{"node": subs[0].pk, "name": "Cathode plane", "sub": "subsystem of FD-VD HVS · D.080.001"}])
+        self.assertEqual(self.client.get(url, {"node": subs[0].pk}).json(),
+                         {"name": "Cathode plane", "subsystems": [],
+                          "types": [{"id": "D08000100001", "name": "Mesh"}, {"id": "D08000100002", "name": "Frame"}]})
+        tree = self.client.get(url, {"node": sys_.pk}).json()
+        self.assertEqual((tree["name"], tree["types"], [(s["name"], len(s["types"])) for s in tree["subsystems"]]),
+                         ("FD-VD HVS", [], [("Cathode plane", 2), ("Field cage", 1), ("Nothing yet", 0)]))
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.assertEqual(self.client.get(url, {"node": "x"}).status_code, 404)
+        self.assertEqual(self.client.get(url, {"node": H.objects.get(part_type_id="D08000100001").pk}).status_code, 404)   # a type is no group
 
     def test_editor_lists_the_other_tables(self):
         # #211: a row may show another table's plan of its type — the editor is told which tables list each type
@@ -704,6 +816,18 @@ class ResourcesPageTest(TestCase):
         self.assertNotIn("Submit to HWDB", html)
         self.assertEqual(api.get_component_type_images.call_count, 3)   # the type's own listing, one per distinct listed type
         self.assertEqual(api.get_image_response.call_count, 1)   # the list; none of the listed types' checklists
+
+    def test_folder_row(self):
+        # #232: a folder is a folding heading row — no type page, no checklists, no listing read for it
+        lst = {"rows": [{"folder": True, "label": "Boards", "level": 0}, {"type": SIPM, "level": 1}]}
+        api = self._api(lst=lst)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(self.URL).content.decode()
+        self.assertIn('<tr data-level="0" data-t="f:Boards" class="ps-folder">\n      <th scope="row" class="cl-rowlab"><button type="button" class="ps-tog" aria-expanded="true" title="Fold its rows"></button>Boards</th>\n'
+                      '      <td class="cl-const" colspan="4"></td>', html)
+        self.assertIn(f'<tr data-level="1" data-t="{SIPM}">', html)
+        self.assertEqual(api.get_component_type_images.call_count, 2)   # the list's type and the one listed type
 
     def test_bookmark_lists_the_page_on_the_profile(self):
         """Hajime 2026-11-20: ☆ Bookmark on the Resources page — a bookmark row with no checklist name, listed among My checklists on the profile and not cached for offline."""

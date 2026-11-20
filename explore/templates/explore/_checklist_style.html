@@ -136,6 +136,7 @@
   .ps-table .ps-tog.ps-tog-none { cursor: default; }
   .ps-table tr[data-level="0"] th.cl-rowlab { font-weight: 700; }
   .ps-table tr:not([data-level="0"]) th.cl-rowlab { font-weight: 500; }
+  .ps-table tr.ps-folder > th, .ps-table tr.ps-folder > td { background: var(--surface); }   /* #232: a folder — a name and the totals of what is under it */
   .ps-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 0 0 6px; }
   .ps-cols { display: inline-flex; gap: 2px 10px; flex-wrap: wrap; margin-left: auto; font-size: 12px; color: var(--dim); }
   .ps-cols label { white-space: nowrap; cursor: pointer; }

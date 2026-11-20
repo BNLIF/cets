@@ -57,13 +57,16 @@
   <div class="tbl-scroll"><table class="cl-table cl-gridlines ps-table rs-table" data-table="rs:{{ part_type_id }}">
     <thead><tr><th>Component</th><th>Type ID</th><th>QA/QC checklists</th><th>Procedures / Drawings</th><th>Items / Exec summaries</th></tr></thead>
     <tbody>
-    {% for r in rows %}<tr data-level="{{ r.level }}" data-t="{{ r.type }}">
+    {% for r in rows %}{% if r.folder %}<tr data-level="{{ r.level }}" data-t="{{ r.key }}" class="ps-folder">
+      <th scope="row" class="cl-rowlab"{% if r.level %} style="padding-left:{% widthratio r.level 1 18 %}px;"{% endif %}>{% if r.has_children %}<button type="button" class="ps-tog" aria-expanded="true" title="Fold its rows"></button>{% elif tree %}<span class="ps-tog ps-tog-none"></span>{% endif %}{{ r.label }}</th>
+      <td class="cl-const" colspan="4"></td>
+    </tr>{% else %}<tr data-level="{{ r.level }}" data-t="{{ r.key }}">
       <th scope="row" class="cl-rowlab"{% if r.level %} style="padding-left:{% widthratio r.level 1 18 %}px;"{% endif %}>{% if r.has_children %}<button type="button" class="ps-tog" aria-expanded="true" title="Fold its rows"></button>{% elif tree %}<span class="ps-tog ps-tog-none"></span>{% endif %}{% if r.level %}<span class="rs-arrow" aria-hidden="true">&#8627;</span>{% endif %}<a href="{{ r.type_url }}" title="the type’s page">{{ r.label }}</a></th>
       <td class="cl-const ps-types"><a href="{{ r.type_url }}" class="mono">{{ r.type }}</a></td>
       <td class="cl-const rs-list{% if not r.checklists %} ps-none{% endif %}">{% for c in r.checklists %}<a href="{{ c.url }}" title="Pick the item to fill this checklist on">{{ c.name }}</a>{% empty %}—{% endfor %}</td>
       <td class="cl-const rs-list{% if not r.procedures %} ps-none{% endif %}">{% for c in r.procedures %}<a href="{{ c.url }}">{{ c.name }}</a>{% empty %}—{% endfor %}</td>
       <td class="cl-const ps-num"><a href="{{ r.items_url }}?from={{ part_type_id }}" title="The type’s items — each one’s checklists, executive summary and linked parts">{{ r.n }} item{{ r.n|pluralize }}</a></td>
-    </tr>{% endfor %}
+    </tr>{% endif %}{% endfor %}
     </tbody>
   </table></div>
   {% include "explore/_production_tree_script.html" %}

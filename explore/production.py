@@ -28,6 +28,12 @@ row may name whose plan it shows (``plan_of``, another consortium's
 suffixed plan, for a type that only has those); and a part whose
 completed-by comes after its parent's is marked. A table of the project managers lists types across
 the consortia the same way — the plans stay where they are.
+
+#232 (Anselmo 2026-11-20): a list row may be a **folder** — a name and a
+level, no type (``{"folder": true, "label", "level"}``; ``[Name]`` in the
+text form) — to group rows; the table shows on it the totals of the type
+rows under it. A subsystem or a system is added from the editor as
+folders with their types copied under them.
 """
 
 from __future__ import annotations
@@ -133,13 +139,19 @@ def normalize_list(raw) -> list[dict]:
     id, in order. ``level`` (#211) is the row's depth: 0, or at most one
     more than the row above; ``plan_of`` names the consortium type whose
     plan of the type the row shows ("" = this table's own, else the
-    plain one)."""
+    plain one). A folder row (#232) has ``folder: True``, its name as
+    the label and ``type`` ""."""
     rows = (raw or {}).get("rows") if isinstance(raw, dict) else None
     out = []
     for r in rows or []:
         if isinstance(r, str):
             r = {"type": r}
         if not isinstance(r, dict):
+            continue
+        if r.get("folder"):
+            out.append({"type": "", "label": str(r.get("label") or "").strip() or "Folder",
+                        "level": _level(r.get("level"), out[-1]["level"] if out else -1),
+                        "plan_of": "", "folder": True})
             continue
         tid = str(r.get("type") or "").strip().upper()
         if not PTID_RX.match(tid):
@@ -160,24 +172,29 @@ def _level(v, prev: int) -> int:
 
 
 _LINE_RX = re.compile(r"^(?P<type>[A-Za-z]\d{11})(?:@(?P<plan_of>[A-Za-z]\d{11}))?(?:\s+(?P<label>.*))?$")
+_FOLDER_RX = re.compile(r"^\[(?P<label>.*\S.*)\]$")   # #232: a folder line, [Name]
 
 
 def parse_lines(text: str) -> tuple[list[dict], list[str]]:
     """The list page's text form → ``(rows, bad lines)``. One row per line:
     the type id, ``@consortium`` for the plan it shows, then the label;
     the level is the indentation (two spaces, or a tab, per level —
-    clamped to one under the row above)."""
+    clamped to one under the row above). ``[Name]`` is a folder (#232)."""
     rows, bad = [], []
     for raw in (text or "").splitlines():
         if not raw.strip():
             continue
         lead = raw[:len(raw) - len(raw.lstrip(" \t"))]
+        level = _level(lead.count("\t") + (lead.count(" ") + 1) // 2, rows[-1]["level"] if rows else -1)
+        f = _FOLDER_RX.match(raw.strip())
+        if f:
+            rows.append({"folder": True, "label": f.group("label").strip(), "level": level})
+            continue
         m = _LINE_RX.match(raw.strip())
         if not m:
             bad.append(raw.strip())
             continue
-        row = {"type": m.group("type").upper(), "label": (m.group("label") or "").strip(),
-               "level": _level(lead.count("\t") + (lead.count(" ") + 1) // 2, rows[-1]["level"] if rows else -1)}
+        row = {"type": m.group("type").upper(), "label": (m.group("label") or "").strip(), "level": level}
         if m.group("plan_of"):
             row["plan_of"] = m.group("plan_of").upper()
         rows.append(row)
@@ -186,8 +203,14 @@ def parse_lines(text: str) -> tuple[list[dict], list[str]]:
 
 def to_lines(rows: list[dict]) -> str:
     """The rows as the text form (the inverse of ``parse_lines``)."""
-    return "\n".join(("  " * (r.get("level") or 0)) + r["type"] + (f"@{r['plan_of']}" if r.get("plan_of") else "")
-                      + (f"  {r['label']}" if r.get("label") else "") for r in rows)
+    return "\n".join(("  " * (r.get("level") or 0)) + (f"[{r.get('label') or 'Folder'}]" if r.get("folder") else
+                      r["type"] + (f"@{r['plan_of']}" if r.get("plan_of") else "") + (f"  {r['label']}" if r.get("label") else ""))
+                      for r in rows)
+
+
+def type_ids(rows: list[dict]) -> list[str]:
+    """The types a list's rows name, in order — its folder rows (#232) have none."""
+    return [r["type"] for r in rows if r.get("type")]
 
 
 def plan_key(row: dict) -> str:
@@ -293,7 +316,7 @@ def row_plans(inst: str, rows: list[dict], consortium: str) -> dict[str, dict]:
     """The cached plans a table's rows show, by ``plan_key``: this
     consortium's own plan of each type over the plain one, and for a row
     naming ``plan_of`` that consortium's (else the plain one)."""
-    out = cached_plans(inst, [r["type"] for r in rows], consortium)
+    out = cached_plans(inst, type_ids(rows), consortium)
     for r in rows:
         if r.get("plan_of"):
             p = cached_plans(inst, [r["type"]], r["plan_of"]).get(r["type"])
@@ -434,34 +457,83 @@ def months_between(a, b) -> int | None:
     return (y[0] - x[0]) * 12 + (y[1] - x[1])
 
 
+def _values(r: dict, plans: dict[str, dict], cnt: dict[str, dict]) -> dict:
+    """A type row's values before they are formatted: its plan's and its count."""
+    p = plans.get(plan_key(r)) or {}
+    c = cnt.get(r["type"]) or {"n": 0, "by_status": []}
+    done, need = p.get("completed_by") or "", p.get("needed_by") or ""
+    return {"p": p, "needed": p.get("needed"), "n": c["n"], "by_status": list(c["by_status"]),
+            "fdone": p.get("first_completed_by") or "", "fneed": p.get("first_needed_by") or "",
+            "done": done, "need": need, "float": months_between(done, need)}   # the float: the last batch's pair
+
+
+def _totals(rows: list[dict], vals: list, i: int) -> dict:
+    """#232: a folder's values — the totals of the type rows under it, at
+    any depth: needed and the count summed, the first batch's dates the
+    earliest, the last batch's the latest, the float the smallest. A type
+    listed twice under it counts once (a plan once, by ``plan_key``)."""
+    lv = rows[i].get("level") or 0
+    types, keys, st, floats, needed = set(), set(), Counter(), [], None
+    dates = {k: [] for k in ("fdone", "fneed", "done", "need")}
+    for j in range(i + 1, len(rows)):
+        r, v = rows[j], vals[j]
+        if (r.get("level") or 0) <= lv:
+            break
+        if r.get("folder"):
+            continue
+        if r["type"] not in types:
+            types.add(r["type"])
+            st.update(dict(v["by_status"]))
+        if plan_key(r) in keys:
+            continue
+        keys.add(plan_key(r))
+        if v["needed"] is not None:
+            needed = (needed or 0) + v["needed"]
+        if v["float"] is not None:
+            floats.append(v["float"])
+        for k in dates:
+            if v[k]:
+                dates[k].append(v[k])
+    return {"p": {}, "needed": needed, "n": sum(st.values()), "by_status": st.most_common(), "n_types": len(types),
+            "fdone": min(dates["fdone"], default=""), "fneed": min(dates["fneed"], default=""),
+            "done": max(dates["done"], default=""), "need": max(dates["need"], default=""),
+            "float": min(floats, default=None)}
+
+
 def table(rows: list[dict], plans: dict[str, dict], cnt: dict[str, dict],
           nm: dict[str, str], today: date | None = None) -> list[dict]:
     """The consortium's table: per listed type its label (or name), plan
     values and count, shaped for the partial — ``month`` cells carry
-    ``past`` for the green tint, the count cell its status breakdown."""
+    ``past`` for the green tint, the count cell its status breakdown. A
+    folder row (#232) carries the totals of the type rows under it."""
     today = today or date.today()
     now = (today.year, today.month)
-    out = []
-    parents: list[dict] = []   # #211: the open ancestors, by level
+    vals = [None if r.get("folder") else _values(r, plans, cnt) for r in rows]
     for i, r in enumerate(rows):
-        tid = r["type"]
-        p = plans.get(plan_key(r)) or {}
-        c = cnt.get(tid) or {"n": 0, "by_status": []}
-        done, need = p.get("completed_by") or "", p.get("needed_by") or ""
-        fdone, fneed = p.get("first_completed_by") or "", p.get("first_needed_by") or ""
-        fl = months_between(done, need)   # the float: the last batch's pair
+        if r.get("folder"):
+            vals[i] = _totals(rows, vals, i)
+    out = []
+    parents: list[dict | None] = []   # #211: the open ancestors, by level
+    path: list[str] = []              # their labels — a folder's fold key
+    for i, r in enumerate(rows):
+        tid, v, folder = r["type"], vals[i], bool(r.get("folder"))
+        p = v["p"]
+        done, need, fdone, fneed = v["done"], v["need"], v["fdone"], v["fneed"]
         level = r.get("level") or 0
-        del parents[level:]
+        del parents[level:], path[level:]
         parent = parents[-1] if parents else None
+        label = r.get("label") or nm.get(tid) or tid
         out.append({
-            "type": tid, "label": r.get("label") or nm.get(tid) or tid,
+            "type": tid, "label": label,
+            "folder": folder, "n_types": v.get("n_types", 0),
+            "key": "f:" + "/".join(path + [label]) if folder else tid,   # what the fold is remembered by
             "level": level, "plan_of": r.get("plan_of") or "",
             "has_children": i + 1 < len(rows) and (rows[i + 1].get("level") or 0) > level,
-            "dep_warn": _after_parent("Last completed by", done, parent, "completed_by"),
-            "first_dep_warn": _after_parent("First completed by", fdone, parent, "first_completed_by"),
+            "dep_warn": "" if folder else _after_parent("Last completed by", done, parent, "completed_by"),
+            "first_dep_warn": "" if folder else _after_parent("First completed by", fdone, parent, "first_completed_by"),
             "has_plan": plan_key(r) in plans,
-            "needed": "" if p.get("needed") is None else f"{p['needed']:,}",
-            "n": f"{c['n']:,}", "by_status": ", ".join(f"{n} {st}" for st, n in c["by_status"]),
+            "needed": "" if v["needed"] is None else f"{v['needed']:,}",
+            "n": f"{v['n']:,}", "by_status": ", ".join(f"{n} {st}" for st, n in v["by_status"]),
             "first_completed_by": month_label(fdone), "first_completed_past": bool(_ym(fdone)) and _ym(fdone) <= now,
             "first_completed_src": p.get("first_completed_src") or "",
             "first_needed_by": month_label(fneed), "first_needed_past": bool(_ym(fneed)) and _ym(fneed) <= now,
@@ -471,11 +543,13 @@ def table(rows: list[dict], plans: dict[str, dict], cnt: dict[str, dict],
             "needed_by": month_label(need), "needed_past": bool(_ym(need)) and _ym(need) <= now,
             "needed_src": p.get("needed_src") or "",
             "p6_missing": "; ".join(p.get("p6_missing") or []),
-            "float": "" if fl is None else str(fl),
+            "float": "" if v["float"] is None else str(v["float"]),
             "comment": p.get("comment") or "",
             "updated_by": p.get("updated_by") or "", "updated": p.get("updated") or "",
         })
-        parents.append({"label": out[-1]["label"], "completed_by": done, "first_completed_by": fdone})
+        # a folder is no assembly: the rows in it are checked against the assembly it sits under, if any
+        parents.append(parent if folder else {"label": label, "completed_by": done, "first_completed_by": fdone})
+        path.append(label)
     return out
 
 
@@ -496,13 +570,19 @@ def resources_rows(rows: list[dict], nm: dict[str, str], info: dict[str, dict], 
     and ``procedures`` (names, from ``info[tid]``), whether it has an ES
     config (``es``) and its item count in the mirror (``n``)."""
     out = []
+    path: list[str] = []
     for i, r in enumerate(rows):
         tid, level = r["type"], r.get("level") or 0
         inf = info.get(tid) or {}
-        out.append({"type": tid, "label": r.get("label") or nm.get(tid) or tid, "level": level,
+        label = r.get("label") or nm.get(tid) or tid
+        del path[level:]
+        out.append({"type": tid, "label": label, "level": level,
+                    "folder": bool(r.get("folder")),   # #232: a heading row, no type behind it
+                    "key": "f:" + "/".join(path + [label]) if r.get("folder") else tid,
                     "has_children": i + 1 < len(rows) and (rows[i + 1].get("level") or 0) > level,
                     "checklists": list(inf.get("checklists") or []), "procedures": list(inf.get("procedures") or []),
                     "es": bool(inf.get("es")), "n": (counts.get(tid) or {}).get("n", 0)})
+        path.append(label)
     return out
 
 
@@ -525,6 +605,6 @@ def summary(rows: list[dict], plans: dict[str, dict], today: date | None = None)
     today = today or date.today()
     this_month = f"{today.year:04d}-{today.month:02d}"
     ps = [plans[plan_key(r)] for r in rows if plan_key(r) in plans]
-    return {"n": len(rows),
+    return {"n": len(type_ids(rows)),
             "needed_by": min((p["needed_by"] for p in ps if p["needed_by"]), default=""),
             "due": sum(1 for p in ps if p["completed_by"] and p["completed_by"] <= this_month)}

@@ -56,7 +56,7 @@
   .pl-hint { color: var(--faint); font-size: 12px; margin: 8px 0 0; }
   .pl-none { color: var(--dim); font-size: 13px; padding: 8px 0; }
 </style>
-{# #200: a consortium type's component list — the types its production-status table reports, one per line, kept as Production_list_<type>.json on the type in HWDB (every version kept); architects edit. #211: a row editor over the same text — a type picker off the mirror, the label, whose plan the row shows, ▲▼ to reorder (with its rows), ← → for the level, "+ sub-components" off the type's positions; "+ under" puts the next picked type under the row (Chao 2026-11-04: a dependency need not be an HWDB position); "Text" shows the lines (indentation = level, @consortium = whose plan). #}
+{# #200: a consortium type's component list — the types its production-status table reports, one per line, kept as Production_list_<type>.json on the type in HWDB (every version kept); architects edit. #211: a row editor over the same text — a type picker off the mirror, the label, whose plan the row shows, ▲▼ to reorder (with its rows), ← → for the level, "+ sub-components" off the type's positions; "+ under" puts the next picked type under the row (Chao 2026-11-04: a dependency need not be an HWDB position); "Text" shows the lines (indentation = level, @consortium = whose plan). #232 (Anselmo 2026-11-20): a row may be a folder — a name, no type ("+ folder"; [Name] in the text) — and the picker also finds the mirror's subsystems and systems: picking one adds a folder named after it with its types under it (a system: a folder per subsystem), a copy the rows are then free of; a folder's ✕ takes its rows with it, after asking. #}
 
 <div class="es-page">
   <div class="es-crumbs">
@@ -66,7 +66,7 @@
   </div>
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
   <h1>Component list <span class="mono" style="font-size:.75em; font-weight:400; color:var(--dim);">{{ part_type_id }}</span></h1>
-  <p class="es-sub">{{ type_name }} · the component types its production-status table reports, in order; a row under another is a part of it.</p>
+  <p class="es-sub">{{ type_name }} · the component types its production-status table reports, in order; a row under another is a part of it, or a member of the folder above.</p>
   {% if role_gate %}<div class="banner banner-warn" style="margin: 0 0 14px;">&#9888; {% if role_gate.required %}Saving onto this type needs one of its HWDB roles <b>{{ role_gate.required|join:", " }}</b>. Your account holds {% if role_gate.mine %}<b>{{ role_gate.mine|join:", " }}</b>{% else %}no roles{% endif %}, so the list cannot be edited here. <a href="{% url 'explore:docs_permissions' %}" target="_blank" rel="noopener">Who may write what &#x2197;</a>{% else %}This type lists no HWDB roles, so HWDB refuses every write onto it. An HWDB administrator must add roles to the type first. <a href="{% url 'explore:docs_permissions' %}" target="_blank" rel="noopener">Who may write what &#x2197;</a>{% endif %}</div>{% endif %}
 
   <div class="es-card">
@@ -78,12 +78,13 @@
         <table class="pl-ed"><thead><tr><th>Component</th><th>Label</th><th>Plan</th><th></th></tr></thead><tbody id="pl-body"></tbody></table>
         <p class="pl-none" id="pl-none" hidden>No rows yet — add a type below.</p>
         <div class="pl-add">
-          <input type="text" id="pl-q" placeholder="add a type — name or id" autocomplete="off" spellcheck="false">
+          <input type="text" id="pl-q" placeholder="add a type, subsystem or system — name or id" autocomplete="off" spellcheck="false">
           <div class="pl-hits" id="pl-hits" hidden></div>
+          <button type="button" class="pl-ib" id="pl-folder" title="Add a folder — a name to group rows under, with their totals">+ folder</button>
           <button type="button" class="pl-ib pl-mode" id="pl-text">Text</button>
         </div>
       </div>
-      <textarea class="pl-rows" name="rows" id="pl-rows" spellcheck="false" hidden placeholder="D00400300001  SiPM boards&#10;  Z10400100001  PDS modules&#10;one type per line: the type id, then a label (the type’s name when left out); indent a line to put it under the one above; id@consortium shows that consortium’s plan">{{ text }}</textarea>
+      <textarea class="pl-rows" name="rows" id="pl-rows" spellcheck="false" hidden placeholder="D00400300001  SiPM boards&#10;  Z10400100001  PDS modules&#10;one type per line: the type id, then a label (the type’s name when left out); indent a line to put it under the one above; id@consortium shows that consortium’s plan; [Name] is a folder">{{ text }}</textarea>
       <input type="text" class="pl-reason" name="reason" placeholder="reason — kept with this version">
       <div class="pl-actions">
         <button type="submit" class="es-btn primary">Save list to HWDB</button>
@@ -95,8 +96,9 @@
     (function () {
       // #211: the row editor. The rows live in `rows` ({type, label, level, plan_of}); the textarea is the
       // form's value, written from the rows on submit (and shown in Text mode, parsed back when it closes).
+      // #232: a folder row is {folder: true, type: "", label: its name, level}.
       var D = JSON.parse(document.getElementById("pl-data").textContent);
-      var rows = D.rows.map(function (r) { return {type: r.type, label: r.label || "", level: r.level || 0, plan_of: r.plan_of || ""}; });
+      var rows = D.rows.map(function (r) { return {type: r.type, label: r.label || "", level: r.level || 0, plan_of: r.plan_of || "", folder: !!r.folder}; });
       var names = {}; D.rows.forEach(function (r) { if (r.name) names[r.type] = r.name; });
       var body = document.getElementById("pl-body"), none = document.getElementById("pl-none"), ta = document.getElementById("pl-rows");
       var ed = document.getElementById("pl-editor"), q = document.getElementById("pl-q"), hits = document.getElementById("pl-hits");
@@ -112,40 +114,43 @@
       function fresh(t, level) {   // a new row: it shows the one other table's plan when exactly one lists the type (a table reuses plans, it does not fork them)
         var tb = tables(t); return {type: t, label: "", level: level, plan_of: tb.length === 1 ? tb[0].id : ""};
       }
+      function folder(name, level) { return {folder: true, type: "", label: name, level: level, plan_of: ""}; }
       function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]; }); }
       function draw() {
         clamp();
         none.hidden = rows.length > 0;
         if (addUnder !== null && !rows[addUnder]) addUnder = null;
-        q.placeholder = addUnder === null ? "add a type — name or id" : "add a type under " + (names[rows[addUnder].type] || rows[addUnder].type);
+        q.placeholder = addUnder === null ? "add a type, subsystem or system — name or id" : "add under " + (rows[addUnder].folder ? rows[addUnder].label : names[rows[addUnder].type] || rows[addUnder].type);
         body.innerHTML = rows.map(function (r, i) {
-          var tb = tables(r.type);
+          var tb = r.folder ? [] : tables(r.type);
           var sel = tb.length ? '<select data-k="plan_of" title="Whose plan this row shows"><option value="">this table</option>' + tb.map(function (x) {
             return '<option value="' + x.id + '"' + (x.id === r.plan_of ? " selected" : "") + ">" + esc(x.name) + "</option>"; }).join("") + "</select>" : "";
           return '<tr data-i="' + i + '"><td class="pl-ty" style="padding-left:' + (r.level * 18) + 'px">' +
-            (names[r.type] ? esc(names[r.type]) : '<span class="pl-dim">not in the mirror</span>') + '<span class="mono">' + r.type + "</span></td>" +
-            '<td><input type="text" data-k="label" value="' + esc(r.label) + '" placeholder="' + esc(names[r.type] || "") + '"></td>' +
+            (r.folder ? '<span class="pl-dim">folder</span>' : (names[r.type] ? esc(names[r.type]) : '<span class="pl-dim">not in the mirror</span>') + '<span class="mono">' + r.type + "</span>") + "</td>" +
+            '<td><input type="text" data-k="label" value="' + esc(r.label) + '" placeholder="' + esc(r.folder ? "folder name" : names[r.type] || "") + '"></td>' +
             "<td>" + sel + "</td>" +
             '<td class="pl-btns"><span class="pl-grp">' +
             '<button type="button" class="pl-ib" data-do="up" title="Move up"' + (sibling(i, -1) < 0 ? " disabled" : "") + ">&#9650;</button> " +
             '<button type="button" class="pl-ib" data-do="down" title="Move down"' + (sibling(i, 1) < 0 ? " disabled" : "") + ">&#9660;</button> " +
             '<button type="button" class="pl-ib" data-do="out" title="One level up"' + (r.level ? "" : " disabled") + ">&#8592;</button> " +
             '<button type="button" class="pl-ib" data-do="in" title="Under the row above"' + (i && rows[i - 1].level >= r.level ? "" : " disabled") + ">&#8594;</button></span> " +
-            '<span class="pl-grp"><button type="button" class="pl-ib" data-do="add" title="Add a type under it — pick it in the box below" aria-pressed="' + (addUnder === i ? "true" : "false") + '">+ under</button> ' +
-            '<button type="button" class="pl-ib" data-do="sub" title="Add the types its positions take, under it">+ sub-components</button> ' +
-            '<button type="button" class="pl-ib" data-do="del" title="Remove">&#10005;</button></span></td></tr>';
+            '<span class="pl-grp"><button type="button" class="pl-ib" data-do="add" title="Add under it — pick it in the box below" aria-pressed="' + (addUnder === i ? "true" : "false") + '">+ under</button> ' +
+            (r.folder ? "" : '<button type="button" class="pl-ib" data-do="sub" title="Add the types its positions take, under it">+ sub-components</button> ') +
+            '<button type="button" class="pl-ib" data-do="del" title="' + (r.folder ? "Remove, with the rows under it" : "Remove") + '">&#10005;</button></span></td></tr>';
         }).join("");
       }
       function lines() {
-        return rows.map(function (r) { return "  ".repeat(r.level) + r.type + (r.plan_of ? "@" + r.plan_of : "") + (r.label ? "  " + r.label : ""); }).join("\n");
+        return rows.map(function (r) { return "  ".repeat(r.level) + (r.folder ? "[" + (r.label.trim() || "Folder") + "]" : r.type + (r.plan_of ? "@" + r.plan_of : "") + (r.label ? "  " + r.label : "")); }).join("\n");
       }
       function parse(text) {
         var out = [];
         text.split("\n").forEach(function (raw) {
           if (!raw.trim()) return;
           var lead = raw.match(/^[ \t]*/)[0], m = raw.trim().match(/^([A-Za-z]\d{11})(?:@([A-Za-z]\d{11}))?(?:\s+(.*))?$/);
-          if (!m) return;
           var lv = (lead.match(/\t/g) || []).length + Math.floor(((lead.match(/ /g) || []).length + 1) / 2);
+          var f = raw.trim().match(/^\[(.*\S.*)\]$/);
+          if (f) { out.push(folder(f[1].trim(), lv)); return; }
+          if (!m) return;
           out.push({type: m[1].toUpperCase(), plan_of: (m[2] || "").toUpperCase(), label: (m[3] || "").trim(), level: lv});
         });
         return out;
@@ -173,7 +178,10 @@
         var i = +b.closest("tr").dataset.i, r = rows[i], n = block(i), j;
         if (b.dataset.do === "add") { addUnder = addUnder === i ? null : i; draw(); q.focus(); return; }
         addUnder = null;
-        if (b.dataset.do === "del") { rows.splice(i, 1); for (j = i; j < i + n - 1; j++) rows[j].level--; }   // its rows stay, one level up
+        if (b.dataset.do === "del" && r.folder) {   // #232: a folder goes with its rows
+          if (n > 1 && !confirm("Remove “" + (r.label || "folder") + "” and the " + (n - 1) + " row" + (n > 2 ? "s" : "") + " under it?")) return;
+          rows.splice(i, n);
+        } else if (b.dataset.do === "del") { rows.splice(i, 1); for (j = i; j < i + n - 1; j++) rows[j].level--; }   // its rows stay, one level up
         if (b.dataset.do === "in") { for (j = i; j < i + n; j++) rows[j].level++; }
         if (b.dataset.do === "out") { for (j = i; j < i + n; j++) rows[j].level--; }
         if (b.dataset.do === "up" || b.dataset.do === "down") {
@@ -202,35 +210,55 @@
         clearTimeout(timer); var v = q.value.trim();
         if (v.length < 2) { hits.hidden = true; return; }
         timer = setTimeout(function () {
-          fetch(D.search + "?q=" + encodeURIComponent(v), {credentials: "same-origin"}).then(function (r) { return r.json(); }).then(function (j) {
-            var ts = j.types || [];
+          fetch(D.search + "?groups=1&q=" + encodeURIComponent(v), {credentials: "same-origin"}).then(function (r) { return r.json(); }).then(function (j) {
+            var ts = j.types || [], gs = j.groups || [];   // #232: the subsystems and systems first, then the types
             if (!ts.length && ID.test(v.toUpperCase())) ts = [{part_type_id: v.toUpperCase(), name: "", sub: "not in the mirror"}];
-            hits.innerHTML = ts.map(function (t) { return '<button type="button" data-t="' + t.part_type_id + '" data-n="' + esc(t.name) + '">' + esc(t.name || t.part_type_id) + '<span class="mono">' + t.part_type_id + '</span><span class="pl-sub">' + esc(t.sub || "") + "</span></button>"; }).join("");
-            hits.hidden = !ts.length;
+            hits.innerHTML = gs.map(function (g) { return '<button type="button" data-g="' + g.node + '">' + esc(g.name) + '<span class="pl-sub">' + esc(g.sub) + " — with its types</span></button>"; }).join("") + ts.map(function (t) { return '<button type="button" data-t="' + t.part_type_id + '" data-n="' + esc(t.name) + '">' + esc(t.name || t.part_type_id) + '<span class="mono">' + t.part_type_id + '</span><span class="pl-sub">' + esc(t.sub || "") + "</span></button>"; }).join("");
+            hits.hidden = !ts.length && !gs.length;
           }).catch(function () { hits.hidden = true; });
         }, 200);
       });
       q.addEventListener("keydown", function (e) {
-        if (e.key === "Enter") { e.preventDefault(); var f = hits.querySelector("button"); if (f && !hits.hidden) f.click(); }
+        if (e.key === "Enter") { e.preventDefault(); var f = hits.querySelector("button[data-t]"); if (f && !hits.hidden) f.click(); }   // the first type; a subsystem or system is clicked
         if (e.key === "Escape") { hits.hidden = true; if (addUnder !== null) { addUnder = null; draw(); } }
       });
+      function insert(add) {   // rows whose levels start at 0, put under the "+ under" row or at the end
+        var base = addUnder !== null ? rows[addUnder].level + 1 : 0, at = addUnder !== null ? addUnder + block(addUnder) : rows.length;
+        add.forEach(function (r) { r.level += base; });
+        rows.splice.apply(rows, [at, 0].concat(add));
+        q.value = ""; hits.hidden = true; draw();
+        return at;
+      }
       hits.addEventListener("click", function (e) {
+        var g = e.target.closest("button[data-g]");
+        if (g) {   // #232: a subsystem — a folder with its types; a system — a folder per subsystem under its own
+          g.disabled = true;
+          fetch(D.groups + "?node=" + g.dataset.g, {credentials: "same-origin"}).then(function (r) { return r.json(); }).then(function (j) {
+            var add = [folder(j.name, 0)];
+            function put(ts, lv) { ts.forEach(function (t) { names[t.id] = t.name; add.push(fresh(t.id, lv)); }); }
+            put(j.types, 1);
+            j.subsystems.forEach(function (s) { if (s.types.length) { add.push(folder(s.name, 1)); put(s.types, 2); } });
+            insert(add); q.focus();
+          }).catch(function () { g.disabled = false; });
+          return;
+        }
         var b = e.target.closest("button[data-t]"); if (!b) return;
         if (b.dataset.n) names[b.dataset.t] = b.dataset.n;
-        var row = fresh(b.dataset.t, 0);
-        if (addUnder !== null) { row.level = rows[addUnder].level + 1; rows.splice(addUnder + block(addUnder), 0, row); }
-        else rows.push(row);
-        q.value = ""; hits.hidden = true; draw(); q.focus();
+        insert([fresh(b.dataset.t, 0)]); q.focus();
+      });
+      document.getElementById("pl-folder").addEventListener("click", function () {
+        var at = insert([folder("", 0)]);
+        body.querySelector('tr[data-i="' + at + '"] input[data-k="label"]').focus();
       });
       document.addEventListener("click", function (e) { if (!e.target.closest(".pl-add")) hits.hidden = true; });
       // Text mode: the lines themselves, parsed back on return
-      var textMode = false, modeBtn = document.getElementById("pl-text");
+      var textMode = false, modeBtn = document.getElementById("pl-text"), fb = document.getElementById("pl-folder");
       modeBtn.addEventListener("click", function () {
         textMode = !textMode;
-        if (textMode) { ta.value = lines(); ta.hidden = false; ed.querySelector("table").hidden = true; none.hidden = true; q.hidden = true; modeBtn.textContent = "Rows"; }
+        if (textMode) { ta.value = lines(); ta.hidden = false; ed.querySelector("table").hidden = true; none.hidden = true; q.hidden = fb.hidden = true; modeBtn.textContent = "Rows"; }
         else {
           rows = parse(ta.value);
-          learn(rows.map(function (r) { return r.type; })).then(function () { ta.hidden = true; ed.querySelector("table").hidden = false; q.hidden = false; modeBtn.textContent = "Text"; draw(); });
+          learn(rows.filter(function (r) { return !r.folder; }).map(function (r) { return r.type; })).then(function () { ta.hidden = true; ed.querySelector("table").hidden = false; q.hidden = fb.hidden = false; modeBtn.textContent = "Text"; draw(); });
         }
       });
       document.getElementById("pl-form").addEventListener("submit", function () { if (!textMode) ta.value = lines(); });
@@ -240,7 +268,7 @@
   {% elif rows %}
     <table class="pl-list">
       <thead><tr><th>Type ID</th><th>Label</th><th>Type</th><th>Plan</th></tr></thead>
-      <tbody>{% for r in rows %}<tr><td class="mono"{% if r.level %} style="padding-left:{% widthratio r.level 1 18 %}px;"{% endif %}>{{ r.type }}</td><td>{{ r.label|default:"—" }}</td><td class="{% if not r.name %}pl-dim{% endif %}">{{ r.name|default:"not in the mirror" }}</td><td class="mono">{{ r.plan_of|default:"" }}</td></tr>{% endfor %}</tbody>
+      <tbody>{% for r in rows %}<tr><td class="mono"{% if r.level %} style="padding-left:{% widthratio r.level 1 18 %}px;"{% endif %}>{{ r.type }}</td><td>{{ r.label|default:"—" }}</td><td class="{% if not r.name %}pl-dim{% endif %}">{% if r.folder %}folder{% else %}{{ r.name|default:"not in the mirror" }}{% endif %}</td><td class="mono">{{ r.plan_of|default:"" }}</td></tr>{% endfor %}</tbody>
     </table>
   {% else %}
     <p style="margin:0; color:var(--dim); font-size:13.5px;">No component list on this type yet.</p>

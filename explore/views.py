@@ -530,7 +530,7 @@ def _production_status_list(request, inst) -> list[dict]:
             level=HierarchyNode.LEVEL_TYPE, part_type_id=tid).first()
         lst = ProductionList.for_instance(inst).filter(part_type_id=tid).first()
         rows = lst.rows if lst else []
-        ids = [r["type"] for r in rows]
+        ids = production.type_ids(rows)
         plans = production.apply_p6(production.row_plans(inst, rows, tid))
         table = production.table(rows, plans, production.counts(inst, ids),
                                  production.names(inst, ids), today) if lst else None
@@ -573,10 +573,12 @@ def explore_production_status_view(request, part_type_id):
     rows, _vs = production.read_list(api, part_type_id)
     has_list = rows is not None
     rows = rows or []
-    ids = [r["type"] for r in rows]
+    ids = production.type_ids(rows)
     plans, listings = {}, {}
     for r in rows:
         tid = r["type"]
+        if not tid:   # #232: a folder row — nothing of its own in HWDB
+            continue
         if tid not in listings:
             # #206: this consortium's own plan of the type first (a type two
             # consortia list), else the type's plain plan — both caches refreshed
@@ -794,14 +796,14 @@ def explore_production_list_view(request, part_type_id):
                                    f"dropdown on its type page to list it on the Production status page.")
         return redirect(nxt or _rev(request, "explore:production_status", args=[part_type_id]))
 
-    ids = [r["type"] for r in rows or []]
+    ids = production.type_ids(rows or [])
     nm = production.names(inst, ids)
     # #211: the row editor — the other tables (consortium types with a cached
     # list) so a row can pick whose plan it shows, the types' names
     lists = list(ProductionList.for_instance(inst).exclude(part_type_id=part_type_id))
     lnm = production.names(inst, [lst.part_type_id for lst in lists])
     others = [{"id": lst.part_type_id, "name": lnm.get(lst.part_type_id) or lst.part_type_id,
-               "types": sorted({r["type"] for r in lst.rows})} for lst in lists]
+               "types": sorted(set(production.type_ids(lst.rows)))} for lst in lists]
     return render(request, "explore/production_list.html", {
         "active_nav": "production",
         "sidebar": navigation.sidebar_tree(inst, {}),
@@ -813,6 +815,7 @@ def explore_production_list_view(request, part_type_id):
         "text": production.to_lines(rows or []),
         "editor": {"rows": [{**r, "name": nm.get(r["type"], "")} for r in rows or []], "tables": others,
                    "search": _rev(request, "explore:search_api"),
+                   "groups": _rev(request, "explore:production_groups"),   # #232: the mirror's subsystems and systems
                    "positions": _rev(request, "explore:type_positions", args=["X00000000000"]),
                    "summary": _rev(request, "explore:type_summary")},
         "n_versions": len(vs),
@@ -826,6 +829,28 @@ def explore_production_list_view(request, part_type_id):
 
 
 _PTID_RX = re.compile(r"^[A-Z]\d{11}$")
+
+
+@login_not_required
+@fnal_login_required
+def explore_production_groups_view(request):
+    """#232 (Anselmo 2026-11-20): the component list editor adds a whole
+    subsystem or system at once — ``?node=<pk>`` (a hit of the instant
+    search's ``groups``) answers that one's component types, a system's
+    by subsystem: ``{name, types, subsystems: [{name, types}]}``, each
+    type ``{id, name}``. Mirror only."""
+    nodes = HierarchyNode.for_instance(instance_of(request))
+    types = lambda sub: [{"id": t.part_type_id, "name": t.name}   # noqa: E731
+                         for t in nodes.filter(parent=sub, level=HierarchyNode.LEVEL_TYPE).order_by("part_type_id")]
+    pk = request.GET.get("node") or ""
+    node = nodes.filter(pk=pk if pk.isdigit() else 0).exclude(level=HierarchyNode.LEVEL_TYPE).first()
+    if node is None:
+        return JsonResponse({"error": "no such system or subsystem"}, status=404)
+    if node.level == HierarchyNode.LEVEL_SUBSYSTEM:
+        return JsonResponse({"name": node.name, "types": types(node), "subsystems": []})
+    subs = nodes.filter(parent=node, level=HierarchyNode.LEVEL_SUBSYSTEM).order_by("subsystem_id")
+    return JsonResponse({"name": node.name, "types": [],
+                         "subsystems": [{"name": s.name, "types": types(s)} for s in subs]})
 
 
 def _type_resources(api, inst, tid: str) -> dict:
@@ -872,10 +897,12 @@ def explore_production_resources_view(request, part_type_id):
         level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
     rows, _vs = production.read_list(api, part_type_id)
     rows = rows or []
-    ids = [r["type"] for r in rows]
+    ids = production.type_ids(rows)
     info = {tid: _resource_names(_type_resources(api, inst, tid)) for tid in set(ids)}   # one listing per distinct type
     table = production.resources_rows(rows, production.names(inst, ids), info, production.counts(inst, ids))
     for r in table:
+        if r["folder"]:
+            continue
         r["type_url"] = _rev(request, "explore:home") + f"?node={r['type']}"
         r["items_url"] = _rev(request, "explore:type_items", args=[r["type"]])
         r["checklists"] = [{"name": c, "url": _rev(request, "explore:type_checklist", args=[r["type"], c])} for c in r["checklists"]]
@@ -9013,7 +9040,9 @@ def explore_profile_view(request):
 def explore_search_api_view(request):
     """JSON results for the instant search box — component types + mirrored
     parts matching ``q`` (substring, case-insensitive), plus a direct-open hint
-    when ``q`` looks like a full part id. Reads only the mirror."""
+    when ``q`` looks like a full part id. Reads only the mirror. ``groups=1``
+    (#232, the component list editor) adds the systems and subsystems
+    matching by name."""
     q = (request.GET.get("q") or "").strip()
     if len(q) < 2:
         return JsonResponse({"types": [], "parts": [], "direct_part": None})
@@ -9044,9 +9073,17 @@ def explore_search_api_view(request):
                                   .values_list("part_id", "part_type_id", "serial_number")[:25])
     ]
     direct = q if _PID_RE.match(q) else None
+    groups = [
+        {"node": n.pk, "name": n.name,
+         "sub": (f"system {n.project}.{n.system_id:03d}" if n.level == HierarchyNode.LEVEL_SYSTEM
+                 else f"subsystem of {n.system_name} · {n.project}.{n.system_id:03d}.{n.subsystem_id or 0:03d}")}
+        for n in (HierarchyNode.for_instance(inst).exclude(level=HierarchyNode.LEVEL_TYPE).filter(name__icontains=q)
+                  .order_by("-level", "system_name", "name")[:8])   # systems before subsystems
+    ] if request.GET.get("groups") else None
     return JsonResponse({
         "types": types, "parts": parts, "direct_part": direct,
         "direct_part_url": _rev(request, "explore:part", args=[direct]) if direct else None,
+        **({"groups": groups} if groups is not None else {}),
     })
 
 

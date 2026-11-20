@@ -25,6 +25,7 @@ urlpatterns = [
     path("status/<str:part_type_id>/resources/", views.explore_production_resources_view, name="production_resources"),   # #213: the list as a table of resources, generated
     path("exec-summary/<str:part_type_id>/", views.explore_type_es_view, name="type_es"),   # #213: the type's items, each with its ES
     path("plan/<str:part_type_id>/", views.explore_production_plan_view, name="production_plan"),   # #200: a type's production plan + history
+    path("plan-list/groups/", views.explore_production_groups_view, name="production_groups"),   # #232: the mirror's systems and subsystems, for the list editor
     path("plan-list/<str:part_type_id>/", views.explore_production_list_view, name="production_list"),   # #200: a consortium type's component list
     path("type-positions/<str:part_type_id>/", views.explore_type_positions_view,
          name="type_positions"),
