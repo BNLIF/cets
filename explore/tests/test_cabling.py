@@ -399,7 +399,12 @@ class CableWritesTest(TestCase):
         self.assertIn('data-expected="Top CRP bias warm cable"', html)
         self.assertEqual(html.count('name="remove" value='), 3)
         self.assertIn('data-open="cc-rm-all">Remove all</button>', html)
-        self.assertIn("Remove the 3 connections on this device?", html)
+        dlg = html.split('<dialog class="cc-dlg" id="cc-rm-all">', 1)[1].split("</dialog>", 1)[0]
+        self.assertIn(f'⚠ This removes all 3 connections on <span class="mono">{FLANGE}</span> from HWDB. It cannot be undone', dlg)
+        for n, pos, cable in ((1, "ISH", INSTALLED), (2, "OSH", ONE_END), (3, "FCT.T", MANY)):    # what goes, named
+            self.assertIn(f'<b>{n} · {pos}</b><span class="mono">{cable}</span>', dlg)
+        self.assertIn('data-close autofocus>Cancel</button>', dlg)                 # Enter cancels
+        self.assertIn('name="remove_all" value="1">Remove all 3</button>', dlg)
         self.assertIn(f'<td class="cc-bun"><a class="mono" href="/hw/dev/part/{TRAY}/">{TRAY}</a>'
                       '<span class="cc-l2">Top CRP bias warm cable bundle · also at 2</span></td>', html)
         self.assertIn('id="cc-bundle" name="bundle" value=""', html)

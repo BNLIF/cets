@@ -94,6 +94,11 @@
   .cc-ends label.used { color: var(--dim); }
   .cc-ends.cc-opts label { font-family: inherit; }
   .cc-err { color: var(--bad); }
+  /* Remove all: the one step that undoes many — its opener and its confirm are told apart from every other button */
+  .cc-page .es-btn.quiet.cc-danger, .cc-page .es-btn.quiet.cc-danger:hover { color: var(--bad); border-color: var(--bad); }
+  .cc-page .es-btn.cc-danger:not(.quiet) { background: var(--bad); border-color: var(--bad); color: #fff; }
+  .cc-warn { margin: 0; }
+  .cc-rm-list { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; max-height: 30vh; overflow: auto; font-size: 13px; }
   /* under 900px the Bundle / tray column folds into the cable's cell */
   @media (max-width: 899px) { .cc-table .cc-bun { display: none; } .cc-bun-in { display: block; } }
 
@@ -191,7 +196,7 @@
     <span>{{ device.n_connected }} / {{ device.rows|length }} connected</span>
     <div class="cc-bar" aria-hidden="true"><i style="width: {% widthratio device.n_connected device.rows|length 100 %}%"></i></div>
     <span class="cc-grow"></span>
-    {% if can_write and device.n_connected %}<button type="button" class="es-btn quiet" data-open="cc-rm-all">Remove all</button>{% endif %}
+    {% if can_write and device.n_connected %}<button type="button" class="es-btn quiet cc-danger" data-open="cc-rm-all">Remove all</button>{% endif %}
     {% if device.n_connected %}<button type="button" class="es-btn quiet" data-print="all" data-count="{{ device.n_connected }}" data-labelled="{{ device.n_labelled }}">Print labels</button>{% endif %}
   </div>
   {% if bundle %}<p class="cc-l2">Bundle / tray <a class="mono" href="{% url 'explore:part' part_id=bundle.part_id %}">{{ bundle.part_id }}</a> · {{ bundle.type_name }} · {% if bundle.cables %}{{ bundle.cables|length }} cable{{ bundle.cables|pluralize }}, {% if bundle.offered %}offered at the free positions{% else %}none of a type a free position takes{% endif %}{% else %}holds no cables{% endif %}</p>{% endif %}
@@ -273,11 +278,15 @@
     </form>
   </dialog>
   <dialog class="cc-dlg" id="cc-rm-all">
-    <div class="cc-dh"><h2>Remove all</h2><button type="button" class="es-btn quiet" data-close aria-label="Close">✕</button></div>
-    <div class="cc-db">Remove the {{ device.n_connected }} connection{{ device.n_connected|pluralize }} on this device? Each cable’s other side stays connected.</div>
+    <div class="cc-dh"><h2>Remove all connections?</h2><button type="button" class="es-btn quiet" data-close aria-label="Close">✕</button></div>
+    <div class="cc-db">
+      <div class="es-flash error cc-warn" role="alert">⚠ This removes {% if device.n_connected == 1 %}the connection{% else %}all {{ device.n_connected }} connections{% endif %} on <span class="mono">{{ device.part_id }}</span> from HWDB. It cannot be undone — each cable has to be connected again by hand.</div>
+      <div class="cc-rm-list">{% for r in device.rows %}{% if r.end %}<b>{{ r.n }} · {{ r.position }}</b><span class="mono">{{ r.cable }}</span>{% endif %}{% endfor %}</div>
+      <span class="cc-l2">Each cable’s other side stays connected.</span>
+    </div>
     <div class="cc-df">
-      <button type="button" class="es-btn quiet" data-close>Cancel</button>
-      <button type="submit" class="es-btn" form="cc-rm" name="remove_all" value="1">Remove all</button>
+      <button type="button" class="es-btn quiet" data-close autofocus>Cancel</button>
+      <button type="submit" class="es-btn cc-danger" form="cc-rm" name="remove_all" value="1">Remove {% if device.n_connected == 1 %}it{% else %}all {{ device.n_connected }}{% endif %}</button>
     </div>
   </dialog>
   {% endif %}
