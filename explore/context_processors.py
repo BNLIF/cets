@@ -3,6 +3,8 @@ and the prod⇄dev switch targets rendered in explore/base.html. Plus the
 watched-activity badge (#90), computed lazily so only templates that render
 it (explore/base.html) pay its two small mirror queries."""
 
+from urllib.parse import urlencode
+
 from django.conf import settings
 from django.urls import reverse
 from django.utils.functional import SimpleLazyObject
@@ -36,8 +38,11 @@ def instance(request):
 
     return {
         "hwdb_instance": instance_of(request),
-        "instance_homes": {
-            inst: reverse("explore:home", current_app=ns)
+        # the prod / dev switch: each instance's switch/ with the page it is
+        # clicked on — its path under the script prefix, as resolve() takes it
+        "instance_switch": {
+            inst: reverse("explore:switch", current_app=ns) + "?"
+                  + urlencode({"from": request.get_full_path_info()})
             for inst, ns in NAMESPACE_BY_INSTANCE.items()
         },
         "watch_unread": SimpleLazyObject(_unread),

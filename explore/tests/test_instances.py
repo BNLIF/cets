@@ -14,7 +14,8 @@ from django.urls import reverse
 from django.utils import timezone
 
 from explore import curation, navigation, shipments
-from explore.models import HierarchySyncState, HierarchyNode as H, ShipmentItem
+from explore.models import (HierarchySyncState, HierarchyNode as H, HwdbComponentEvent,
+                            ShipmentItem)
 
 DEV_PTID = "D00599800007"  # Hajime's shipping-test type on dev (system 5)
 
@@ -124,9 +125,44 @@ class InstanceViewTest(TestCase):
         dev_html = self.client.get("/hw/dev/").content.decode()
         self.assertIn("DEVELOPMENT HWDB", dev_html)
         self.assertNotIn("DEVELOPMENT HWDB", prod_html)
-        # both pages offer the switch to the other instance's root
-        self.assertIn('href="/hw/dev/"', prod_html)
-        self.assertIn('href="/hw/"', dev_html)
+        # both pages offer the switch to the other instance, naming the page
+        self.assertIn('href="/hw/dev/switch/?from=%2Fhw%2F"', prod_html)
+        self.assertIn('href="/hw/switch/?from=%2Fhw%2Fdev%2F"', dev_html)
+        self.assertIn('<span class="is-on" aria-current="true" title="Production HWDB">prod</span>', prod_html)
+
+    def _switch(self, to, frm):
+        resp = self.client.get("/hw/dev/switch/" if to == "dev" else "/hw/switch/", {"from": frm})
+        self.assertEqual(resp.status_code, 302)
+        return resp["Location"]
+
+    def test_switch_keeps_a_page_both_instances_have(self):
+        self.assertEqual(self._switch("dev", "/hw/shipments/"), "/hw/dev/shipments/")
+        self.assertEqual(self._switch("prod", "/hw/dev/search/?q=amc&kind=type"),
+                         "/hw/search/?q=amc&kind=type")
+        self.assertEqual(self._switch("prod", "/hw/dev/FD/"), "/hw/FD/")
+
+    def test_switch_keeps_a_type_page_where_the_type_exists(self):
+        self.assertEqual(self._switch("dev", "/hw/plot/D05700200001/"), "/hw/dev/")
+        _node("dev", "D05700200001", 57, "FD-VD TDE", 2, "Digital electronics", "AMC")
+        self.assertEqual(self._switch("dev", "/hw/plot/D05700200001/?embed=1"),
+                         "/hw/dev/plot/D05700200001/?embed=1")
+        # a hierarchy path the other instance cannot resolve
+        self.assertEqual(self._switch("prod", navigation.leaf_path_for("dev", DEV_PTID)), "/hw/")
+
+    def test_switch_keeps_an_item_page_where_the_item_is_mirrored(self):
+        pid = DEV_PTID + "-00001"
+        # not mirrored on dev: its type's page there, the Overview for a type dev lacks
+        self.assertEqual(self._switch("dev", f"/hw/part/{pid}/"),
+                         navigation.leaf_path_for("dev", DEV_PTID))
+        self.assertEqual(self._switch("dev", "/hw/part/D05700200001-00001/exec-summary/"), "/hw/dev/")
+        HwdbComponentEvent.objects.create(instance="dev", part_type_id=DEV_PTID, part_id=pid)
+        self.assertEqual(self._switch("dev", f"/hw/part/{pid}/?edit=1"), f"/hw/dev/part/{pid}/?edit=1")
+        self.assertEqual(self._switch("prod", f"/hw/dev/part/{pid}/"), "/hw/")
+
+    def test_switch_falls_back_to_the_overview(self):
+        for frm in ("", "/larasic/", "https://example.org/hw/", "/hw/login/?next=/hw/part/X/",
+                    "/hw/switch/?from=/hw/"):
+            self.assertEqual(self._switch("dev", frm), "/hw/dev/", frm)
 
     def test_dev_page_links_stay_on_dev(self):
         # {% url %} reversing (navbar) is pinned to /hw/dev/ by the middleware.

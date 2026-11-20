@@ -26,7 +26,7 @@ from django.http import (
     StreamingHttpResponse,
 )
 from django.shortcuts import redirect, render
-from django.urls import reverse
+from django.urls import Resolver404, resolve, reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.clickjacking import xframe_options_sameorigin
@@ -79,6 +79,43 @@ def _rev(request, viewname, args=None):
     """``reverse()`` pinned to this request's instance namespace, so a dev-page
     view reverses explore URLs back onto /hw/dev/ (#47)."""
     return reverse(viewname, args=args, current_app=namespace_of(instance_of(request)))
+
+
+@login_not_required
+@fnal_login_required
+def explore_switch_view(request):
+    """The header's prod / dev switch (Chao 2026-11-20): ``?from=`` is the
+    page it was clicked on, and the answer is that page on this URL's
+    instance where it exists — an item this instance's mirror lacks goes to
+    its type's page, a type or a hierarchy path it lacks to the Overview.
+    Mirror reads only; decided at the click so no page pays for it."""
+    inst = instance_of(request)
+    ns = namespace_of(inst)
+    home = reverse("explore:home", current_app=ns)
+    path, _, query = request.GET.get("from", "").partition("?")
+    try:
+        rm = resolve(path)
+    except Resolver404:
+        return redirect(home)
+    if rm.app_name != "explore" or rm.url_name in ("login", "login_poll", "switch"):
+        return redirect(home)
+    kw = rm.kwargs
+    if "part_id" in kw:
+        ptid = kw["part_id"].rsplit("-", 1)[0]
+        if not HwdbComponentEvent.for_instance(inst).filter(
+                part_type_id=ptid, part_id=kw["part_id"]).exists():
+            return redirect(navigation.leaf_path_for(inst, ptid) or home)
+    elif "part_type_id" in kw:
+        if not HierarchyNode.for_instance(inst).filter(
+                level=HierarchyNode.LEVEL_TYPE, part_type_id=kw["part_type_id"]).exists():
+            return redirect(home)
+    elif "trail" in kw:
+        try:
+            navigation.resolve(inst, kw["trail"])
+        except Http404:
+            return redirect(home)
+    url = reverse(f"explore:{rm.url_name}", kwargs=kw, current_app=ns)
+    return redirect(f"{url}?{query}" if query else url)
 
 
 @login_not_required

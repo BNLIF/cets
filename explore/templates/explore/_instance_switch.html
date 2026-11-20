@@ -1,0 +1,5 @@
+{# The prod / dev switch (base.html: the header's pill, the drawer's on a phone). The other instance's link goes through switch/, which keeps the page where it exists there. #}
+<nav class="ex-instance {{ cls }}" aria-label="HWDB instance">
+    {% if hwdb_instance == "prod" %}<span class="is-on" aria-current="true" title="Production HWDB">prod</span>{% else %}<a href="{{ instance_switch.prod }}" title="Production HWDB">prod</a>{% endif %}
+    {% if hwdb_instance == "dev" %}<span class="is-on" aria-current="true" title="Development HWDB (sandbox)">dev</span>{% else %}<a href="{{ instance_switch.dev }}" title="Development HWDB (sandbox)">dev</a>{% endif %}
+</nav>

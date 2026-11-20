@@ -8,6 +8,7 @@ app_name = "explore"
 urlpatterns = [
     path("", views.explore_tree_view, name="home"),
     path("tree/", views.explore_tree_view, name="tree"),
+    path("switch/", views.explore_switch_view, name="switch"),   # the header's prod / dev switch: ?from=<page> → the same page on this instance where it exists
     path("browse/", views.explore_view, name="browse"),
     path("hierarchy/", views.explore_hierarchy_view, name="hierarchy"),
     path("hierarchy/summary/", views.explore_type_summary_view, name="type_summary"),

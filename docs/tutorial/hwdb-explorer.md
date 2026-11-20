@@ -158,9 +158,11 @@ HWDB has two instances, and so does the Explorer:
 - `/hw/dev/` browses **development** — the sandbox where consortia try
   uploads and new component types.
 
-Switch with the *prod/dev* toggle at the top of the sidebar. Dev pages carry
-a banner so you always know where you are; the two mirrors are completely
-separate.
+Switch with the *prod / dev* toggle in the top menu bar (on a phone, at the
+top of the ☰ drawer). You stay on the same page where the other instance has
+it; an item it does not hold takes you to the item's type, a type it does not
+hold to the Overview. Dev pages carry a banner so you always know where you
+are; the two mirrors are completely separate.
 
 ---
 

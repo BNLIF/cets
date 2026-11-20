@@ -15,6 +15,8 @@
       .eh-find input { font: inherit; font-size: 13px; padding: 5px 12px; width: 190px;
         border: 1px solid var(--rule); border-radius: 999px; background: var(--page); color: var(--ink); }
       .eh-find input:focus { outline: none; border-color: var(--accent); }
+      /* under 1360px the nav and the search box make room for the prod / dev switch */
+      @media (max-width: 1360px) { .eh-nav { gap: 16px; } .eh-find input { width: 140px; } }
       .eh-find-menu { position: absolute; top: calc(100% + 6px); right: 0; width: 360px;
         max-height: 60vh; overflow: auto; background: var(--page); border: 1px solid var(--rule-hard);
         border-radius: var(--r-lg); box-shadow: 0 10px 30px rgba(0,0,0,.14); z-index: 60; padding: 4px; }
@@ -104,19 +106,24 @@
       .extree-kids { padding-left: 13px; }
       .ex-count { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--faint); white-space: nowrap; padding-left: 6px; }
 
-      /* dev-instance affordances (#47): page banner + sidebar switch */
+      /* dev-instance affordances (#47): page banner + the prod / dev switch — a pill in the header, in the drawer on a phone */
       .eh-devbanner { display: flex; align-items: center; justify-content: center; gap: 8px;
         padding: 6px 30px; font-size: 12.5px; color: var(--ink);
         background: var(--warn-bg); border-bottom: 1px solid var(--warn); }
       .eh-devbanner strong { color: var(--warn); letter-spacing: .02em; }
       .eh-devbanner a { color: var(--accent-ink); }
-      .ex-side-instance { display: flex; gap: 4px; margin: 0 8px 10px; padding: 3px;
+      .ex-instance { display: flex; gap: 2px; padding: 2px;
         background: var(--surface); border: 1px solid var(--rule); border-radius: 999px; }
-      .ex-side-instance a { flex: 1; text-align: center; padding: 3px 0; font-size: 11.5px;
-        font-weight: 600; color: var(--faint); text-decoration: none; border-radius: 999px; }
-      .ex-side-instance a.is-on { background: var(--page); color: var(--ink);
-        border: 1px solid var(--rule-hard); }
-      .ex-side-instance a:not(.is-on):hover { color: var(--ink); }
+      .ex-instance > * { padding: 2px 9px; font-size: 11.5px; font-weight: 600; color: var(--faint);
+        text-decoration: none; border: 1px solid transparent; border-radius: 999px; }
+      .ex-instance .is-on { background: var(--page); color: var(--ink); border-color: var(--rule-hard); }
+      .ex-instance a:hover { color: var(--ink); }
+      .ex-side-instance { display: none; }
+      @media (max-width: 760px) {
+        .eh-instance { display: none; }
+        .ex-side-instance { display: flex; margin: 0 8px 10px; }
+        .ex-side-instance > * { flex: 1; text-align: center; padding: 6px 0; }
+      }
 
       /* shared footer (all explorer pages) */
       .eh-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
@@ -173,6 +180,7 @@
             {% if is_ops_user %}<a class="eh-nav-item{% if active_nav == 'ops' %} active{% endif %}" href="{% url 'explore:ops' %}">Ops</a>{% endif %}
         </nav>
         <div class="eh-right">
+            {% include "explore/_instance_switch.html" with cls="eh-instance" %}
             {% if user.is_authenticated %}
             <div class="eh-find" id="eh-find" data-api="{% url 'explore:search_api' %}" data-search="{% url 'explore:search' %}">
                 <input id="eh-find-q" type="text" placeholder="Search…" autocomplete="off" spellcheck="false"
@@ -204,7 +212,7 @@
     <div class="eh-devbanner">
         <strong>DEVELOPMENT HWDB</strong>
         <span>sandbox database — ids differ from production</span>
-        <a href="{{ instance_homes.prod }}">switch to production</a>
+        <a href="{{ instance_switch.prod }}">switch to production</a>
     </div>
     {% endif %}
 
@@ -212,6 +220,7 @@
         <div class="ex-layout" id="ex-layout"{% if side_hidden %} data-side-hidden{% endif %}>
             {# The aside always renders: on small screens it is the slide-in drawer and carries the main nav (#93); a page without a tree hides it on desktop via .ex-side-bare. #}
             <aside class="ex-side{% if not sidebar %} ex-side-bare{% endif %}" id="ex-side" aria-label="Hierarchy tree">
+                {% include "explore/_instance_switch.html" with cls="ex-side-instance" %}
                 <nav class="ex-side-nav" aria-label="Main">
                     <a{% if active_nav == 'hierarchy' %} class="active"{% endif %} href="{% url 'explore:home' %}">Overview</a>
                     <a{% if active_nav == 'detector' %} class="active"{% endif %} href="{% url 'explore:hierarchy' %}">Hierarchy</a>
@@ -226,12 +235,6 @@
                 </nav>
                 {% if sidebar %}
                 {% block side %}
-                <nav class="ex-side-instance" aria-label="HWDB instance">
-                    <a{% if hwdb_instance == "prod" %} class="is-on" aria-current="true"{% endif %}
-                       href="{{ instance_homes.prod }}" title="Production HWDB">Production</a>
-                    <a{% if hwdb_instance == "dev" %} class="is-on" aria-current="true"{% endif %}
-                       href="{{ instance_homes.dev }}" title="Development HWDB (sandbox)">Development</a>
-                </nav>
                 <div class="ex-side-label">{{ sidebar_label|default:"Curated hierarchy" }}</div>
                 {% for node in sidebar %}{% include "explore/_tree_node.html" with node=node %}{% endfor %}
                 {% endblock %}
