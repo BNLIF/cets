@@ -199,7 +199,7 @@ class PlainIdsTest(TestCase):
         fake_resp.json.return_value = {"data": [
             {"part_id": "Z00100100065-00010-US001", "parent_part_id": "Z00100100065-00001-US186"},
             {"part_id": "Z00100100065-00011", "parent_part_id": None},
-            {"part_id": "Z00100300080-00001.END1:3"},            # a cable-end ref is not a label
+            {"part_id": "Z00100300080-00001.END1:3"},            # a cable-end ref without the codes stays
             "not a row"]}
         with mock.patch.object(api.session, "request", return_value=fake_resp):
             rows = api.get_component_types("Z00100100065")["data"]
@@ -212,3 +212,22 @@ class PlainIdsTest(TestCase):
         fake_resp.json.return_value = {"status": "OK", "part_id": "Z00100100065-00026-US128"}   # a create's answer is top-level
         with mock.patch.object(api.session, "request", return_value=fake_resp):
             self.assertEqual(api.create_component("Z00100100065", {})["part_id"], "Z00100100065-00026")
+
+    def test_cable_refs_and_the_container_lose_the_codes_too(self):
+        """Dev 2026-11-20 (#223): the codes sit INSIDE a cable-end ref,
+        before its ``.END:n`` or ``.position``, and on the nested
+        ``container`` of a /container row."""
+        api = FnalDbApiClient("https://example/api", "fake-bearer")
+        fake_resp = mock.Mock(ok=True)
+        fake_resp.json.return_value = {"data": [
+            {"part_id": "Z00100300035-00001-US186.Flange:7", "functional_position": "Cold FC Bot"},
+            {"part_id": "Z00100300064-00004-US186.Warm Outer CRP SH", "cable_connector": "FCP Flange:1"},
+            {"part_id": "Z00100300073-00020-US186",
+             "container": {"part_id": "Z00100300072-00004-US186"}}]}
+        with mock.patch.object(api.session, "request", return_value=fake_resp):
+            rows = api.get_subcomponents("Z00100300037-00001")["data"]
+        self.assertEqual([r["part_id"] for r in rows],
+                         ["Z00100300035-00001.Flange:7",
+                          "Z00100300064-00004.Warm Outer CRP SH",
+                          "Z00100300073-00020"])
+        self.assertEqual(rows[2]["container"]["part_id"], "Z00100300072-00004")

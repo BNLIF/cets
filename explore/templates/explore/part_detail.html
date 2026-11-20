@@ -252,7 +252,7 @@
         {% else %}
         <table class="sd-kv">
           {% for f in detail.facts %}<tr><td class="k">{{ f.label }}</td><td>{{ f.value }}</td></tr>{% endfor %}
-          {% if detail.container %}<tr><td class="k">Inside</td>
+          {% if detail.container %}<tr><td class="k">{% if cable_bundle %}Bundle / tray{% else %}Inside{% endif %}</td>
             <td><a class="mono" style="color:var(--accent-ink);text-decoration:none;" href="{% url 'explore:part' part_id=detail.container.part_id %}">{{ detail.container.part_id }}</a>
             {% if detail.container.type_name %} — {{ detail.container.type_name }}{% endif %}{% if detail.container.functional_position %} <span style="color:var(--faint);font-size:11px;">· position “{{ detail.container.functional_position }}”</span>{% endif %}</td></tr>
           {% elif mirror_parent %}<tr><td class="k">Inside</td>
@@ -546,8 +546,27 @@
 
   {# Full width below the grid — the assembly/connections table is the widest pane on the page. #}
   <div class="sd-card">
-    <h2>{% if detail.is_cable %}Connections{% else %}Assembly{% endif %} ({{ detail.manifest|length }}){% if link_items_url %} <a class="pk-link" style="margin-left:10px;" href="{{ link_items_url }}">Link items…</a>{% endif %}</h2>
+    <h2>{% if detail.is_cable %}Connections ({{ detail.manifest|length }}{% if detail.connector_count %} / {{ detail.connector_count }}{% endif %}){% else %}Assembly ({{ detail.manifest|length }}){% endif %}{% if link_items_url %} <a class="pk-link" style="margin-left:10px;" href="{{ link_items_url }}">Link items…</a>{% endif %}</h2>
     <div class="tbl-scroll">
+    {% if detail.is_cable %}
+    {# #223 (Hajime): one row per END:connector of the cable's type, a free one left empty. No carets — a connection is not contents; the link opens the connected item. #}
+    <table class="sd-table">
+      <thead><tr><th>End : connector</th><th>Connected to</th><th>Type</th><th>Position</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for c in detail.connections %}
+        <tr>
+          <td class="mono">{{ c.slot|default:"—" }}</td>
+          <td class="mono">{% if c.m.part_id %}<a href="{% url 'explore:part' part_id=c.m.part_id %}">{{ c.m.part_id }}</a>{% endif %}</td>
+          <td>{{ c.m.type_name|default:"" }}</td>
+          <td>{{ c.m.functional_position|default:"" }}</td>
+          <td>{{ c.m.status|default:"" }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5" class="sd-empty">None.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
     <table class="sd-table asm-table" data-assembly-base="{% url 'explore:assembly' part_id='__PID__' %}">
       <thead><tr><th>Part</th><th>Type</th><th>Position</th><th>Status</th></tr></thead>
       <tbody>
@@ -558,7 +577,7 @@
             back-reference would loop the tree (cable → flange → cable …), and
             a forward cable end would fan out into the cable's whole
             neighborhood. Follow the link for the cable's own page.{% endcomment %}
-            {% if m.part_id %}{% if m.connection %}<button type="button" class="asm-caret is-leaf" title="{% if m.peer %}Connection — follow the link for its contents{% else %}Cable end — open the cable for its connections{% endif %}">·</button>{% else %}<button type="button" class="asm-caret" aria-label="Expand subcomponents">▸</button>{% endif %}<a href="{% url 'explore:part' part_id=m.part_id %}">{{ m.part_id }}</a>{% if m.connection and not m.peer %}<span class="asm-conn" title="Cable end · END name : connector #">.{{ m.connection }}</span>{% endif %}{% if m.via %}<span class="asm-conn" title="This cable’s END name : connector # used by the connection"> · via {{ m.via }}</span>{% endif %}{% else %}<span class="asm-caret-spacer"></span>—{% endif %}
+            {% if m.part_id %}{% if m.connection %}<button type="button" class="asm-caret is-leaf" title="{% if m.peer %}Connection — follow the link for its contents{% else %}Cable end — open the cable for its connections{% endif %}">·</button>{% else %}<button type="button" class="asm-caret" aria-label="Expand subcomponents">▸</button>{% endif %}<a href="{% url 'explore:part' part_id=m.part_id %}">{{ m.part_id }}</a>{% if m.connection and not m.peer %}<span class="asm-conn" title="Cable end · END name : connector #">.{{ m.connection }}</span>{% endif %}{% else %}<span class="asm-caret-spacer"></span>—{% endif %}
           </td>
           <td>{{ m.type_name|default:"—" }}</td>
           <td>{{ m.functional_position|default:"—" }}</td>
@@ -577,6 +596,7 @@
       {% endfor %}
       </tbody>
     </table>
+    {% endif %}
     </div>
   </div>
   {% endif %}

@@ -26,7 +26,10 @@ logger = logging.getLogger(__name__)
 # form ("Wrong component ID provided"). Every id HWDB hands back is
 # reduced to the plain PID here, at the one place all reads pass through,
 # so the mirror, the sync and every page keep one key per item.
-_LABEL_ID = re.compile(r"^([A-Za-z]\d{11}-\d{5})-[A-Za-z]{2}\d{3}$")
+# Dev, 2026-11-20 (#223): the codes also sit inside a cable-end ref, before
+# its ``.END:n`` / ``.position`` suffix (``Z00100300035-00001-US186.Flange:7``),
+# and on the nested ``container`` of a /container row.
+_LABEL_ID = re.compile(r"^([A-Za-z]\d{11}-\d{5})-[A-Za-z]{2}\d{3}(\..+)?$")
 
 # Connect / read timeout on every call. Without one, a connection HWDB
 # accepted and then lost (twister's route to FNAL dropped mid-sync,
@@ -40,10 +43,13 @@ _TIMEOUT = (10, 120)
 
 def _plain_ids(body) -> None:
     """Strip the label suffix off ``part_id`` / ``parent_part_id`` on a
-    response and at the top level of its ``data`` (a row, or a list of
-    rows), in place."""
+    response, at the top level of its ``data`` (a row, or a list of
+    rows) and on a row's ``container``, in place. A cable-end ref keeps
+    what follows the codes."""
     data = body.get("data") if isinstance(body, dict) else None
     rows = data if isinstance(data, list) else [data] if isinstance(data, dict) else []
+    rows = rows + [r["container"] for r in rows
+                   if isinstance(r, dict) and isinstance(r.get("container"), dict)]
     for row in [body] + rows:   # a create answers its part_id at the top level
         if not isinstance(row, dict):
             continue
@@ -52,7 +58,7 @@ def _plain_ids(body) -> None:
             if isinstance(v, str):
                 m = _LABEL_ID.match(v.strip())
                 if m:
-                    row[k] = m.group(1)
+                    row[k] = m.group(1) + (m.group(2) or "")
 
 
 class FnalDbApiClient:

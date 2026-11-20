@@ -413,16 +413,18 @@ def _enrich_test_ids(api, part_id: str, tests: list[dict]) -> None:
 def _annotate_cable_connections(api, part_id: str, manifest: list[dict]) -> list[str]:
     """Recover which of this cable's connectors each connection uses (#72).
 
-    A cable's reverse rows only carry the *peer's* position name — the
+    Since 2026-11 a cable's own rows name it (``cable_connector``, kept as
+    ``via`` by ``current_manifest``) and nothing more is read (#223). Rows
+    of the older shape only carry the *peer's* position name — the
     ``END:connector`` on the cable side is recorded on the peer's manifest
-    (``<cable PID>.<END>:<n>``). One ``/subcomponents`` call per distinct
-    peer (capped, best-effort) fills each peer row's ``via`` and returns the
+    (``<cable PID>.<END>:<n>``): one ``/subcomponents`` call per distinct
+    such peer (capped, best-effort) fills its rows' ``via``. Returns the
     sorted occupied slots for the diagram. An only-PID connection (no
     ENDs/connectors, e.g. a cable tray) keeps ``via`` None and occupies
     nothing."""
-    peers = [m for m in manifest if m.get("peer") and m.get("part_id")]
+    used = {m["via"] for m in manifest if m.get("peer") and m.get("via")}
+    peers = [m for m in manifest if m.get("peer") and m.get("part_id") and not m.get("via")]
     via: dict[tuple, str] = {}
-    used: set[str] = set()
     for pid in sorted({m["part_id"] for m in peers})[:_STATUS_FETCH_CAP]:
         rows = current_manifest(_safe_data(
             f"peer {pid} manifest", lambda pid=pid: api.get_subcomponents(pid)))
@@ -435,7 +437,19 @@ def _annotate_cable_connections(api, part_id: str, manifest: list[dict]) -> list
     return sorted(used)
 
 
-def cable_ends(connectors: dict | None) -> list[dict]:
+def cable_connections(slots, manifest: list[dict]) -> list[dict]:
+    """A cable's Connections table (Hajime, #223): one row per
+    ``END:connector`` of its type, in the type's order — ``m`` the
+    manifest row connected there, None while the connector is free. A
+    connection whose connector isn't known (or isn't on the type) follows,
+    with no ``slot``."""
+    by_slot = {m["via"]: m for m in manifest if m.get("via") in slots}
+    rows = [{"slot": s, "m": by_slot.get(s)} for s in slots]
+    placed = {id(m) for m in by_slot.values()}
+    return rows + [{"slot": None, "m": m} for m in manifest if id(m) not in placed]
+
+
+def cable_ends(connectors: dict | list | None) -> list[dict]:
     """A cable type's ENDs from its ``connectors`` keys (#72): HWDB stores the
     definition expanded into one ``<END name>:<connector #>`` slot per
     connector (``Flange:1`` … ``Flange:8``), so grouping on the name yields
@@ -532,15 +546,16 @@ def part_detail(api, part_id: str, is_shipping: bool) -> dict:
     # cable's page draws its ENDs/connectors from the type definition, with
     # this item's occupied connectors recovered from its peers' manifests.
     is_cable = comp.get("category") == "cable"
-    ends, used = [], []
+    slots, used = [], []
     if is_cable:
         try:
-            ends = cable_ends(
+            slots = list(
                 (api.get_component_type(part_id.rsplit("-", 1)[0]).get("data") or {})
-                .get("connectors"))
+                .get("connectors") or {})
         except Exception as e:
             logger.warning("part detail: cable ends for %s failed: %s", part_id, e)
         used = _annotate_cable_connections(api, part_id, manifest)
+    ends = cable_ends(slots)
 
     container = current_container(
         _safe_data("container", lambda: api.get_container(part_id)))
@@ -561,6 +576,8 @@ def part_detail(api, part_id: str, is_shipping: bool) -> dict:
         "is_cable": is_cable,
         "cable_ends": ends,
         "used_connectors": used,
+        "connections": cable_connections(slots, manifest) if is_cable else [],
+        "connector_count": len(slots),
         "status": normalize_status(comp.get("status")),
         "facts": part_facts(comp),
         # #104: the raw standard fields for the part page's edit form

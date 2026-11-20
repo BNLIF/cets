@@ -115,17 +115,22 @@ def current_manifest(subs: list[dict] | None) -> list[dict]:
     are split: ``part_id`` is the base PID (usable for lookups/links),
     ``connection`` keeps the ``END:connector`` (or peer-position) suffix and
     ``peer`` marks a back-reference row (no ``:n`` — the other side of a cable
-    link, not contents)."""
+    link, not contents). A cable's own row names its connector in
+    ``cable_connector`` and carries no ``functional_position`` (dev
+    2026-11-20, #223): that key marks the row a peer whatever its suffix
+    looks like, ``via`` keeps the connector and the suffix is the position."""
     out = []
     for s in subs or []:
         if s.get("operation") == "unmount":
             continue
         pid, conn = split_subcomp_ref(s.get("part_id"))
+        peer = bool(conn) and ("cable_connector" in s or not _FWD_CONNECTOR.search(conn))
         out.append({"part_id": pid,
                     "connection": conn,
-                    "peer": bool(conn) and not _FWD_CONNECTOR.search(conn),
+                    "peer": peer,
+                    "via": s.get("cable_connector"),
                     "type_name": s.get("type_name"),
-                    "functional_position": s.get("functional_position")})
+                    "functional_position": s.get("functional_position") or (conn if peer else None)})
     return out
 
 

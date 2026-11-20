@@ -2634,6 +2634,11 @@ def explore_part_view(request, part_id):
         "leaf_path": navigation.leaf_path_for(inst, ptid) if leaf else None,
         "box": box,
         "mirror_parent": mirror_parent,
+        # #223: a generic item holding a cable by its plain PID stands for the
+        # cable's bundle or tray — unless it is a shipping box
+        "cable_bundle": bool(detail["is_cable"] and detail["container"]
+                             and not curation.is_shipping_type(
+                                 inst, detail["container"]["part_id"].rsplit("-", 1)[0])),
         "hwdb_ui_base": settings.HWDB_PROFILES[inst]["ui"],
         "can_update_location": can_update_location,
         "show_location_form": show_location_form,

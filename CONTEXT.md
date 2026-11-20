@@ -149,7 +149,11 @@ the part-type ID. For LArASIC P5B Prod, `D08100100003` decodes as:
   `part_id` as `<cable PID>.<END name>:<connector #>` (and, on the cable's
   own rows, `<peer PID>.<position>` back-references — connectivity, not
   containment). The explorer splits these into base PID + connection at the
-  manifest. See [[0018-cable-end-subcomponent-refs]].
+  manifest. Since 2026-11 HWDB puts country / institution codes inside the
+  ref (`<PID>-US186.<END>:<n>`), which the API client strips, and a cable's
+  own row names its connector in `cable_connector`. A generic item holding
+  a cable by plain PID is the cable's **bundle / tray**.
+  See [[0018-cable-end-subcomponent-refs]].
 - **Component Type**: the leaf type with its own QC test-types and components
   (e.g. `AMC`, `LArASIC P5B Prod`). HWDB exposes a `full_name` like
   `D.FD-VD TDE.Digital electronics.AMC`. This is what the existing models call

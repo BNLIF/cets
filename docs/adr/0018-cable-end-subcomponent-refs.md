@@ -74,6 +74,52 @@ cabling are still pending upstream, so the contract may shift.
   (`static/explore/cable-diagram.js`). An unmirrored cable leaf hints to
   re-run the hierarchy refresh (or the system re-walk) rather than fetching.
 
+## Update 2026-11-20: the cable API as released on dev (#223)
+
+Hajime's two emails of November 2026 and a read-only look on dev
+(`Z00100300037-00001`, `Z00100300073-00020`, `Z00100300035-00001`, bundle
+`Z00100300072-00004`). Prod was not looked at; the older row shape below
+is still read.
+
+What dev answers now:
+
+- **Country / institution codes on every id.** `part_id` and
+  `parent_part_id` come as `Z00100300073-00020-US186` on the item record,
+  the type listing, `/subcomponents` and `/container` rows (there also on
+  the nested `container.part_id`). In a cable-end ref the codes sit
+  *before* the suffix: `Z00100300035-00001-US186.Flange:7`,
+  `Z00100300064-00004-US186.Warm Outer CRP SH`. A per-item GET accepts
+  either form; `/tests` refuses the long one (2026-09-28).
+- **A cable's own rows** carry `cable_connector` (`"FCP Flange:1"`, the
+  cable's END:connector) and **no `functional_position`**; the connected
+  item's position is the ref's suffix.
+- **A bundle / tray** is a generic item whose positions accept the cable
+  type and hold cables by plain PID. It does not appear on the cable's
+  `/subcomponents` rows at all. It is the cable's `/container` row and
+  its `parent_part_id`. A cable's `/container` no longer lists its
+  connections: `Z00100300035-00001`, connected at eight positions, has
+  none.
+
+What changed here:
+
+- **The API client strips the codes** wherever it already did for plain
+  ids, now also inside a cable-end ref (the suffix is kept) and on a
+  row's `container`. `split_subcomp_ref` is unchanged — it never sees the
+  codes.
+- **`current_manifest`** takes `cable_connector` as the mark of a cable's
+  own row: such a row is a peer whatever its suffix looks like (a generic
+  type's position may end in `:2`), `via` holds the connector, and
+  `functional_position` is filled from the suffix.
+- **No call per connected item** on a cable's page when its rows name
+  their connectors. Rows of the older shape still get the one read per
+  distinct peer.
+- **A cable's Connections table has one row per END:connector** of its
+  type, in the type's order, a free connector's row empty (Hajime). It is
+  a table of its own, without carets; the heading counts connected over
+  connectors. A connection with no known connector follows the list.
+- **"Inside" reads "Bundle / tray"** on a cable whose container is not a
+  shipping box.
+
 ## Consequences
 
 - `receive_box` now posts arrival locations to base PIDs (previously a
