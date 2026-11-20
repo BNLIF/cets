@@ -287,9 +287,13 @@ def cache_plan(inst: str, part_type_id: str, plan: dict | None, consortium: str 
 
 
 def cache_list(inst: str, part_type_id: str, rows: list[dict] | None) -> None:
+    """The list as last read or saved, normalised — the readers of the
+    cache count on every row's keys (a folder row as saved from the text
+    form has no ``type``: the overview failed on one, 2026-11-20)."""
     if rows is None:
         ProductionList.objects.filter(instance=inst, part_type_id=part_type_id).delete()
         return
+    rows = normalize_list({"rows": rows})
     ProductionList.objects.update_or_create(instance=inst, part_type_id=part_type_id,
                                             defaults={"rows": rows})
 
@@ -406,16 +410,21 @@ def apply_p6(plans: dict[str, dict]) -> dict[str, dict]:
 
 # ---- the mirror -------------------------------------------------------------
 
+PASSED = ("QA/QC Tests - Passed All", "QA/QC Tests - Use As Is")   # the statuses the Passed QC column counts (Anselmo + Hajime 2026-11-20)
+
+
 def counts(inst: str, type_ids: list[str]) -> dict[str, dict]:
-    """Per type: its items in the mirror and the breakdown by HWDB status
-    (most common first) — ``{tid: {n, by_status: [(status, n)]}}``."""
+    """Per type: its items in the mirror, the breakdown by HWDB status
+    (most common first) and how many hold a ``PASSED`` status —
+    ``{tid: {n, ok, by_status: [(status, n)]}}``."""
     c = Counter()
     for tid, st in (HwdbComponentEvent.for_instance(inst).filter(part_type_id__in=type_ids)
                     .values_list("part_type_id", "status")):
         c[(tid, st or "no status")] += 1
-    out = {tid: {"n": 0, "by_status": []} for tid in type_ids}
+    out = {tid: {"n": 0, "ok": 0, "by_status": []} for tid in type_ids}
     for (tid, st), n in c.most_common():
         out[tid]["n"] += n
+        out[tid]["ok"] += n if st in PASSED else 0
         out[tid]["by_status"].append((st, n))
     return out
 
@@ -428,7 +437,7 @@ def names(inst: str, type_ids: list[str]) -> dict[str, str]:
 
 # ---- the table --------------------------------------------------------------
 
-COLUMNS = ["Type ID", "Needed", "In HWDB", "First completed by", "First needed by", "Last completed by", "Last needed by",
+COLUMNS = ["Type ID", "Needed", "In HWDB", "Passed QC", "First completed by", "First needed by", "Last completed by", "Last needed by",
            "Float (months)", "Comment"]   # Anselmo 2026-10-26: the first batch's two dates before the last batch's
 
 
@@ -462,18 +471,18 @@ def _values(r: dict, plans: dict[str, dict], cnt: dict[str, dict]) -> dict:
     p = plans.get(plan_key(r)) or {}
     c = cnt.get(r["type"]) or {"n": 0, "by_status": []}
     done, need = p.get("completed_by") or "", p.get("needed_by") or ""
-    return {"p": p, "needed": p.get("needed"), "n": c["n"], "by_status": list(c["by_status"]),
+    return {"p": p, "needed": p.get("needed"), "n": c["n"], "ok": c.get("ok", 0), "by_status": list(c["by_status"]),
             "fdone": p.get("first_completed_by") or "", "fneed": p.get("first_needed_by") or "",
             "done": done, "need": need, "float": months_between(done, need)}   # the float: the last batch's pair
 
 
 def _totals(rows: list[dict], vals: list, i: int) -> dict:
     """#232: a folder's values — the totals of the type rows under it, at
-    any depth: needed and the count summed, the first batch's dates the
+    any depth: needed and the two counts summed, the first batch's dates the
     earliest, the last batch's the latest, the float the smallest. A type
     listed twice under it counts once (a plan once, by ``plan_key``)."""
     lv = rows[i].get("level") or 0
-    types, keys, st, floats, needed = set(), set(), Counter(), [], None
+    types, keys, st, floats, needed, ok = set(), set(), Counter(), [], None, 0
     dates = {k: [] for k in ("fdone", "fneed", "done", "need")}
     for j in range(i + 1, len(rows)):
         r, v = rows[j], vals[j]
@@ -484,6 +493,7 @@ def _totals(rows: list[dict], vals: list, i: int) -> dict:
         if r["type"] not in types:
             types.add(r["type"])
             st.update(dict(v["by_status"]))
+            ok += v["ok"]
         if plan_key(r) in keys:
             continue
         keys.add(plan_key(r))
@@ -494,7 +504,7 @@ def _totals(rows: list[dict], vals: list, i: int) -> dict:
         for k in dates:
             if v[k]:
                 dates[k].append(v[k])
-    return {"p": {}, "needed": needed, "n": sum(st.values()), "by_status": st.most_common(), "n_types": len(types),
+    return {"p": {}, "needed": needed, "n": sum(st.values()), "ok": ok, "by_status": st.most_common(), "n_types": len(types),
             "fdone": min(dates["fdone"], default=""), "fneed": min(dates["fneed"], default=""),
             "done": max(dates["done"], default=""), "need": max(dates["need"], default=""),
             "float": min(floats, default=None)}
@@ -534,6 +544,7 @@ def table(rows: list[dict], plans: dict[str, dict], cnt: dict[str, dict],
             "has_plan": plan_key(r) in plans,
             "needed": "" if v["needed"] is None else f"{v['needed']:,}",
             "n": f"{v['n']:,}", "by_status": ", ".join(f"{n} {st}" for st, n in v["by_status"]),
+            "ok": f"{v['ok']:,}",   # of them, Passed All or Use As Is
             "first_completed_by": month_label(fdone), "first_completed_past": bool(_ym(fdone)) and _ym(fdone) <= now,
             "first_completed_src": p.get("first_completed_src") or "",
             "first_needed_by": month_label(fneed), "first_needed_past": bool(_ym(fneed)) and _ym(fneed) <= now,
@@ -595,7 +606,7 @@ def columns(table: list[dict]) -> dict[str, bool]:
             "ticks": [t for t in TICKS if t[0] != "comment" or any(r["comment"] for r in table)]}
 
 
-TICKS = [("type", "Type ID"), ("needed", "Needed"), ("n", "In HWDB"), ("fdone", "First completed"), ("fneed", "First needed"),
+TICKS = [("type", "Type ID"), ("needed", "Needed"), ("n", "In HWDB"), ("ok", "Passed QC"), ("fdone", "First completed"), ("fneed", "First needed"),
          ("done", "Last completed"), ("need", "Last needed"), ("float", "Float"), ("comment", "Comment")]   # a tick per column (Chao 2026-11-04)
 
 

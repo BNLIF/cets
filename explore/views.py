@@ -529,7 +529,7 @@ def _production_status_list(request, inst) -> list[dict]:
         node = HierarchyNode.for_instance(inst).filter(
             level=HierarchyNode.LEVEL_TYPE, part_type_id=tid).first()
         lst = ProductionList.for_instance(inst).filter(part_type_id=tid).first()
-        rows = lst.rows if lst else []
+        rows = production.normalize_list({"rows": lst.rows}) if lst else []   # a row cached before 2026-11-20's fix may lack keys
         ids = production.type_ids(rows)
         plans = production.apply_p6(production.row_plans(inst, rows, tid))
         table = production.table(rows, plans, production.counts(inst, ids),

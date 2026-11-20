@@ -205,11 +205,12 @@ class EngineTest(TestCase):
                  PDS: {**production.normalize_plan({"needed": 100, "needed_by": "2028-04", "first_completed_by": "2025-11",
                                                     "first_needed_by": "2027-06"}), "completed_by": "2028-01-15"},   # a P6 date
                  PTID: production.normalize_plan({"needed": 5})}
-        cnt = {SIPM: {"n": 3, "by_status": [("available", 2), ("in QC", 1)]}, PDS: {"n": 4, "by_status": [("available", 4)]}}
+        cnt = {SIPM: {"n": 3, "ok": 2, "by_status": [("available", 2), ("in QC", 1)]}, PDS: {"n": 4, "ok": 1, "by_status": [("available", 4)]}}
         t = production.table(rows, plans, cnt, {}, date(2026, 10, 8))
         hvs, cathode, sipm, _dup, cathode2, _pds, empty, own = t
         self.assertEqual((hvs["folder"], hvs["type"], hvs["has_children"], hvs["has_plan"], hvs["n_types"]), (True, "", True, False, 2))
-        self.assertEqual((hvs["needed"], hvs["n"], hvs["by_status"]), ("48,100", "7", "6 available, 1 in QC"))
+        self.assertEqual((hvs["needed"], hvs["n"], hvs["ok"], hvs["by_status"]), ("48,100", "7", "3", "6 available, 1 in QC"))
+        self.assertEqual((cathode["ok"], sipm["ok"], empty["ok"]), ("2", "2", "0"))   # Passed QC: summed, the type twice once
         self.assertEqual((hvs["first_completed_by"], hvs["first_needed_by"], hvs["completed_by"], hvs["needed_by"], hvs["float"]),
                          ("Nov 2025", "Jan 2027", "15 Jan 2028", "May 2028", "3"))   # PDS's float of 3 under the SiPM boards' 17
         self.assertTrue(hvs["first_completed_past"])
@@ -337,7 +338,7 @@ class StatusPageTest(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn("<h1>Test Production Status</h1>", html)
         self.assertIn(f'<table class="cl-table cl-gridlines ps-table" data-table="{PTID}">', html)   # the fill page's table look
-        self.assertIn('<th>Component</th><th data-col="type">Type ID</th><th data-col="needed">Needed</th><th data-col="n">In HWDB</th><th data-col="fdone">First completed by</th><th data-col="fneed">First needed by</th><th data-col="done">Last completed by</th><th data-col="need">Last needed by</th><th data-col="float">Float (months)</th><th data-col="comment">Comment</th></tr>', html)
+        self.assertIn('<th>Component</th><th data-col="type">Type ID</th><th data-col="needed">Needed</th><th data-col="n">In HWDB</th><th data-col="ok" title="Of the items in HWDB, those whose status is Passed All or Use As Is">Passed QC</th><th data-col="fdone">First completed by</th><th data-col="fneed">First needed by</th><th data-col="done">Last completed by</th><th data-col="need">Last needed by</th><th data-col="float">Float (months)</th><th data-col="comment">Comment</th></tr>', html)
         self.assertNotIn('class="ps-fold-btn"', html)   # a flat list: no fold controls, no toggles
         self.assertNotIn('class="ps-tog', html)
         self.assertIn(f'<tr data-level="0" data-t="{SIPM}">\n    <th scope="row" class="cl-rowlab"><a href="/hw/dev/?node={SIPM}" title="the type’s page">SiPM boards (6 SiPMs)</a>'
@@ -403,6 +404,20 @@ class StatusPageTest(TestCase):
         self.assertIn('data-fold="close">Collapse all</button>', html)
         self.assertIn('<td data-col="needed" class="cl-const ps-num">7</td>', html)
 
+    def test_passed_qc_column(self):
+        # Anselmo + Hajime 2026-11-20: of the items in HWDB, those whose status is Passed All or Use As Is
+        for i, st in enumerate(("QA/QC Tests - Passed All", "QA/QC Tests - Passed All", "QA/QC Tests - Use As Is", "Waiting on QA/QC Tests", "")):
+            HwdbComponentEvent.objects.create(instance="dev", part_type_id=PDS, part_id=f"{PDS}-{i}", status=st)
+        self.assertEqual({t: (c["n"], c["ok"]) for t, c in production.counts("dev", [SIPM, PDS, PTID]).items()},
+                         {SIPM: (3, 0), PDS: (5, 3), PTID: (0, 0)})
+        api = _api()
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(self.URL).content.decode()
+        self.assertIn('<input type="checkbox" data-col="ok" autocomplete="off" checked> Passed QC</label>', html)
+        row = html.split(f'<tr data-level="0" data-t="{PDS}">')[1].split("</tr>")[0]
+        self.assertIn('">5</td>\n    <td data-col="ok" class="cl-const ps-num">3</td>', row)
+
     def test_folder_row(self):
         # #232: a folder draws its name and totals, folds, and costs no HWDB call
         lst = {"rows": [{"folder": True, "label": "Photon <detectors>", "level": 0}, {"type": SIPM, "level": 1}, {"type": PDS, "level": 1}]}
@@ -411,9 +426,9 @@ class StatusPageTest(TestCase):
         with m1, m2:
             html = self.client.get(self.URL).content.decode()
         self.assertIn('<tr data-level="0" data-t="f:Photon &lt;detectors&gt;" class="ps-folder">\n    <th scope="row" class="cl-rowlab"><button type="button" class="ps-tog" aria-expanded="true" title="Fold its rows"></button>'
-                      '<span title="Totals of the 2 types under it: needed and in HWDB summed, the earliest first dates, the latest last dates, the smallest float">Photon &lt;detectors&gt;</span></th>\n'
+                      '<span title="Totals of the 2 types under it: needed and the counts summed, the earliest first dates, the latest last dates, the smallest float">Photon &lt;detectors&gt;</span></th>\n'
                       '    <td data-col="type" class="cl-const ps-types"></td>\n    <td data-col="needed" class="cl-const ps-num">48,000</td>\n'
-                      '    <td data-col="n" class="cl-const ps-num" title="3 available">3</td>', html)
+                      '    <td data-col="n" class="cl-const ps-num" title="3 available">3</td>\n    <td data-col="ok" class="cl-const ps-num">0</td>', html)
         self.assertIn(f'<tr data-level="1" data-t="{SIPM}">', html)
         self.assertEqual(html.count('class="ps-plan"'), 2)   # the two types' pencils; the folder has no plan
         self.assertEqual(ProductionList.for_instance("dev").get(part_type_id=PTID).rows[0],
@@ -570,6 +585,13 @@ class ListPageTest(TestCase):
             self.assertIn(f">[Boards]\n  {SIPM}</textarea>", html)
             self.assertIn('id="pl-folder" title="Add a folder — a name to group rows under, with their totals">+ folder</button>', html)
             self.client.post(self.URL, {"rows": f"[Cathode]\n  [Frames]\n    {SIPM}\n"})
+            # 2026-11-20, twister: the overview read the saved rows off the cache and failed on a folder's missing "type"
+            self.assertEqual(ProductionList.for_instance("dev").get(part_type_id=PTID).rows[0],
+                             {"type": "", "label": "Cathode", "level": 0, "plan_of": "", "folder": True})
+            ConsortiumTypeOverride.objects.create(instance="dev", part_type_id=PTID)
+            self.assertIn('data-t="f:Cathode/Frames" class="ps-folder">', self.client.get("/hw/dev/status/").content.decode())
+            ProductionList.for_instance("dev").filter(part_type_id=PTID).update(rows=[{"folder": True, "label": "Old", "level": 0}, {"type": SIPM, "level": 1}])   # a row cached before the fix
+            self.assertIn('data-t="f:Old" class="ps-folder">', self.client.get("/hw/dev/status/").content.decode())
         self.assertEqual(json.loads(api.post_component_type_image.call_args.args[1].getvalue()),
                          {"rows": [{"folder": True, "label": "Cathode", "level": 0}, {"folder": True, "label": "Frames", "level": 1},
                                    {"type": SIPM, "label": "", "level": 2}]})
