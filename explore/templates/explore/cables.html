@@ -48,7 +48,7 @@
   .cc-dh h2 { margin: 0; font-size: 16px; color: var(--ink); }
   .cc-db { display: grid; gap: 12px; padding: 14px 16px 16px; font-size: 14px; }
   .cc-box { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--rule); border-radius: var(--r-md); background: var(--bg); }
-  .cc-box h3 { margin: 0; font-size: 11.5px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
+  .cc-box h3, .cc-db > h3 { margin: 0; font-size: 11.5px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
   .cc-box b { color: var(--ink); }
   .cc-list { display: grid; }
   .cc-list a { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; padding: 6px 4px; border-top: 1px solid var(--rule); }
@@ -94,14 +94,8 @@
     {# typed and saved with the device-location ticket; blank until then #}
     <div class="cc-f">Device location<span class="cc-val cc-none">—</span></div>
     <span class="cc-grow"></span>
-    {# the other side: one device → straight there; several → a list; none known → scan one #}
-    {% if device.others|length == 1 %}
-    <a class="es-btn quiet" href="{% url 'explore:cable_connections' part_id=device.others.0.part_id %}" title="Work from {{ device.others.0.part_id }}, the device this one’s cables go to">Change working device</a>
-    {% elif device.others %}
+    {# always the same dialog: the devices on the other side, and the scanner #}
     <button type="button" class="es-btn quiet" data-open="cc-others">Change working device</button>
-    {% else %}
-    <button type="button" class="es-btn quiet cl-scan" data-target="cc-pid" title="No other side is connected yet — scan the device to work from">Change working device</button>
-    {% endif %}
     {% endif %}
   </form>
 
@@ -158,20 +152,25 @@
     </div>
   </dialog>
   {% endif %}{% endfor %}
+  {% endif %}
 
-  {% if device.others|length > 1 %}
+  {% if device and not device.is_cable %}
   <dialog class="cc-dlg" id="cc-others">
     <div class="cc-dh"><h2>Change working device</h2><button type="button" class="es-btn quiet" data-close aria-label="Close">✕</button></div>
     <div class="cc-db">
+      {% if device.others %}
+      <h3>Other side</h3>
       <div class="cc-list">
         {% for o in device.others %}
         <a href="{% url 'explore:cable_connections' part_id=o.part_id %}"><span><span class="mono">{{ o.part_id }}</span><span class="cc-l2">{{ o.type_name }}</span></span><span class="cc-l2">{{ o.cables }} cable{{ o.cables|pluralize }}</span></a>
         {% endfor %}
       </div>
+      {% else %}
+      <span class="cc-none">No device on the other side yet.</span>
+      {% endif %}
       <button type="button" class="es-btn quiet cl-scan" data-target="cc-pid" data-close>Scan another device</button>
     </div>
   </dialog>
-  {% endif %}
   {% endif %}
 </div>
 

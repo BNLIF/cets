@@ -208,14 +208,24 @@ class CablesPageTest(TestCase):
             self.assertIn(f'href="/hw/dev/part/{pid}/cables/"', others)
         self.assertIn("1 cable<", others)
 
-    def test_one_other_side_is_a_straight_link(self):
+    def test_change_working_device_is_the_same_dialog_for_one_other_side_or_none(self):
         api = _api()
         rows = api.get_subcomponents(FLANGE)["data"][:1]                         # the installed cable alone
         inner = api.get_subcomponents.side_effect
         api.get_subcomponents.side_effect = lambda pid: {"data": rows} if pid == FLANGE else inner(pid)
         html = self._get(PAGE, api).content.decode()
-        self.assertIn(f'<a class="es-btn quiet" href="/hw/dev/part/{SHIELD}/cables/"', html)
-        self.assertNotIn('id="cc-others"', html)
+        self.assertIn('data-open="cc-others">Change working device</button>', html)
+        others = html.split('id="cc-others"', 1)[1].split("</dialog>", 1)[0]
+        self.assertEqual(others.count("/cables/"), 1)
+        self.assertIn(f'href="/hw/dev/part/{SHIELD}/cables/"', others)
+        self.assertIn("Scan another device", others)
+
+        api.get_subcomponents.side_effect = lambda pid: {"data": []}             # nothing connected
+        html = self._get(PAGE, api).content.decode()
+        self.assertIn('data-open="cc-others">Change working device</button>', html)
+        others = html.split('id="cc-others"', 1)[1].split("</dialog>", 1)[0]
+        self.assertIn("No device on the other side yet.", others)
+        self.assertIn("Scan another device", others)
 
     def test_a_cable_gets_one_line_and_a_link_to_its_item_page(self):
         html = self._get(f"/hw/dev/part/{INSTALLED}/cables/").content.decode()
