@@ -239,6 +239,32 @@ Related instance-level terms:
   shipment sections. See [[0013-shipment-tracker-on-shipping-leaves]] and
   [[0014-generic-part-detail-page]].
 
+### Cabling (Cable connections page)
+
+How HWDB records a cable link is in [[0018-cable-end-subcomponent-refs]];
+these are the words the Explorer uses on top of it.
+
+- **Endpoint device** — a non-cable item a cable plugs into (a flange, a
+  shield, a filter box). Cable links are written on the endpoint device, at
+  one of its positions, never on the cable.
+- **Working side** — the endpoint device the Cable connections page is open
+  on: the only item a Connect or Remove there writes. The **other side** is
+  what each cable's other ENDs are connected to; "Change working device"
+  moves the page to one of those.
+- **Bundle / tray** — an item that holds cables by plain PID (no
+  `END:connector`): it is the cable's container, not a connection. Scanning
+  it first offers its cables at the working side's free positions.
+- **Device location** — the geographical location name of an endpoint
+  device (`FCP_201NE`, `SEDM07.F.CU27.S02f`), typed by hand and saved in the
+  device's Item Specs (`DATA["Device location"]`). Not the HWDB *location*
+  of an item, which is the institution it sits at.
+- **Cable label** — where each end of a cable goes, one line per side,
+  `<device location>.<position>`, the same text on both ends of the cable
+  (as one string, joined with `-`). Worked out from the connections and the
+  saved device locations for a cable connected at exactly two positions;
+  not stored. A **bundle label** is the two device locations alone,
+  `<location>/<location>`.
+
 ### Simple vs detailed QC record
 
 A LArASIC QC test (RoomT or CryoT) can be uploaded in two shapes:

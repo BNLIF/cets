@@ -296,9 +296,50 @@ prepared once.
   scrolls the page), a drag to pan once zoomed. Markers keep their size.
 - **Reads**: two more per page — the type's image listing and the map
   file. The picture itself goes through the image proxy.
-- **Not checked against HWDB**: an upload and a save were run with mocked
-  answers only — posting onto a sandbox type on dev would have left files
-  on a type that is not ours. The read side was run on dev.
+- **Checked against HWDB**: the read side on dev, and — at Chao's word — an
+  upload and a save through the editor's own endpoints: a drawn mock-up and
+  18 markers on the sandbox type `Z00100300037`, where they stay.
+
+## Update 2026-11-20: device location, labels and Print (#229)
+
+- **Device location**: typed by hand in the page's header and saved in the
+  device's Item Specs as `DATA["Device location"]` — the checklists'
+  envelope, so the type's spec template must define `DATA` (added on first
+  use for an architect, a message for anyone else, as for "→ Specs"
+  fields). The save rewrites that one key and sends the rest as read; a
+  blank removes it. The key's name is ours until Hajime agrees one. The
+  field is shown only where writes are open and the account holds one of
+  the type's roles; elsewhere the location is plain text.
+- **The other side's location** is read off each other-side device's
+  record: one read per distinct device, per page.
+- **Cable label**: worked out on every page load, never stored (HWDB has no
+  text field on a cable item yet). A cable gets one when it is connected at
+  exactly two positions on two different ENDs — two connectors of one END
+  sit at the same end of the cable and say nothing of where it goes. One
+  line per side, `<device location>.<position>`; as one string the lines
+  are joined with `-`. The sides are ordered by the cable's own connector
+  names, so either working side gives the same text. A side whose device
+  has no location is its position alone, and the label is marked
+  incomplete.
+- **Bundle label**: `<location>/<location>` when the bundle's cables *on
+  this page* all go to one same other device and both locations are saved;
+  the two in PID order. The bundle's cables that are not connected at the
+  working device are not read, so a bundle split between more than two
+  devices is only noticed from a device that sees both.
+- **Print**: one dialog for a row, a bundle and "Print labels" (every
+  connected row, in row order): label and PID, label only or PID only; the
+  PID as the label generator's QR (the item's HWDB address) or bar code
+  (the external ID, one record read per item, the bare PID if that read
+  fails); the type name on request. A cable with no label prints its PID
+  only and is left out of a labels-only sheet. The sheet is one of the
+  label generator's (`labels.TEMPLATES`), the layout made for it
+  (`cabling.label_layout`): text along the label's longer side, the
+  label's lines at one size, a QR left of the text on a wide label and
+  above it on a squarish one. `?print=` answers the PDF, without the
+  generator's intro pages; it opens in a new tab, and the sheet, code and
+  type-name choices are kept in the browser. Reads only, any instance.
+- **Left out**: a consortium's short label (BDE's `A07` and its lookup
+  table); where on the sheet a single label lands (always the first).
 
 ## Consequences
 

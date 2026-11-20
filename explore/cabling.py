@@ -7,13 +7,20 @@ own rows say what else it is connected to (ADR-0018).
 
 Reads are bounded by the device: its record, its type and its positions once,
 each connected cable's rows and container once, each cable type's record once,
-the type's picture (its image listing and one small file). No sweep over a
-type, nothing written, nothing added to the mirror.
+the type's picture (its image listing and one small file), each other-side
+device's record once for its location. No sweep over a type, nothing written,
+nothing added to the mirror.
 
 The picture (#228) belongs to the device's **type**: ``Cable_map_<type>.json``
 among the type's HWDB images names a picture (another of those images) and a
 marker per position — the checklist image map's shape, ``slots`` of ``label``,
 ``x``, ``y`` in percent of the picture.
+
+The **device location** (#229) is typed by hand and kept in the device's Item
+Specs, ``DATA["Device location"]``. A **cable label** is worked out each time
+from the connections and the saved locations, never stored: one line per
+side, ``<device location>.<position>``; a bundle / tray's label is the two
+locations alone, ``<location>/<location>``.
 """
 
 from __future__ import annotations
@@ -21,13 +28,28 @@ from __future__ import annotations
 import io
 import json
 
-from . import parts, production
+from reportlab.pdfbase.pdfmetrics import stringWidth
+
+from . import labels, parts, production
 from .models import HierarchyNode
 from .shipments import current_manifest
 
 
+LOCATION_KEY = "Device location"   # in the device's Item Specs DATA — the name is not yet agreed with Hajime
+LOCATION_MAX = 60
+LABEL_SHEET = "Letter-3x10-Avery"  # the print dialog's sheet until the browser remembers another
+
+
 def _type_id(part_id: str) -> str:
     return part_id.rsplit("-", 1)[0]
+
+
+def location_of(comp: dict) -> str:
+    """The device location saved in an item record's Item Specs; "" for none."""
+    specs = (comp.get("specifications") or [{}])[-1]
+    data = specs.get("DATA") if isinstance(specs, dict) else None
+    value = data.get(LOCATION_KEY) if isinstance(data, dict) else None
+    return value.strip() if isinstance(value, str) else ""
 
 
 def _end_name(connector) -> str:
@@ -105,7 +127,7 @@ def _tray(container, device) -> dict | None:
     """A cable's bundle / tray from its current container; not the device itself."""
     if not container or container["part_id"] == device:
         return None
-    return {"part_id": container["part_id"], "type_name": container["type_name"], "also": []}
+    return {"part_id": container["part_id"], "type_name": container["type_name"], "also": [], "label": ""}
 
 
 def device_connections(api, inst: str, part_id: str) -> dict:
@@ -133,9 +155,22 @@ def device_connections(api, inst: str, part_id: str) -> dict:
     - ``picture`` — the type's picture: ``image_id`` and ``markers``, one per
       slot named like a row's position (``row``, ``x``, ``y``); a slot whose
       position the page has no row for is left off. None without a picture;
-    - ``n_connected`` — rows connected or installed;
+    - ``n_connected`` — rows connected or installed; ``n_labelled`` — those
+      with a cable label;
     - ``others`` — the distinct items on the other side, each with the number
-      of this device's cables going there, for Change working device.
+      of this device's cables going there, for Change working device;
+    - ``location`` — the device's saved location, and ``location`` on every
+      other-side entry (one record read per other-side device);
+    - ``label`` per row — the cable label, for a cable connected at exactly
+      two positions on two different ENDs: ``lines`` (one per side,
+      ``<device location>.<position>``, in the order of the cable's own
+      connectors so that either working side gives the same text), ``text``
+      (the lines joined with ``-``) and ``incomplete`` when a side's device
+      has no location saved — that side is the position name alone. None
+      for any other cable;
+    - ``label`` on a row's ``bundle`` — ``<location>/<location>`` when the
+      bundle's cables on this page all go to one same other device and both
+      locations are saved (in PID order, the same from either side); "" else.
 
     The other side of a connection is what the cable's *other ENDs* are
     connected to: connectors of one END sit at the same end of the cable, so
@@ -147,6 +182,7 @@ def device_connections(api, inst: str, part_id: str) -> dict:
     out = {"part_id": part_id, "part_type_id": ptid,
            "type_name": (comp.get("component_type") or {}).get("name") or ptid,
            "is_cable": comp.get("category") == "cable",
+           "location": location_of(comp),
            "rows": [], "n_connected": 0, "others": [], "type_record": {}, "picture": None}
     if out["is_cable"]:
         return out
@@ -198,7 +234,7 @@ def device_connections(api, inst: str, part_id: str) -> dict:
             row.update(
                 cable=pid, end=m["connection"],
                 cable_type=m["type_name"] or facts.get(_type_id(pid), ("", ""))[0] or _type_id(pid),
-                others=list(sides.values()),
+                others=list(sides.values()), links=links, label=None,
                 connected=len(links), connectors=total, unread=pid in cables and mine is None,
                 bundle=_tray(trays.get(pid), part_id),
                 status=("noend" if not m["connection"]
@@ -209,10 +245,25 @@ def device_connections(api, inst: str, part_id: str) -> dict:
                                                         "cables": set()})
                     d["cables"].add(pid)
         out["rows"].append(row)
+    locs = parts.fetch_map(api, lambda c, pid: location_of(c.get_component(pid).get("data") or {}), list(there))
+    locs[part_id] = out["location"]
+    for row in out["rows"]:
+        if not row["cable"]:
+            continue
+        for o in row["others"]:
+            o["location"] = locs.get(o["part_id"]) or ""
+        ends = sorted(row["links"], key=lambda c: (str(c["via"] or ""), c["part_id"], str(c["functional_position"])))
+        if row["end"] and len(ends) == 2 and _end_name(ends[0]["via"]) != _end_name(ends[1]["via"]):
+            lines = [".".join(x for x in (locs.get(c["part_id"]), c["functional_position"]) if x) for c in ends]
+            row["label"] = {"lines": lines, "text": "-".join(lines),
+                            "incomplete": not all(locs.get(c["part_id"]) for c in ends)}
     for row in out["rows"]:
         if row["bundle"]:
-            row["bundle"]["also"] = [r["n"] for r in out["rows"] if r is not row and r["bundle"]
-                                     and r["bundle"]["part_id"] == row["bundle"]["part_id"]]
+            same = [r for r in out["rows"] if r["bundle"] and r["bundle"]["part_id"] == row["bundle"]["part_id"]]
+            row["bundle"]["also"] = [r["n"] for r in same if r is not row]
+            far = {o["part_id"] for r in same for o in r["others"] if not o["here"]}
+            pair = sorted([part_id, *far]) if len(far) == 1 else []
+            row["bundle"]["label"] = "/".join(locs[p] for p in pair) if pair and all(locs.get(p) for p in pair) else ""
     cmap = read_map(api, ptid) if out["rows"] else None
     if cmap:
         by_pos = {r["position"]: r for r in out["rows"]}
@@ -220,6 +271,7 @@ def device_connections(api, inst: str, part_id: str) -> dict:
                           "markers": [{"row": by_pos[s["label"]], "x": s["x"], "y": s["y"]}
                                       for s in cmap["slots"] if s["label"] in by_pos]}
     out["n_connected"] = sum(r["status"] in ("connected", "installed") for r in out["rows"])
+    out["n_labelled"] = sum(bool(r.get("label")) for r in out["rows"])
     out["others"] = [{**d, "cables": len(d["cables"])} for d in there.values()]
     return out
 
@@ -267,3 +319,79 @@ def offer_bundle(api, inst: str, device: dict, bundle_id: str) -> dict:
             r["prefill"] = open_[0] if len(open_) == 1 else ""
     return {"part_id": bundle_id, "type_name": facts.get(_type_id(bundle_id), ("", ""))[0] or _type_id(bundle_id),
             "cables": cables, "offered": any(r.get("candidates") for r in device["rows"])}
+
+
+def label_layout(sheet: str, lines: list[str], code: str | None, type_name: bool) -> dict:
+    """A label generator layout for one cable or bundle label on ``sheet``
+    (one of ``labels.TEMPLATES``): the code (``"qr"``, ``"bar"`` or None) with
+    the PID readable beside it, the label's ``lines`` (``${lines.n}`` of the
+    item's data, all at one size — the longest one's fit) and the type name
+    when asked. The text runs along the label's longer side; a QR sits left
+    of it on a wide label and above it on a squarish one, a bar code always
+    above."""
+    w, h = labels.template_for({"label template": sheet})["label"]     # in points
+    wide, high = max(w, h), min(w, h)
+    texts = [{"element type": "text", "text": "${lines.%d}" % i} for i in range(len(lines))]
+    if code:
+        texts.append({"element type": "external id" if code == "bar" else "part id", "font face": "Helvetica"})
+    if type_name:
+        texts.append({"element type": "part name", "font face": "Helvetica"})
+    x0, x1, y0, y1 = 4.0, 96.0, 8.0, 92.0             # the text block, in percent of the label
+    elements = []
+    if code == "bar":
+        elements.append({"element type": "bar", "alignment": "top-center", "anchor": ["50%", "8%"],
+                         "size": ["88%", "34%"], "preserve aspect ratio": False})
+        y0 = 48.0
+    elif code and wide / high >= 1.5:
+        side = min(84.0 * high / wide, 30.0)          # a square, in percent of the width: the text keeps most of it
+        tall = side * wide / high
+        elements.append({"element type": "qr", "alignment": "top-left", "anchor": ["3%", f"{(100 - tall) / 2:.2f}%"],
+                         "size": [f"{side:.2f}%", f"{tall:.2f}%"], "preserve aspect ratio": True})
+        x0 = 3.0 + side + 3.0
+    elif code:
+        elements.append({"element type": "qr", "alignment": "top-center", "anchor": ["50%", "5%"],
+                         "size": ["90%", "50%"], "preserve aspect ratio": True})
+        y0 = 58.0
+    pitch = (y1 - y0) / max(1, len(texts))
+    size = min(pitch / 1.7, 16.0)                     # the generator draws text 1.35 × its font size tall
+    mid = (x0 + x1) / 2
+    room = min(x1 - x0, 2 * min(mid, 100 - mid) - 200 * labels.FIT_MARGIN) / 100 * wide   # the generator's fit width
+    longest = max([stringWidth(t, "Helvetica-Bold", 1.35 * size / 100 * high) for t in lines] or [0])
+    own = size * min(1.0, room / longest) if longest else size
+    for i, el in enumerate(texts):
+        fs = own if i < len(lines) else min(size, own)    # the PID and type name never larger than the label
+        elements.append({**el, "alignment": "top-center", "fit width": True,
+                         "anchor": [f"{mid:.2f}%", f"{y0 + i * pitch + (pitch - 1.35 * fs) / 2:.2f}%"],
+                         "size": [f"{x1 - x0:.2f}%", f"{pitch:.2f}%"], "font size": f"{fs:.2f}%"})
+    return {"label template": sheet, "orientation": "landscape" if h > w else "portrait", "elements": elements}
+
+
+def label_jobs(device: dict, what: str, show: str, code: str, type_name: bool, sheet: str) -> list[tuple[dict, dict]]:
+    """The labels to print (#229), as the label generator's (layout, item)
+    pairs in row order. ``what``: ``"all"`` — every connected row; a row's
+    number — that row's cable; ``"b<n>"`` — the bundle / tray of row n, with
+    its bundle label. ``show``: ``"both"`` (label and PID), ``"label"`` or
+    ``"pid"``. A cable with no label prints its PID only, and is left out when
+    only labels are asked for; the PID is drawn as ``code`` (``"qr"`` or
+    ``"bar"``) with its text."""
+    rows = {str(r["n"]): r for r in device["rows"] if r["cable"]}
+    if what == "all":
+        picked = [(r["cable"], r["cable_type"], (r["label"] or {}).get("lines") or [])
+                  for r in rows.values() if r["status"] in ("connected", "installed")]
+    elif what[:1] == "b" and (rows.get(what[1:]) or {}).get("bundle"):
+        b = rows[what[1:]]["bundle"]
+        picked = [(b["part_id"], b["type_name"], [b["label"]] if b["label"] else [])]
+    elif what in rows:
+        r = rows[what]
+        picked = [(r["cable"], r["cable_type"], (r["label"] or {}).get("lines") or [])]
+    else:
+        picked = []
+    jobs = []
+    for pid, name, lines in picked:
+        lines = [] if show == "pid" else lines
+        if show == "label" and not lines:
+            continue
+        with_code = code if show != "label" else None
+        jobs.append((label_layout(sheet, lines, with_code, type_name),
+                     {"part_id": pid, "part_name": name or "", "lines": lines}))
+    return jobs

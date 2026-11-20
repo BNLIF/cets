@@ -2,7 +2,7 @@
 {% block title %}Cable connections{% if device %} · {{ device.part_id }}{% endif %} · HWDB Explorer{% endblock %}
 
 {% block content %}
-{# #226, #227: the Cable connections page — the list-under-the-picture layout picked on #225 (Hajime's mock-up, ten columns folded). One row per position of the endpoint device that takes a cable; View shows one connection with both sides; on an instance open to writes, Connect and Remove write the working side. #228: the type's picture over the list, a numbered marker per position. The device location and labels come with the last cabling ticket. #}
+{# #226, #227: the Cable connections page — the list-under-the-picture layout picked on #225 (Hajime's mock-up, ten columns folded). One row per position of the endpoint device that takes a cable; View shows one connection with both sides; on an instance open to writes, Connect and Remove write the working side. #228: the type's picture over the list, a numbered marker per position. #229: the device location typed in the header and saved in the item's specifications, the cable and bundle labels worked out from it, and Print — a sheet of the label generator. #}
 {% include "explore/_es_style.html" %}
 <style>
   .cc-page { max-width: 1180px; }
@@ -20,6 +20,15 @@
   .cc-page .cc-in input { min-height: 44px; width: 220px; max-width: 100%; font-family: var(--font-mono); font-size: 14px; }
   .cc-val { display: flex; align-items: center; min-height: 44px; font-size: 14px; font-weight: 600; color: var(--ink); }
   .cc-grow { flex: 1 1 0; }
+  .cc-page .cc-in input.cc-loc { width: 170px; }
+  /* a label: as it is printed, one line per side */
+  .cc-lab { overflow-wrap: anywhere; }
+  .cc-lbl { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--rule-hard); border-radius: var(--r-md); background: #fff;
+    font-family: var(--font-mono); font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+  .cc-lbl .cc-l2 { font-weight: 400; }
+  .cc-page button.cc-link { font: inherit; font-size: 12.5px; padding: 0; border: 0; background: none; color: var(--accent-ink); cursor: pointer; }
+  .cc-page button.cc-link:hover { text-decoration: underline; }
+  .cc-dlg select { min-height: 44px; width: 100%; font: inherit; font-size: 14px; }
   .cc-bar-row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 8px; }
   .cc-bar-row h2 { margin: 0; font-size: 16px; color: var(--ink); }
   .cc-bar { width: 150px; height: 8px; border-radius: 4px; background: var(--surface); overflow: hidden; }
@@ -83,6 +92,7 @@
   .cc-ends { display: grid; gap: 2px; }
   .cc-ends label { display: flex; gap: 8px; align-items: center; min-height: 44px; font-family: var(--font-mono); color: var(--ink); }
   .cc-ends label.used { color: var(--dim); }
+  .cc-ends.cc-opts label { font-family: inherit; }
   .cc-err { color: var(--bad); }
   /* under 900px the Bundle / tray column folds into the cable's cell */
   @media (max-width: 899px) { .cc-table .cc-bun { display: none; } .cc-bun-in { display: block; } }
@@ -125,8 +135,18 @@
     </form>
     {% if device and not device.is_cable %}
     <div class="cc-f">Type<span class="cc-val">{{ device.type_name }}</span></div>
-    {# typed and saved with the device-location ticket; blank until then #}
-    <div class="cc-f">Device location<span class="cc-val cc-none">—</span></div>
+    {% if can_set_location %}
+    {# typed by hand; one key of the item's specifications, read by the other side's page #}
+    <form class="cc-f" method="post">{% csrf_token %}<input type="hidden" name="bundle" value="{{ bundle.part_id }}">
+      <label for="cc-loc">Device location</label>
+      <span class="cc-in">
+        <input type="text" id="cc-loc" class="cc-loc" name="location" value="{{ device.location }}" maxlength="60" autocomplete="off" spellcheck="false">
+        <button type="submit" class="es-btn" name="set_location" value="1" title="Saved in this item’s specifications">Save</button>
+      </span>
+    </form>
+    {% else %}
+    <div class="cc-f">Device location<span class="cc-val mono{% if not device.location %} cc-none{% endif %}">{{ device.location|default:"—" }}</span></div>
+    {% endif %}
     {% if can_write %}
     {# optional: its cables are then offered at the free positions, nothing linked until Connect #}
     <form class="cc-f" id="cc-bform" method="get">
@@ -172,6 +192,7 @@
     <div class="cc-bar" aria-hidden="true"><i style="width: {% widthratio device.n_connected device.rows|length 100 %}%"></i></div>
     <span class="cc-grow"></span>
     {% if can_write and device.n_connected %}<button type="button" class="es-btn quiet" data-open="cc-rm-all">Remove all</button>{% endif %}
+    {% if device.n_connected %}<button type="button" class="es-btn quiet" data-print="all" data-count="{{ device.n_connected }}" data-labelled="{{ device.n_labelled }}">Print labels</button>{% endif %}
   </div>
   {% if bundle %}<p class="cc-l2">Bundle / tray <a class="mono" href="{% url 'explore:part' part_id=bundle.part_id %}">{{ bundle.part_id }}</a> · {{ bundle.type_name }} · {% if bundle.cables %}{{ bundle.cables|length }} cable{{ bundle.cables|pluralize }}, {% if bundle.offered %}offered at the free positions{% else %}none of a type a free position takes{% endif %}{% else %}holds no cables{% endif %}</p>{% endif %}
   {% if can_write %}<form method="post" id="cc-rm">{% csrf_token %}<input type="hidden" name="bundle" value="{{ bundle.part_id }}">{% endif %}
@@ -182,11 +203,11 @@
       <tr class="cc-{{ r.status }}" data-row="{{ r.n }}">
         <td class="cc-n"><span class="cc-num">{{ r.n }}</span></td>
         <td class="cc-pos">{{ r.position }}</td>
-        <td class="cc-cable">{% if r.cable %}<a class="mono" href="{% url 'explore:part' part_id=r.cable %}">{{ r.cable }}</a><span class="cc-l2 mono">{{ r.end|default:"no END" }}</span>{% if r.bundle %}<span class="cc-l2 cc-bun-in">Bundle / tray <a class="mono" href="{% url 'explore:part' part_id=r.bundle.part_id %}">{{ r.bundle.part_id }}</a>{% if r.bundle.also %} · also at {{ r.bundle.also|join:", " }}{% endif %}</span>{% endif %}{% else %}Not connected<span class="cc-l2">Expected: {{ r.expected|join:" or " }}</span>{% endif %}</td>
-        <td class="cc-other">{% if not r.cable %}<span class="cc-none">—</span>{% elif r.unread %}<span class="cc-none">couldn’t be read</span>{% else %}{% for o in r.others %}<span class="cc-side"><b>{{ o.connections.0.position }}{% if o.connections|length > 1 %}, {{ o.connections.1.position }}{% endif %}</b>{% if o.connections|length > 2 %} + {{ o.connections|length|add:"-2" }} more{% endif %}<span class="cc-l2">{% if o.here %}this device{% else %}<a class="mono" href="{% url 'explore:cable_connections' part_id=o.part_id %}" title="Work from this device">{{ o.part_id }}</a>{% if o.type_name %} · {{ o.type_name }}{% endif %}{% endif %}</span></span>{% empty %}<span class="cc-none">not connected yet</span>{% endfor %}{% endif %}</td>
+        <td class="cc-cable">{% if r.cable %}<a class="mono" href="{% url 'explore:part' part_id=r.cable %}">{{ r.cable }}</a><span class="cc-l2 mono">{{ r.end|default:"no END" }}</span>{% if r.label %}<span class="cc-l2 cc-lab">Label <span class="mono">{{ r.label.text }}</span>{% if r.label.incomplete %} · location missing{% endif %}</span>{% endif %}{% if r.bundle %}<span class="cc-l2 cc-bun-in">Bundle / tray <a class="mono" href="{% url 'explore:part' part_id=r.bundle.part_id %}">{{ r.bundle.part_id }}</a>{% if r.bundle.also %} · also at {{ r.bundle.also|join:", " }}{% endif %}</span>{% endif %}{% else %}Not connected<span class="cc-l2">Expected: {{ r.expected|join:" or " }}</span>{% endif %}</td>
+        <td class="cc-other">{% if not r.cable %}<span class="cc-none">—</span>{% elif r.unread %}<span class="cc-none">couldn’t be read</span>{% else %}{% for o in r.others %}<span class="cc-side">{% if o.location %}<b class="mono">{{ o.location }}</b> · {% endif %}<b>{{ o.connections.0.position }}{% if o.connections|length > 1 %}, {{ o.connections.1.position }}{% endif %}</b>{% if o.connections|length > 2 %} + {{ o.connections|length|add:"-2" }} more{% endif %}<span class="cc-l2">{% if o.here %}this device{% else %}<a class="mono" href="{% url 'explore:cable_connections' part_id=o.part_id %}" title="Work from this device">{{ o.part_id }}</a>{% if o.type_name %} · {{ o.type_name }}{% endif %}{% endif %}</span></span>{% empty %}<span class="cc-none">not connected yet</span>{% endfor %}{% endif %}</td>
         <td class="cc-st">{% if r.status == "installed" %}<span class="cc-chip cc-installed" title="Every END : connector of the cable is connected">Installed</span>{% elif r.status == "connected" %}<span class="cc-chip cc-connected" title="Connected here; the cable has connectors still free">Connected</span>{% elif r.status == "noend" %}<span class="cc-chip" title="Linked without an END: this device is the cable’s bundle / tray">No END</span>{% else %}<span class="cc-chip">Available</span>{% endif %}</td>
-        <td class="cc-bun">{% if r.bundle %}<a class="mono" href="{% url 'explore:part' part_id=r.bundle.part_id %}">{{ r.bundle.part_id }}</a><span class="cc-l2">{{ r.bundle.type_name }}{% if r.bundle.also %} · also at {{ r.bundle.also|join:", " }}{% endif %}</span>{% else %}<span class="cc-none">—</span>{% endif %}</td>
-        <td class="cc-act">{% if r.cable %}<button type="button" class="es-btn quiet" data-open="cc-view-{{ r.n }}">View</button>{% if can_write %}<button type="submit" class="es-btn" name="remove" value="{{ r.position }}" title="Remove this connection — on this device only">Remove</button>{% endif %}{% elif can_write %}<button type="button" class="es-btn quiet" data-connect="{{ r.position }}" data-n="{{ r.n }}" data-types="{{ r.accepts|join:"," }}" data-names='[{% for e in r.expected %}"{{ e|escapejs }}"{% if not forloop.last %},{% endif %}{% endfor %}]' data-expected="{{ r.expected|join:" or " }}" data-prefill="{{ r.prefill }}">Connect</button>{% if r.candidates %}<template id="cc-cands-{{ r.n }}">{% for c in r.candidates %}<button type="button" data-pid="{{ c.part_id }}"{% if not c.open %} class="done"{% endif %}><span><span class="mono">{{ c.part_id }}</span><span class="cc-l2">{{ c.held_at }}</span></span><span class="cc-l2">{% if c.here %}connected at {{ c.here|join:", " }}{% elif c.connected %}{{ c.connected }} of {{ c.connectors }} connected{% else %}free{% endif %}</span></button>{% endfor %}</template>{% endif %}{% endif %}</td>
+        <td class="cc-bun">{% if r.bundle %}<a class="mono" href="{% url 'explore:part' part_id=r.bundle.part_id %}">{{ r.bundle.part_id }}</a><span class="cc-l2">{{ r.bundle.type_name }}{% if r.bundle.also %} · also at {{ r.bundle.also|join:", " }}{% endif %}</span>{% if r.bundle.label %}<span class="cc-l2 cc-lab">Label <span class="mono">{{ r.bundle.label }}</span> · <button type="button" class="cc-link" data-print="b{{ r.n }}" data-at="bundle / tray" data-pid="{{ r.bundle.part_id }}" data-type="{{ r.bundle.type_name }}" data-l1="{{ r.bundle.label }}">Print</button></span>{% endif %}{% else %}<span class="cc-none">—</span>{% endif %}</td>
+        <td class="cc-act">{% if r.cable %}<button type="button" class="es-btn quiet" data-open="cc-view-{{ r.n }}">View</button><button type="button" class="es-btn quiet" data-print="{{ r.n }}" data-at="{{ r.n }} · {{ r.position }}" data-pid="{{ r.cable }}" data-type="{{ r.cable_type }}" data-l1="{{ r.label.lines.0 }}" data-l2="{{ r.label.lines.1 }}">Print</button>{% if can_write %}<button type="submit" class="es-btn" name="remove" value="{{ r.position }}" title="Remove this connection — on this device only">Remove</button>{% endif %}{% elif can_write %}<button type="button" class="es-btn quiet" data-connect="{{ r.position }}" data-n="{{ r.n }}" data-types="{{ r.accepts|join:"," }}" data-names='[{% for e in r.expected %}"{{ e|escapejs }}"{% if not forloop.last %},{% endif %}{% endfor %}]' data-expected="{{ r.expected|join:" or " }}" data-prefill="{{ r.prefill }}">Connect</button>{% if r.candidates %}<template id="cc-cands-{{ r.n }}">{% for c in r.candidates %}<button type="button" data-pid="{{ c.part_id }}"{% if not c.open %} class="done"{% endif %}><span><span class="mono">{{ c.part_id }}</span><span class="cc-l2">{{ c.held_at }}</span></span><span class="cc-l2">{% if c.here %}connected at {{ c.here|join:", " }}{% elif c.connected %}{{ c.connected }} of {{ c.connectors }} connected{% else %}free{% endif %}</span></button>{% endfor %}</template>{% endif %}{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -201,24 +222,32 @@
         <a class="mono" href="{% url 'explore:part' part_id=r.cable %}">{{ r.cable }}</a>
         <span class="cc-l2">{{ r.cable_type }}{% if r.connectors %} · {{ r.connected }} of {{ r.connectors }} connectors connected{% endif %}</span>
       </div>
+      {% if r.label %}
+      <div class="cc-ends">
+        <h3>Cable label</h3>
+        <div class="cc-lbl">{% for line in r.label.lines %}<span>{{ line }}</span>{% endfor %}</div>
+        {% if r.label.incomplete %}<span class="cc-l2">Incomplete — a device location is missing.</span>{% endif %}
+      </div>
+      {% endif %}
       <div class="cc-box">
         <h3>This side</h3>
-        <span><b>{{ r.position }}</b></span>
+        <span>{% if device.location %}<b class="mono">{{ device.location }}</b> · {% endif %}<b>{{ r.position }}</b></span>
         <span class="cc-l2"><span class="mono">{{ device.part_id }}</span> · {{ device.type_name }}</span>
-        <span class="cc-l2 mono">{{ r.end|default:"no END" }}</span>
+        <span class="cc-l2"><span class="mono">{{ r.end|default:"no END" }}</span>{% if r.end %} · connected{% endif %}</span>
       </div>
       {% for o in r.others %}
       <div class="cc-box">
         <h3>Other side</h3>
-        <span class="cc-l2">{% if o.here %}this device{% else %}<a class="mono" href="{% url 'explore:cable_connections' part_id=o.part_id %}" title="Work from this device">{{ o.part_id }}</a>{% if o.type_name %} · {{ o.type_name }}{% endif %}{% endif %}</span>
-        {% for c in o.connections %}<span><b>{{ c.position }}</b>{% if c.end %} <span class="cc-l2 mono" style="display: inline;">· {{ c.end }}</span>{% endif %}</span>{% endfor %}
+        <span class="cc-l2">{% if o.location %}<b class="mono">{{ o.location }}</b> · {% endif %}{% if o.here %}this device{% else %}<a class="mono" href="{% url 'explore:cable_connections' part_id=o.part_id %}" title="Work from this device">{{ o.part_id }}</a>{% if o.type_name %} · {{ o.type_name }}{% endif %}{% endif %}</span>
+        {% for c in o.connections %}<span><b>{{ c.position }}</b>{% if c.end %} <span class="cc-l2" style="display: inline;">· <span class="mono">{{ c.end }}</span> · connected</span>{% endif %}</span>{% endfor %}
       </div>
       {% empty %}
       <span class="cc-none">{% if r.unread %}The cable’s connections couldn’t be read.{% else %}Other side not connected yet.{% endif %}</span>
       {% endfor %}
-      {% if r.bundle %}<span class="cc-l2">Bundle / tray <a class="mono" href="{% url 'explore:part' part_id=r.bundle.part_id %}">{{ r.bundle.part_id }}</a> · {{ r.bundle.type_name }}{% if r.bundle.also %} · also at {{ r.bundle.also|join:", " }}{% endif %}</span>{% endif %}
+      {% if r.bundle %}<span class="cc-l2">Bundle / tray <a class="mono" href="{% url 'explore:part' part_id=r.bundle.part_id %}">{{ r.bundle.part_id }}</a> · {{ r.bundle.type_name }}{% if r.bundle.also %} · also at {{ r.bundle.also|join:", " }}{% endif %}{% if r.bundle.label %} · label <span class="mono">{{ r.bundle.label }}</span> · <button type="button" class="cc-link" data-print="b{{ r.n }}" data-at="bundle / tray" data-pid="{{ r.bundle.part_id }}" data-type="{{ r.bundle.type_name }}" data-l1="{{ r.bundle.label }}" data-close>Print</button>{% endif %}</span>{% endif %}
       <a href="{% url 'explore:part' part_id=r.cable %}">Open the cable’s item page</a>
     </div>
+    <div class="cc-df"><button type="button" class="es-btn quiet" data-print-row="{{ r.n }}" data-close>Print label</button></div>
   </dialog>
   {% endif %}{% endfor %}
 
@@ -252,6 +281,39 @@
     </div>
   </dialog>
   {% endif %}
+  {% endif %}
+
+  {% if device.rows %}
+  {# one dialog for a row's label, a bundle's and every row's: the sheet opens as a PDF in a new tab, nothing is written #}
+  <dialog class="cc-dlg" id="cc-print">
+    <form method="get" target="_blank">
+      <input type="hidden" name="print">
+      <div class="cc-dh"><h2 id="cc-p-title">Print label</h2><button type="button" class="es-btn quiet" data-close aria-label="Close">✕</button></div>
+      <div class="cc-db">
+        <div class="cc-lbl" id="cc-p-lbl"></div>
+        <div class="cc-ends cc-opts">
+          <h3>On the label</h3>
+          <label><input type="radio" name="show" value="both"> Label and PID</label>
+          <label><input type="radio" name="show" value="label"> Label only</label>
+          <label><input type="radio" name="show" value="pid"> PID only</label>
+        </div>
+        <div class="cc-ends cc-opts">
+          <h3>PID as</h3>
+          <label><input type="radio" name="code" value="qr" checked> QR code</label>
+          <label><input type="radio" name="code" value="bar"> Bar code</label>
+          <label><input type="checkbox" name="name" value="1"> Type name<span class="cc-l2" id="cc-p-type" style="display: inline;"></span></label>
+        </div>
+        <div class="cc-ends">
+          <h3><label for="cc-p-sheet">Sheet</label></h3>
+          <select id="cc-p-sheet" name="sheet">{% for key, text in label_sheets %}<option value="{{ key }}"{% if key == label_sheet %} selected{% endif %}>{{ text }}</option>{% endfor %}</select>
+        </div>
+      </div>
+      <div class="cc-df">
+        <button type="button" class="es-btn quiet" data-close>Cancel</button>
+        <button type="submit" class="es-btn quiet">Print</button>
+      </div>
+    </form>
+  </dialog>
   {% endif %}
 
   {% if device and not device.is_cable %}
@@ -342,6 +404,44 @@
       if (cpid.value) lookup();
     });
   }
+  // Print: a row's label, a bundle's, or every connected row's — without a label only the PID can be printed
+  var pd = byId("cc-print");
+  if (pd) {
+    var pf = pd.querySelector("form"), KEY = "cc-print";
+    function span(cls, text) { var e = document.createElement("span"); e.className = cls; e.textContent = text; return e; }
+    try {       // the sheet and the PID's form are the printer's, not the row's: kept in this browser
+      var kept = JSON.parse(localStorage.getItem(KEY) || "{}");
+      if (kept.sheet && pf.sheet.querySelector('option[value="' + kept.sheet + '"]')) pf.sheet.value = kept.sheet;
+      if (kept.code === "bar") pf.code.value = "bar";
+      pf.elements.name.checked = !!kept.name;
+    } catch (e) { /* no storage: the defaults */ }
+    document.addEventListener("click", function (e) {
+      var v = e.target.closest("[data-print-row]");
+      if (v) v = document.querySelector('.cc-table tr[data-row="' + v.getAttribute("data-print-row") + '"] .cc-act [data-print]');
+      var b = v || e.target.closest("[data-print]");
+      if (!b) return;
+      var what = b.getAttribute("data-print"), all = what === "all", box = byId("cc-p-lbl"),
+          lines = [b.getAttribute("data-l1"), b.getAttribute("data-l2")].filter(Boolean),
+          labelled = all ? +b.getAttribute("data-labelled") > 0 : lines.length > 0;
+      pf.elements.print.value = what;
+      byId("cc-p-title").textContent = all ? "Print labels" : "Print label · " + b.getAttribute("data-at");
+      box.textContent = "";
+      if (all) box.appendChild(span("cc-l2", b.getAttribute("data-count") + " connected · " + b.getAttribute("data-labelled") + " with a cable label"));
+      else {
+        lines.forEach(function (t) { box.appendChild(span("", t)); });
+        box.appendChild(span("cc-l2", b.getAttribute("data-pid")));
+      }
+      byId("cc-p-type").textContent = all ? "" : " · " + b.getAttribute("data-type");
+      Array.prototype.forEach.call(pf.show, function (r) { r.disabled = !labelled && r.value !== "pid"; });
+      pf.show.value = labelled ? "both" : "pid";
+      pd.showModal();
+    });
+    pf.addEventListener("submit", function () {
+      try { localStorage.setItem(KEY, JSON.stringify({ sheet: pf.sheet.value, code: pf.code.value, name: pf.elements.name.checked })); } catch (e) { /* not kept */ }
+      pd.close();
+    });
+  }
+
   // the picture: a marker stands for its row — a tap is the row's Connect or View, and each lights the other up
   var map = byId("cc-map");
   if (map) {

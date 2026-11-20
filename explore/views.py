@@ -1713,8 +1713,24 @@ def _cables_write(request, api, inst, part_id) -> None:
     of the cable there; ``remove=<position>`` empties it; ``remove_all``
     empties every position holding a cable end. The working side only — the
     cable's other connections are other items' positions. Like Link items,
-    the PATCH carries the device's complete positions, each as read (#224)."""
+    the PATCH carries the device's complete positions, each as read (#224).
+
+    ``set_location`` (#229) saves the header's device location instead: one
+    key of the item's Item Specs DATA, the rest as read; blank removes it."""
     ptid = part_id.rsplit("-", 1)[0]
+    if "set_location" in request.POST:
+        loc = " ".join((request.POST.get("location") or "").split())[:cabling.LOCATION_MAX]
+        err = (_ensure_spec_data(request, api, ptid)
+               or _patch_spec_data(api, part_id, {cabling.LOCATION_KEY: loc} if loc else {},
+                                   owned={cabling.LOCATION_KEY}))
+        if err:
+            messages.error(request, f"Couldn’t save the device location — {err}")
+            return
+        activity.log(inst, ActivityEvent.KIND_SPEC,
+                     f"Device location of {part_id} set to “{loc}”" if loc else f"Device location of {part_id} cleared",
+                     part_id=part_id, part_type_id=ptid, actor=activity.actor_of(request))
+        messages.success(request, f"Device location saved — {loc}." if loc else "Device location cleared.")
+        return
     try:
         connectors = _box_connectors(api, ptid)
         current = {pos: None for pos in connectors}
@@ -1773,14 +1789,41 @@ def _cables_write(request, api, inst, part_id) -> None:
     messages.success(request, done)
 
 
+def _cable_labels_pdf(request, api, inst, device) -> HttpResponse | None:
+    """#229: the Print dialog's sheet — ``?print=`` ``all``, a row's number or
+    ``b<n>`` (row n's bundle / tray), ``show`` (``both``, ``label``, ``pid``),
+    ``code`` (``qr``, ``bar``), ``name`` (the type name too) and ``sheet``, one
+    of the label generator's sheets. Drawn by the label generator, the labels
+    in row order, no intro pages. None when there is nothing to print.
+
+    The QR is the item's HWDB address and needs no read; the bar code is the
+    external ID (``PID-CC###``), read off each item's record — the bare PID
+    where that read fails."""
+    g = request.GET
+    sheet = g.get("sheet") if g.get("sheet") in labels.TEMPLATES else cabling.LABEL_SHEET
+    show = g.get("show") if g.get("show") in ("label", "pid") else "both"
+    code = "bar" if g.get("code") == "bar" else "qr"
+    jobs = cabling.label_jobs(device, g.get("print") or "", show, code, bool(g.get("name")), sheet)
+    if not jobs:
+        return None
+    if code == "bar" and show != "label":
+        records = parts.fetch_map(api, lambda c, pid: labels.item_data(c.get_component(pid).get("data") or {}),
+                                  [data["part_id"] for _, data in jobs])
+        for _, data in jobs:
+            data["external_id"] = (records.get(data["part_id"]) or {}).get("external_id") or data["part_id"]
+    pdf = labels.build_pdf([], [], settings.HWDB_PROFILES[inst]["ui"], intro=False, pairs=jobs)
+    resp = HttpResponse(pdf, content_type="application/pdf")
+    resp["Content-Disposition"] = f'inline; filename="cable_labels_{device["part_id"]}.pdf"'
+    return resp
+
+
 @login_not_required
 @fnal_login_required
 def explore_cables_view(request, part_id=None):
     """#226 (Hajime's Cable Connections mock-up, the list-under-the-picture
     layout Chao picked on #225): one endpoint device — its positions that
     take a cable, what is connected at each and where that cable goes on
-    its other side(s). The picture, the device location and the labels are
-    the later cabling tickets (#228, #229).
+    its other side(s).
 
     ``cables/`` is the way in: ``?pid=`` (typed, or filled by the scanner —
     a bare PID, an HWDB URL, a label) goes to that item's page. The page
@@ -1790,7 +1833,13 @@ def explore_cables_view(request, part_id=None):
     position or removes connections (``_cables_write``), then comes back to
     the page; ``?slots=<cable>&pos=<position>`` answers the Connect dialog
     with the cable's END : connector slots as JSON; ``?bundle=<PID>`` offers
-    that bundle / tray's cables at the free positions."""
+    that bundle / tray's cables at the free positions.
+
+    #229: the device location is typed in the header and saved in the item's
+    Item Specs (a POST, so only where writes are open; the field only for an
+    account holding one of the type's roles); cable and bundle labels are
+    worked out from the connections and the saved locations; ``?print=``
+    answers the label sheet as a PDF, on any instance."""
     inst = instance_of(request)
     ctx = {"active_nav": "hardware", "typed": part_id or ""}
     if part_id is None:
@@ -1829,10 +1878,18 @@ def explore_cables_view(request, part_id=None):
     except requests.RequestException as e:
         messages.error(request, f"Couldn’t read {part_id} — {_hwdb_error_detail(e)}")
         return render(request, "explore/cables.html", ctx)
+    if "print" in request.GET:
+        pdf = _cable_labels_pdf(request, api, inst, device)
+        if pdf is None:
+            messages.error(request, "Nothing to print.")
+        return pdf or redirect(page_url)
+    ctx.update(label_sheets=[(k, v["description"]) for k, v in labels.TEMPLATES.items()],
+               label_sheet=cabling.LABEL_SHEET)
     if can_write and device["rows"]:
         ctx.update(can_write=True, typed_bundle=typed_bundle,
                    role_gate=_type_role_gate(request, inst, api, device["part_type_id"], device["type_record"]))
-        ctx["can_edit_map"] = ctx["role_gate"] is None   # the picture is the type's: its roles, as for its checklists
+        # the picture is the type's and the location the item's: the type's roles, as for its checklists and items
+        ctx["can_edit_map"] = ctx["can_set_location"] = ctx["role_gate"] is None
         if bundle_id:
             try:
                 ctx["bundle"] = cabling.offer_bundle(api, inst, device, bundle_id)

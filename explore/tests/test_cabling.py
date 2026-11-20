@@ -1,6 +1,7 @@
-"""The Cable connections page (#226, #227): one endpoint device, its positions
-that take a cable, where each connected cable goes, and connecting and
-removing on the working side. HWDB is mocked with rows
+"""The Cable connections page (#226–#229): one endpoint device, its positions
+that take a cable, where each connected cable goes, connecting and
+removing on the working side, the type's picture, the device location and
+the labels. HWDB is mocked with rows
 shaped as dev answers them since 2026-11-20, the client having taken the
 country / institution codes off.
 
@@ -116,7 +117,7 @@ class DeviceConnectionsTest(TestCase):
         r = self.rows["ISH"]
         self.assertEqual((r["cable"], r["end"], r["cable_type"]),
                          (INSTALLED, "FCP Flange:1", "Top CRP bias warm cable"))
-        self.assertEqual(r["others"], [{"part_id": SHIELD, "type_name": "CRP Shield (slot 4)", "here": False,
+        self.assertEqual(r["others"], [{"part_id": SHIELD, "type_name": "CRP Shield (slot 4)", "here": False, "location": "",
                                         "connections": [{"position": "CH01.2", "end": "HVS PS:1"}]}])
 
     def test_installed_means_every_connector_of_the_cable_is_connected(self):
@@ -152,7 +153,7 @@ class DeviceConnectionsTest(TestCase):
         api.get_subcomponents.side_effect = lambda pid: {"data": rows.get(pid, [])}
         device = cabling.device_connections(api, "dev", FLANGE)
         by = {r["position"]: r for r in device["rows"]}
-        self.assertEqual(by["ISH"]["others"], [{"part_id": FILTER, "type_name": "Filter box", "here": False, "connections": [
+        self.assertEqual(by["ISH"]["others"], [{"part_id": FILTER, "type_name": "Filter box", "here": False, "location": "", "connections": [
             {"position": "FB1", "end": "Inner CRP:1"}, {"position": "FB2", "end": "Inner CRP:2"}]}])
         self.assertEqual([(o["here"], o["connections"]) for o in by["ICO"]["others"]],
                          [(True, [{"position": "Board", "end": "HVS PS:1"}])])
@@ -164,8 +165,10 @@ class DeviceConnectionsTest(TestCase):
 
     def test_reads_are_bounded_by_the_device(self):
         """Its record, its positions, each connected cable's rows once, a type
-        record per type — no item of the other side, no listing."""
-        self.assertEqual(self.api.get_component.call_count, 1)
+        record per type, the record of each other-side device for its
+        location (#229) — no listing."""
+        self.assertEqual(sorted(c.args[0] for c in self.api.get_component.call_args_list),
+                         sorted([FLANGE, SHIELD, FCT, FILTER]))
         self.assertEqual(sorted(c.args[0] for c in self.api.get_subcomponents.call_args_list),
                          sorted([FLANGE, INSTALLED, ONE_END, MANY]))
         self.assertLessEqual(self.api.get_component_type.call_count, 6)   # the device's, three accepted, two cable types
@@ -193,7 +196,7 @@ class DeviceConnectionsTest(TestCase):
 
     def test_a_row_names_the_cables_bundle_and_the_other_rows_of_the_same_one(self):
         self.assertEqual(self.rows["ISH"]["bundle"],
-                         {"part_id": TRAY, "type_name": "Top CRP bias warm cable bundle", "also": [2]})
+                         {"part_id": TRAY, "type_name": "Top CRP bias warm cable bundle", "also": [2], "label": ""})
         self.assertEqual(self.rows["OSH"]["bundle"]["also"], [1])
         self.assertIsNone(self.rows["FCT.T"]["bundle"])                   # in no bundle
         self.assertIsNone(self.rows["ICO"]["bundle"])
@@ -290,7 +293,7 @@ class CablesPageTest(TestCase):
         self.assertIn("Connection at 3 · FCT.T", dlg)
         self.assertIn("3 of 4 connectors connected", dlg)
         self.assertEqual(dlg.count("<h3>Other side</h3>"), 2)
-        self.assertIn("· FC Termination:1", dlg)
+        self.assertIn('· <span class="mono">FC Termination:1</span> · connected', dlg)
         self.assertIn(f'href="/hw/dev/part/{MANY}/">Open the cable’s item page</a>', dlg)
         self.assertNotIn('id="cc-view-4"', html)                                 # a free position has nothing to view
 
@@ -590,3 +593,211 @@ class CablePictureTest(TestCase):
         self.api.post_component_type_image.return_value = {"status": "ERROR", "data": "Not authorized"}
         html = self._call("post", self.EDITOR, {"map": json.dumps({"image_id": "55", "slots": []})}, follow=True).content.decode()
         self.assertIn("HWDB refused the picture’s markers — Not authorized", html)
+
+
+def _located(api, locations, data=None):
+    """The items named in ``locations`` carry that device location in their
+    Item Specs; the shield becomes a device with the installed cable's far
+    END on it, and the flange's type template defines DATA."""
+    inner_c, inner_t, inner_s = (api.get_component.side_effect, api.get_component_type.side_effect,
+                                 api.get_subcomponents.side_effect)
+
+    def component(pid):
+        rec = inner_c(pid)["data"]
+        specs = {"DATA": {**(data or {}), **({cabling.LOCATION_KEY: locations[pid]} if pid in locations else {})}}
+        return {"data": {**rec, "serial_number": "S1", "comments": "c", "manufacturer": None, "specifications": [specs]}}
+
+    def ctype(t):
+        if t == "Z00100300061":
+            return {"data": {"category": "generic", "connectors": {"CH01.2": WARM}}}
+        extra = {"properties": {"specifications": [{"datasheet": {"DATA": {}}}]}} if t == "Z00100300064" else {}
+        return {"data": {**inner_t(t)["data"], **extra}}
+
+    def subcomponents(pid):
+        if pid == SHIELD:
+            return {"data": [{"part_id": f"{INSTALLED}.HVS PS:1", "type_name": "Top CRP bias warm cable",
+                              "functional_position": "CH01.2", "operation": "mount"}]}
+        return inner_s(pid)
+
+    api.get_component.side_effect, api.get_component_type.side_effect = component, ctype
+    api.get_subcomponents.side_effect = subcomponents
+    api.patch_component.return_value = {"status": "OK"}
+    return api
+
+
+class CableLabelsTest(TestCase):
+    """#229: the device location, the cable and bundle labels, and Print."""
+
+    BOTH = {FLANGE: "FCP_201NE", SHIELD: "SEDM07.S04"}
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("k", "k@k.io", "pw"))
+
+    def _rows(self, locations, part_id=FLANGE):
+        device = cabling.device_connections(_located(_api(), locations), "dev", part_id)
+        return device, {r["position"]: r for r in device["rows"]}
+
+    def _call(self, api, method="get", data=None, **kw):
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            return getattr(self.client, method)(PAGE, data or {}, **kw)
+
+    def test_the_location_is_read_off_the_item_specs_of_each_side(self):
+        device, rows = self._rows(self.BOTH)
+        self.assertEqual(device["location"], "FCP_201NE")
+        self.assertEqual(rows["ISH"]["others"][0]["location"], "SEDM07.S04")
+        self.assertEqual(rows["FCT.T"]["others"][0]["location"], "")          # nothing saved on that device
+        self.assertEqual(cabling.location_of({}), "")
+        self.assertEqual(cabling.location_of({"specifications": [{"DATA": {cabling.LOCATION_KEY: 7}}]}), "")
+
+    def test_a_cable_connected_at_two_positions_gets_a_line_per_side(self):
+        device, rows = self._rows(self.BOTH)
+        self.assertEqual(rows["ISH"]["label"], {"lines": ["FCP_201NE.ISH", "SEDM07.S04.CH01.2"],
+                                                "text": "FCP_201NE.ISH-SEDM07.S04.CH01.2", "incomplete": False})
+        self.assertIsNone(rows["OSH"]["label"])                               # connected at one position
+        self.assertIsNone(rows["FCT.T"]["label"])                             # at three
+        self.assertEqual(device["n_labelled"], 1)
+
+    def test_the_label_is_the_same_from_either_working_side(self):
+        here = self._rows(self.BOTH)[1]["ISH"]["label"]
+        there = self._rows(self.BOTH, SHIELD)[1]["CH01.2"]["label"]
+        self.assertEqual(here, there)
+
+    def test_a_side_with_no_location_is_its_position_alone_and_the_label_incomplete(self):
+        label = self._rows({FLANGE: "FCP_201NE"})[1]["ISH"]["label"]
+        self.assertEqual((label["lines"], label["incomplete"]), (["FCP_201NE.ISH", "CH01.2"], True))
+
+    def test_two_connectors_of_one_end_make_no_label(self):
+        api = _located(_api(), self.BOTH)
+        inner = api.get_subcomponents.side_effect
+        many = [{"part_id": f"{FLANGE}.FCT.T", "cable_connector": "Flange:7", "operation": "mount"},
+                {"part_id": f"{SHIELD}.X", "cable_connector": "Flange:8", "operation": "mount"}]
+        api.get_subcomponents.side_effect = lambda pid: {"data": many} if pid == MANY else inner(pid)
+        row = {r["position"]: r for r in cabling.device_connections(api, "dev", FLANGE)["rows"]}["FCT.T"]
+        self.assertEqual((row["connected"], row["label"]), (2, None))
+
+    def test_a_bundle_is_labelled_with_the_two_locations(self):
+        rows = self._rows(self.BOTH)[1]
+        self.assertEqual(rows["ISH"]["bundle"]["label"], "SEDM07.S04/FCP_201NE")          # in PID order
+        self.assertEqual(rows["OSH"]["bundle"]["label"], "SEDM07.S04/FCP_201NE")          # the same bundle
+        self.assertEqual(self._rows(self.BOTH, SHIELD)[1]["CH01.2"]["bundle"]["label"], "SEDM07.S04/FCP_201NE")
+        self.assertEqual(self._rows({FLANGE: "FCP_201NE"})[1]["ISH"]["bundle"]["label"], "")  # a location missing
+
+    def test_a_bundle_going_to_more_than_two_devices_has_no_label(self):
+        api = _located(_api(), {**self.BOTH, FCT: "FCT_3"})
+        inner = api.get_subcomponents.side_effect
+        one_end = [{"part_id": f"{FLANGE}.OSH", "cable_connector": "FCP Flange:1", "operation": "mount"},
+                   {"part_id": f"{FCT}.IN2", "cable_connector": "HVS PS:1", "operation": "mount"}]
+        api.get_subcomponents.side_effect = lambda pid: {"data": one_end} if pid == ONE_END else inner(pid)
+        rows = {r["position"]: r for r in cabling.device_connections(api, "dev", FLANGE)["rows"]}
+        self.assertEqual(rows["OSH"]["label"]["text"], "FCP_201NE.OSH-FCT_3.IN2")
+        self.assertEqual(rows["ISH"]["bundle"]["label"], "")
+
+    def test_print_jobs_follow_the_rows_and_what_is_asked(self):
+        device = self._rows(self.BOTH)[0]
+
+        def jobs(what, show="both"):
+            return [(d["part_id"], d["lines"], [e["element type"] for e in lay["elements"]])
+                    for lay, d in cabling.label_jobs(device, what, show, "qr", False, "Letter-3x10-Avery")]
+
+        self.assertEqual(jobs("all"), [(INSTALLED, ["FCP_201NE.ISH", "SEDM07.S04.CH01.2"], ["qr", "text", "text", "part id"]),
+                                       (ONE_END, [], ["qr", "part id"]),              # no label: the PID only
+                                       (MANY, [], ["qr", "part id"])])
+        self.assertEqual([j[0] for j in jobs("all", "label")], [INSTALLED])           # the unlabelled left out
+        self.assertEqual(jobs("1", "label"), [(INSTALLED, ["FCP_201NE.ISH", "SEDM07.S04.CH01.2"], ["text", "text"])])
+        self.assertEqual(jobs("1", "pid"), [(INSTALLED, [], ["qr", "part id"])])
+        self.assertEqual(jobs("b1"), [(TRAY, ["SEDM07.S04/FCP_201NE"], ["qr", "text", "part id"])])
+        self.assertEqual((jobs("4"), jobs("b3"), jobs("9"), jobs("")), ([], [], [], []))   # free, no bundle, no row
+
+    def test_every_sheet_gets_a_layout_with_the_type_name_and_bar_code_on_request(self):
+        from explore import labels
+        for sheet, tpl in labels.TEMPLATES.items():
+            lay = cabling.label_layout(sheet, ["A.B", "C.D"], "bar", True)
+            self.assertEqual([e["element type"] for e in lay["elements"]], ["bar", "text", "text", "external id", "part name"])
+            self.assertEqual(lay["orientation"], "landscape" if tpl["label size"][1] > tpl["label size"][0] else "portrait")
+            sizes = {e["font size"] for e in lay["elements"] if e["element type"] == "text"}
+            self.assertEqual(len(sizes), 1)                                   # the label's lines at one size
+
+    def test_the_page_shows_locations_labels_and_print(self):
+        html = self._call(_located(_api(), self.BOTH)).content.decode()
+        self.assertIn('name="location" value="FCP_201NE" maxlength="60"', html)
+        self.assertIn('name="set_location" value="1"', html)
+        self.assertIn('<b class="mono">SEDM07.S04</b> · <b>CH01.2</b>', html)
+        self.assertIn('Label <span class="mono">FCP_201NE.ISH-SEDM07.S04.CH01.2</span></span>', html)
+        self.assertIn(f'data-print="1" data-at="1 · ISH" data-pid="{INSTALLED}" data-type="Top CRP bias warm cable" '
+                      'data-l1="FCP_201NE.ISH" data-l2="SEDM07.S04.CH01.2">Print</button>', html)
+        self.assertIn(f'data-print="2" data-at="2 · OSH" data-pid="{ONE_END}" data-type="Top CRP bias warm cable" '
+                      'data-l1="" data-l2="">Print</button>', html)
+        self.assertIn('data-print="all" data-count="3" data-labelled="1">Print labels</button>', html)
+        self.assertIn(f'data-print="b1" data-at="bundle / tray" data-pid="{TRAY}"', html)
+        self.assertIn('<option value="Letter-3x10-Avery" selected>', html)
+        dlg = html.split('id="cc-view-1"', 1)[1].split("</dialog>", 1)[0]
+        self.assertIn('<div class="cc-lbl"><span>FCP_201NE.ISH</span><span>SEDM07.S04.CH01.2</span></div>', dlg)
+        self.assertIn('<b class="mono">FCP_201NE</b> · <b>ISH</b>', dlg)
+        self.assertIn('data-print-row="1"', dlg)
+
+    def test_an_incomplete_label_says_so(self):
+        html = self._call(_located(_api(), {SHIELD: "SEDM07.S04"})).content.decode()
+        self.assertIn('Label <span class="mono">ISH-SEDM07.S04.CH01.2</span> · location missing</span>', html)
+        self.assertIn("Incomplete — a device location is missing.", html)
+
+    def test_the_location_is_read_only_without_the_role_or_where_writes_are_closed(self):
+        api = _located(_api(), self.BOTH)
+        inner = api.get_component_type.side_effect
+        api.get_component_type.side_effect = lambda t: {"data": {**inner(t)["data"], "roles": [{"id": 3, "name": "type-manager"}]}}
+        with mock.patch("explore.views._my_roles", return_value=[]):
+            html = self._call(api).content.decode()
+        self.assertNotIn('name="set_location"', html)
+        self.assertIn('Device location<span class="cc-val mono">FCP_201NE</span>', html)
+        with override_settings(HWDB_WRITE_INSTANCES=[]):
+            html = self._call(api).content.decode()
+            self.assertNotIn('name="set_location"', html)
+            self.assertIn(">Print labels</button>", html)                     # printing writes nothing
+            self.assertEqual(self._call(api, "post", {"set_location": "1", "location": "X"}).status_code, 403)
+        api.patch_component.assert_not_called()
+
+    def test_saving_the_location_writes_its_one_key_and_keeps_the_rest(self):
+        api = _located(_api(), {FLANGE: "OLD"}, data={"SubPIDs": ["a"], "Checklist": {"Torque": 5}})
+        html = self._call(api, "post", {"set_location": "1", "location": "  FCP_201NE  "}, follow=True).content.decode()
+        self.assertIn("Device location saved — FCP_201NE.", html)
+        pid, payload = api.patch_component.call_args.args
+        self.assertEqual(pid, FLANGE)
+        self.assertEqual(payload["specifications"], {"DATA": {"SubPIDs": ["a"], "Checklist": {"Torque": 5},
+                                                              cabling.LOCATION_KEY: "FCP_201NE"}})
+        self.assertEqual((payload["serial_number"], payload["comments"]), ("S1", "c"))
+        api.patch_subcomponents.assert_not_called()
+
+    def test_a_blank_location_removes_the_key_and_a_refusal_is_shown(self):
+        api = _located(_api(), {FLANGE: "OLD"}, data={"SubPIDs": ["a"]})
+        html = self._call(api, "post", {"set_location": "1", "location": " "}, follow=True).content.decode()
+        self.assertIn("Device location cleared.", html)
+        self.assertEqual(api.patch_component.call_args.args[1]["specifications"], {"DATA": {"SubPIDs": ["a"]}})
+        api.patch_component.return_value = {"status": "ERROR", "data": "Not authorized"}
+        html = self._call(api, "post", {"set_location": "1", "location": "X"}, follow=True).content.decode()
+        self.assertIn("Couldn’t save the device location — Not authorized", html)
+
+    def test_print_answers_a_sheet_of_the_label_generator(self):
+        import fitz
+        api = _located(_api(), self.BOTH)
+        r = self._call(api, data={"print": "all", "show": "both", "code": "qr", "name": "1", "sheet": "Letter-2x5-Avery"})
+        self.assertEqual((r.status_code, r["Content-Type"]), (200, "application/pdf"))
+        self.assertIn(f"cable_labels_{FLANGE}.pdf", r["Content-Disposition"])
+        doc = fitz.open(stream=r.content, filetype="pdf")
+        self.assertEqual(doc.page_count, 1)                                   # the labels alone, no intro pages
+        text = doc.load_page(0).get_text()
+        for expected in ("FCP_201NE.ISH", "SEDM07.S04.CH01.2", INSTALLED, ONE_END, MANY, "Top CRP bias warm cable"):
+            self.assertIn(expected, text)
+        self.assertLess(text.index(INSTALLED), text.index(ONE_END))           # in row order
+        self.assertNotIn(INSTALLED, [c.args[0] for c in api.get_component.call_args_list])   # a QR needs no read
+
+    def test_a_bar_code_reads_the_external_id_and_an_empty_print_goes_back(self):
+        import fitz
+        api = _located(_api(), self.BOTH)
+        inner = api.get_component.side_effect
+        api.get_component.side_effect = lambda pid: {"data": {**inner(pid)["data"], "part_id": pid, "country_code": "US",
+                                                              "institution": {"id": 186}}}
+        r = self._call(api, data={"print": "1", "show": "pid", "code": "bar", "sheet": "nonsense"})
+        self.assertIn(f"{INSTALLED}-US186", fitz.open(stream=r.content, filetype="pdf").load_page(0).get_text())
+        r = self._call(api, data={"print": "4"}, follow=True)
+        self.assertRedirects(r, PAGE)
+        self.assertIn("Nothing to print.", r.content.decode())

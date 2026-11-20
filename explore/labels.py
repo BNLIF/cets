@@ -550,26 +550,28 @@ def _template_page(cvs, tpl, shift=(0.0, 0.0)):
 
 
 def build_pdf(layouts: list[dict], items: list[dict], ui_base: str, intro: bool = True,
-              shift_mm: tuple[float, float] = (0.0, 0.0)) -> bytes:
+              shift_mm: tuple[float, float] = (0.0, 0.0), pairs: list[tuple[dict, dict]] | None = None) -> bytes:
     """The label sheets: for every sheet the chosen layouts use, the intro +
     alignment pages (``intro``) and then one label per (layout, item) —
     every item under the first layout, then under the next, as the utility's
     label sets print. ``shift_mm`` (right, down) moves everything on every
     sheet, alignment page included — Hajime 2026-09-24: the small correction
-    a particular printer needs."""
+    a particular printer needs. ``pairs`` — (layout, item) in print order —
+    replaces the layouts × items product: the cable labels (#229), whose
+    layout depends on the item."""
     buf = io.BytesIO()
     cvs = rl_canvas.Canvas(buf)
     cvs.setTitle("HWDB Item Bar/QR Code Labels")
     cvs.setAuthor("HWDB Explorer")
     sx, sy = (max(-SHIFT_MAX, min(SHIFT_MAX, float(s or 0))) * units.mm for s in shift_mm)
     groups: dict[str, list] = {}
-    for lay in layouts:
+    for lay, its in ([(lay, items) for lay in layouts] if pairs is None else [(lay, [it]) for lay, it in pairs]):
         try:
             tpl = template_for(lay)
         except (KeyError, ValueError):
             continue
         key = json.dumps(lay.get("sheet"), sort_keys=True) if lay.get("sheet") else lay.get("label template")
-        groups.setdefault(key, [tpl, []])[1].extend((lay, it) for it in items)
+        groups.setdefault(key, [tpl, []])[1].extend((lay, it) for it in its)
     for tpl, jobs in groups.values():
         pw, ph = tpl["page"]
         pages = -(-len(jobs) // tpl["per_page"])
