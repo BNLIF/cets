@@ -47,6 +47,29 @@
       .ex-side-bare { display: none; }   /* pages without a tree (#93) */
       .ex-content { flex: 1; min-width: 0; }
       .ex-side-nav { display: none; }
+      /* the account menu: a popover under the avatar, anchored to it where the browser can, else fixed under the header's right end */
+      .eh-acct-btn { border: 0; padding: 0; font-family: inherit; cursor: pointer; anchor-name: --eh-acct; }
+      .eh-acct { min-width: 170px; max-width: min(280px, calc(100vw - 24px)); box-sizing: border-box; padding: 4px;
+        background: var(--page); color: var(--ink); border: 1px solid var(--rule-hard); border-radius: var(--r-lg);
+        box-shadow: 0 10px 30px rgba(0,0,0,.14); font-size: 13px; }
+      @supports (position-area: block-end) {
+        .eh-acct { position-anchor: --eh-acct; position-area: block-end span-inline-start;
+          position-try-fallbacks: flip-block; inset: auto; margin: 6px 0; }
+      }
+      @supports not (position-area: block-end) {
+        .eh-acct { position: fixed; inset: 46px 22px auto auto; margin: 0; }
+        @media (max-width: 760px) { .eh-acct { right: 12px; } }
+      }
+      .eh-acct-name { padding: 6px 10px 8px; margin-bottom: 4px; border-bottom: 1px solid var(--rule);
+        font-weight: 600; overflow-wrap: anywhere; }
+      .eh-acct form { margin: 0; }
+      .eh-acct a, .eh-acct button { display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box;
+        padding: 7px 10px; border: 0; border-radius: var(--r-sm); background: none; font: inherit;
+        color: var(--body); text-align: left; text-decoration: none; cursor: pointer; }
+      .eh-acct a:hover, .eh-acct button:hover { background: var(--surface); }
+      .eh-acct-new { margin-left: auto; padding: 1px 7px; border-radius: 999px; background: var(--bad);
+        color: #fff; font-size: 10.5px; font-weight: 700; }
+      @media (pointer: coarse) { .eh-acct a, .eh-acct button { padding-top: 11px; padding-bottom: 11px; } }
       .ex-scrim { display: none; }
       /* Small screens (#93): the sidebar becomes a slide-in drawer over the
          content (never squeezes it), openable via the header's existing
@@ -134,6 +157,8 @@
       .eh-foot .sep { color: var(--rule-hard); }
     </style>
     <script src="https://unpkg.com/htmx.org@1.9.5"></script>
+    {# The account menu is a popover: a browser without the attribute (Safari before 17, Firefox before 125) gets the polyfill, nobody else loads it. #}
+    <script>if (!("popover" in HTMLElement.prototype)) import("https://unpkg.com/@oddbird/popover-polyfill@0.7.3/dist/popover.min.js");</script>
 </head>
 <body>
     <script>
@@ -189,21 +214,23 @@
                 <div class="eh-find-menu" id="eh-find-menu" role="listbox" hidden></div>
             </div>
             {% endif %}
-            {% if fnal_credkey %}
-            <a class="eh-user" href="{% url 'explore:profile' %}" title="Signed in via FNAL — view your profile{% if watch_unread %} · {{ watch_unread }} new event(s) on things you watch{% endif %}">
-                <span class="eh-user-dot">{% firstof user_initials fnal_credkey|slice:":2"|upper %}{% if watch_unread %}<span class="eh-avatar-badge">{{ watch_unread }}</span>{% endif %}</span><span class="eh-user-name">{{ fnal_credkey }}</span>
-            </a>
-            {% elif user.is_authenticated %}
-            <a class="eh-user" href="{% url 'explore:profile' %}" title="{{ user.username }} — view your profile{% if watch_unread %} · {{ watch_unread }} new event(s) on things you watch{% endif %}">
-                <span class="eh-user-dot">{% firstof user_initials user.username|slice:":2"|upper %}{% if watch_unread %}<span class="eh-avatar-badge">{{ watch_unread }}</span>{% endif %}</span><span class="eh-user-name">{{ user.get_full_name|default:user.username }}</span>
-            </a>
-            {% endif %}
-            {% if user.is_authenticated %}
-            <form action="{% url 'rest_framework:logout' %}" method="post" style="margin:0;">
-                {% csrf_token %}
-                <input type="hidden" name="next" value="{% url 'explore:login' %}">
-                <button class="eh-signout" type="submit">Sign out</button>
-            </form>
+            {% if fnal_credkey or user.is_authenticated %}
+            {# The account menu (Chao 2026-11-20): the avatar opens a popover with the name, Profile and Sign out — a group of two controls reached by Tab, not an ARIA menu. #}
+            {% firstof fnal_credkey user.get_full_name user.username as acct_name %}
+            {% firstof fnal_credkey user.username as acct_id %}
+            <button class="eh-user-dot eh-acct-btn" type="button" popovertarget="eh-acct" aria-label="Account: {{ acct_name }}"
+                    title="{{ acct_name }}{% if watch_unread %} · {{ watch_unread }} new event(s) on things you watch{% endif %}">{% firstof user_initials acct_id|slice:":2"|upper %}{% if watch_unread %}<span class="eh-avatar-badge">{{ watch_unread }}</span>{% endif %}</button>
+            <div class="eh-acct" id="eh-acct" popover>
+                <div class="eh-acct-name">{{ acct_name }}</div>
+                <a href="{% url 'explore:profile' %}">Profile{% if watch_unread %}<span class="eh-acct-new">{{ watch_unread }} new</span>{% endif %}</a>
+                {% if user.is_authenticated %}
+                <form action="{% url 'rest_framework:logout' %}" method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{% url 'explore:login' %}">
+                    <button type="submit">Sign out</button>
+                </form>
+                {% endif %}
+            </div>
             {% endif %}
         </div>
     </header>

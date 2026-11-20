@@ -54,7 +54,7 @@ class ProfileViewTest(TestCase):
         # avatar initials are first + last name (CZ), not the first two letters
         self.assertIn('class="pf-avatar">CZ<', html)
         # …and the visit caches the name, so the HEADER avatar shows CZ too
-        self.assertIn('class="eh-user-dot">CZ', html)
+        self.assertRegex(html, r'class="eh-user-dot eh-acct-btn"[^>]*>CZ<')
         # …and the page has a tree, so the drawer aside is not marked bare (#93).
         self.assertIn('<aside class="ex-side" id="ex-side"', html)
         self.assertEqual(self.client.session["fnal_full_name"], "Chao Zhang")
@@ -84,13 +84,19 @@ class ProfileViewTest(TestCase):
         self.assertIn("Roles (0)", html)
         self.assertIn("will be refused", html)
 
-    def test_nav_chip_links_to_profile(self):
-        # The user chip in the top nav is a link to the profile page.
+    def test_account_menu_links_to_profile_and_signs_out(self):
+        # The avatar in the top bar opens the account menu: the name, the
+        # profile page, Sign out — no name or button in the bar itself.
         api = _api()
         m1, m2 = _mocked(api)
         with m1, m2:
             html = self.client.get(PAGE).content.decode()
-        self.assertIn('class="eh-user" href="/hw/dev/profile/"', html)
+        self.assertIn('popovertarget="eh-acct"', html)
+        menu = html.split('id="eh-acct" popover>', 1)[1].split("</div>\n            {% endif", 1)[0][:900]
+        self.assertIn('<div class="eh-acct-name">', menu)
+        self.assertIn('<a href="/hw/dev/profile/">Profile</a>', menu)
+        self.assertIn('<button type="submit">Sign out</button>', menu)
+        self.assertEqual(html.count("Sign out"), 1)
 
     def test_expired_link_redirects_to_relink(self):
         with mock.patch("explore.views.mint_for", side_effect=FnalLinkRequired()):
