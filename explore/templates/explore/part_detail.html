@@ -546,7 +546,7 @@
 
   {# Full width below the grid — the assembly/connections table is the widest pane on the page. #}
   <div class="sd-card">
-    <h2>{% if detail.is_cable %}Connections ({{ detail.manifest|length }}{% if detail.connector_count %} / {{ detail.connector_count }}{% endif %}){% else %}Assembly ({{ detail.manifest|length }}){% endif %}{% if link_items_url %} <a class="pk-link" style="margin-left:10px;" href="{{ link_items_url }}">Link items…</a>{% endif %}</h2>
+    <h2>{% if detail.is_cable %}Connections ({{ detail.manifest|length }}{% if detail.connector_count %} / {{ detail.connector_count }}{% endif %}){% else %}Assembly ({{ detail.manifest|length }}){% endif %}{% if link_items_url %} <a class="pk-link" style="margin-left:10px;" href="{{ link_items_url }}">Link items…</a>{% endif %}{% if cables_url %} <a class="pk-link" style="margin-left:10px;" href="{{ cables_url }}">Cable connections</a>{% endif %}</h2>
     <div class="tbl-scroll">
     {% if detail.is_cable %}
     {# #223 (Hajime): one row per END:connector of the cable's type, a free one left empty. No carets — a connection is not contents; the link opens the connected item. #}

@@ -187,6 +187,43 @@ What changed here:
   item links its plain PID, as before (open in #222); the image map's
   contents table shows a cable end's whole ref as the item.
 
+## Update 2026-11-20: the Cable connections page, read-only (#226)
+
+Hajime's mock-up (slides 12–20) in the layout Chao picked on #225: the list
+under the picture, ten columns folded. `cabling.device_connections()` is
+the page's model; `part/<PID>/cables/` shows it, `cables/?pid=` is the way
+in for a typed or scanned PID.
+
+- **The page works from an endpoint device, not from a cable.** A cable's
+  PID gets one line and a link to its item page.
+- **A row per position that takes a cable**: one whose accepted types
+  include a cable type (the mirror's category, or the type record for a
+  type the mirror lacks), or one that holds a cable end. Numbered in the
+  type's order.
+- **Other side = what the cable's other ENDs are connected to**, read off
+  the cable's own rows. Connectors of one END sit at the same end of the
+  cable, so a bundle's eight `Flange:n` are not each other's other side
+  (dev's `Z00100300034-00007` listed eight of them in one row before this
+  rule). HWDB does not say which END is opposite which, so a cable with
+  three ENDs has two other sides. Each other device is listed once with
+  its positions; a short cable's other END may sit on the working device
+  itself ("this device"). A row of the older shape, with no connector
+  named, counts every other connection.
+- **Status** (Hajime, slide 15): Available — nothing at the position;
+  Connected — a cable end is there; Installed — every END : connector of
+  that cable is connected, counted against its type's connectors. A cable
+  held without an END ("No END") is a bundle / tray link, not a
+  connection, and is not counted.
+- **Reads, bounded by the device**: its record, its type, its positions;
+  each connected cable's rows once; each cable type's record once (the
+  connector count); a type record for an accepted type the mirror cannot
+  name. The other side's type name comes with the cable's rows, so no
+  other-side item is read until device locations exist (#229). Nothing is
+  written to the mirror.
+- **The item page links there** when the item holds a cable end, or — on
+  an instance open to writes, where its positions are read anyway — one of
+  them accepts a cable type by the mirror's word. No read is added for it.
+
 ## Consequences
 
 - `receive_box` now posts arrival locations to base PIDs (previously a

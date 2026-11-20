@@ -38,7 +38,7 @@ from hwdb.fnal import flow
 from hwdb.fnal import session as fnal_session
 from hwdb.fnal.bearer import FnalLinkRequired, FnalUnavailable, mint_for, verify_link
 
-from . import (activity, charts, checklistforms, checklists, curation, events, p6,
+from . import (activity, cabling, charts, checklistforms, checklists, curation, events, p6,
                execsummary, installation, itemsedit, labels, navigation, ops, parts, plotting, production,
                scanning, sheetupload, watches)
 from .auth import fnal_login_required, provision_and_login
@@ -1638,6 +1638,45 @@ def explore_part_tree_view(request, part_id):
 
 @login_not_required
 @fnal_login_required
+def explore_cables_view(request, part_id=None):
+    """#226 (Hajime's Cable Connections mock-up, the list-under-the-picture
+    layout Chao picked on #225): one endpoint device — its positions that
+    take a cable, what is connected at each and where that cable goes on
+    its other side(s). Read-only here: connecting, the picture, the device
+    location and the labels are the later cabling tickets (#227–#229).
+
+    ``cables/`` is the way in: ``?pid=`` (typed, or filled by the scanner —
+    a bare PID, an HWDB URL, a label) goes to that item's page. The page
+    reads HWDB live and bounded by the device (``cabling.device_connections``)."""
+    inst = instance_of(request)
+    ctx = {"active_nav": "hardware", "typed": part_id or ""}
+    if part_id is None:
+        typed = (request.GET.get("pid") or "").strip()
+        pid = scanning.extract_pid(typed.upper())   # a PID typed in lower case counts
+        if pid:
+            return redirect(_rev(request, "explore:cable_connections", args=[pid.upper()]))
+        if typed:
+            messages.error(request, f"“{typed}” doesn’t look like a PID.")
+        return render(request, "explore/cables.html", {**ctx, "typed": typed})
+    page_url = _rev(request, "explore:cable_connections", args=[part_id])
+    try:
+        bearer = mint_for(request)
+    except FnalLinkRequired:
+        link = reverse("hwdb:link")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
+    except FnalUnavailable:
+        messages.error(request, FNAL_UNAVAILABLE)
+        return render(request, "explore/cables.html", ctx)
+    api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
+    try:
+        ctx["device"] = cabling.device_connections(api, inst, part_id)
+    except requests.RequestException as e:
+        messages.error(request, f"Couldn’t read {part_id} — {_hwdb_error_detail(e)}")
+    return render(request, "explore/cables.html", ctx)
+
+
+@login_not_required
+@fnal_login_required
 def explore_type_summary_view(request):
     """Compact per-type summaries for the chart popup (#58): mirror-only, no
     live HWDB. ``?ids=`` takes comma-separated part type ids (the mapping may
@@ -2564,14 +2603,25 @@ def explore_part_view(request, part_id):
                if can_update_location else None)
     # #136: any other item whose type defines positions links sub-components
     # on the same page — the Assembly card offers it (no second card).
-    link_items_url = None
+    link_items_url, connectors = None, {}
     # a cable is linked from the item it connects to, never from its own page (#224)
     if not is_shipping and not detail["is_cable"] and inst in settings.HWDB_WRITE_INSTANCES:
         try:
-            if _box_connectors(api, ptid):
+            connectors = _box_connectors(api, ptid)
+            if connectors:
                 link_items_url = _rev(request, "explore:box_pack", args=[part_id])
         except Exception as e:
             logger.warning("connectors for %s failed: %s", ptid, e)
+    # #226: the Cable connections page, for an item a cable plugs into — it
+    # holds a cable end, or (where the positions were read anyway) one of them
+    # accepts a cable type by the mirror's word. No read of its own.
+    cables_url = None
+    if not detail["is_cable"] and (
+            any(m["connection"] and not m["peer"] for m in detail["manifest"])
+            or (connectors and HierarchyNode.for_instance(inst).filter(
+                level=HierarchyNode.LEVEL_TYPE, category="cable",
+                part_type_id__in=parts.child_types(connectors)).exists())):
+        cables_url = _rev(request, "explore:cable_connections", args=[part_id])
 
     # Every shipping sheet on the box (each checklist run appends one, both
     # naming eras) — the Pre-shipping card lists them in a newest-first
@@ -2663,6 +2713,7 @@ def explore_part_view(request, part_id):
         # connectors fetch fails (the card just doesn't render).
         "packing": packing,
         "link_items_url": link_items_url,
+        "cables_url": cables_url,
         "shipping_sheets": shipping_sheets,
         # Executive summaries already on this item (issue #53): attachments
         # matching the Dashboard's gate convention, newest first (the gate
