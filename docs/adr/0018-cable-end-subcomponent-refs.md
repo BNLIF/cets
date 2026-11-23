@@ -310,6 +310,20 @@ prepared once.
   not yet placed is picked; a marker is moved by a drag and removed from
   the list. A stored marker whose position the type no longer has is
   flagged there and can only be removed.
+- **Cabling Guide** (Hajime's first try, the name Chao's; 2026-11-23,
+  #235): what a type carries for the people cabling its items — today this
+  picture and its markers, other guides (cable routing) possibly later. It
+  is the editor's title and the name on the links to it; the file stays
+  `Cable_map_<type id>.json`. The type's page links to it on a line of
+  its own, "Cabling", under Manage (Chao: other guides may join it there).
+  The mirror holds no positions of a type, so that line is hidden
+  until the page's lazy request (the Checklists row's, asked with
+  `?cabling=1`) has read the type's record — one read, after the render:
+  shown when a position accepts a cable type by the mirror's word and the
+  account holds one of the type's roles. Opened from the type's page,
+  Cancel and Save go back to it; from an item, to its Cable connections
+  page. The editor shows the picture's HWDB image id with a Copy button,
+  for use elsewhere — a checklist's image map, for one.
 - **Who may save**: anyone on a write instance, HWDB arbitrating by the
   type's roles — as for the type's checklists. The role banner says so
   beforehand, and the page links to the editor only for an account that

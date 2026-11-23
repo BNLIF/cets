@@ -264,6 +264,11 @@ these are the words the Explorer uses on top of it.
   saved device locations for a cable connected at exactly two positions;
   not stored. A **bundle label** is the two device locations alone,
   `<location>/<location>`.
+- **Cabling Guide** — what an endpoint device's type carries for the people
+  cabling its items: today a picture of the device with a numbered marker
+  on each position that takes a cable, shown on every item's Cable
+  connections page. Edited from the type's page or from one of its items.
+  Not a "cable editor": the type is not a cable.
 
 ### Simple vs detailed QC record
 

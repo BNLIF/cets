@@ -123,6 +123,14 @@ def cable_positions(api, inst: str, connectors: dict) -> list[str]:
             if any(facts.get(t, ("", ""))[1] == "cable" for t in parts.accepted_types(accepted))]
 
 
+def takes_cables(inst: str, connectors: dict) -> bool:
+    """Whether one of the positions accepts a cable type by the mirror's word
+    alone — no HWDB read; what an item's page and its type's page go by."""
+    return HierarchyNode.for_instance(inst).filter(
+        level=HierarchyNode.LEVEL_TYPE, category="cable",
+        part_type_id__in=parts.child_types(connectors)).exists()
+
+
 def _tray(container, device) -> dict | None:
     """A cable's bundle / tray from its current container; not the device itself."""
     if not container or container["part_id"] == device:

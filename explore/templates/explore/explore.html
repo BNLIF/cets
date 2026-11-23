@@ -217,11 +217,10 @@
                     title="Not mirrored yet — re-walk this system’s structure from HWDB">not mirrored — re-walk system</button>{% endif %}
             {# Explorer classification (#101 shipping container, #199 consortium type): one dropdown for architects, plain text for everyone else; a yaml-curated class is read-only here (Chao 2026-10-08: the inline links made the pane messy) #}
             {% if can_edit_type %}<form method="post" action="{% url 'explore:type_class' part_type_id=leaf.part_type_id %}" class="type-class" style="display:inline; margin:0 0 0 8px;">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><select name="class"{% if class_locked %} disabled title="Listed in curation.yaml — edit the yaml to change"{% else %} title="How the Explorer treats this type: a shipping container’s items are boxes (Shipments tab, packing, ship/receive checklists); a consortium type holds the consortium’s production-status and organizer checklists"{% endif %}><option value="none"{% if not is_shipping and not is_consortium %} selected{% endif %}>no classification</option><option value="shipping"{% if is_shipping %} selected{% endif %}>shipping container</option><option value="consortium"{% if is_consortium %} selected{% endif %}>consortium type</option></select></form>{% elif is_shipping %} <span class="sep">·</span> shipping container{% elif is_consortium %} <span class="sep">·</span> consortium type{% endif %}</dd>
-        <dt>System</dt><dd>{{ leaf.system_name }} ({{ leaf.system_id }})</dd>
-        <dt>Subsystem</dt><dd>{{ leaf.subsystem_name }} ({{ leaf.subsystem_id }})</dd>
+        {# Chao 2026-11-23: system and subsystem in one field, and no Test events line — a consortium type has no Items cell beside it, so the field takes the row #}
+        <dt>System</dt><dd{% if is_consortium %} class="span"{% endif %}>{{ leaf.system_name }} ({{ leaf.system_id }}) <span class="crumbs-sep">›</span> {{ leaf.subsystem_name }} ({{ leaf.subsystem_id }})</dd>
         {% if not is_consortium %}
         <dt>{% if is_shipping %}Boxes in HWDB{% else %}Items in HWDB{% endif %}</dt><dd>{% if type_items_url %}<a href="{{ type_items_url }}" title="The items — each one’s checklists, executive summary and linked parts">{{ leaf.n_components }}</a>{% else %}{{ leaf.n_components }}{% endif %}</dd>
-        <dt>Test events</dt><dd>{{ leaf.n_tests }}</dd>
         {% endif %}
         {# #110: fill-out links for the type's consortium checklists — each opens the PID chooser (scan / items table / new item). Filled lazily so the mirror-only render never waits on HWDB; no checklists = no row. #}
         <dt id="cl-names-dt" hidden>Checklists</dt><dd id="cl-names-dd" class="span" hidden
@@ -243,6 +242,10 @@
           {% endif %}
           {% endif %}
         </dd>
+        {% endif %}
+        {% if can_edit_es and not is_consortium and leaf.category != 'cable' %}
+        {# the Cabling line (its own line: Chao 2026-11-23; other guides may join it): hidden until the Checklists row's lazy request, asked with ?cabling=1, says a position takes a cable and the account holds one of the type's roles — the mirror holds no positions #}
+        <dt id="cg-dt" hidden>Cabling</dt><dd id="cg-dd" class="span" hidden><a href="{% url 'explore:cable_map' part_type_id=leaf.part_type_id %}" target="_blank" rel="noopener" title="A picture of this type with a marker on each position that takes a cable — every item’s Cable connections page shows it">Cabling Guide <span aria-hidden="true">&#x2197;</span></a></dd>
         {% endif %}
         {% if is_consortium %}
         {# #199: the consortium's production-status table (its own line — Chao 2026-10-08); #200: the component list it is generated from #}
@@ -662,11 +665,12 @@
     });
     // #110: the Checklists row — filled after render so the page never waits
     // on HWDB; an empty list (no checklists, or FNAL not linked) keeps it hidden
-    var clDd = document.getElementById("cl-names-dd");
-    if (clDd) fetch(clDd.getAttribute("data-names-url"))
+    var clDd = document.getElementById("cl-names-dd"), cgDd = document.getElementById("cg-dd");
+    if (clDd) fetch(clDd.getAttribute("data-names-url") + (cgDd ? "?cabling=1" : ""))
         .then(function (r) { return r.json(); })
         .then(function (j) {
             var names = j.checklists || [];
+            if (cgDd && j.cabling_guide) cgDd.hidden = document.getElementById("cg-dt").hidden = false;
             if (!names.length) return;
             var open = clDd.getAttribute("data-open-url");
             clDd.innerHTML = names.map(function (n) {

@@ -196,7 +196,7 @@
       {% for m in device.picture.markers %}<button type="button" class="cc-mk cc-{{ m.row.status }}" data-row="{{ m.row.n }}" style="left: {{ m.x|stringformat:"g" }}%; top: {{ m.y|stringformat:"g" }}%;" title="{{ m.row.position }}" aria-label="Position {{ m.row.n }}, {{ m.row.position }}{% if m.row.cable %}, {{ m.row.status }}{% else %}, free{% endif %}">{{ m.row.n }}</button>{% endfor %}
     </div></div>
     <div class="cc-map-zoom">
-      {% if can_edit_map %}<a class="es-btn quiet" href="{% url 'explore:cable_map' part_type_id=device.part_type_id %}?item={{ device.part_id }}" title="The picture and markers of this type — every item of the type shows them">Edit picture</a>{% endif %}
+      {% if can_edit_map %}<a class="es-btn quiet" href="{% url 'explore:cable_map' part_type_id=device.part_type_id %}?item={{ device.part_id }}" title="The picture and markers of this type — every item of the type shows them">Edit cabling guide</a>{% endif %}
       <span class="cc-grow"></span>
       <button type="button" class="es-btn quiet" data-zoom="out" aria-label="Zoom out">−</button>
       <button type="button" class="es-btn quiet" data-zoom="in" aria-label="Zoom in">+</button>
@@ -204,7 +204,7 @@
     </div>
   </div>
   {% elif can_edit_map %}
-  <div class="cc-map"><a class="es-btn quiet" href="{% url 'explore:cable_map' part_type_id=device.part_type_id %}?item={{ device.part_id }}" title="A picture of this type with a marker on each position — every item of the type shows it">Add picture</a></div>
+  <div class="cc-map"><a class="es-btn quiet" href="{% url 'explore:cable_map' part_type_id=device.part_type_id %}?item={{ device.part_id }}" title="A picture of this type with a marker on each position — every item of the type shows it">Add cabling guide</a></div>
   {% endif %}
   <div class="cc-bar-row">
     <h2>Connections</h2>

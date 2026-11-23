@@ -1941,17 +1941,18 @@ def explore_cables_view(request, part_id=None):
 @login_not_required
 @fnal_login_required
 def explore_cable_map_view(request, part_type_id):
-    """#228: the cable connection editor — a picture of an endpoint device's
+    """#228: the Cabling Guide's editor (the name: #235) — a picture of an endpoint device's
     type with a marker on each position that takes a cable, prepared once
     for the type; every item's Cable connections page then shows it. The
     picture goes onto the type's HWDB images as a checklist's reference
     picture does (``checklist_asset``); a save posts a version of
     ``Cable_map_<type>.json`` (``cabling.write_map``). On a write instance,
     HWDB arbitrating by the type's roles as for its checklists — the banner
-    says so beforehand. ``?item=<PID>`` is the device to go back to."""
+    says so beforehand. ``?item=<PID>`` is the device to go back to; without
+    one Cancel and Save go back to the type's page."""
     inst = instance_of(request)
     if inst not in settings.HWDB_WRITE_INSTANCES:
-        return HttpResponseForbidden("The cable picture can only be edited on a write instance.")
+        return HttpResponseForbidden("The cabling guide can only be edited on a write instance.")
     item = scanning.extract_pid((request.POST.get("item") or request.GET.get("item") or "").upper()) or ""
     page_url = _rev(request, "explore:cable_map", args=[part_type_id]) + (f"?{urlencode({'item': item})}" if item else "")
     back_url = (_rev(request, "explore:cable_connections", args=[item]) if item
@@ -1984,11 +1985,11 @@ def explore_cable_map_view(request, part_type_id):
             messages.error(request, f"HWDB refused the picture’s markers — {detail}")
             return redirect(page_url)
         activity.log(inst, ActivityEvent.KIND_CURATION,
-                     f"Cable picture of {part_type_id}: {len(cmap['slots'])} markers",
+                     f"Cabling guide of {part_type_id}: {len(cmap['slots'])} markers",
                      part_type_id=part_type_id, actor=activity.actor_of(request))
         messages.success(request, f"Saved {len(cmap['slots'])} marker{'s' if len(cmap['slots']) != 1 else ''} "
                                   f"as {cabling.map_name(part_type_id)}.")
-        return redirect(back_url if item else page_url)
+        return redirect(back_url)
 
     try:
         record = api.get_component_type(part_type_id).get("data") or {}
@@ -2953,9 +2954,7 @@ def explore_part_view(request, part_id):
     cables_url = None
     if not detail["is_cable"] and (
             any(m["connection"] and not m["peer"] for m in detail["manifest"])
-            or (connectors and HierarchyNode.for_instance(inst).filter(
-                level=HierarchyNode.LEVEL_TYPE, category="cable",
-                part_type_id__in=parts.child_types(connectors)).exists())):
+            or (connectors and cabling.takes_cables(inst, connectors))):
         cables_url = _rev(request, "explore:cable_connections", args=[part_id])
 
     # Every shipping sheet on the box (each checklist run appends one, both
@@ -6014,8 +6013,17 @@ def explore_checklist_names_view(request, part_type_id):
     except (FnalLinkRequired, FnalUnavailable):
         return JsonResponse({"checklists": []})
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
-    return JsonResponse({"checklists": [
-        r["name"] for r in checklistforms.active(api, part_type_id)]})
+    out = {"checklists": [r["name"] for r in checklistforms.active(api, part_type_id)]}
+    # #235: the type page's Cabling Guide link, asked for with ?cabling=1 — one read of the type's record:
+    # a position accepts a cable type (the mirror's word) and the account holds one of the type's roles
+    if request.GET.get("cabling"):
+        try:
+            record = api.get_component_type(part_type_id).get("data") or {}
+            out["cabling_guide"] = (cabling.takes_cables(inst, record.get("connectors") or {})
+                                    and _type_role_gate(request, inst, api, part_type_id, record) is None)
+        except requests.RequestException:
+            out["cabling_guide"] = False
+    return JsonResponse(out)
 
 
 @login_not_required

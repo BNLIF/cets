@@ -1,8 +1,8 @@
 {% extends 'explore/base.html' %}
-{% block title %}Cable picture · {{ type_name }} · HWDB Explorer{% endblock %}
+{% block title %}Cabling Guide · {{ type_name }} · HWDB Explorer{% endblock %}
 
 {% block content %}
-{# #228: the cable connection editor — a picture of an endpoint device's type and a marker per position that takes a cable. Placing follows the checklist editor's image map: a click drops a marker, in percent of the picture. #}
+{# #228: the Cabling Guide's editor (named so on #235) — a picture of an endpoint device's type and a marker per position that takes a cable. Placing follows the checklist editor's image map: a click drops a marker, in percent of the picture. #}
 {% include "explore/_es_style.html" %}
 <style>
   .cm-page { max-width: 1180px; }
@@ -38,6 +38,8 @@
   li.placed .cm-n { border-color: var(--ink); }
   li.stale .cm-n { border-style: dashed; border-color: var(--bad); color: var(--bad); }
   .cm-page .cm-del { min-width: 44px; padding: 0; }
+  .cm-id { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 8px 0 0; }
+  .cm-id code { font-size: 13px; color: var(--ink); user-select: all; overflow-wrap: anywhere; }
   @media (max-width: 800px) { .cm-cols { grid-template-columns: minmax(0, 1fr); } }
 </style>
 
@@ -45,11 +47,12 @@
   <div class="es-crumbs">
     <a href="{% url 'explore:home' %}">Explorer</a>
     {% if item %}<span class="sep">›</span><a class="mono" href="{% url 'explore:part' part_id=item %}">{{ item }}</a>
-    <span class="sep">›</span><a href="{{ back_url }}">Cable connections</a>{% endif %}
-    <span class="sep">›</span>Picture
+    <span class="sep">›</span><a href="{{ back_url }}">Cable connections</a>
+    {% else %}<span class="sep">›</span><a href="{{ back_url }}">{{ type_name }}</a>{% endif %}
+    <span class="sep">›</span>Cabling Guide
   </div>
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
-  <h1>Cable picture<span class="cm-sub">{% if type_name != part_type_id %}{{ type_name }} · {% endif %}<span class="mono">{{ part_type_id }}</span></span></h1>
+  <h1>Cabling Guide<span class="cm-sub">{% if type_name != part_type_id %}{{ type_name }} · {% endif %}<span class="mono">{{ part_type_id }}</span></span></h1>
   {% include "explore/_role_gate.html" %}
 
   {% if not editor.positions and not editor.map.slots %}
@@ -66,9 +69,14 @@
       <button type="submit" class="es-btn" id="cm-save" title="Stored on the type in HWDB — every item of the type shows it">Save</button>
     </div>
     <div class="cm-cols">
-      <div class="cm-frame">
-        <span class="cm-hint" id="cm-empty">No picture yet.</span>
-        <div class="cm-pic" id="cm-pic" hidden><img id="cm-img" alt="{{ type_name }}" draggable="false"></div>
+      <div>
+        <div class="cm-frame">
+          <span class="cm-hint" id="cm-empty">No picture yet.</span>
+          <div class="cm-pic" id="cm-pic" hidden><img id="cm-img" alt="{{ type_name }}" draggable="false"></div>
+        </div>
+        {# #235: the picture's HWDB image id, to use the same image elsewhere — a checklist's image map, for one #}
+        <p class="cm-hint cm-id" id="cm-idline" hidden>Image id <code class="mono" id="cm-id"></code>
+          <button type="button" class="es-btn quiet" id="cm-copy">Copy</button></p>
       </div>
       <div>
         <p class="cm-hint" style="margin: 0 0 6px;">Pick a position, then tap the picture. Drag a marker to move it.</p>
@@ -118,6 +126,8 @@
       });
       pic.hidden = !imageId;
       byId("cm-empty").hidden = !!imageId;
+      byId("cm-idline").hidden = !imageId;
+      byId("cm-id").textContent = imageId;
       pic.classList.toggle("placing", !!sel && D.positions.indexOf(sel) >= 0);
       byId("cm-save").disabled = !imageId;
     }
@@ -174,6 +184,15 @@
         })
         .catch(function () { status.textContent = "upload failed"; })
         .then(function () { input.value = ""; });
+    });
+    byId("cm-copy").addEventListener("click", function () {
+      var b = this, sel = window.getSelection(), r = document.createRange();
+      r.selectNodeContents(byId("cm-id"));           // selected either way: the clipboard needs https
+      sel.removeAllRanges(); sel.addRange(r);
+      if (navigator.clipboard) navigator.clipboard.writeText(imageId).then(function () {
+        b.textContent = "Copied";
+        setTimeout(function () { b.textContent = "Copy"; }, 1500);
+      }).catch(function () {});
     });
     byId("cm-form").addEventListener("submit", function () {
       byId("cm-map").value = JSON.stringify({ image_id: imageId, slots: D.positions.concat(stale()).filter(function (l) { return slots[l]; })

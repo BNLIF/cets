@@ -623,15 +623,15 @@ class CablePictureTest(TestCase):
         self.assertIn('class="cc-mk cc-available" data-row="4" style="left: 55.5%; top: 80%;" title="ICO"', html)
         self.assertEqual(html.count('class="cc-mk '), 2)                  # "Gone" and "Board" have no row
         self.assertIn('<tr class="cc-installed" data-row="1">', html)
-        self.assertIn(f'href="{self.EDITOR}?item={FLANGE}" title="The picture and markers of this type — every item of the type shows them">Edit picture</a>', html)
+        self.assertIn(f'href="{self.EDITOR}?item={FLANGE}" title="The picture and markers of this type — every item of the type shows them">Edit cabling guide</a>', html)
 
     def test_a_type_with_no_picture_shows_the_list_alone_and_a_link_to_the_editor(self):
         html = self._call("get", PAGE).content.decode()
         self.assertNotIn('id="cc-map"', html)
         self.assertIn("3 / 4 connected", html)
         self.assertIn(f'href="{self.EDITOR}?item={FLANGE}"', html)
-        self.assertIn(">Add picture</a>", html)
-        self.assertLess(html.index(">Add picture</a>"), html.index('<table class="cc-table">'))   # where the picture would be
+        self.assertIn(">Add cabling guide</a>", html)
+        self.assertLess(html.index(">Add cabling guide</a>"), html.index('<table class="cc-table">'))   # where the picture would be
 
     def test_the_link_is_for_those_who_may_edit(self):
         inner = self.api.get_component_type.side_effect
@@ -671,6 +671,92 @@ class CablePictureTest(TestCase):
         self.api.post_component_type_image.return_value = {"status": "ERROR", "data": "Not authorized"}
         html = self._call("post", self.EDITOR, {"map": json.dumps({"image_id": "55", "slots": []})}, follow=True).content.decode()
         self.assertIn("HWDB refused the picture’s markers — Not authorized", html)
+
+
+class CablingGuideTest(TestCase):
+    """#235: the editor under its name, reached from the type's page, and the
+    picture's image id."""
+
+    EDITOR = "/hw/dev/cables/picture/Z00100300064/"
+    NAMES = "/hw/dev/checklist-names/Z00100300064/"
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("k", "k@k.io", "pw"))
+        self.api = _api()
+        H.objects.create(instance="dev", level=H.LEVEL_TYPE, system_id=1, system_name="S", subsystem_id=3,
+                         subsystem_name="SS", name="Top CRP bias warm cable", part_type_id=WARM, category="cable")
+
+    def _call(self, method, url, data=None, **kw):
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=self.api):
+            return getattr(self.client, method)(url, data or {}, **kw)
+
+    def test_the_type_pages_lazy_answer_says_whether_to_link_the_guide(self):
+        self.assertEqual(self._call("get", self.NAMES).json(), {"checklists": []})          # not asked: nothing read for it
+        self.api.get_component_type.assert_not_called()
+        self.assertEqual(self._call("get", self.NAMES, {"cabling": 1}).json(), {"checklists": [], "cabling_guide": True})
+        self.assertEqual(self.api.get_component_type.call_count, 1)                         # the type's record, nothing else
+        board = f"/hw/dev/checklist-names/{BOARD}/"                                         # no position takes a cable
+        self.assertFalse(self._call("get", board, {"cabling": 1}).json()["cabling_guide"])
+        H.objects.filter(part_type_id=WARM).delete()                                        # the mirror's word alone
+        self.assertFalse(self._call("get", self.NAMES, {"cabling": 1}).json()["cabling_guide"])
+
+    def test_the_answer_is_no_without_one_of_the_types_roles(self):
+        inner = self.api.get_component_type.side_effect
+        self.api.get_component_type.side_effect = lambda t: {"data": {**inner(t)["data"], "roles": [{"id": 3, "name": "type-manager"}]}}
+        with mock.patch("explore.views._my_roles", return_value=[]):
+            self.assertFalse(self._call("get", self.NAMES, {"cabling": 1}).json()["cabling_guide"])
+        with mock.patch("explore.views._my_roles", return_value=[{"id": 3, "name": "type-manager"}]):
+            self.assertTrue(self._call("get", self.NAMES, {"cabling": 1}).json()["cabling_guide"])
+
+    def test_the_type_page_holds_a_cabling_line_hidden_until_the_answer(self):
+        from explore import navigation
+        from explore.models import ConsortiumTypeOverride
+        from explore.tests.test_events import _node
+        sipm = "D00400300001"
+        _node(sipm)
+        url = navigation.leaf_path_for("prod", sipm)
+        html = self.client.get(url).content.decode()
+        self.assertIn(f'<dt id="cg-dt" hidden>Cabling</dt><dd id="cg-dd" class="span" hidden><a href="/hw/cables/picture/{sipm}/" target="_blank"', html)
+        self.assertIn('>Cabling Guide <span aria-hidden="true">', html)
+        self.assertIn('(cgDd ? "?cabling=1" : "")', html)                                   # asked for only where the line is
+        # Chao 2026-11-23: system and subsystem in one field, no Test events line
+        self.assertIn('<dt>System</dt><dd>FD-VD TDE (57) <span class="crumbs-sep">›</span> Digital electronics (2)</dd>', html)
+        self.assertNotIn("<dt>Subsystem</dt>", html)
+        self.assertNotIn("Test events</dt>", html)
+        ConsortiumTypeOverride.objects.create(instance="prod", part_type_id=sipm)           # no items, no guide: not asked
+        html = self.client.get(url).content.decode()
+        self.assertNotIn('id="cg-dd"', html)
+        self.assertIn('<dt>System</dt><dd class="span">FD-VD TDE (57) ', html)               # no Items cell beside it
+        ConsortiumTypeOverride.objects.all().delete()
+        with override_settings(HWDB_WRITE_INSTANCES=[]):
+            self.assertNotIn('id="cg-dd"', self.client.get(url).content.decode())
+
+    def test_opened_from_the_type_the_editor_goes_back_to_the_types_page(self):
+        with mock.patch("explore.views.navigation.leaf_path_for", return_value="/hw/dev/the-type/"):
+            html = self._call("get", self.EDITOR).content.decode()
+            self.assertIn("<title>Cabling Guide · ", html)
+            self.assertIn("<h1>Cabling Guide<span", html)
+            self.assertIn('<span class="sep">›</span><a href="/hw/dev/the-type/">Z00100300064</a>', html)
+            self.assertIn('<span class="sep">›</span>Cabling Guide', html)
+            self.assertIn('href="/hw/dev/the-type/">Cancel</a>', html)
+            posted = {"image_id": "55", "slots": [{"label": "ISH", "x": 10, "y": 20}]}
+            r = self._call("post", self.EDITOR, {"map": json.dumps(posted)})
+            self.assertRedirects(r, "/hw/dev/the-type/", fetch_redirect_response=False)
+        self.assertEqual(self.api.post_component_type_image.call_args.args[2], "Cable_map_Z00100300064.json")   # stored as before
+
+    def test_opened_from_an_item_the_crumbs_go_through_its_cable_connections(self):
+        html = self._call("get", self.EDITOR, {"item": FLANGE}).content.decode()
+        self.assertIn(f'<a href="/hw/dev/part/{FLANGE}/cables/">Cable connections</a>', html)
+        self.assertIn('<span class="sep">›</span>Cabling Guide', html)
+
+    def test_the_editor_shows_the_pictures_image_id_with_a_copy_button(self):
+        _with_picture(self.api)
+        r = self._call("get", self.EDITOR)
+        self.assertEqual(r.context["editor"]["map"]["image_id"], "55")       # the page fills the line from it, and again after an upload
+        html = r.content.decode()
+        self.assertIn('id="cm-idline" hidden>Image id <code class="mono" id="cm-id"></code>', html)
+        self.assertIn('<button type="button" class="es-btn quiet" id="cm-copy">Copy</button>', html)
 
 
 def _located(api, locations, data=None):
