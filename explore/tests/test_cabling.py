@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 from unittest import mock
 
+import requests
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
@@ -757,6 +758,98 @@ class CablingGuideTest(TestCase):
         html = r.content.decode()
         self.assertIn('id="cm-idline" hidden>Image id <code class="mono" id="cm-id"></code>', html)
         self.assertIn('<button type="button" class="es-btn quiet" id="cm-copy">Copy</button>', html)
+
+
+class ConnectListTest(TestCase):
+    """#236: Connect's List — the pick list's table of the position's cables,
+    a short page at a time, each with its END : connectors read, the free
+    ones offered."""
+
+    def setUp(self):
+        from explore.models import HwdbComponentEvent as C
+        self.C = C
+        self.client.force_login(get_user_model().objects.create_user("k", "k@k.io", "pw"))
+        self.api = _api()
+        for pid, serial in ((INSTALLED, ""), (ONE_END, "SN-21"), (FREE, ""), (f"{BOARD}-00009", "")):
+            C.objects.create(instance="dev", part_type_id=pid.rsplit("-", 1)[0], part_id=pid, serial_number=serial, status_id=120,
+                             status="QA/QC Tests - Passed All", qaqc_uploaded=True, certified_qaqc=False, institution="BNL")
+
+    def _list(self, **params):
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=self.api):
+            return self.client.get(PAGE, params).json()
+
+    def test_each_cable_shown_comes_with_its_connectors_those_in_use_marked(self):
+        d = self._list(cables=f"{WARM},{BOARD}")
+        self.assertEqual([r["part_id"] for r in d["rows"]], [INSTALLED, ONE_END, FREE])          # the board type is no cable type
+        used = {r["part_id"]: [(s["name"], s["used"]) for s in r["slots"]] for r in d["rows"]}
+        self.assertEqual(used[INSTALLED], [("FCP Flange:1", True), ("HVS PS:1", True)])
+        self.assertEqual(used[ONE_END], [("FCP Flange:1", True), ("HVS PS:1", False)])
+        self.assertEqual(used[FREE], [("FCP Flange:1", False), ("HVS PS:1", False)])
+        row = d["rows"][1]                                                                       # the pick list's columns, and the serial
+        self.assertEqual((row["status"], row["linkable"], row["qc_up"], row["qc_cert"], row["institution"], row["serial"], row["part_type_id"]),
+                         ("QA/QC Tests - Passed All", True, True, False, "BNL", "SN-21", WARM))
+        self.assertEqual(d["types"], {WARM: WARM})                                               # not in the mirror: its id for a name
+        self.assertEqual((d["total"], d["page"], d["pages"], d["per"]), (3, 1, 1, 8))
+        self.assertEqual(sorted(c.args[0] for c in self.api.get_subcomponents.call_args_list), sorted([INSTALLED, ONE_END, FREE]))
+        self.assertEqual(sorted(c.args[0] for c in self.api.get_component_type.call_args_list), sorted([WARM, BOARD]))
+
+    def test_only_the_page_shown_is_read_and_the_search_narrows(self):
+        for n in range(30, 40):
+            self.C.objects.create(instance="dev", part_type_id=WARM, part_id=f"{WARM}-000{n}", status_id=120)
+        d = self._list(cables=WARM, page="2")
+        self.assertEqual((d["total"], d["page"], d["pages"], len(d["rows"])), (13, 2, 2, 5))
+        self.assertEqual(self.api.get_subcomponents.call_count, 5)                                 # 13 cables of the type, 5 shown
+        self.assertEqual([r["part_id"] for r in self._list(cables=WARM, q="sn-2")["rows"]], [ONE_END])  # by serial number
+        self.assertEqual([r["part_id"] for r in self._list(cables=WARM, q="00022")["rows"]], [FREE])    # by PID
+        self.assertEqual(self._list(cables=WARM, q="nothing")["rows"], [])
+
+    def test_a_cable_that_could_not_be_read_is_listed_without_connectors(self):
+        inner = self.api.get_subcomponents.side_effect
+
+        def rows(pid):
+            if pid == ONE_END or (pid == FREE and not tried.count(FREE)):
+                tried.append(pid)
+                raise requests.ConnectionError("down")
+            return inner(pid)
+        tried = []
+        self.api.get_subcomponents.side_effect = rows
+        d = self._list(cables=WARM)
+        self.assertEqual([(r["part_id"], r["slots"] is None) for r in d["rows"]], [(INSTALLED, False), (ONE_END, True), (FREE, False)])
+        self.assertEqual(sorted(tried), sorted([ONE_END, ONE_END, FREE]))                          # each failed read tried once more
+
+    def test_a_type_that_cannot_be_read_is_said_rather_than_an_empty_list(self):
+        self.api.get_component_type.side_effect = requests.ConnectionError("down")
+        self.assertEqual(self._list(cables=WARM), {"error": "Couldn’t read the cable type — down"})
+
+    def test_several_cable_types_are_named_and_other_statuses_are_shown_only_on_request(self):
+        H.objects.create(instance="dev", level=H.LEVEL_TYPE, system_id=1, system_name="S", subsystem_id=3, subsystem_name="SS",
+                         name="HVS Test Bundle 4 Ends", part_type_id=BUNDLE4, category="cable")
+        self.C.objects.create(instance="dev", part_type_id=BUNDLE4, part_id=MANY, status_id=120)
+        self.C.objects.create(instance="dev", part_type_id=BUNDLE4, part_id=f"{BUNDLE4}-00002", status_id=150, status="In Rework")
+        d = self._list(cables=f"{WARM},{BUNDLE4}", q=BUNDLE4)
+        self.assertEqual(d["types"], {WARM: WARM, BUNDLE4: "HVS Test Bundle 4 Ends"})
+        self.assertEqual([r["part_id"] for r in d["rows"]], [MANY])
+        self.assertEqual([s["name"] for s in d["rows"][0]["slots"] if not s["used"]], ["Outer CRP:1"])
+        self.api.get_subcomponents.reset_mock()
+        d = self._list(cables=BUNDLE4, all="1")                                                    # "show all statuses"
+        self.assertEqual([(r["part_id"], r["linkable"], r["slots"] is None) for r in d["rows"]],
+                         [(MANY, True, False), (f"{BUNDLE4}-00002", False, True)])
+        self.assertEqual([c.args[0] for c in self.api.get_subcomponents.call_args_list], [MANY])   # a display-only cable is not read
+
+    def test_the_connect_dialog_opens_its_own_list(self):
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=self.api):
+            html = self.client.get(PAGE).content.decode()
+        self.assertIn('<button type="button" class="es-btn quiet" id="cc-c-list" title="Cables of the expected type with their free END : connectors">List</button>', html)
+        self.assertIn('<dialog class="cc-dlg" id="cc-pick">', html)
+        self.assertIn('<thead><tr><th>Item</th><th class="ty">Type</th><th>Status</th><th>Uploaded</th><th>Certified</th><th class="inst">Institution</th></tr></thead>', html)
+        self.assertIn('<input type="checkbox" id="cc-p-all"> show all statuses</label>', html)
+        self.assertIn('fetch("?cables=" + encodeURIComponent(psel.value || ptypes)', html)
+        self.assertNotIn('id="cl-pick-modal"', html)                                              # the shared dialog itself is not used here
+        with override_settings(HWDB_WRITE_INSTANCES=[]), mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=self.api):
+            self.assertNotIn('id="cc-pick"', self.client.get(PAGE).content.decode())
 
 
 def _located(api, locations, data=None):

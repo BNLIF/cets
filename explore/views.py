@@ -1734,6 +1734,52 @@ def _cable_choices(api, inst, part_id, typed, pos) -> dict:
     return {"pid": pid, "slots": slots}
 
 
+_CABLE_LIST_PER = 8
+
+
+def _cable_list(api, inst, types, q, page, show_all=False) -> dict:
+    """The Connect dialog's List (#236, Hajime: one pick for the cable and its
+    END : connector): the shared pick list's table — the mirrored cables of
+    ``types``, the types a position accepts, those of them that are cable
+    types; the four linkable statuses, the rest display-only with
+    ``show_all``; ``q`` narrows by PID or serial number — a short page at a
+    time, each linkable cable shown coming with its END : connector
+    ``slots``, those in use marked, so the list offers the free ones. One
+    read per cable shown and one per type; never the type's other cables. A
+    cable whose rows could not be read, the second try included, comes with
+    ``slots`` None; a type that could not be read raises."""
+    types = [t for t in dict.fromkeys(types) if _PTID_RX.match(t)][:20]
+    # the types one after the other on the page's own connection: a failed read here would empty the whole list
+    records = {t: api.get_component_type(t).get("data") or {} for t in types}
+    names = {t: list(r.get("connectors") or {}) for t, r in records.items() if r.get("category") == "cable"}
+    rows = _type_candidates(inst, list(names), show_all, False, q)
+    total = rows.count()
+    pages = max(1, -(-total // _CABLE_LIST_PER))
+    try:
+        page = min(max(1, int(page or 1)), pages)
+    except ValueError:
+        page = 1
+    shown = [{**_candidate_row(r), "serial": r.serial_number or ""}
+             for r in rows[(page - 1) * _CABLE_LIST_PER:page * _CABLE_LIST_PER]]
+
+    def in_use(client, pid):
+        return {m["via"] for m in current_manifest(client.get_subcomponents(pid).get("data")) if m.get("via")}
+    used = parts.fetch_map(api, in_use, [r["part_id"] for r in shown if r["linkable"]])
+    # a read that failed is tried once more, alone: on dev one in a few of the parallel reads drops its connection
+    for pid in [p for p, u in used.items() if u is None]:
+        try:
+            used[pid] = in_use(api, pid)
+        except requests.RequestException:
+            pass
+    for r in shown:
+        u = used.get(r["part_id"])
+        r["slots"] = None if u is None else [{"name": n, "used": n in u} for n in names[r["part_type_id"]]]
+    type_names = dict(HierarchyNode.for_instance(inst).filter(level=HierarchyNode.LEVEL_TYPE, part_type_id__in=names)
+                      .values_list("part_type_id", "name"))
+    return {"rows": shown, "types": {t: type_names.get(t) or t for t in names},
+            "total": total, "page": page, "pages": pages, "per": _CABLE_LIST_PER}
+
+
 def _cables_write(request, api, inst, part_id) -> None:
     """One write of the Cable connections page (#227), its outcome flashed:
     ``connect=<position>`` with ``pid`` and ``end`` links that END : connector
@@ -1859,7 +1905,9 @@ def explore_cables_view(request, part_id=None):
     #227, on an instance open to writes: a POST connects a cable at a free
     position or removes connections (``_cables_write``), then comes back to
     the page; ``?slots=<cable>&pos=<position>`` answers the Connect dialog
-    with the cable's END : connector slots as JSON; ``?bundle=<PID>`` offers
+    with the cable's END : connector slots as JSON, ``?cables=<type ids>`` the
+    dialog's List (#236: the pick list's table, a page of those types'
+    cables each with its free END : connectors); ``?bundle=<PID>`` offers
     that bundle / tray's cables at the free positions. The cable and the
     bundle can also be scanned with a phone (``phone``: the scanner page's
     link and QR for this device, and the feed the page listens to).
@@ -1902,6 +1950,13 @@ def explore_cables_view(request, part_id=None):
     if "slots" in request.GET:
         return JsonResponse(_cable_choices(api, inst, part_id, request.GET.get("slots"),
                                            (request.GET.get("pos") or "").strip()))
+    if "cables" in request.GET:
+        try:
+            return JsonResponse(_cable_list(api, inst, request.GET["cables"].split(","),
+                                            (request.GET.get("q") or "").strip(), request.GET.get("page"),
+                                            request.GET.get("all") == "1"))
+        except requests.RequestException as e:
+            return JsonResponse({"error": f"Couldn’t read the cable type — {_hwdb_error_detail(e)}"})
     try:
         device = ctx["device"] = cabling.device_connections(api, inst, part_id)
     except requests.RequestException as e:

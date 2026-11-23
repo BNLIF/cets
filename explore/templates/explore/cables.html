@@ -15,7 +15,7 @@
   .cc-l2 { display: block; font-size: 12.5px; color: var(--dim); }
   .cc-none { color: var(--dim); }
   .cc-head { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: flex-end; margin: 10px 0 18px; }
-  .cc-f { display: grid; gap: 3px; font-size: 11.5px; color: var(--dim); min-width: 0; }
+  .cc-f { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; font-size: 11.5px; color: var(--dim); min-width: 0; }   /* the column never wider than the form: a box and its buttons shrink on a phone */
   .cc-in { display: flex; gap: 8px; align-items: center; }
   .cc-page .cc-in input { min-height: 44px; width: 220px; max-width: 100%; font-family: var(--font-mono); font-size: 14px; }
   .cc-val { display: flex; align-items: center; min-height: 44px; font-size: 14px; font-weight: 600; color: var(--ink); }
@@ -75,7 +75,7 @@
   .cc-dlg::backdrop { background: rgba(0, 0, 0, .45); }
   .cc-dh { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--rule); }
   .cc-dh h2 { margin: 0; font-size: 16px; color: var(--ink); }
-  .cc-db { display: grid; gap: 12px; padding: 14px 16px 16px; font-size: 14px; }
+  .cc-db { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 14px 16px 16px; font-size: 14px; }
   .cc-box { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--rule); border-radius: var(--r-md); background: var(--bg); }
   .cc-box h3, .cc-db > h3, .cc-ends h3 { margin: 0; font-size: 11.5px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
   .cc-box b { color: var(--ink); }
@@ -94,6 +94,32 @@
   .cc-ends label.used { color: var(--dim); }
   .cc-ends.cc-opts label { font-family: inherit; }
   .cc-err { color: var(--bad); }
+  /* Connect's List: the pick list's table of the position's cables, a short page at a time, the free END : connectors of each under it */
+  #cc-pick { width: min(680px, 94vw); }
+  .cc-p-head { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
+  .cc-p-head .cc-in { flex: 1 1 180px; }
+  .cc-p-head select { min-height: 44px; max-width: 100%; font: inherit; font-size: 13px; color: var(--ink); background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-sm); padding: 5px 6px; }
+  .cc-p-head label { display: inline-flex; gap: 6px; align-items: center; min-height: 44px; font-size: 12.5px; color: var(--dim); }
+  .cc-p-scroll { max-height: 50vh; overflow: auto; border: 1px solid var(--rule); border-radius: var(--r-sm); }
+  .cc-p-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .cc-p-tbl th { position: sticky; top: 0; z-index: 1; padding: 6px 8px; text-align: left; font-size: 11.5px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .03em; color: var(--faint); background: var(--page); border-bottom: 1px solid var(--rule); }
+  .cc-p-tbl td { padding: 6px 8px; border-top: 1px solid var(--rule); }
+  .cc-p-tbl tbody tr:first-child td, .cc-p-tbl tr.ends td { border-top: 0; }
+  .cc-p-tbl tr.ends td { padding-top: 0; }
+  .cc-p-tbl tr.pick { cursor: pointer; }
+  .cc-p-tbl tr.pick:hover, .cc-p-tbl tr.pick:hover + tr.ends { background: var(--surface); }
+  .cc-p-tbl tr.off td { color: var(--faint); }
+  .cc-p-tbl.one .ty { display: none; }
+  .cc-p-tbl td .mono { white-space: nowrap; }
+  .cc-p-tbl .ok { color: var(--good); }
+  .cc-p-tbl .bad { color: var(--bad); }
+  .cc-p-ends { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+  .cc-p-ends .es-btn { font-family: var(--font-mono); }
+  #cc-p-status { flex: 1 1 auto; align-self: center; font-size: 12.5px; color: var(--dim); }
+  .cc-page #cc-pick .cc-df .es-btn[disabled] { opacity: .45; cursor: default; }
+  .cc-page #cc-pick [hidden] { display: none; }   /* the pager of a single page, the type choice of a single type: the classes set display */
+  @media (max-width: 640px) { .cc-p-tbl .inst { display: none; } .cc-p-tbl th, .cc-p-tbl td { padding-left: 5px; padding-right: 5px; } .cc-p-tbl th { letter-spacing: 0; font-size: 10.5px; } }
   /* View on a cable with more than two connectors: every END : connector, grouped by END */
   .cc-slots { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; align-items: baseline; margin-top: 6px; }
   .cc-slots > .cc-slots-end { grid-column: 1 / -1; font-weight: 600; color: var(--ink); }
@@ -120,6 +146,8 @@
   @media (max-width: 640px) {
     .es-page.cc-page { padding: 14px 12px 40px; }
     .cc-page .cc-in input { width: auto; flex: 1 1 0; min-width: 0; }
+    #cc-connect .cc-in { flex-wrap: wrap; }                     /* the PID whole on a line of its own, its three buttons under it */
+    .cc-page #cc-connect .cc-in input { flex-basis: 100%; }
     .cc-head > form.cc-f { flex: 1 1 100%; }
     .cc-table thead { display: none; }
     .cc-table, .cc-table tbody { display: block; }
@@ -227,7 +255,7 @@
         <td class="cc-other">{% if not r.cable %}<span class="cc-none">—</span>{% elif r.unread %}<span class="cc-none">couldn’t be read</span>{% else %}{% for o in r.others %}<span class="cc-side">{% if o.location %}<b class="mono">{{ o.location }}</b> · {% endif %}<b>{{ o.connections.0.position }}{% if o.connections|length > 1 %}, {{ o.connections.1.position }}{% endif %}</b>{% if o.connections|length > 2 %} + {{ o.connections|length|add:"-2" }} more{% endif %}<span class="cc-l2">{% if o.here %}this device{% else %}<a class="mono" href="{% url 'explore:cable_connections' part_id=o.part_id %}" title="Work from this device">{{ o.part_id }}</a>{% if o.type_name %} · {{ o.type_name }}{% endif %}{% endif %}</span></span>{% empty %}<span class="cc-none">not connected yet</span>{% endfor %}{% endif %}</td>
         <td class="cc-st">{% if r.status == "installed" %}<span class="cc-chip cc-installed" title="Every END : connector of the cable is connected">Installed</span>{% elif r.status == "connected" %}<span class="cc-chip cc-connected" title="Connected here; the cable has connectors still free">Connected</span>{% elif r.status == "noend" %}<span class="cc-chip" title="Linked without an END: this device is the cable’s bundle / tray">No END</span>{% else %}<span class="cc-chip">Available</span>{% endif %}</td>
         <td class="cc-bun">{% if r.bundle %}<a class="mono" href="{% url 'explore:part' part_id=r.bundle.part_id %}">{{ r.bundle.part_id }}</a><span class="cc-l2">{{ r.bundle.type_name }}{% if r.bundle.also %} · also at {{ r.bundle.also|join:", " }}{% endif %}</span>{% if r.bundle.label %}<span class="cc-l2 cc-lab">Label <span class="mono">{{ r.bundle.label }}</span> · <button type="button" class="cc-link" data-print="b{{ r.n }}" data-at="bundle / tray" data-pid="{{ r.bundle.part_id }}" data-type="{{ r.bundle.type_name }}" data-l1="{{ r.bundle.label }}">Print</button></span>{% endif %}{% else %}<span class="cc-none">—</span>{% endif %}</td>
-        <td class="cc-act">{% if r.cable %}<button type="button" class="es-btn quiet" data-open="cc-view-{{ r.n }}">View</button><button type="button" class="es-btn quiet" data-print="{{ r.n }}" data-at="{{ r.n }} · {{ r.position }}" data-pid="{{ r.cable }}" data-type="{{ r.cable_type }}" data-l1="{{ r.label.lines.0 }}" data-l2="{{ r.label.lines.1 }}">Print</button>{% if can_write %}<button type="button" class="es-btn quiet" data-remove="{{ r.position }}" data-at="{{ r.n }} · {{ r.position }}" data-what="{{ r.cable }} · {{ r.end|default:"no END" }}">Remove</button>{% endif %}{% elif can_write %}<button type="button" class="es-btn quiet" data-connect="{{ r.position }}" data-n="{{ r.n }}" data-types="{{ r.accepts|join:"," }}" data-names='[{% for e in r.expected %}"{{ e|escapejs }}"{% if not forloop.last %},{% endif %}{% endfor %}]' data-expected="{{ r.expected|join:" or " }}" data-prefill="{{ r.prefill }}">Connect</button>{% if r.candidates %}<template id="cc-cands-{{ r.n }}">{% for c in r.candidates %}<button type="button" data-pid="{{ c.part_id }}"{% if not c.open %} class="done"{% endif %}><span><span class="mono">{{ c.part_id }}</span><span class="cc-l2">{{ c.held_at }}</span></span><span class="cc-l2">{% if c.here %}connected at {{ c.here|join:", " }}{% elif c.connected %}{{ c.connected }} of {{ c.connectors }} connected{% else %}free{% endif %}</span></button>{% endfor %}</template>{% endif %}{% endif %}</td>
+        <td class="cc-act">{% if r.cable %}<button type="button" class="es-btn quiet" data-open="cc-view-{{ r.n }}">View</button><button type="button" class="es-btn quiet" data-print="{{ r.n }}" data-at="{{ r.n }} · {{ r.position }}" data-pid="{{ r.cable }}" data-type="{{ r.cable_type }}" data-l1="{{ r.label.lines.0 }}" data-l2="{{ r.label.lines.1 }}">Print</button>{% if can_write %}<button type="button" class="es-btn quiet" data-remove="{{ r.position }}" data-at="{{ r.n }} · {{ r.position }}" data-what="{{ r.cable }} · {{ r.end|default:"no END" }}">Remove</button>{% endif %}{% elif can_write %}<button type="button" class="es-btn quiet" data-connect="{{ r.position }}" data-n="{{ r.n }}" data-types="{{ r.accepts|join:"," }}" data-expected="{{ r.expected|join:" or " }}" data-prefill="{{ r.prefill }}">Connect</button>{% if r.candidates %}<template id="cc-cands-{{ r.n }}">{% for c in r.candidates %}<button type="button" data-pid="{{ c.part_id }}"{% if not c.open %} class="done"{% endif %}><span><span class="mono">{{ c.part_id }}</span><span class="cc-l2">{{ c.held_at }}</span></span><span class="cc-l2">{% if c.here %}connected at {{ c.here|join:", " }}{% elif c.connected %}{{ c.connected }} of {{ c.connectors }} connected{% else %}free{% endif %}</span></button>{% endfor %}</template>{% endif %}{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -297,7 +325,7 @@
           <input type="text" id="cc-c-pid" name="pid" placeholder="Cable PID" aria-label="Cable PID" autocomplete="off" autocapitalize="characters" spellcheck="false">
           <button type="button" class="es-btn quiet cl-scan" data-target="cc-c-pid">Scan</button>
           {% if phone %}<button type="button" class="es-btn quiet cc-phone" id="cc-c-phone" data-target="cc-c-pid" title="Scan with your phone" aria-label="Scan with your phone"><svg class="cc-phone-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2.5"/><line x1="10.5" y1="18.5" x2="13.5" y2="18.5"/></svg></button>{% endif %}
-          <button type="button" class="es-btn quiet cl-pick" id="cc-c-list" data-target="cc-c-pid" title="Items of the expected type — search by PID or serial number">List</button>
+          <button type="button" class="es-btn quiet" id="cc-c-list" title="Cables of the expected type with their free END : connectors">List</button>
         </span>
         <div class="cc-ends" id="cc-c-ends" aria-live="polite"></div>
       </div>
@@ -306,6 +334,29 @@
         <button type="submit" class="es-btn" id="cc-c-go" disabled>Connect</button>
       </div>
     </form>
+  </dialog>
+  {# Connect's List: the pick list's table of the position's cables, a short page at a time, with the free END : connectors of each read and shown under it — a tap on one names the cable and its END at once, a tap on the row the cable alone #}
+  <dialog class="cc-dlg" id="cc-pick">
+    <div class="cc-dh"><h2>Cables for <span id="cc-p-at"></span></h2><button type="button" class="es-btn quiet" data-close aria-label="Close">✕</button></div>
+    <div class="cc-db">
+      <div class="cc-p-head">
+        <select id="cc-p-sel" aria-label="Type" hidden></select>
+        <span class="cc-in"><input type="search" id="cc-p-q" placeholder="PID or serial" aria-label="PID or serial number" autocomplete="off" autocapitalize="characters" spellcheck="false"></span>
+        <label title="Also list statuses the Shipping Procedure doesn’t allow to be linked — shown for information only"><input type="checkbox" id="cc-p-all"> show all statuses</label>
+      </div>
+      <div class="cc-p-scroll">
+        <table class="cc-p-tbl" id="cc-p-tbl">
+          <thead><tr><th>Item</th><th class="ty">Type</th><th>Status</th><th>Uploaded</th><th>Certified</th><th class="inst">Institution</th></tr></thead>
+          <tbody id="cc-p-rows"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="cc-df">
+      <span id="cc-p-status" aria-live="polite"></span>
+      <button type="button" class="es-btn quiet" id="cc-p-prev" aria-label="Previous page">&lsaquo;</button>
+      <button type="button" class="es-btn quiet" id="cc-p-next" aria-label="Next page">&rsaquo;</button>
+      <button type="button" class="es-btn quiet" data-close>Close</button>
+    </div>
   </dialog>
   {# a row's Remove asks first: what goes is named, Cancel holds the focus #}
   <dialog class="cc-dlg" id="cc-rm-one">
@@ -396,7 +447,6 @@
 </div>
 
 {% include "explore/_checklist_scan.html" %}
-{% if can_write %}{% include "explore/_checklist_pick.html" %}{% endif %}
 <script>
 (function () {
   function byId(id) { return document.getElementById(id); }
@@ -412,11 +462,22 @@
     var cpid = byId("cc-c-pid"), ends = byId("cc-c-ends"), go = byId("cc-c-go"), cands = byId("cc-c-cands"),
         seq = 0, timer = null;
     function esc(t) { var d = document.createElement("div"); d.textContent = t; return d.innerHTML.replace(/"/g, "&quot;"); }
+    function mark(pid) { Array.prototype.forEach.call(cands.children, function (b) { b.classList.toggle("on", b.getAttribute("data-pid") === pid); }); }
+    // the cable's END : connectors: one in use cannot be chosen; the one picked in the list, or a single free one, is chosen already
+    function show(d, chosen) {
+      cpid.value = d.pid;
+      var free = d.slots.filter(function (s) { return !s.used; });
+      ends.innerHTML = "<h3>END : connector</h3>" + d.slots.map(function (s) {
+        return '<label' + (s.used ? ' class="used"' : "") + '><input type="radio" name="end" required value="' + esc(s.name) + '"' +
+          (s.used ? " disabled" : (chosen ? s.name === chosen : free.length === 1) ? " checked" : "") + "> " + esc(s.name) + (s.used ? " · in use" : "") + "</label>";
+      }).join("") + (free.length ? "" : '<span class="cc-err">Every connector of this cable is in use.</span>');
+      go.disabled = !ends.querySelector("input:checked");     // greyed until an END : connector is chosen
+    }
     function lookup() {
       var v = cpid.value.trim(), n = ++seq;
       clearTimeout(timer);
       go.disabled = true;
-      Array.prototype.forEach.call(cands.children, function (b) { b.classList.toggle("on", b.getAttribute("data-pid") === v.toUpperCase()); });
+      mark(v.toUpperCase());
       if (!v) { ends.textContent = ""; return; }
       ends.textContent = "Reading the cable…";
       fetch("?slots=" + encodeURIComponent(v) + "&pos=" + encodeURIComponent(cd.querySelector("[name=connect]").value),
@@ -426,14 +487,7 @@
         .then(function (d) {
           if (n !== seq) return;                       // a newer cable superseded this one
           if (d.error) { ends.innerHTML = '<span class="cc-err">' + esc(d.error) + "</span>"; return; }
-          cpid.value = d.pid;
-          var free = d.slots.filter(function (s) { return !s.used; });
-          // a connector in use cannot be chosen; a single free one is chosen already
-          ends.innerHTML = "<h3>END : connector</h3>" + d.slots.map(function (s) {
-            return '<label' + (s.used ? ' class="used"' : "") + '><input type="radio" name="end" required value="' + esc(s.name) + '"' +
-              (s.used ? " disabled" : free.length === 1 ? " checked" : "") + "> " + esc(s.name) + (s.used ? " · in use" : "") + "</label>";
-          }).join("") + (free.length ? "" : '<span class="cc-err">Every connector of this cable is in use.</span>');
-          go.disabled = free.length !== 1;             // greyed until an END : connector is chosen
+          show(d);
         });
     }
     cpid.addEventListener("input", function (e) {
@@ -453,8 +507,7 @@
       cd.querySelector("[name=connect]").value = b.getAttribute("data-connect");
       byId("cc-c-at").textContent = n + " · " + b.getAttribute("data-connect");
       byId("cc-c-exp").textContent = b.getAttribute("data-expected");
-      list.setAttribute("data-type-id", b.getAttribute("data-types"));
-      list.setAttribute("data-type-names", b.getAttribute("data-names"));
+      list.setAttribute("data-types", b.getAttribute("data-types"));
       cands.innerHTML = mine ? mine.innerHTML : "";
       cands.hidden = !mine;
       cpid.value = b.getAttribute("data-prefill") || "";   // a bundle's one open cable for this position
@@ -462,6 +515,82 @@
       go.disabled = true;
       cd.showModal();
       if (cpid.value) lookup();
+    });
+  }
+  // Connect's List: the pick list's table of the position's cables, a short page at a time, the connections of each read —
+  // a tap on a free END : connector names the cable and its END at once and Connect is ready; a tap on the row names the cable
+  var pk = byId("cc-pick");
+  if (pk) {
+    var pq = byId("cc-p-q"), prows = byId("cc-p-rows"), pstat = byId("cc-p-status"), pprev = byId("cc-p-prev"), pnext = byId("cc-p-next"),
+        psel = byId("cc-p-sel"), pall = byId("cc-p-all"), ptypes = "", ppage = 1, pseq = 0, ptimer = null, pcables = {};
+    function tick(v, yes, no) { return v ? '<span class="ok" title="' + yes + '">✓</span>' : '<span class="bad" title="' + no + '">✗</span>'; }
+    function plist() {
+      var n = ++pseq, q = pq.value.trim();
+      pstat.textContent = "Reading the cables…";
+      fetch("?cables=" + encodeURIComponent(psel.value || ptypes) + "&q=" + encodeURIComponent(q) + "&page=" + ppage + (pall.checked ? "&all=1" : ""),
+            { credentials: "same-origin" })
+        .then(function (r) { return r.json(); })
+        .catch(function () { return { error: "List not available." }; })
+        .then(function (d) {
+          if (n !== pseq) return;                      // a newer search superseded this one
+          if (d.error) d = { error: d.error, rows: [], types: {}, total: 0, page: 1, pages: 1 };
+          var ids = Object.keys(d.types);
+          if (!psel.value && !d.error) {               // the type choice, from the first answer: the position's cable types
+            psel.innerHTML = '<option value="">all types</option>' + ids.map(function (t) {
+              return '<option value="' + esc(t) + '">' + esc(d.types[t] === t ? t : d.types[t] + " · " + t) + "</option>"; }).join("");
+            psel.hidden = ids.length < 2;
+            byId("cc-p-tbl").classList.toggle("one", ids.length < 2);
+          }
+          pcables = {};
+          prows.innerHTML = d.rows.map(function (r) {
+            var free = (r.slots || []).filter(function (s) { return !s.used; });
+            pcables[r.part_id] = r;
+            // only the four linkable statuses can be picked; the rest (under "show all statuses") are display-only
+            return '<tr class="' + (r.linkable ? "pick" : "off") + '" data-pid="' + esc(r.part_id) + '"' +
+              (r.linkable ? "" : ' title="Display only — the Shipping Procedure doesn’t allow linking this status."') + ">" +
+              '<td><span class="mono">' + esc(r.part_id) + "</span>" + (r.serial ? '<span class="cc-l2">' + esc(r.serial) + "</span>" : "") + "</td>" +
+              '<td class="ty">' + esc(d.types[r.part_type_id] || r.part_type_id) + "</td><td>" + esc(r.status) + "</td>" +
+              "<td>" + tick(r.qc_up, "QA/QC uploaded", "QA/QC not uploaded") + "</td><td>" + tick(r.qc_cert, "Certified QA/QC", "Not certified") + "</td>" +
+              '<td class="inst">' + esc(r.institution) + "</td></tr>" +
+              (r.linkable ? '<tr class="ends"><td colspan="6"><span class="cc-p-ends"><span class="cc-l2">' +
+                (!r.slots ? "couldn’t read the connectors" : free.length ? free.length + " of " + r.slots.length + " free" : "all " + r.slots.length + " connected") + "</span>" +
+                free.map(function (s) {
+                  return '<button type="button" class="es-btn quiet" data-pid="' + esc(r.part_id) + '" data-end="' + esc(s.name) + '">' + esc(s.name) + "</button>";
+                }).join("") + "</span></td></tr>" : "");
+          }).join("") || '<tr class="off"><td colspan="6"' + (d.error ? ' class="cc-err"' : "") + ">" +
+            esc(d.error || (q ? "No match." : "No cables in the mirror — sync the type first.")) + "</td></tr>";
+          ppage = d.page;
+          var lo = (ppage - 1) * (d.per || 0) + 1;
+          pstat.textContent = d.rows.length ? (d.pages > 1 ? lo + "–" + (lo + d.rows.length - 1) + " of " + d.total : d.total + (d.total === 1 ? " cable" : " cables")) : "";
+          pprev.hidden = pnext.hidden = !(d.pages > 1);
+          pprev.disabled = ppage <= 1;
+          pnext.disabled = ppage >= d.pages;
+        });
+    }
+    function pfirst() { ppage = 1; plist(); }
+    byId("cc-c-list").addEventListener("click", function () {
+      ptypes = this.getAttribute("data-types") || "";
+      byId("cc-p-at").textContent = byId("cc-c-at").textContent;
+      pq.value = psel.innerHTML = "";
+      psel.hidden = pprev.hidden = pnext.hidden = true;
+      prows.textContent = "";
+      pk.showModal();
+      pfirst();
+    });
+    pq.addEventListener("input", function () { clearTimeout(ptimer); ptimer = setTimeout(pfirst, 250); });
+    psel.addEventListener("change", pfirst);
+    pall.addEventListener("change", pfirst);
+    pprev.addEventListener("click", function () { ppage--; plist(); });
+    pnext.addEventListener("click", function () { ppage++; plist(); });
+    prows.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-end]"), tr = e.target.closest("tr.pick, tr.ends"),
+          r = pcables[b ? b.getAttribute("data-pid") : tr && (tr.getAttribute("data-pid") || tr.previousElementSibling.getAttribute("data-pid"))];
+      if (!r || !r.linkable || !(b || e.target.closest("tr.pick"))) return;
+      pk.close();
+      ++seq; clearTimeout(timer);                       // a lookup still under way no longer counts
+      mark(r.part_id);
+      if (r.slots) show({ pid: r.part_id, slots: r.slots }, b && b.getAttribute("data-end"));
+      else { cpid.value = r.part_id; lookup(); }        // its connectors could not be read: read again, as for a typed PID
     });
   }
   // Scanning with a phone: the phone's scanner page sends each code to this user's feed for this device, and the box

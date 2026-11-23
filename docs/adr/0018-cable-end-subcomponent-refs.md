@@ -250,6 +250,23 @@ side. Checked on dev with the probe flange `Z00100300037-00006` and the free
   one choice, those in use not pickable, a single free one chosen already.
   Which END goes here is the installer's to say — nothing tells it until
   the other side is connected.
+- **List offers END : connectors** since 2026-11-23 (Hajime's first try,
+  the way Chao's choice; #236): the dialog's own list in place of the shared
+  pick list, keeping that list's table — Item, Type when the position takes
+  several cable types (with the type choice), Status, Uploaded, Certified,
+  Institution; the linkable statuses, the rest display-only under "show
+  all statuses"; the search by PID or serial number — eight cables to a
+  page, and for each linkable one shown its rows are read
+  (`?cables=<type ids>&q=&page=&all=`: one read per cable shown and one per
+  type, never the type's other cables; a failed read is tried once more).
+  Under each cable a row shows its free END : connectors as buttons with
+  "n of m free", or "all m connected", or that they could not be read. A
+  tap on a connector names the cable and its END at once: the dialog shows
+  the choice made, with no second read, and Connect is ready. A tap on the
+  cable's row names the cable alone, as the old list did, the END then
+  chosen in the dialog. The mirror holds no connections, which is why the
+  state is read for the page shown rather than listed for the whole type.
+  A scan or a typed PID still asks for the END afterwards.
 - **A cable of a type the position does not take is refused before any
   write**, by the dialog's read and again by the POST, naming the expected
   type(s) — the mirror's names, the type record for a type it lacks.
