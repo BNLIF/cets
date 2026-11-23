@@ -1860,7 +1860,9 @@ def explore_cables_view(request, part_id=None):
     position or removes connections (``_cables_write``), then comes back to
     the page; ``?slots=<cable>&pos=<position>`` answers the Connect dialog
     with the cable's END : connector slots as JSON; ``?bundle=<PID>`` offers
-    that bundle / tray's cables at the free positions.
+    that bundle / tray's cables at the free positions. The cable and the
+    bundle can also be scanned with a phone (``phone``: the scanner page's
+    link and QR for this device, and the feed the page listens to).
 
     #229: the device location is typed in the header and saved in the item's
     Item Specs (a POST, so only where writes are open; the field only for an
@@ -1917,6 +1919,15 @@ def explore_cables_view(request, part_id=None):
                    role_gate=_type_role_gate(request, inst, api, device["part_type_id"], device["type_record"]))
         # the picture is the type's and the location the item's: the type's roles, as for its checklists and items
         ctx["can_edit_map"] = ctx["can_set_location"] = ctx["role_gate"] is None
+        # scanning with a phone (Chao 2026-11-23): the checklists' route — the phone's scanner page sends each
+        # code to this user's feed for this device, and the box that is listening on the page takes it
+        scan_path = _rev(request, "explore:scan") + "?" + urlencode({"target": part_id, "for": "cables"})
+        scan_url = settings.PUBLIC_ORIGIN + scan_path if settings.PUBLIC_ORIGIN else request.build_absolute_uri(scan_path)
+        ctx["phone"] = {
+            "url": scan_url, "qr": scanning.qr_svg(scan_url),
+            "feed": _rev(request, "explore:scan_feed") + f"?target={part_id}", "ack": _rev(request, "explore:scan_ack"),
+            "since": (PackScan.for_instance(inst).filter(username=request.user.get_username())   # stale scans stay out
+                      .order_by("-id").values_list("id", flat=True).first()) or 0}
         if bundle_id:
             try:
                 ctx["bundle"] = cabling.offer_bundle(api, inst, device, bundle_id)
@@ -4046,7 +4057,10 @@ def explore_scan_view(request):
 
     #170: opened from a checklist's linking table, ``?target=<PID>`` names
     the checklist item and ``free=1`` keeps the text as scanned (a serial
-    number as well as a PID) — the fill page resolves it in the cell."""
+    number as well as a PID) — the fill page resolves it in the cell.
+    ``for=cables`` with a target is the same route opened from that item's
+    Cable connections page: only the wording differs, and a code may be
+    scanned again (one cable, several connectors)."""
     inst = instance_of(request)
     if inst not in settings.HWDB_WRITE_INSTANCES:
         return HttpResponseForbidden("Scanning is not enabled here.")
@@ -4069,6 +4083,7 @@ def explore_scan_view(request):
         "scan_sn": (request.GET.get("sn") or "")[:200] if target else "",   # its serial pattern
         "ocr": bool(target) and request.GET.get("ocr") == "1",   # #188: opened from a text field — read text from the start
         "one": bool(target) and request.GET.get("one") == "1",   # a single field: the camera stops once its scan is placed
+        "cables": bool(target) and request.GET.get("for") == "cables",   # opened from a Cable connections page: its wording
     })
 
 

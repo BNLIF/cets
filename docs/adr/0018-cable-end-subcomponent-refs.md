@@ -245,6 +245,21 @@ side. Checked on dev with the probe flange `Z00100300037-00006` and the free
   position holding a cable end.** A cable held by plain PID (the device is
   its bundle / tray) and every non-cable item stay. The other side is never
   written: it is another item's position.
+  Both ask first since 2026-11-23 (Hajime's first try; #233): a row's
+  Remove names the position, the cable and its END : connector; Remove all
+  is a warning that lists what goes. Cancel holds the focus in both.
+  Connect stays grey until an END : connector is chosen.
+- **Scanning with a phone** (Chao 2026-11-23): the page's own Scan uses
+  the camera of the device it is open on; a phone button beside it, in the
+  Connect dialog and at the bundle box, uses the checklists' phone route
+  instead — the scanner page opened with `?target=<device>&for=cables`,
+  each code queued for the same user and that device, the page polling the
+  feed while a box listens and telling the phone where the scan went. A
+  scan fills the box as a local scan does (the cable is read and its
+  END : connectors offered; a bundle opens). Scans that arrive while
+  nothing listens are not placed. In the Connect dialog the choice is kept
+  in the browser, so the next Connect listens at once. Not offered for the
+  device box: the feed is keyed by an item, and the way in has none yet.
 - **The write is Link items' write** (the complete positions, each as
   read, #224), the status rule and the occupied-position check included;
   HWDB's refusal is shown as it comes and the page is read again.

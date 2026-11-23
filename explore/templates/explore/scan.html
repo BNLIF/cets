@@ -45,6 +45,10 @@
     <h1>Scan items into <span style="font-family:ui-monospace,monospace;">{{ box }}</span></h1>
     <p>Scanning as <strong>{{ user.get_username }}</strong> — each scanned item is added to the box
       immediately; you’ll see a warning here if one can’t be.</p>
+    {% elif cables %}
+    <h1>Scan cables for <span style="font-family:ui-monospace,monospace;">{{ target }}</span></h1>
+    <p>Scanning as <strong>{{ user.get_username }}</strong> — each code lands in the box that is listening on the
+      Cable connections page you have open, if it is signed in as the same user.</p>
     {% elif target %}
     <h1>Scan into the checklist of <span style="font-family:ui-monospace,monospace;">{{ target }}</span></h1>
     <p>Scanning as <strong>{{ user.get_username }}</strong> — each code lands in the next cell of the
@@ -92,6 +96,7 @@
     var ONE = {{ one|yesno:"true,false" }};   // a single field: done once its scan is placed — the camera stops
     var BOX = "{{ box }}";
     var TARGET = "{{ target }}", FREE = {{ free|yesno:"true,false" }};   // #170: a checklist's table
+    var CABLES = {{ cables|yesno:"true,false" }}, PAGE = CABLES ? "Cable connections page" : "checklist page";   // the page that takes the scans
     var TYPE = "{{ scan_type }}", SN = "{{ scan_sn|escapejs }}", sentBefore = {};
     var OUTCOME_URL = "{{ outcome_url }}", pending = {}, outcomeT = null;
     // the checklist's table takes items of TYPE (a PID of another type is
@@ -111,7 +116,7 @@
       if (pid) { if (TYPE && pid.indexOf(TYPE + "-") !== 0) return "expected type " + TYPE; }
       else if (!FREE) return "no PID in the scanned text";
       else if (SN) { try { if (!new RegExp("^(?:" + SN + ")$").test(code)) return "not a PID or a serial number like " + SN; } catch (e) {} }
-      if (sentBefore[code.toUpperCase()]) return "already scanned";
+      if (!CABLES && sentBefore[code.toUpperCase()]) return "already scanned";   // one cable may go to several positions
       return "";
     }
     var csrf = document.querySelector("#csrf input[name=csrfmiddlewaretoken]").value;
@@ -145,7 +150,7 @@
         setStatus("✗ " + j.pid + " " + j.message, "bad");
         if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
       } else if (TARGET) {
-        setStatus("✓ Sent " + j.pid + " — waiting for the checklist page…", "ok");
+        setStatus("✓ Sent " + j.pid + " — waiting for the " + PAGE + "…", "ok");
         if (navigator.vibrate) navigator.vibrate(80);
       } else {
         setStatus("✓ Sent " + j.pid + " — keep scanning.", "ok");
@@ -188,7 +193,7 @@
       if (r.ok && j.scans) j.scans.forEach(function (s) { if (s.ok !== null) settle(s.id, s.ok, s.message); });
       var now = Date.now();
       Object.keys(pending).forEach(function (id) {
-        if (now - pending[id].at > 15000) settle(id, false, ONE ? "no checklist page is listening — press the field’s Phone button there" : "no checklist page is listening — press the row’s scan button there");
+        if (now - pending[id].at > 15000) settle(id, false, "no " + PAGE + " is listening — press the " + (CABLES ? "phone button in its Connect dialog" : ONE ? "field’s Phone button" : "row’s scan button") + " there");
       });
     }
 

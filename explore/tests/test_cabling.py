@@ -397,7 +397,13 @@ class CableWritesTest(TestCase):
         html = self._get(PAGE).content.decode()
         self.assertIn(f'data-connect="ICO" data-n="4" data-types="{WARM}"', html)
         self.assertIn('data-expected="Top CRP bias warm cable"', html)
-        self.assertEqual(html.count('name="remove" value='), 3)
+        # a row's Remove asks first (#233): the row's button only opens the question, which names what goes
+        self.assertIn(f'data-remove="ISH" data-at="1 · ISH" data-what="{INSTALLED} · FCP Flange:1">Remove</button>', html)
+        self.assertEqual(html.count('data-remove="'), 3)
+        one = html.split('<dialog class="cc-dlg" id="cc-rm-one">', 1)[1].split("</dialog>", 1)[0]
+        self.assertIn('data-close autofocus>Cancel</button>', one)                 # Enter cancels
+        self.assertIn('class="es-btn cc-danger" form="cc-rm" name="remove" id="cc-r-go">Remove</button>', one)
+        self.assertEqual(html.count('name="remove"'), 1)                           # the one submit is the confirmed one
         self.assertIn('data-open="cc-rm-all">Remove all</button>', html)
         dlg = html.split('<dialog class="cc-dlg" id="cc-rm-all">', 1)[1].split("</dialog>", 1)[0]
         self.assertIn(f'⚠ This removes all 3 connections on <span class="mono">{FLANGE}</span> from HWDB. It cannot be undone', dlg)
@@ -478,6 +484,33 @@ class CableWritesTest(TestCase):
     def test_removing_nothing_writes_nothing(self):
         self.assertIn("“ICO” holds nothing to remove.", self._post({"remove": "ICO"}).content.decode())
         self.api.patch_subcomponents.assert_not_called()
+
+    def test_the_cable_and_the_bundle_can_be_scanned_with_a_phone(self):
+        """The checklists' phone route: the scanner page's link and QR for
+        this device, a button at the Connect dialog's box and at the bundle
+        box, and the feed the page listens to."""
+        r = self._get(PAGE)
+        phone, html = r.context["phone"], r.content.decode()
+        self.assertEqual(phone["url"], f"http://testserver/hw/dev/scan/?target={FLANGE}&for=cables")
+        self.assertEqual((phone["feed"], phone["ack"], phone["since"]),
+                         (f"/hw/dev/scan/feed/?target={FLANGE}", "/hw/dev/scan/ack/", 0))
+        self.assertIn(f'id="cc-phone-panel" hidden data-feed="/hw/dev/scan/feed/?target={FLANGE}" data-ack="/hw/dev/scan/ack/" data-since="0"', html)
+        self.assertIn('class="es-btn quiet cc-phone" id="cc-c-phone" data-target="cc-c-pid"', html)
+        self.assertIn('class="es-btn quiet cc-phone" data-target="cc-bundle" data-what="bundle / tray"', html)
+        self.assertIn("<svg", phone["qr"])
+        with override_settings(HWDB_WRITE_INSTANCES=[]):                           # the scan route is closed there too
+            closed = self._get(PAGE).content.decode()
+            self.assertNotIn('id="cc-phone-panel"', closed)
+            self.assertNotIn('class="es-btn quiet cc-phone"', closed)
+
+    def test_the_phones_scanner_page_speaks_of_cables(self):
+        html = self.client.get(f"/hw/dev/scan/?target={FLANGE}&for=cables").content.decode()
+        self.assertIn(f'<h1>Scan cables for <span style="font-family:ui-monospace,monospace;">{FLANGE}</span></h1>', html)
+        self.assertIn("var CABLES = true,", html)
+        self.assertNotIn("Scan into the checklist of", html)
+        plain = self.client.get(f"/hw/dev/scan/?target={FLANGE}").content.decode()   # a checklist's page is as before
+        self.assertIn("Scan into the checklist of", plain)
+        self.assertIn("var CABLES = false,", plain)
 
     def test_a_scanned_bundle_fills_each_free_positions_list(self):
         html = self._get(PAGE, {"bundle": TRAY.lower()}).content.decode()
