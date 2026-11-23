@@ -117,7 +117,10 @@
   .cc-p-ends { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
   .cc-p-ends .es-btn { font-family: var(--font-mono); }
   #cc-p-status { flex: 1 1 auto; align-self: center; font-size: 12.5px; color: var(--dim); }
-  .cc-page #cc-pick .cc-df .es-btn[disabled] { opacity: .45; cursor: default; }
+  .cc-page #cc-pick .es-btn[disabled] { opacity: .45; cursor: default; }
+  .cc-p-sync { display: flex; gap: 6px; }
+  #cc-p-log { margin: 0; padding: 10px; max-height: 120px; overflow: auto; border-radius: var(--r-md); background: #1c1812; color: #e7dfce;
+    font-family: var(--font-mono); font-size: 11.5px; white-space: pre-wrap; }
   .cc-page #cc-pick [hidden] { display: none; }   /* the pager of a single page, the type choice of a single type: the classes set display */
   @media (max-width: 640px) { .cc-p-tbl .inst { display: none; } .cc-p-tbl th, .cc-p-tbl td { padding-left: 5px; padding-right: 5px; } .cc-p-tbl th { letter-spacing: 0; font-size: 10.5px; } }
   /* View on a cable with more than two connectors: every END : connector, grouped by END */
@@ -343,7 +346,13 @@
         <select id="cc-p-sel" aria-label="Type" hidden></select>
         <span class="cc-in"><input type="search" id="cc-p-q" placeholder="PID or serial" aria-label="PID or serial number" autocomplete="off" autocapitalize="characters" spellcheck="false"></span>
         <label title="Also list statuses the Shipping Procedure doesn’t allow to be linked — shown for information only"><input type="checkbox" id="cc-p-all"> show all statuses</label>
+        {# the list is the mirror's: the Link items page's two syncs, for the type(s) listed — they write nothing to HWDB #}
+        <span class="cc-p-sync" id="cc-p-sync" data-sync-url="{% url 'explore:node_sync' part_type_id='__T__' %}">
+          <button type="button" class="es-btn quiet" data-mode="incremental" title="Fetch this type’s new items from HWDB into the mirror — does not refresh items already listed">Sync new items</button>
+          <button type="button" class="es-btn quiet" data-mode="components" title="Re-fetch every item of this type from HWDB — refreshes status and QC flags of items already listed">Re-sync</button>
+        </span>
       </div>
+      <pre id="cc-p-log" hidden></pre>
       <div class="cc-p-scroll">
         <table class="cc-p-tbl" id="cc-p-tbl">
           <thead><tr><th>Item</th><th class="ty">Type</th><th>Status</th><th>Uploaded</th><th>Certified</th><th class="inst">Institution</th></tr></thead>
@@ -522,7 +531,8 @@
   var pk = byId("cc-pick");
   if (pk) {
     var pq = byId("cc-p-q"), prows = byId("cc-p-rows"), pstat = byId("cc-p-status"), pprev = byId("cc-p-prev"), pnext = byId("cc-p-next"),
-        psel = byId("cc-p-sel"), pall = byId("cc-p-all"), ptypes = "", ppage = 1, pseq = 0, ptimer = null, pcables = {};
+        psel = byId("cc-p-sel"), pall = byId("cc-p-all"), psync = byId("cc-p-sync"), plog = byId("cc-p-log"),
+        ptypes = "", pcable = [], ppage = 1, pseq = 0, ptimer = null, pcables = {};
     function tick(v, yes, no) { return v ? '<span class="ok" title="' + yes + '">✓</span>' : '<span class="bad" title="' + no + '">✗</span>'; }
     function plist() {
       var n = ++pseq, q = pq.value.trim();
@@ -536,6 +546,7 @@
           if (d.error) d = { error: d.error, rows: [], types: {}, total: 0, page: 1, pages: 1 };
           var ids = Object.keys(d.types);
           if (!psel.value && !d.error) {               // the type choice, from the first answer: the position's cable types
+            pcable = ids;
             psel.innerHTML = '<option value="">all types</option>' + ids.map(function (t) {
               return '<option value="' + esc(t) + '">' + esc(d.types[t] === t ? t : d.types[t] + " · " + t) + "</option>"; }).join("");
             psel.hidden = ids.length < 2;
@@ -558,7 +569,7 @@
                   return '<button type="button" class="es-btn quiet" data-pid="' + esc(r.part_id) + '" data-end="' + esc(s.name) + '">' + esc(s.name) + "</button>";
                 }).join("") + "</span></td></tr>" : "");
           }).join("") || '<tr class="off"><td colspan="6"' + (d.error ? ' class="cc-err"' : "") + ">" +
-            esc(d.error || (q ? "No match." : "No cables in the mirror — sync the type first.")) + "</td></tr>";
+            esc(d.error || (q ? "No match." : "No cables in the mirror — sync new items.")) + "</td></tr>";
           ppage = d.page;
           var lo = (ppage - 1) * (d.per || 0) + 1;
           pstat.textContent = d.rows.length ? (d.pages > 1 ? lo + "–" + (lo + d.rows.length - 1) + " of " + d.total : d.total + (d.total === 1 ? " cable" : " cables")) : "";
@@ -571,8 +582,9 @@
     byId("cc-c-list").addEventListener("click", function () {
       ptypes = this.getAttribute("data-types") || "";
       byId("cc-p-at").textContent = byId("cc-c-at").textContent;
-      pq.value = psel.innerHTML = "";
-      psel.hidden = pprev.hidden = pnext.hidden = true;
+      pq.value = psel.innerHTML = plog.textContent = "";
+      pcable = [];
+      psel.hidden = pprev.hidden = pnext.hidden = plog.hidden = true;
       prows.textContent = "";
       pk.showModal();
       pfirst();
@@ -580,6 +592,35 @@
     pq.addEventListener("input", function () { clearTimeout(ptimer); ptimer = setTimeout(pfirst, 250); });
     psel.addEventListener("change", pfirst);
     pall.addEventListener("change", pfirst);
+    // the mirror may be behind HWDB: sync the type listed (each cable type in turn under "all types"), then list again
+    psync.addEventListener("click", async function (e) {
+      var b = e.target.closest("button"), btns = psync.querySelectorAll("button");
+      if (!b) return;
+      var mode = b.getAttribute("data-mode"), types = psel.value ? [psel.value] : pcable.length ? pcable : ptypes.split(",").filter(Boolean),
+          failed = false;
+      btns.forEach(function (x) { x.disabled = true; });
+      plog.hidden = false;
+      plog.textContent = "";
+      for (var i = 0; i < types.length; i++) {
+        plog.textContent += (mode === "incremental" ? "Syncing new items of " : "Re-syncing all items of ") + types[i] + " from HWDB…\n";
+        var fd = new FormData(), resp;
+        fd.append("csrfmiddlewaretoken", cd.querySelector("[name=csrfmiddlewaretoken]").value);
+        fd.append("mode", mode);
+        try { resp = await fetch(psync.getAttribute("data-sync-url").replace("__T__", encodeURIComponent(types[i])), { method: "POST", body: fd, credentials: "same-origin" }); }
+        catch (err) { plog.textContent += "network error: " + err + "\n"; failed = true; break; }
+        if (resp.redirected) { window.location = resp.url; return; }     // the FNAL link has to be renewed
+        var reader = resp.body.getReader(), dec = new TextDecoder();
+        while (true) {
+          var chunk = await reader.read();
+          if (chunk.done) break;
+          plog.textContent += dec.decode(chunk.value, { stream: true });
+          plog.scrollTop = plog.scrollHeight;
+        }
+      }
+      btns.forEach(function (x) { x.disabled = false; });
+      plog.hidden = !failed;                            // the log goes once the sync is done, as the Link items page's does; an error stays
+      pfirst();
+    });
     pprev.addEventListener("click", function () { ppage--; plist(); });
     pnext.addEventListener("click", function () { ppage++; plist(); });
     prows.addEventListener("click", function (e) {

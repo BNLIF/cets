@@ -266,7 +266,11 @@ side. Checked on dev with the probe flange `Z00100300037-00006` and the free
   cable's row names the cable alone, as the old list did, the END then
   chosen in the dialog. The mirror holds no connections, which is why the
   state is read for the page shown rather than listed for the whole type.
-  A scan or a typed PID still asks for the END afterwards.
+  A scan or a typed PID still asks for the END afterwards. The list is
+  the mirror's, so it carries the Link items page's two syncs (Chao, same
+  day): "Sync new items" and "Re-sync" run the type's mirror sync — each
+  cable type in turn under "all types" — show its log while it runs, and
+  the list is read again. They write nothing to HWDB.
 - **A cable of a type the position does not take is refused before any
   write**, by the dialog's read and again by the POST, naming the expected
   type(s) — the mirror's names, the type record for a type it lacks.

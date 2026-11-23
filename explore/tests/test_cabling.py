@@ -846,6 +846,10 @@ class ConnectListTest(TestCase):
         self.assertIn('<thead><tr><th>Item</th><th class="ty">Type</th><th>Status</th><th>Uploaded</th><th>Certified</th><th class="inst">Institution</th></tr></thead>', html)
         self.assertIn('<input type="checkbox" id="cc-p-all"> show all statuses</label>', html)
         self.assertIn('fetch("?cables=" + encodeURIComponent(psel.value || ptypes)', html)
+        # the list is the mirror's: the Link items page's two syncs, for the type(s) listed
+        self.assertIn('<span class="cc-p-sync" id="cc-p-sync" data-sync-url="/hw/dev/sync-tests/__T__/">', html)
+        self.assertIn('data-mode="incremental" title="Fetch this type’s new items from HWDB into the mirror — does not refresh items already listed">Sync new items</button>', html)
+        self.assertIn('data-mode="components" title="Re-fetch every item of this type from HWDB — refreshes status and QC flags of items already listed">Re-sync</button>', html)
         self.assertNotIn('id="cl-pick-modal"', html)                                              # the shared dialog itself is not used here
         with override_settings(HWDB_WRITE_INSTANCES=[]), mock.patch("explore.views.mint_for", return_value="bearer"), \
              mock.patch("explore.views.FnalDbApiClient", return_value=self.api):
