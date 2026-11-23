@@ -184,6 +184,33 @@ class DeviceConnectionsTest(TestCase):
         self.assertEqual([r["position"] for r in device["rows"]], ["ISH", "OSH", "FCT.T", "ICO"])
         self.assertEqual(api.get_component_type.call_count, 3)            # the device's and the two cable types' connectors
 
+    def test_a_connected_row_lists_every_connector_of_its_cable(self):
+        """#234: in the type's order, connected or free — the one at this row,
+        those elsewhere on this device, and those on other devices."""
+        slots = self.rows["FCT.T"]["slots"]
+        self.assertEqual([(s["name"], s["end"], s["n"], s["part_id"]) for s in slots],
+                         [("Flange:7", "Flange", ":7", FLANGE), ("FC Termination:1", "FC Termination", ":1", FCT),
+                          ("Inner CRP:1", "Inner CRP", ":1", FILTER), ("Outer CRP:1", "Outer CRP", ":1", None)])
+        self.assertEqual([(s["this"], s["here"], s["position"]) for s in slots[:3]],
+                         [(True, True, "FCT.T"), (False, False, "IN"), (False, False, "FB2")])
+        self.assertEqual([s["name"] for s in self.rows["OSH"]["slots"] if not s["part_id"]], ["HVS PS:1"])   # the free end
+        self.assertNotIn("slots", self.rows["ICO"])                       # nothing connected: nothing to list
+
+    def test_connectors_of_one_end_on_this_and_on_another_device_are_listed_with_their_location(self):
+        api = _api()
+        many = [{"part_id": f"{FLANGE}.FCT.T", "cable_connector": "Flange:7", "operation": "mount"},
+                {"part_id": f"{FLANGE}.ISH", "cable_connector": "Inner CRP:1", "operation": "mount"},
+                {"part_id": f"{FCT}.B", "cable_connector": "Odd:9", "operation": "mount"}]     # a name the type lacks
+        inner_s, inner_c = api.get_subcomponents.side_effect, api.get_component.side_effect
+        api.get_subcomponents.side_effect = lambda pid: {"data": many} if pid == MANY else inner_s(pid)
+        api.get_component.side_effect = lambda pid: {"data": {**inner_c(pid)["data"], "specifications": [
+            {"DATA": {cabling.LOCATION_KEY: "FCT_3"}}] if pid == FCT else []}}
+        slots = {r["position"]: r for r in cabling.device_connections(api, "dev", FLANGE)["rows"]}["FCT.T"]["slots"]
+        self.assertEqual([(s["name"], s["part_id"], s.get("this"), s.get("here"), s.get("location")) for s in slots],
+                         [("Flange:7", FLANGE, True, True, ""), ("FC Termination:1", None, None, None, None),
+                          ("Inner CRP:1", FLANGE, False, True, ""), ("Outer CRP:1", None, None, None, None),
+                          ("Odd:9", FCT, False, False, "FCT_3")])           # still shown, after the type's own
+
     def test_a_cable_linked_without_an_end_is_not_a_connection(self):
         api = _api()
         rows = [{"part_id": ONE_END, "type_name": "Top CRP bias warm cable",
@@ -289,11 +316,24 @@ class CablesPageTest(TestCase):
 
     def test_view_shows_one_connection_with_both_sides(self):
         html = self._get(PAGE).content.decode()
+        dlg = html.split('id="cc-view-1"', 1)[1].split("</dialog>", 1)[0]     # a two-connector cable: this side, other side
+        self.assertIn("Connection at 1 · ISH", dlg)
+        self.assertIn("2 of 2 connectors connected", dlg)
+        self.assertEqual((dlg.count("<h3>This side</h3>"), dlg.count("<h3>Other side</h3>")), (1, 1))
+        self.assertIn('· <span class="mono">HVS PS:1</span> · connected', dlg)
+        self.assertNotIn("<h3>Connectors", dlg)
         dlg = html.split('id="cc-view-3"', 1)[1].split("</dialog>", 1)[0]
         self.assertIn("Connection at 3 · FCT.T", dlg)
-        self.assertIn("3 of 4 connectors connected", dlg)
-        self.assertEqual(dlg.count("<h3>Other side</h3>"), 2)
-        self.assertIn('· <span class="mono">FC Termination:1</span> · connected', dlg)
+        # more than two connectors (#234): every one with its status, grouped by END, in place of the other-side boxes
+        self.assertIn("<h3>Connectors · 3 of 4 connected</h3>", dlg)
+        self.assertNotIn("<h3>Other side</h3>", dlg)
+        self.assertEqual(dlg.count('class="cc-slots-end"'), 4)
+        self.assertIn('<span class="cc-slots-end">Flange</span>', dlg)
+        self.assertIn('<span class="mono">:7</span><span><span class="cc-dot on"></span><b>FCT.T</b> '
+                      '<span class="cc-l2" style="display: inline;">· this side</span></span>', dlg)
+        self.assertIn(f'<b>IN</b> <span class="cc-l2" style="display: inline;">· <a class="mono" href="/hw/dev/part/{FCT}/cables/"', dlg)
+        self.assertIn('<span class="cc-none"><span class="cc-dot"></span>not connected</span>', dlg)
+        self.assertEqual(dlg.count('class="cc-dot on"'), 3)
         self.assertIn(f'href="/hw/dev/part/{MANY}/">Open the cable’s item page</a>', dlg)
         self.assertNotIn('id="cc-view-4"', html)                                 # a free position has nothing to view
 

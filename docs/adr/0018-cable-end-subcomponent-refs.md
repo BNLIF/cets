@@ -224,6 +224,18 @@ in for a typed or scanned PID.
   an instance open to writes, where its positions are read anyway — one of
   them accepts a cable type by the mirror's word. No read is added for it.
 
+- **View on a cable with more than two connectors** (Hajime's first try,
+  2026-11-23; #234) lists every END : connector of the cable's type, in the
+  type's order and grouped by END, in place of the "Other side" boxes: a
+  connected one with the device's location, the position and the device
+  (this side, this device, or the other device's link), a free one as "not
+  connected". A two-connector cable keeps This side / Other side. The names
+  come from the cable type's record, already read for the count; a
+  connection on a name the type lacks is listed after them. The location is
+  now read for every device a cable of the page is connected to, not only
+  the other-side ones — one more read only where connectors of the row's own
+  END sit on another device. The table's "Other side" column is unchanged.
+
 ## Update 2026-11-20: connecting and removing on the page (#227)
 
 On an instance open to writes the Cable connections page writes the working

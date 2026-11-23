@@ -94,6 +94,11 @@
   .cc-ends label.used { color: var(--dim); }
   .cc-ends.cc-opts label { font-family: inherit; }
   .cc-err { color: var(--bad); }
+  /* View on a cable with more than two connectors: every END : connector, grouped by END */
+  .cc-slots { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; align-items: baseline; margin-top: 6px; }
+  .cc-slots > .cc-slots-end { grid-column: 1 / -1; font-weight: 600; color: var(--ink); }
+  .cc-dot { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border-radius: 50%; border: 2px solid var(--dim); }
+  .cc-dot.on { background: var(--good); border-color: var(--good); }
   /* scanning with a phone: the button beside Scan, and the panel with the scanner page's QR under the box that listens */
   .cc-page .es-btn.cc-phone { min-width: 44px; padding: 0 10px; }
   .cc-page .es-btn.cc-phone.on { color: var(--good); border-color: var(--good); }
@@ -235,7 +240,7 @@
     <div class="cc-db">
       <div>
         <a class="mono" href="{% url 'explore:part' part_id=r.cable %}">{{ r.cable }}</a>
-        <span class="cc-l2">{{ r.cable_type }}{% if r.connectors %} · {{ r.connected }} of {{ r.connectors }} connectors connected{% endif %}</span>
+        <span class="cc-l2">{{ r.cable_type }}{% if r.connectors and r.connectors <= 2 %} · {{ r.connected }} of {{ r.connectors }} connectors connected{% endif %}</span>
       </div>
       {% if r.label %}
       <div class="cc-ends">
@@ -250,6 +255,19 @@
         <span class="cc-l2"><span class="mono">{{ device.part_id }}</span> · {{ device.type_name }}</span>
         <span class="cc-l2"><span class="mono">{{ r.end|default:"no END" }}</span>{% if r.end %} · connected{% endif %}</span>
       </div>
+      {% if r.connectors > 2 and not r.unread %}
+      {# more than two connectors: each one with its status, in place of the other-side boxes #}
+      <div class="cc-ends">
+        <h3>Connectors · {{ r.connected }} of {{ r.connectors }} connected</h3>
+        {% regroup r.slots by end as ends %}
+        {% for g in ends %}
+        <div class="cc-slots">
+          <span class="cc-slots-end">{{ g.grouper }}</span>
+          {% for s in g.list %}<span class="mono">{{ s.n }}</span><span>{% if s.part_id %}<span class="cc-dot on"></span>{% if s.location %}<b class="mono">{{ s.location }}</b> · {% endif %}<b>{{ s.position }}</b> <span class="cc-l2" style="display: inline;">· {% if s.this %}this side{% elif s.here %}this device{% else %}<a class="mono" href="{% url 'explore:cable_connections' part_id=s.part_id %}" title="Work from this device">{{ s.part_id }}</a>{% endif %}</span>{% else %}<span class="cc-none"><span class="cc-dot"></span>not connected</span>{% endif %}</span>{% endfor %}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
       {% for o in r.others %}
       <div class="cc-box">
         <h3>Other side</h3>
@@ -259,6 +277,7 @@
       {% empty %}
       <span class="cc-none">{% if r.unread %}The cable’s connections couldn’t be read.{% else %}Other side not connected yet.{% endif %}</span>
       {% endfor %}
+      {% endif %}
       {% if r.bundle %}<span class="cc-l2">Bundle / tray <a class="mono" href="{% url 'explore:part' part_id=r.bundle.part_id %}">{{ r.bundle.part_id }}</a> · {{ r.bundle.type_name }}{% if r.bundle.also %} · also at {{ r.bundle.also|join:", " }}{% endif %}{% if r.bundle.label %} · label <span class="mono">{{ r.bundle.label }}</span> · <button type="button" class="cc-link" data-print="b{{ r.n }}" data-at="bundle / tray" data-pid="{{ r.bundle.part_id }}" data-type="{{ r.bundle.type_name }}" data-l1="{{ r.bundle.label }}" data-close>Print</button>{% endif %}</span>{% endif %}
       <a href="{% url 'explore:part' part_id=r.cable %}">Open the cable’s item page</a>
     </div>

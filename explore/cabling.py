@@ -144,6 +144,12 @@ def device_connections(api, inst: str, part_id: str) -> dict:
       ``end``), ``connected`` / ``connectors`` (how many of the cable's
       END:connectors are connected, of how many) and ``unread`` when the
       cable's rows could not be read;
+    - ``slots`` per connected row — every END : connector of the cable, in its
+      type's order: ``name``, ``end`` (the END it belongs to), ``n`` (the
+      rest of the name, ``:1``) and, when connected, ``part_id``,
+      ``type_name``, ``position``, ``location``, ``here`` (on this device)
+      and ``this`` (the connection at this very row); ``part_id`` None for a
+      free one;
     - ``status`` per row — ``available``, ``connected``, ``installed`` (every
       END:connector of the cable is connected; Hajime, slide 15) or ``noend``;
     - ``bundle`` per row — the cable's bundle / tray, the item that holds it by
@@ -160,7 +166,8 @@ def device_connections(api, inst: str, part_id: str) -> dict:
     - ``others`` — the distinct items on the other side, each with the number
       of this device's cables going there, for Change working device;
     - ``location`` — the device's saved location, and ``location`` on every
-      other-side entry (one record read per other-side device);
+      other-side entry and connected slot (one record read per device a
+      cable of this page is connected to);
     - ``label`` per row — the cable label, for a cable connected at exactly
       two positions on two different ENDs: ``lines`` (one per side,
       ``<device location>.<position>``, in the order of the cable's own
@@ -203,8 +210,8 @@ def device_connections(api, inst: str, part_id: str) -> dict:
               if pos in held and (held[pos]["connection"] or is_cable(_type_id(held[pos]["part_id"])))]
     cable_rows = parts.fetch_map(
         api, lambda c, pid: current_manifest(c.get_subcomponents(pid).get("data")), cables)
-    slots = parts.fetch_map(
-        api, lambda c, t: len((c.get_component_type(t).get("data") or {}).get("connectors") or {}),
+    names = parts.fetch_map(                                 # each cable type's END : connectors, in its order
+        api, lambda c, t: list((c.get_component_type(t).get("data") or {}).get("connectors") or {}),
         [_type_id(pid) for pid in cables])
     trays = parts.fetch_map(
         api, lambda c, pid: parts.current_container(c.get_container(pid).get("data")), cables)
@@ -219,7 +226,7 @@ def device_connections(api, inst: str, part_id: str) -> dict:
             pid = m["part_id"]
             mine = cable_rows.get(pid)                       # None: not a cable, or its rows could not be read
             links = [c for c in mine or [] if c["peer"]]
-            total = slots.get(_type_id(pid)) or 0
+            total = len(names.get(_type_id(pid)) or [])
             my_end = _end_name(m["connection"])
             sides: dict[str, dict] = {}
             for c in links:
@@ -245,13 +252,25 @@ def device_connections(api, inst: str, part_id: str) -> dict:
                                                         "cables": set()})
                     d["cables"].add(pid)
         out["rows"].append(row)
-    locs = parts.fetch_map(api, lambda c, pid: location_of(c.get_component(pid).get("data") or {}), list(there))
+    devices = dict.fromkeys(c["part_id"] for r in out["rows"] for c in r.get("links") or [] if c["part_id"] != part_id)
+    locs = parts.fetch_map(api, lambda c, pid: location_of(c.get_component(pid).get("data") or {}), list(devices))
     locs[part_id] = out["location"]
     for row in out["rows"]:
         if not row["cable"]:
             continue
         for o in row["others"]:
             o["location"] = locs.get(o["part_id"]) or ""
+        by_name = {c["via"]: c for c in row["links"] if c["via"]}
+        known = names.get(_type_id(row["cable"])) or []
+        row["slots"] = []
+        for name in [*known, *(n for n in by_name if n not in known)]:   # a connection on a name the type lacks is still shown
+            c, end = by_name.get(name), _end_name(name)
+            slot = {"name": name, "end": end, "n": name[len(end):] or name, "part_id": None}
+            if c:
+                slot.update(part_id=c["part_id"], type_name=c["type_name"], position=c["functional_position"],
+                            location=locs.get(c["part_id"]) or "", here=c["part_id"] == part_id,
+                            this=c["part_id"] == part_id and c["functional_position"] == row["position"])
+            row["slots"].append(slot)
         ends = sorted(row["links"], key=lambda c: (str(c["via"] or ""), c["part_id"], str(c["functional_position"])))
         if row["end"] and len(ends) == 2 and _end_name(ends[0]["via"]) != _end_name(ends[1]["via"]):
             lines = [".".join(x for x in (locs.get(c["part_id"]), c["functional_position"]) if x) for c in ends]
