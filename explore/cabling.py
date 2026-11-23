@@ -21,6 +21,12 @@ Specs, ``DATA["Device location"]``. A **cable label** is worked out each time
 from the connections and the saved locations, never stored: one line per
 side, ``<device location>.<position>``; a bundle / tray's label is the two
 locations alone, ``<location>/<location>``.
+
+The **Cable dashboard** (#230) is the other way round: the cables of one
+cable type, each with how many of its END : connectors are connected and
+where. It reads the mirror alone — a cable's connections are kept on its
+mirror row (``cable_links``), read by the type's sync and again after this
+page's own connects and removes.
 """
 
 from __future__ import annotations
@@ -30,14 +36,18 @@ import json
 
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
+from django.core.paginator import Paginator
+
 from . import labels, parts, production
-from .models import HierarchyNode
+from .models import HierarchyNode, HwdbComponentEvent
 from .shipments import current_manifest
 
 
 LOCATION_KEY = "Device location"   # in the device's Item Specs DATA — the name is not yet agreed with Hajime
 LOCATION_MAX = 60
 LABEL_SHEET = "Letter-3x10-Avery"  # the print dialog's sheet until the browser remembers another
+DASH_PER = 25                      # the dashboard's page: bundles, and cables in none
+DASH_STATES = (("", "All cables"), ("none", "Not connected"), ("connected", "Connected"), ("installed", "Installed"))
 
 
 def _type_id(part_id: str) -> str:
@@ -422,3 +432,169 @@ def label_jobs(device: dict, what: str, show: str, code: str, type_name: bool, s
         jobs.append((label_layout(sheet, lines, with_code, type_name),
                      {"part_id": pid, "part_name": name or "", "lines": lines}))
     return jobs
+
+
+def cable_links(subs) -> list[dict]:
+    """A cable's connections as its mirror row keeps them (#230), from the
+    cable's own ``/subcomponents`` rows: the END : connector (``via``), the
+    device and its position. ``location`` and ``status`` are the device's,
+    filled by ``stamp_devices``."""
+    return [{"via": m["via"] or "", "part_id": m["part_id"], "position": m["functional_position"] or "",
+             "type_name": m["type_name"] or "", "location": "", "status": ""}
+            for m in current_manifest(subs) if m["peer"] and m["part_id"]]
+
+
+def stamp_devices(api, links_by_cable: dict, known: dict | None = None) -> int:
+    """Fill each link's ``location`` and ``status`` from its device's record,
+    one read per device; a device that cannot be read keeps what ``known``
+    (``{device: (location, status)}``) has for it. Returns the device count."""
+    devices = sorted({l["part_id"] for links in links_by_cable.values() for l in links})
+
+    def facts(client, pid):
+        comp = client.get_component(pid).get("data") or {}
+        return location_of(comp), parts.normalize_status(comp.get("status")) or ""
+
+    read = parts.fetch_map(api, facts, devices)
+    for links in links_by_cable.values():
+        for l in links:
+            l["location"], l["status"] = read.get(l["part_id"]) or (known or {}).get(l["part_id"]) or ("", "")
+    return len(devices)
+
+
+def known_devices(rows) -> dict:
+    """``{device: (location, status)}`` out of mirror rows' ``cable_links``."""
+    return {l["part_id"]: (l.get("location") or "", l.get("status") or "")
+            for r in rows for l in r.cable_links or []}
+
+
+def mirror_cables(api, inst: str, cable_ids) -> None:
+    """After a connect or a remove of the Explorer's own: these cables'
+    connections read again into their mirror rows. A cable the mirror lacks
+    is skipped, one that cannot be read keeps what it had."""
+    rows = {r.part_id: r for r in HwdbComponentEvent.for_instance(inst).filter(part_id__in=list(cable_ids))}
+    read = parts.fetch_map(api, lambda c, pid: cable_links(c.get_subcomponents(pid).get("data")), list(rows))
+    read = {pid: links for pid, links in read.items() if links is not None}
+    stamp_devices(api, read, known_devices(rows.values()))
+    for pid, links in read.items():
+        rows[pid].cable_links = links
+    HwdbComponentEvent.objects.bulk_update([rows[pid] for pid in read], ["cable_links"])
+
+
+def mirror_location(inst: str, device_id: str, location: str) -> None:
+    """A device location saved on the Cable connections page, carried to the
+    mirrored connections that name the device."""
+    rows = [r for r in HwdbComponentEvent.for_instance(inst).filter(cable_links__icontains=device_id)
+            if any(l["part_id"] == device_id for l in r.cable_links or [])]
+    for r in rows:
+        for l in r.cable_links:
+            if l["part_id"] == device_id:
+                l["location"] = location
+    HwdbComponentEvent.objects.bulk_update(rows, ["cable_links"])
+
+
+def _link_state(links, total: int) -> str:
+    """A cable's state on the dashboard from its mirrored connections:
+    ``unread`` (never mirrored), ``none``, ``connected`` or ``installed``
+    (every one of its ``total`` END : connectors connected)."""
+    if links is None:
+        return "unread"
+    return "none" if not links else "installed" if total and len(links) >= total else "connected"
+
+
+def _tally(states) -> dict:
+    """How many of ``states`` are installed, connected, not connected and
+    unread, with the two bar widths in percent."""
+    states = list(states)
+    t = {k: states.count(k) for k in ("installed", "connected", "none", "unread")}
+    n = len(states) or 1
+    return {**t, "pct_installed": round(100 * t["installed"] / n), "pct_connected": round(100 * t["connected"] / n)}
+
+
+def overview(inst: str, leaves) -> list[dict]:
+    """The dashboard before a type is chosen: the cable types grouped by
+    subsystem (``system``, ``subsystem``, ``types``, in the order of
+    ``leaves``), one row per type — ``leaf``, its mirrored ``cables`` and
+    their tally by state. Mirror only."""
+    totals = {leaf.part_type_id: sum(e["connectors"] for e in leaf.cable_ends or []) for leaf in leaves}
+    states: dict[str, list] = {t: [] for t in totals}
+    for ptid, links in (HwdbComponentEvent.for_instance(inst).filter(part_type_id__in=list(totals))
+                        .values_list("part_type_id", "cable_links")):
+        states[ptid].append(_link_state(links, totals[ptid]))
+    groups: dict[tuple, dict] = {}
+    for leaf in leaves:
+        g = groups.setdefault((leaf.project, leaf.system_id, leaf.subsystem_id),
+                              {"system": leaf.system_name, "subsystem": leaf.subsystem_name, "types": []})
+        g["types"].append({"leaf": leaf, "cables": len(states[leaf.part_type_id]), **_tally(states[leaf.part_type_id])})
+    return list(groups.values())
+
+
+def _dash_cable(row, names: list[str]) -> dict:
+    """One cable of the dashboard from its mirror row: ``slots`` — every
+    END : connector of the type, in its order, each with its ``link`` or None,
+    a connection on a name the type lacks after them; ``state``
+    (``_link_state``); ``places`` — the devices it goes to,
+    each with its location and the positions used."""
+    links = row.cable_links
+    by_name = {l["via"]: l for l in links or [] if l["via"]}
+    slots = [{"name": n, "end": _end_name(n), "link": by_name.get(n)}
+             for n in [*names, *(n for n in by_name if n not in names)]]
+    places: dict[str, dict] = {}
+    for l in links or []:
+        places.setdefault(l["part_id"], {"part_id": l["part_id"], "location": l.get("location") or "",
+                                         "positions": []})["positions"].append(l["position"])
+    n, total = len(links or []), len(names)
+    return {"part_id": row.part_id, "serial": row.serial_number, "status": row.status, "bundle": row.parent_part_id,
+            "slots": slots, "places": list(places.values()), "connected": n, "connectors": total,
+            "state": _link_state(links, total),
+            "hay": " ".join([row.part_id, row.serial_number, row.parent_part_id,
+                             *(x for l in links or [] for x in (l["part_id"], l.get("location") or "", l["position"]))]).lower()}
+
+
+def dashboard(inst: str, leaf, *, state: str = "", q: str = "", status: str = "", page=None) -> dict:
+    """The Cable dashboard's model for one cable type (#230, Hajime's
+    cables-first list), from the mirror alone:
+
+    - ``names`` — the type's END : connectors, from its mirrored ENDs;
+    - ``statuses`` — the Component Statuses its cables have, for the filter;
+    - ``counts`` — cables per state among those matching ``q`` and
+      ``status``, with ``all``; ``n_unread`` — those never read;
+      ``connected`` / ``connectors`` — END : connectors connected, of how
+      many, over the same cables;
+    - ``page`` — a page of the list after the ``state`` filter: one entry per
+      bundle (``bundle``: ``part_id``, ``type_name``, ``status`` when the
+      mirror has the item, its ``cables``, how many are ``installed``,
+      ``connected``, ``none`` and ``unread``, and the ``places`` they go
+      to), then one per cable in no bundle (``cable``). A cable's bundle is
+      its mirrored parent, the item that holds it by plain PID."""
+    names = [f"{e['name']}:{i}" for e in leaf.cable_ends or [] for i in range(1, e["connectors"] + 1)]
+    rows = HwdbComponentEvent.for_instance(inst).filter(part_type_id=leaf.part_type_id).order_by("part_id")
+    cables = [_dash_cable(r, names) for r in rows]
+    statuses = sorted({c["status"] for c in cables if c["status"]})
+    needle = q.lower()
+    cables = [c for c in cables if (not needle or needle in c["hay"]) and (not status or c["status"] == status)]
+    counts = {"all": len(cables), **{k: sum(c["state"] == k for c in cables) for k, _ in DASH_STATES if k}}
+    shown = [c for c in cables if not state or c["state"] == state]
+    groups, by_bundle = [], {}
+    for c in sorted(shown, key=lambda c: (not c["bundle"], c["bundle"], c["part_id"])):
+        if not c["bundle"]:
+            groups.append({"cable": c})
+            continue
+        if c["bundle"] not in by_bundle:
+            by_bundle[c["bundle"]] = {"part_id": c["bundle"], "cables": []}
+            groups.append({"bundle": by_bundle[c["bundle"]]})
+        by_bundle[c["bundle"]]["cables"].append(c)
+    page_obj = Paginator(groups, DASH_PER).get_page(page)
+    held = [g["bundle"] for g in page_obj if "bundle" in g]
+    type_names = dict(HierarchyNode.for_instance(inst)
+                      .filter(level=HierarchyNode.LEVEL_TYPE, part_type_id__in={_type_id(b["part_id"]) for b in held})
+                      .values_list("part_type_id", "name"))
+    item_status = dict(HwdbComponentEvent.for_instance(inst).filter(part_id__in=[b["part_id"] for b in held])
+                       .values_list("part_id", "status"))
+    for b in held:
+        b.update(_tally(c["state"] for c in b["cables"]))
+        b.update(type_name=type_names.get(_type_id(b["part_id"]), ""), status=item_status.get(b["part_id"], ""),
+                 places=list({p["part_id"]: p for c in b["cables"] for p in c["places"]}.values()))
+    return {"names": names, "statuses": statuses, "counts": counts,
+            "n_unread": sum(c["state"] == "unread" for c in cables),
+            "connected": sum(c["connected"] for c in cables), "connectors": len(names) * len(cables),
+            "page": page_obj}

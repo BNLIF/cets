@@ -403,6 +403,51 @@ prepared once.
 - **Left out**: a consortium's short label (BDE's `A07` and its lookup
   table); where on the sheet a single label lands (always the first).
 
+## Update 2026-11-23: the Cable dashboard (#230)
+
+Donato's table (I&I 2026-11-19) is one row per pair of endpoint devices.
+Hajime, 2026-11-23: cables first — which devices expect cables is not
+something HWDB answers, and a cable with more than two ENDs cannot be laid
+out as device pairs without a channel-to-channel map, which does not exist.
+Chao picked the one-row-per-cable layout of two mock-ups, and the mirror as
+the source.
+
+- **A cable's connections are mirrored** on its own row
+  (`HwdbComponentEvent.cable_links`): its `/subcomponents` rows as END :
+  connector, device, position and the device's type name, with the device's
+  saved location and Component Status. NULL = never read, `[]` = not
+  connected.
+- **The type's sync reads them**, for a cable type only: one more read per
+  cable in the detail pass (so "Re-sync" refreshes every cable, "Sync new
+  items" the new ones), then one record read per distinct device. A device
+  that cannot be read keeps the location and status the mirror had.
+- **The Explorer's own writes keep it current**: a connect or a remove on
+  the Cable connections page reads the touched cables again
+  (`cabling.mirror_cables`); a saved device location is carried to the
+  mirrored connections naming the device (`cabling.mirror_location`).
+  Connections changed elsewhere — HWDB's own UI, a script, the Link items
+  page — show after a Re-sync.
+- **The page** (`cables/dashboard/`, "Cables" in the header) reads the
+  mirror alone. A sidebar lists the cable types alone, System › Subsystem
+  as on Shipments. Hajime had asked that nothing be listed before a type is
+  given, there being very many cables; Chao wanted the page to start with
+  something, as Shipments does — it starts with one row per cable type:
+  its mirrored cables and how many are installed, connected, not connected
+  and not read, and no cable; the types sit under their System ›
+  Subsystem, and a filter box narrows them as one types (type name or id,
+  subsystem, system — in the browser, as on the Plots tab). A type opens
+  from there or from the sidebar. The type's cables
+  are grouped by bundle — the cable's mirrored parent, the item holding it
+  by plain PID — a bundle being one row that opens to its cables, a cable
+  in none a row of its own; 25 such rows to a page. A cable's row: its
+  Component Status, "n of m" END : connectors with Not connected /
+  Connected / Installed (every connector connected), and where it goes —
+  the device's location, its PID where none is saved, with the positions.
+  Opened, it lists every END : connector as View does. Tabs by state, a
+  search (PID, serial number, bundle, device, location, position) and a
+  Component Status filter; a search opens the bundles of its hits.
+- **Left out**: Donato's device-pair table, "QC done", a per-cable refresh.
+
 ## Consequences
 
 - `receive_box` now posts arrival locations to base PIDs (previously a

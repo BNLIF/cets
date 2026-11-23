@@ -1,0 +1,249 @@
+{% extends 'explore/base.html' %}
+{% block title %}Cable dashboard{% if leaf %} · {{ leaf.name }}{% endif %} · HWDB Explorer{% endblock %}
+
+{% block content %}
+{# #230: the Cable dashboard — a row per cable type to start with, then the cables of the type chosen, grouped by bundle, each with its connections; mirror only. #}
+{% include "explore/_es_style.html" %}
+<style>
+  .cd-page { max-width: 1180px; }
+  .cd-page .mono { font-family: var(--font-mono); font-size: .93em; }
+  .cd-page a { color: var(--accent-ink); text-decoration: none; }
+  .cd-page a:hover { text-decoration: underline; }
+  .cd-page a.mono { white-space: nowrap; }
+  .cd-page .es-btn { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
+  .cd-sub { margin: 0 0 14px; color: var(--dim); font-size: 14px; }
+  .cd-l2 { display: block; font-size: 12.5px; color: var(--dim); }
+  .cd-none { color: var(--dim); }
+  .cd-row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 10px; }
+  .cd-grow { flex: 1 1 0; }
+  .cd-sync { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 12.5px; color: var(--dim); }
+  #cd-log { margin: 0 0 10px; padding: 10px; max-height: 160px; overflow: auto; border-radius: var(--r-md); background: #1c1812; color: #e7dfce;
+    font-family: var(--font-mono); font-size: 11.5px; white-space: pre-wrap; }
+  .cd-note { margin: 0 0 10px; font-size: 13px; color: var(--dim); }
+
+  .cd-tabs { display: flex; flex-wrap: wrap; border: 1px solid var(--dim); border-radius: var(--r-md); overflow: hidden; }
+  .cd-page .cd-tab { display: flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 14px; font-size: 13px; font-weight: 600;
+    color: var(--ink); background: var(--page); white-space: nowrap; border-left: 1px solid var(--dim); margin-left: -1px; }
+  .cd-page .cd-tab:hover { text-decoration: none; color: var(--accent-ink); }
+  .cd-page .cd-tab.on { background: var(--ink); color: var(--page); }
+  .cd-tab .n { font-family: var(--font-mono); font-weight: 500; }
+  .cd-filter { display: flex; flex: 1 1 320px; gap: 8px; min-width: 0; }
+  .cd-page .cd-filter input, .cd-page .cd-filter select { min-height: 44px; font-size: 14px; min-width: 0; }
+  .cd-page .cd-filter input { flex: 1 1 0; }
+  .cd-page .cd-filter #cd-type-q { flex: 0 1 380px; }
+  .cd-page .cd-filter select { flex: 0 1 220px; }
+  /* installed, connected, not connected: told apart by lightness as well as hue */
+  .cd-bar { display: flex; width: 150px; height: 8px; border-radius: 4px; overflow: hidden; background: var(--page);
+    box-shadow: inset 0 0 0 1px var(--rule-hard); }
+  .cd-bar > i { display: block; height: 100%; }
+  .cd-bar > .i { background: var(--good); }
+  .cd-bar > .c { background: color-mix(in oklch, var(--good) 45%, var(--page)); }
+  .cd-chip { display: inline-block; padding: 3px 9px; border-radius: var(--r-sm); font-size: 12.5px; font-weight: 600; white-space: nowrap;
+    border: 1px solid var(--rule-hard); color: var(--dim); background: var(--page); }
+  .cd-chip.connected { background: color-mix(in oklch, var(--good) 18%, var(--page)); border-color: transparent;
+    color: color-mix(in oklch, var(--good) 70%, black); }
+  .cd-chip.installed { background: var(--good); border-color: var(--good); color: #fff; }
+  .cd-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--dim); }
+  .cd-dot.on { background: var(--good); border-color: var(--good); }
+
+  .cd-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .cd-table th { text-align: left; font-size: 11.5px; font-weight: 500; color: var(--dim); padding: 6px 8px; white-space: nowrap; }
+  .cd-table td { padding: 5px 8px; border-top: 1px solid var(--rule); vertical-align: middle; }
+  .cd-table tr[hidden], .cd-table tbody[hidden] { display: none; }
+  .cd-ph { display: none; }   /* a column's name, where the table has lost its header row */
+  .cd-table tr.cd-g th { padding: 16px 8px 6px; font-size: 13px; font-weight: 600; color: var(--ink); }
+  .cd-table tr.cd-b td { background: var(--surface); border-top-color: var(--rule-hard); }
+  .cd-table tr.cd-x td { border-top: 0; padding: 0 8px 10px 60px; }
+  .cd-table tr.cd-in td:first-child { padding-left: 28px; }
+  .cd-table tr.cd-in.cd-x td { padding-left: 80px; }
+  .cd-name { display: flex; align-items: center; gap: 4px; }
+  .cd-tg { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 36px; flex: none; padding: 0;
+    border: 0; border-radius: var(--r-sm); background: transparent; color: var(--ink); cursor: pointer; }
+  .cd-tg:hover { background: color-mix(in oklch, var(--ink) 8%, transparent); }
+  .cd-tg svg { width: 18px; height: 18px; }
+  .cd-tg[aria-expanded=true] svg { transform: rotate(90deg); }
+  .cd-place + .cd-place::before { content: " · "; color: var(--dim); }
+  /* a cable's END : connectors, as View lists them on the Cable connections page */
+  .cd-slots { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 4px 12px; align-items: baseline;
+    padding: 8px 12px; border: 1px solid var(--rule); border-radius: var(--r-md); background: var(--surface); font-size: 13.5px; }
+  .cd-slots > .cd-end { grid-column: 1 / -1; font-size: 11.5px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
+  .cd-pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 14px; font-size: 13px; color: var(--dim); }
+
+  @media (max-width: 720px) {
+    .es-page.cd-page { padding: 14px 12px 40px; }
+    .cd-filter { flex-wrap: wrap; }
+    .cd-page .cd-filter input, .cd-page .cd-filter select { flex: 1 1 100%; }
+    .cd-table thead { display: none; }
+    .cd-ph { display: inline; }
+    .cd-table tr { display: block; padding: 6px 0; border-top: 1px solid var(--rule); }
+    .cd-table td, .cd-table tr.cd-b td { display: block; border: 0; padding: 2px 6px; }
+    .cd-table td:empty { display: none; }
+    .cd-table tr.cd-in { margin-left: 14px; }
+    .cd-table tr.cd-in td:first-child { padding-left: 6px; }
+    .cd-table tr.cd-x td, .cd-table tr.cd-in.cd-x td { padding: 0 6px 6px; }
+    .cd-slots { grid-template-columns: auto minmax(0, 1fr); }
+    .cd-slots > .cd-at { grid-column: 2; }
+    .cd-slots > .cd-dst { grid-column: 2; }
+  }
+</style>
+
+<div class="es-page cd-page">
+  <h1>Cable dashboard</h1>
+  {% if not leaf %}
+  <p class="cd-sub">{{ n_types }} cable type{{ n_types|pluralize }} · {{ n_cables }} cable{{ n_cables|pluralize }}</p>
+  <div class="cd-row cd-filter"><input type="text" id="cd-type-q" placeholder="Filter: type, subsystem or system" aria-label="Filter the cable types" autocomplete="off" spellcheck="false"></div>
+  <table class="cd-table cd-types">
+    <thead><tr><th>Cable type</th><th>Cables</th><th>Connections</th></tr></thead>
+    {% for g in groups %}
+    <tbody>
+      <tr class="cd-g"><th colspan="3" scope="rowgroup">{{ g.system }} <span aria-hidden="true">›</span> {{ g.subsystem }}</th></tr>
+      {% for t in g.types %}
+      <tr data-q="{{ t.leaf.name|lower }} {{ t.leaf.part_type_id|lower }} {{ g.system|lower }} {{ g.subsystem|lower }}">
+        <td><a href="?type={{ t.leaf.part_type_id }}">{{ t.leaf.name }}</a><span class="cd-l2 mono">{{ t.leaf.part_type_id }}</span></td>
+        <td>{{ t.cables }}<span class="cd-ph"> cable{{ t.cables|pluralize }}</span></td>
+        <td>{% if t.cables %}{% include "explore/_cable_dash_tally.html" with t=t %}{% elif t.leaf.n_components %}<span class="cd-none">{{ t.leaf.n_components }} in HWDB — not synced</span>{% else %}<span class="cd-none">—</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    {% endfor %}
+  </table>
+  <p class="cd-note" id="cd-type-none" hidden>No match.</p>
+  <script>
+  (function () {
+    // the overview's filter: a row stays when its type, subsystem or system holds the text; a subsystem with no row left goes too
+    var box = document.getElementById("cd-type-q"), none = document.getElementById("cd-type-none");
+    box.addEventListener("input", function () {
+      var q = box.value.trim().toLowerCase(), left = 0;
+      document.querySelectorAll(".cd-types tbody").forEach(function (g) {
+        var any = false;
+        g.querySelectorAll("tr[data-q]").forEach(function (r) { var hit = r.getAttribute("data-q").indexOf(q) >= 0; r.hidden = !hit; any = any || hit; });
+        g.hidden = !any;
+        left += any ? 1 : 0;
+      });
+      none.hidden = left > 0;
+    });
+  })();
+  </script>
+  {% else %}
+  <p class="cd-sub">{% if type_url %}<a href="{{ type_url }}">{{ leaf.name }}</a>{% else %}{{ leaf.name }}{% endif %} <span class="mono">{{ leaf.part_type_id }}</span>{% if leaf.cable_ends %} · {% for e in leaf.cable_ends %}{{ e.name }} × {{ e.connectors }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}</p>
+
+  <div class="cd-row">
+    <div class="cd-tabs">
+      {% for t in tabs %}<a class="cd-tab{% if t.on %} on{% endif %}" href="{{ t.url }}"{% if t.on %} aria-current="true"{% endif %}>{{ t.label }} <span class="n">{{ t.count }}</span></a>{% endfor %}
+    </div>
+    <form class="cd-filter" method="get">
+      <input type="hidden" name="type" value="{{ leaf.part_type_id }}">
+      {% if state %}<input type="hidden" name="state" value="{{ state }}">{% endif %}
+      <input type="text" name="q" value="{{ q }}" placeholder="PID, serial number, device or location" aria-label="Search" autocomplete="off" spellcheck="false">
+      <select name="status" aria-label="Component Status" onchange="this.form.submit()">
+        <option value="">Any Component Status</option>
+        {% for s in dash.statuses %}<option{% if s == status %} selected{% endif %}>{{ s }}</option>{% endfor %}
+      </select>
+    </form>
+  </div>
+
+  <div class="cd-row">
+    <span class="cd-sync" id="cd-sync" data-sync-url="{% url 'explore:node_sync' part_type_id=leaf.part_type_id %}">
+      {% csrf_token %}
+      <span>{% if leaf.tests_synced_at %}Synced {{ leaf.tests_synced_at|date:"Y-m-d H:i" }}{% else %}Not synced yet{% endif %}</span>
+      <button type="button" class="es-btn quiet" data-mode="incremental" title="Reads the cables HWDB has and the mirror lacks">Sync new items</button>
+      <button type="button" class="es-btn quiet" data-mode="components" title="Reads every cable of this type again: status, QC flags and connections">Re-sync</button>
+    </span>
+    <span class="cd-grow"></span>
+    {% if dash.connectors %}<span class="cd-none">{{ dash.connected }} of {{ dash.connectors }} END : connectors connected</span>{% endif %}
+    {% if dash.page.paginator.count %}<button type="button" class="es-btn quiet" id="cd-all" aria-pressed="false">Open all</button>{% endif %}
+  </div>
+  <pre id="cd-log" hidden></pre>
+  {% if dash.n_unread %}<p class="cd-note">Connections of {{ dash.n_unread }} cable{{ dash.n_unread|pluralize }} not read yet — Re-sync.</p>{% endif %}
+
+  {% if dash.page.paginator.count %}
+  <table class="cd-table">
+    <thead><tr><th>Bundle / cable</th><th>Component Status</th><th>Connections</th><th>Connected to</th></tr></thead>
+    <tbody>
+    {% for g in dash.page %}
+      {% if g.bundle %}{% with b=g.bundle %}
+      <tr class="cd-b">
+        <td><span class="cd-name"><button type="button" class="cd-tg" data-bundle="{{ forloop.counter }}" aria-expanded="{{ q|yesno:'true,false' }}" aria-label="Cables of {{ b.part_id }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button><span><a class="mono" href="{% url 'explore:part' part_id=b.part_id %}">{{ b.part_id }}</a><span class="cd-l2">{% if b.type_name %}{{ b.type_name }} · {% endif %}{{ b.cables|length }} cable{{ b.cables|length|pluralize }}</span></span></span></td>
+        <td>{{ b.status }}</td>
+        <td>{% include "explore/_cable_dash_tally.html" with t=b %}</td>
+        <td>{% for p in b.places %}<span class="cd-place">{% if p.location %}<b class="mono">{{ p.location }}</b>{% else %}<span class="mono">{{ p.part_id }}</span>{% endif %}</span>{% empty %}<span class="cd-none">—</span>{% endfor %}</td>
+      </tr>
+      {% for c in b.cables %}{% include "explore/_cable_dash_row.html" with c=c inb=forloop.parentloop.counter shut=q|yesno:",1" %}{% endfor %}
+      {% endwith %}{% else %}{% include "explore/_cable_dash_row.html" with c=g.cable inb="" shut="" %}{% endif %}
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if dash.page.paginator.num_pages > 1 %}
+  <div class="cd-pager">
+    {% if prev_url %}<a class="es-btn quiet" href="{{ prev_url }}">Previous</a>{% endif %}
+    <span>Page {{ dash.page.number }} of {{ dash.page.paginator.num_pages }}</span>
+    {% if next_url %}<a class="es-btn quiet" href="{{ next_url }}">Next</a>{% endif %}
+  </div>
+  {% endif %}
+  {% elif dash.counts.all or q or status %}
+  <p class="cd-note">No match.</p>
+  {% else %}
+  <p class="cd-note">No cables in the mirror — sync new items.</p>
+  {% endif %}
+  {% endif %}
+</div>
+
+{% if leaf %}
+<script>
+(function () {
+  var table = document.querySelector(".cd-table"), all = document.getElementById("cd-all");
+  function set(btn, open) {
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    var tr = btn.closest("tr");
+    if (btn.hasAttribute("data-bundle")) {
+      // a bundle shows or hides its cables; closing it also closes theirs
+      table.querySelectorAll("tr[data-in='" + btn.getAttribute("data-bundle") + "']").forEach(function (r) {
+        if (r.classList.contains("cd-x")) { if (!open) { r.hidden = true; } }
+        else { r.hidden = !open; if (!open) { r.querySelector(".cd-tg").setAttribute("aria-expanded", "false"); } }
+      });
+    } else {
+      tr.nextElementSibling.hidden = !open;
+    }
+  }
+  if (table) {
+    table.addEventListener("click", function (e) {
+      var btn = e.target.closest(".cd-tg");
+      if (btn) set(btn, btn.getAttribute("aria-expanded") !== "true");
+    });
+  }
+  if (all) {
+    all.addEventListener("click", function () {
+      var open = all.getAttribute("aria-pressed") !== "true";
+      table.querySelectorAll(".cd-tg[data-bundle]").forEach(function (b) { set(b, open); });
+      table.querySelectorAll(".cd-tg:not([data-bundle])").forEach(function (b) { set(b, open); });
+      all.setAttribute("aria-pressed", open ? "true" : "false");
+      all.textContent = open ? "Close all" : "Open all";
+    });
+  }
+  // the mirror may be behind HWDB: the type's own sync, its log shown while it runs, then the page again
+  var sync = document.getElementById("cd-sync"), log = document.getElementById("cd-log");
+  sync.addEventListener("click", async function (e) {
+    var b = e.target.closest("button"), btns = sync.querySelectorAll("button");
+    if (!b) return;
+    btns.forEach(function (x) { x.disabled = true; });
+    log.hidden = false;
+    log.textContent = (b.getAttribute("data-mode") === "incremental" ? "Syncing new items" : "Re-syncing all items") + " from HWDB…\n";
+    var fd = new FormData(), resp;
+    fd.append("csrfmiddlewaretoken", sync.querySelector("[name=csrfmiddlewaretoken]").value);
+    fd.append("mode", b.getAttribute("data-mode"));
+    try { resp = await fetch(sync.getAttribute("data-sync-url"), { method: "POST", body: fd, credentials: "same-origin" }); }
+    catch (err) { log.textContent += "network error: " + err + "\n"; btns.forEach(function (x) { x.disabled = false; }); return; }
+    if (resp.redirected) { window.location = resp.url; return; }     // the FNAL link has to be renewed
+    var reader = resp.body.getReader(), dec = new TextDecoder();
+    while (true) {
+      var chunk = await reader.read();
+      if (chunk.done) break;
+      log.textContent += dec.decode(chunk.value, { stream: true });
+      log.scrollTop = log.scrollHeight;
+    }
+    window.location.reload();
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

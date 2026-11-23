@@ -137,6 +137,7 @@ urlpatterns = [
     path("part/<str:part_id>/receiving/", views.explore_receiving_view, name="receiving"),
     path("part/<str:part_id>/box-reset/", views.explore_box_reset_view, name="box_reset"),
     path("assembly/<str:part_id>/", views.explore_assembly_view, name="assembly"),
+    path("cables/dashboard/", views.explore_cable_dashboard_view, name="cable_dashboard"),   # #230: the cables of one cable type, from the mirror
     path("cables/", views.explore_cables_view, name="cables"),   # #226: the way into the Cable connections page, ?pid= typed or scanned
     path("part/<str:part_id>/cables/", views.explore_cables_view, name="cable_connections"),   # #226: one endpoint device's cable connections
     path("cables/picture/<str:part_type_id>/", views.explore_cable_map_view, name="cable_map"),   # #228: a type's picture and markers

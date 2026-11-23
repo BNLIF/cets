@@ -198,9 +198,9 @@
             <a class="eh-nav-item{% if active_nav == 'production' %} active{% endif %}" href="{% url 'explore:production_overview' %}">Production</a>
             <a class="eh-nav-item{% if active_nav == 'installation' %} active{% endif %}" href="{% url 'explore:installation_overview' %}">Installation</a>
             <a class="eh-nav-item{% if active_nav == 'shipments' %} active{% endif %}" href="{% url 'explore:shipments' %}">Shipments</a>
+            <a class="eh-nav-item{% if active_nav == 'cables' %} active{% endif %}" href="{% url 'explore:cable_dashboard' %}">Cables</a>
             <a class="eh-nav-item{% if active_nav == 'plots' %} active{% endif %}" href="{% url 'explore:plots' %}">Plots</a>
             <a class="eh-nav-item{% if active_nav == 'activities' %} active{% endif %}" href="{% url 'explore:activities' %}">Activities</a>
-            <a class="eh-nav-item{% if active_nav == 'search' %} active{% endif %}" href="{% url 'explore:search' %}">Search</a>
             <a class="eh-nav-item{% if active_nav == 'docs' %} active{% endif %}" href="{% url 'explore:docs' %}">Docs</a>
             {% if is_ops_user %}<a class="eh-nav-item{% if active_nav == 'ops' %} active{% endif %}" href="{% url 'explore:ops' %}">Ops</a>{% endif %}
         </nav>
@@ -254,9 +254,9 @@
                     <a{% if active_nav == 'production' %} class="active"{% endif %} href="{% url 'explore:production_overview' %}">Production</a>
                     <a{% if active_nav == 'installation' %} class="active"{% endif %} href="{% url 'explore:installation_overview' %}">Installation</a>
                     <a{% if active_nav == 'shipments' %} class="active"{% endif %} href="{% url 'explore:shipments' %}">Shipments</a>
+                    <a{% if active_nav == 'cables' %} class="active"{% endif %} href="{% url 'explore:cable_dashboard' %}">Cables</a>
                     <a{% if active_nav == 'plots' %} class="active"{% endif %} href="{% url 'explore:plots' %}">Plots</a>
                     <a{% if active_nav == 'activities' %} class="active"{% endif %} href="{% url 'explore:activities' %}">Activities</a>
-                    <a{% if active_nav == 'search' %} class="active"{% endif %} href="{% url 'explore:search' %}">Search</a>
                     <a{% if active_nav == 'docs' %} class="active"{% endif %} href="{% url 'explore:docs' %}">Docs</a>
                     {% if is_ops_user %}<a{% if active_nav == 'ops' %} class="active"{% endif %} href="{% url 'explore:ops' %}">Ops</a>{% endif %}
                 </nav>

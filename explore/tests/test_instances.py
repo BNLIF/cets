@@ -167,8 +167,8 @@ class InstanceViewTest(TestCase):
     def test_dev_page_links_stay_on_dev(self):
         # {% url %} reversing (navbar) is pinned to /hw/dev/ by the middleware.
         dev_html = self.client.get("/hw/dev/").content.decode()
-        self.assertIn('href="/hw/dev/search/"', dev_html)
-        self.assertNotIn('href="/hw/search/"', dev_html)
+        self.assertIn('href="/hw/dev/shipments/"', dev_html)
+        self.assertNotIn('href="/hw/shipments/"', dev_html)
 
     def test_dev_leaf_drill_in(self):
         url = navigation.leaf_path_for("dev", DEV_PTID)

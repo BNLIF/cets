@@ -1802,6 +1802,7 @@ def _cables_write(request, api, inst, part_id) -> None:
         activity.log(inst, ActivityEvent.KIND_SPEC,
                      f"Device location of {part_id} set to “{loc}”" if loc else f"Device location of {part_id} cleared",
                      part_id=part_id, part_type_id=ptid, actor=activity.actor_of(request))
+        cabling.mirror_location(inst, part_id, loc)    # the dashboard's copy of it
         messages.success(request, f"Device location saved — {loc}." if loc else "Device location cleared.")
         return
     try:
@@ -1859,6 +1860,9 @@ def _cables_write(request, api, inst, part_id) -> None:
         messages.error(request, f"HWDB refused — {detail}")    # shown as it comes: it names the connector and where it is in use
         return
     _after_subcomponent_write(api, inst, ptid, part_id, after)
+    # the dashboard's mirrored connections (#230): the cables this write touched are read again
+    cabling.mirror_cables(api, inst, {split_subcomp_ref(ref)[0] for p in after if after[p] != current[p]
+                                      for ref in (after[p], current[p]) if ref and split_subcomp_ref(ref)[1]})
     messages.success(request, done)
 
 
@@ -1991,6 +1995,86 @@ def explore_cables_view(request, part_id=None):
         elif typed_bundle:
             messages.error(request, f"“{typed_bundle}” doesn’t look like a PID.")
     return render(request, "explore/cables.html", ctx)
+
+
+def _cable_sidebar(request, leaves, counts, sel_type):
+    """The Cable dashboard's sidebar: the Shipments sidebar's shape with the
+    cable types alone — "All cable types" (the overview), then System ›
+    Subsystem folders, a type leaf opening its cables (``?type=``). Leaf
+    count = mirrored cables (none renders faint); a green count = the type
+    has been synced."""
+    base = _rev(request, "explore:cable_dashboard")
+
+    def _node(label, title, **kw):
+        return {"label": label, "title": title, "url": "", "count": 0, "current": False, "open": True, "dim": False,
+                "children": [], "is_leaf": False, "empty": False, "synced": False, **kw}
+
+    total = sum(counts.values())
+    nodes = [_node("All cable types", "Every cable type, with how far its cabling is", url=base, count=total,
+                   current=not sel_type, is_leaf=True, empty=total == 0)]
+    systems, subs = {}, {}
+    for leaf in leaves:
+        sys_key, n = (leaf.project, leaf.system_id), counts.get(leaf.part_type_id, 0)
+        if sys_key not in systems:
+            systems[sys_key] = _node(leaf.system_name, f"{leaf.system_name} ({leaf.system_id})")
+            nodes.append(systems[sys_key])
+        if (sys_key, leaf.subsystem_id) not in subs:
+            subs[(sys_key, leaf.subsystem_id)] = _node(
+                leaf.subsystem_name, f"{leaf.subsystem_name} ({leaf.system_id}.{leaf.subsystem_id})")
+            systems[sys_key]["children"].append(subs[(sys_key, leaf.subsystem_id)])
+        subs[(sys_key, leaf.subsystem_id)]["children"].append(_node(
+            leaf.name, f"{leaf.name} ({leaf.part_type_id})", url=f"{base}?{urlencode({'type': leaf.part_type_id})}",
+            count=n, current=leaf.part_type_id == sel_type, is_leaf=True, empty=n == 0,
+            synced=bool(leaf.tests_synced_at)))
+        subs[(sys_key, leaf.subsystem_id)]["count"] += n
+        systems[sys_key]["count"] += n
+    return nodes
+
+
+@login_not_required
+@fnal_login_required
+def explore_cable_dashboard_view(request):
+    """#230 (Hajime 2026-11-23, cables first; the one-row-per-cable layout Chao
+    picked): the cables of one cable type — chosen in a sidebar of the cable
+    types alone, or in the overview the page starts with, one row per cable
+    type with its cables' tally by state, the types grouped by subsystem and
+    narrowed as one types into its filter box (Chao: start with something,
+    as Shipments does) — grouped by bundle, each with
+    its Component Status, how many of its END : connectors are connected and
+    where; a cable opens to every END : connector as View lists them on the
+    Cable connections page. Tabs by state (``?state=``), a search (``?q=``:
+    PID, serial number, device or location) and a Component Status filter
+    (``?status=``). Reads the mirror alone (``cabling.dashboard``); the two
+    sync buttons run the type's own sync, which reads a cable's connections."""
+    inst = instance_of(request)
+    leaves = list(HierarchyNode.for_instance(inst).filter(level=HierarchyNode.LEVEL_TYPE, category="cable")
+                  .order_by("project", "system_name", "subsystem_name", "name"))
+    counts = dict(HwdbComponentEvent.for_instance(inst)
+                  .filter(part_type_id__in=[leaf.part_type_id for leaf in leaves])
+                  .values_list("part_type_id").annotate(n=Count("id")))
+    sel = request.GET.get("type") or ""
+    leaf = next((x for x in leaves if x.part_type_id == sel), None)
+    ctx = {"active_nav": "cables", "sidebar_label": "Cable types", "leaf": leaf,
+           "sidebar": _cable_sidebar(request, leaves, counts, sel)}
+    if leaf:
+        state = request.GET.get("state") or ""
+        if state not in {k for k, _ in cabling.DASH_STATES}:
+            state = ""
+        q, status = (request.GET.get("q") or "").strip(), request.GET.get("status") or ""
+        dash = cabling.dashboard(inst, leaf, state=state, q=q, status=status, page=request.GET.get("page"))
+
+        def _qs(**kw):
+            params = {"type": sel, "state": state, "q": q, "status": status, **kw}
+            return "?" + urlencode({k: v for k, v in params.items() if v})
+
+        ctx.update(dash=dash, state=state, q=q, status=status, type_url=navigation.leaf_path_for(inst, sel),
+                   tabs=[{"label": label, "count": dash["counts"][k or "all"], "url": _qs(state=k), "on": k == state}
+                         for k, label in cabling.DASH_STATES],
+                   prev_url=_qs(page=dash["page"].previous_page_number()) if dash["page"].has_previous() else "",
+                   next_url=_qs(page=dash["page"].next_page_number()) if dash["page"].has_next() else "")
+    else:
+        ctx.update(groups=cabling.overview(inst, leaves), n_types=len(leaves), n_cables=sum(counts.values()))
+    return render(request, "explore/cable_dashboard.html", ctx)
 
 
 @login_not_required

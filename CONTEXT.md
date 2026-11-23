@@ -269,6 +269,10 @@ these are the words the Explorer uses on top of it.
   on each position that takes a cable, shown on every item's Cable
   connections page. Edited from the type's page or from one of its items.
   Not a "cable editor": the type is not a cable.
+- **Cable dashboard** — the cables of one cable type, grouped by bundle,
+  each with how many of its END : connectors are connected and where
+  (Not connected / Connected / Installed). Cables first, not devices; read
+  from the mirror, which keeps each cable's connections.
 
 ### Simple vs detailed QC record
 

@@ -243,6 +243,14 @@ class HwdbComponentEvent(InstanceScoped):
     parent_part_id = models.CharField(max_length=50, blank=True, default="",
                                       db_index=True)
     enabled = models.BooleanField(null=True, blank=True)
+    # A cable's connections, for the Cable dashboard (#230): its own
+    # ``/subcomponents`` rows as ``[{"via", "part_id", "position", "type_name",
+    # "location", "status"}, …]`` — the END : connector, the device and its
+    # position, with the device's saved location and Component Status, read
+    # once per device. Read by the type's sync for a cable type only, and
+    # again after the Explorer's own connects and removes. NULL = never read
+    # (not a cable, or mirrored before this was captured); [] = not connected.
+    cable_links = models.JSONField(null=True, blank=True)
 
     class Meta:
         indexes = [models.Index(fields=["part_type_id", "updated"])]

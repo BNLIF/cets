@@ -1,0 +1,19 @@
+{# One cable of the Cable dashboard (#230) and, under it, its END : connectors. Expects `c`; `inb` = its bundle's row number on the page ("" for a cable in none), `shut` = start hidden. #}
+<tr class="cd-c{% if inb %} cd-in{% endif %}"{% if inb %} data-in="{{ inb }}"{% endif %}{% if shut %} hidden{% endif %}>
+  <td><span class="cd-name"><button type="button" class="cd-tg" aria-expanded="false" aria-label="END : connectors of {{ c.part_id }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button><span><a class="mono" href="{% url 'explore:part' part_id=c.part_id %}">{{ c.part_id }}</a>{% if c.serial %}<span class="cd-l2">{{ c.serial }}</span>{% endif %}</span></span></td>
+  <td>{{ c.status|default:"—" }}</td>
+  <td>{% if c.state == "unread" %}<span class="cd-none">not read</span>{% else %}<span class="cd-chip {{ c.state }}">{% if c.state == "installed" %}Installed{% elif c.state == "connected" %}Connected{% else %}Not connected{% endif %}</span> {{ c.connected }} of {{ c.connectors }}{% endif %}</td>
+  <td>{% for p in c.places %}<span class="cd-place">{% if p.location %}<b class="mono">{{ p.location }}</b>{% else %}<span class="mono">{{ p.part_id }}</span>{% endif %} {{ p.positions|join:", " }}</span>{% empty %}<span class="cd-none">—</span>{% endfor %}</td>
+</tr>
+<tr class="cd-x{% if inb %} cd-in{% endif %}"{% if inb %} data-in="{{ inb }}"{% endif %} hidden>
+  <td colspan="4">
+    <div class="cd-slots">
+      {% for s in c.slots %}
+      {% ifchanged s.end %}<span class="cd-end">{{ s.end }}</span>{% endifchanged %}
+      <span class="cd-dot{% if s.link %} on{% endif %}"></span><span class="mono">{{ s.name }}</span>
+      {% if s.link %}<span class="cd-at">{% if s.link.location %}<b class="mono">{{ s.link.location }}</b> · {% endif %}{{ s.link.position }} · <a class="mono" href="{% url 'explore:cable_connections' part_id=s.link.part_id %}">{{ s.link.part_id }}</a> <span class="cd-none">{{ s.link.type_name }}</span></span><span class="cd-dst cd-none">{{ s.link.status }}</span>
+      {% else %}<span class="cd-at cd-none">not connected</span><span class="cd-dst"></span>{% endif %}
+      {% endfor %}
+    </div>
+  </td>
+</tr>

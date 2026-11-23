@@ -1062,3 +1062,197 @@ class CableLabelsTest(TestCase):
         r = self._call(api, data={"print": "4"}, follow=True)
         self.assertRedirects(r, PAGE)
         self.assertIn("Nothing to print.", r.content.decode())
+
+
+DASH = "/hw/dev/cables/dashboard/"
+LOOSE = f"{WARM}-00030"
+
+
+class CableDashboardTest(TestCase):
+    """#230: the Cable dashboard — a cable's connections kept on its mirror
+    row by the type's sync and the page's own writes, and the page that lists
+    one cable type's cables from the mirror alone."""
+
+    def setUp(self):
+        from explore.models import HwdbComponentEvent as C
+        self.C = C
+        self.client.force_login(get_user_model().objects.create_user("k", "k@k.io", "pw"))
+        common = {"instance": "dev", "level": H.LEVEL_TYPE, "project": "Z", "system_id": 1, "system_name": "Sandbox",
+                  "subsystem_id": 3, "subsystem_name": "Test"}
+        self.leaf = H.objects.create(**common, name="Top CRP bias warm cable", part_type_id=WARM, category="cable",
+                                     cable_ends=[{"name": "FCP Flange", "connectors": 1}, {"name": "HVS PS", "connectors": 1}])
+        H.objects.create(**common, name="HVS Test Bundle 4 Ends", part_type_id=BUNDLE4, category="cable", cable_ends=[])
+        H.objects.create(**common, name="Top CRP bias warm cable bundle", part_type_id="Z00100300072", category="generic")
+        H.objects.create(**common, name="Bias FT flange", part_type_id="Z00100300064", category="generic")
+
+    def _mirror(self):
+        """Four cables as a sync leaves them: two in the bundle, one free one
+        in it too, and one in no bundle that was mirrored before #230."""
+        at_flange = {"via": "FCP Flange:1", "part_id": FLANGE, "type_name": "Bias FT flange", "location": "FCP_201NE",
+                     "status": "Available"}
+        at_shield = {"via": "HVS PS:1", "part_id": SHIELD, "position": "CH01.2", "type_name": "CRP Shield (slot 4)",
+                     "location": "", "status": "Installed"}
+        for pid, serial, parent, status, links in (
+                (INSTALLED, "TCB-20", TRAY, "Available", [{**at_flange, "position": "ISH"}, at_shield]),
+                (ONE_END, "TCB-21", TRAY, "Available", [{**at_flange, "position": "OSH"}]),
+                (FREE, "", TRAY, "In Fabrication", []),
+                (LOOSE, "", "", "Available", None)):
+            self.C.objects.create(instance="dev", part_type_id=WARM, part_id=pid, serial_number=serial, status=status,
+                                  parent_part_id=parent, cable_links=links)
+        self.C.objects.create(instance="dev", part_type_id="Z00100300072", part_id=TRAY, status="Available")
+
+    def _sync_client(self, located=True):
+        client = _located(_api(), {FLANGE: "FCP_201NE"}) if located else _api()
+        inner = client.get_component.side_effect
+        client.get_component.side_effect = lambda pid: {"data": {**inner(pid)["data"], "status": {"id": 120, "name": "Available"}}}
+
+        def _make_request(method, endpoint, data=None, params=None):
+            if endpoint.startswith("component-types/"):
+                return {"data": [{"part_id": p} for p in (INSTALLED, ONE_END, FREE)], "pagination": {"pages": 1}}
+            return {"data": {"created": "2026-11-01T00:00:00+00:00", "parent_part_id": TRAY}}
+        client._make_request.side_effect = _make_request
+        client.get_tests.side_effect = lambda pid: {"data": []}
+        return client
+
+    def _sync(self, client, ptid=WARM, mode="components"):
+        from explore import events
+        with mock.patch("explore.events.FnalDbApiClient", return_value=client):
+            return "".join(events.sync_test_events("https://x", "bearer", ptid, instance="dev", mode=mode))
+
+    def test_the_sync_of_a_cable_type_mirrors_each_cables_connections(self):
+        client = self._sync_client()
+        log = self._sync(client)
+        self.assertIn("connections of 2 cable(s) mirrored · 2 device(s) read", log)
+        links = dict(self.C.objects.filter(part_type_id=WARM).values_list("part_id", "cable_links"))
+        self.assertEqual(links[INSTALLED], [
+            {"via": "FCP Flange:1", "part_id": FLANGE, "position": "ISH", "type_name": "Bias FT flange",
+             "location": "FCP_201NE", "status": "Available"},
+            {"via": "HVS PS:1", "part_id": SHIELD, "position": "CH01.2", "type_name": "CRP Shield (slot 4)",
+             "location": "", "status": "Available"}])
+        self.assertEqual([l["position"] for l in links[ONE_END]], ["OSH"])
+        self.assertEqual(links[FREE], [])                                      # read, and not connected
+        self.assertEqual(sorted(c.args[0] for c in client.get_subcomponents.call_args_list), sorted([INSTALLED, ONE_END, FREE]))
+        self.assertEqual(sorted(c.args[0] for c in client.get_component.call_args_list), sorted([FLANGE, SHIELD]))   # once per device
+
+    def test_a_type_that_is_no_cable_type_reads_no_connections(self):
+        client = self._sync_client()
+        self._sync(client, ptid="Z00100300072")
+        client.get_subcomponents.assert_not_called()
+        self.assertEqual(set(self.C.objects.values_list("cable_links", flat=True)), {None})
+
+    def test_a_device_that_cannot_be_read_keeps_its_mirrored_location(self):
+        self._sync(self._sync_client())
+        client = self._sync_client()
+        client.get_component.side_effect = requests.ConnectionError("EOF")
+        self._sync(client)
+        row = self.C.objects.get(part_id=ONE_END)
+        self.assertEqual((row.cable_links[0]["location"], row.cable_links[0]["status"]), ("FCP_201NE", "Available"))
+
+    def test_new_items_only_leaves_the_known_cables_connections_alone(self):
+        self._mirror()
+        self.C.objects.filter(part_id=FREE).delete()
+        self._sync(self._sync_client(), mode="incremental")
+        self.assertEqual(self.C.objects.get(part_id=FREE).cable_links, [])     # the new one is read
+        self.assertEqual(len(self.C.objects.get(part_id=INSTALLED).cable_links), 2)
+        self.assertIsNone(self.C.objects.get(part_id=LOOSE).cable_links)
+
+    def test_the_model_counts_states_groups_by_bundle_and_filters(self):
+        self._mirror()
+        d = cabling.dashboard("dev", self.leaf)
+        self.assertEqual(d["names"], ["FCP Flange:1", "HVS PS:1"])
+        self.assertEqual(d["counts"], {"all": 4, "none": 1, "connected": 1, "installed": 1})
+        self.assertEqual((d["n_unread"], d["connected"], d["connectors"]), (1, 3, 8))
+        self.assertEqual(d["statuses"], ["Available", "In Fabrication"])
+        bundle, loose = list(d["page"])
+        b = bundle["bundle"]
+        self.assertEqual((b["part_id"], b["type_name"], b["status"]), (TRAY, "Top CRP bias warm cable bundle", "Available"))
+        self.assertEqual([c["part_id"] for c in b["cables"]], [INSTALLED, ONE_END, FREE])
+        self.assertEqual((b["installed"], b["connected"], b["none"], b["unread"], b["pct_installed"], b["pct_connected"]),
+                         (1, 1, 1, 0, 33, 33))
+        self.assertEqual([p["part_id"] for p in b["places"]], [FLANGE, SHIELD])
+        one = b["cables"][1]
+        self.assertEqual((one["state"], one["connected"], one["connectors"]), ("connected", 1, 2))
+        self.assertEqual(one["places"], [{"part_id": FLANGE, "location": "FCP_201NE", "positions": ["OSH"]}])
+        self.assertEqual([(s["name"], bool(s["link"])) for s in one["slots"]], [("FCP Flange:1", True), ("HVS PS:1", False)])
+        self.assertEqual((loose["cable"]["part_id"], loose["cable"]["state"]), (LOOSE, "unread"))
+        # the tab, the search (a location, a serial number, a device) and the Component Status
+        self.assertEqual([c["part_id"] for g in cabling.dashboard("dev", self.leaf, state="installed")["page"]
+                          for c in g["bundle"]["cables"]], [INSTALLED])
+        for q, hits in (("fcp_201", 2), ("tcb-21", 1), (SHIELD.lower(), 1), ("nothing", 0)):
+            self.assertEqual(cabling.dashboard("dev", self.leaf, q=q)["counts"]["all"], hits, q)
+        self.assertEqual(cabling.dashboard("dev", self.leaf, status="In Fabrication")["counts"],
+                         {"all": 1, "none": 1, "connected": 0, "installed": 0})
+
+    def test_the_page_starts_with_a_row_per_cable_type(self):
+        self._mirror()
+        H.objects.filter(part_type_id=BUNDLE4).update(n_components=2)
+        with mock.patch("explore.views.mint_for", side_effect=AssertionError("no HWDB read")):
+            html = self.client.get(DASH).content.decode()
+        self.assertIn('<p class="cd-sub">2 cable types · 4 cables</p>', html)
+        self.assertNotIn('<table class="cd-table">', html)                     # no cable is listed yet
+        # the types under their subsystem, each row carrying what the filter box matches
+        self.assertEqual(html.count('<tr class="cd-g">'), 1)
+        self.assertIn('scope="rowgroup">Sandbox <span aria-hidden="true">›</span> Test</th>', html)
+        self.assertIn(f'<tr data-q="top crp bias warm cable {WARM.lower()} sandbox test">', html)
+        self.assertIn('id="cd-type-q"', html)
+        row = html.split(f'<a href="?type={WARM}">Top CRP bias warm cable</a>', 1)[1].split("</tr>", 1)[0]
+        self.assertIn(f'<span class="cd-l2 mono">{WARM}</span>', row)
+        self.assertIn('<td>4<span class="cd-ph"> cables</span></td>', row)
+        self.assertIn('<i class="i" style="width: 25%"></i><i class="c" style="width: 25%"></i>', row)
+        self.assertIn("1 installed · 1 connected · 1 not connected · 1 not read", row)
+        row = html.split(f'<a href="?type={BUNDLE4}">', 1)[1].split("</tr>", 1)[0]
+        self.assertIn("2 in HWDB — not synced", row)                           # a type with nothing mirrored
+        self.assertIn(f'<a class="extree-leaf is-cur" href="{DASH}" title="Every cable type, with how far its cabling is">', html)
+        self.assertNotIn(">Search</a>", html)                                  # the header's search box is the way to the Search page
+        self.assertIn('data-search="/hw/dev/search/"', html)
+        self.assertIn('<div class="ex-side-label">Cable types</div>', html)
+        self.assertIn(f'href="{DASH}?type={WARM}" title="Top CRP bias warm cable ({WARM})"', html)
+        self.assertIn(f'href="{DASH}?type={BUNDLE4}"', html)
+        self.assertNotIn(f"{DASH}?type=Z00100300072", html)                    # the bundle's type is no cable type
+        self.assertIn(f'<a class="eh-nav-item active" href="{DASH}">Cables</a>', html)
+
+    def test_the_page_lists_the_types_cables_from_the_mirror_alone(self):
+        self._mirror()
+        with mock.patch("explore.views.mint_for", side_effect=AssertionError("no HWDB read")):
+            html = self.client.get(DASH, {"type": WARM}).content.decode()
+        self.assertIn(f'<span class="mono">{WARM}</span> · FCP Flange × 1, HVS PS × 1', html)
+        for label, n in (("All cables", 4), ("Not connected", 1), ("Connected", 1), ("Installed", 1)):
+            self.assertIn(f'{label} <span class="n">{n}</span>', html)
+        self.assertIn("3 of 8 END : connectors connected", html)
+        self.assertIn("Connections of 1 cable not read yet — Re-sync.", html)
+        self.assertIn(f'<a class="mono" href="/hw/dev/part/{TRAY}/">{TRAY}</a>'
+                      '<span class="cd-l2">Top CRP bias warm cable bundle · 3 cables</span>', html)
+        self.assertIn("1 installed · 1 connected · 1 not connected", html)
+        self.assertEqual(html.count('<tr class="cd-c cd-in" data-in="1" hidden>'), 3)      # a bundle's cables wait behind its row
+        self.assertIn('<span class="cd-chip installed">Installed</span> 2 of 2', html)
+        self.assertIn('<span class="cd-chip connected">Connected</span> 1 of 2', html)
+        self.assertIn('<span class="cd-chip none">Not connected</span> 0 of 2', html)
+        self.assertIn('<span class="cd-none">not read</span>', html)
+        self.assertIn('<b class="mono">FCP_201NE</b> ISH</span>', html)                    # the location where one is saved
+        self.assertIn(f'<span class="mono">{SHIELD}</span> CH01.2</span>', html)           # the device's PID where none is
+        self.assertIn(f'<b class="mono">FCP_201NE</b> · OSH · <a class="mono" href="/hw/dev/part/{FLANGE}/cables/">{FLANGE}</a>', html)
+        self.assertIn('<span class="cd-at cd-none">not connected</span>', html)
+        self.assertIn(f'data-sync-url="/hw/dev/sync-tests/{WARM}/"', html)
+        html = self.client.get(DASH, {"type": WARM, "q": "tcb-21"}).content.decode()
+        self.assertEqual(html.count('<tr class="cd-c cd-in" data-in="1">'), 1)             # a search opens the bundle of its hit
+        self.assertIn("No match.", self.client.get(DASH, {"type": WARM, "q": "zzz"}).content.decode())
+        self.assertIn("No cables in the mirror — sync new items.", self.client.get(DASH, {"type": BUNDLE4}).content.decode())
+
+    def test_a_connect_on_the_cable_connections_page_refreshes_the_cables_mirror_row(self):
+        self._mirror()
+        api = _located(_api(), {FLANGE: "FCP_201NE"})
+        rows = api.get_subcomponents.side_effect
+        api.get_subcomponents.side_effect = lambda pid: {"data": [
+            {"part_id": f"{FLANGE}.ICO", "type_name": "Bias FT flange", "cable_connector": "HVS PS:1", "operation": "mount"}]
+            if pid == FREE else rows(pid)["data"]}
+        with mock.patch("explore.views.mint_for", return_value="bearer"), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            self.client.post(PAGE, {"connect": "ICO", "pid": FREE, "end": "HVS PS:1"})
+            self.assertEqual(self.C.objects.get(part_id=FREE).cable_links, [
+                {"via": "HVS PS:1", "part_id": FLANGE, "position": "ICO", "type_name": "Bias FT flange",
+                 "location": "FCP_201NE", "status": ""}])
+            self.assertEqual(len(self.C.objects.get(part_id=INSTALLED).cable_links), 2)     # the others are not read again
+            # a saved device location reaches the mirrored connections that name the device
+            self.client.post(PAGE, {"set_location": "1", "location": "FCP_202SW"})
+        self.assertEqual([l["location"] for l in self.C.objects.get(part_id=INSTALLED).cable_links], ["FCP_202SW", ""])
+        self.assertEqual(self.C.objects.get(part_id=FREE).cable_links[0]["location"], "FCP_202SW")

@@ -381,8 +381,12 @@ def _ref_name(v) -> str:
 
 def _fetch_component(api, part_id: str, date_spec: dict | None,
                      test_type_ids: dict[str, int], *,
-                     need_detail: bool, need_tests: bool) -> dict:
+                     need_detail: bool, need_tests: bool, need_links: bool = False) -> dict:
     """Per-component fetch; the caller decides which halves to pull.
+
+    - ``need_links`` (#230, a cable type's detail pass) → one more call, the
+      cable's own ``/subcomponents`` rows: its connections, kept on the
+      mirror row for the Cable dashboard.
 
     - ``need_detail`` → one ``components/{pid}`` call for ``created``/``updated``
       (the cheap component-level refresh that keeps the ``updated`` chart fresh).
@@ -438,6 +442,10 @@ def _fetch_component(api, part_id: str, date_spec: dict | None,
         certified = _flag(d.get("certified_qaqc"))
         # The box/assembly currently holding this item (#63); "" when free.
         parent = d.get("parent_part_id") or ""
+    links = None
+    if need_links:
+        from . import cabling    # cabling → labels → itemsedit import this module
+        links = cabling.cable_links(api.get_subcomponents(part_id).get("data"))
 
     return {
         "part_id": part_id, "created": created, "updated": updated,
@@ -445,7 +453,7 @@ def _fetch_component(api, part_id: str, date_spec: dict | None,
         "status_id": status_id,
         "manufacturer": manufacturer, "institution": institution,
         "is_installed": installed, "qaqc_uploaded": uploaded,
-        "certified_qaqc": certified, "parent_part_id": parent,
+        "certified_qaqc": certified, "parent_part_id": parent, "cable_links": links,
         "tests": tests, "test_data": test_data, "date_fallbacks": fallbacks,
         "has_detail": need_detail, "has_tests": need_tests,
     }
@@ -636,6 +644,7 @@ def sync_test_events(
             detail_set, tests_set = new, new
 
         process = sorted(detail_set | tests_set)
+        is_cable = node.category == "cable"    # #230: a cable's connections ride along with its detail
         yield (
             f"sync tests ({mode}): {len(part_ids)} in HWDB · {len(new)} new · "
             f"fetching detail×{len(detail_set)} + tests×{len(tests_set)}\n"
@@ -661,7 +670,8 @@ def sync_test_events(
                         try:
                             return _fetch_component(
                                 tls.client, p, date_spec, test_type_ids,
-                                need_detail=p in detail_set, need_tests=p in tests_set)
+                                need_detail=p in detail_set, need_tests=p in tests_set,
+                                need_links=is_cable and p in detail_set)
                         except requests.exceptions.ConnectionError:
                             if attempt == 2:
                                 raise
@@ -722,6 +732,16 @@ def sync_test_events(
             n_td = store_test_data(instance, part_type_id, td_rows)
             yield f"sync tests: {n_td} latest test record(s) mirrored for plotting\n"
 
+        # --- A cable type's connections (#230) ---
+        # Each connected device's location and Component Status, one read per
+        # device; a device that cannot be read keeps what the mirror had.
+        linked = {r["part_id"]: r["cable_links"] for r in results if r["cable_links"]}
+        if linked:
+            from . import cabling
+            n_dev = cabling.stamp_devices(bootstrap, linked, cabling.known_devices(
+                HwdbComponentEvent.for_instance(instance).filter(part_type_id=part_type_id)))
+            yield f"sync tests: connections of {len(linked)} cable(s) mirrored · {n_dev} device(s) read\n"
+
         # --- Component events ---
         # full/components fetch detail for ALL → rewrite wholesale; incremental
         # keeps existing rows and appends only the new components.
@@ -747,6 +767,7 @@ def sync_test_events(
                     qaqc_uploaded=r.get("qaqc_uploaded"),
                     certified_qaqc=r.get("certified_qaqc"),
                     parent_part_id=r.get("parent_part_id", ""),
+                    cable_links=r.get("cable_links"),
                 )
                 for r in results if r["has_detail"]
             ],
