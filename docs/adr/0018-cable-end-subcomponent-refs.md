@@ -454,7 +454,7 @@ Hajime's test with a bundle of six cables of six cable types
 (`Z00100300100-00001` on dev).
 
 - **Cable connections page**: with a bundle listed, a free row names the
-  bundle's cables still open for it ("From the bundle <PID>", three at
+  bundle's cables still open for it ("Cable in bundle: <PID>", three at
   most, then "+ n more") under "Not connected". They were offered inside
   the Connect dialog only. Nothing is read for it, and Connect still asks
   for the END : connector.

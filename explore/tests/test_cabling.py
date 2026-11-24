@@ -568,9 +568,9 @@ class CableWritesTest(TestCase):
         self.assertIn(f'id="cc-bundle" name="bundle" value="{TRAY.lower()}"', html)
         self.assertIn("3 cables, offered at the free positions", html)
         self.assertIn(f'data-prefill="{FREE}"', html)
-        offer = f'<span class="cc-l2">From the bundle <a class="mono" href="/hw/dev/part/{FREE}/">{FREE}</a></span>'
+        offer = f'<span class="cc-l2">Cable in bundle: <a class="mono" href="/hw/dev/part/{FREE}/">{FREE}</a></span>'
         self.assertIn(offer, html)                                        # #238: the row itself names the open cable
-        self.assertNotIn("From the bundle", self._get(PAGE).content.decode())
+        self.assertNotIn("Cable in bundle", self._get(PAGE).content.decode())
         cands = html.split('<template id="cc-cands-4">', 1)[1].split("</template>", 1)[0]
         self.assertEqual(cands.count("<button"), 3)
         self.assertIn(f'<button type="button" data-pid="{INSTALLED}" class="done">', cands)
