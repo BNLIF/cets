@@ -592,9 +592,11 @@ def build_pdf(layouts: list[dict], items: list[dict], ui_base: str, intro: bool 
     return buf.getvalue()
 
 
-def preview_png(layout: dict, data: dict, ui_base: str, dpi: int = 220) -> bytes:
+def preview_png(layout: dict, data: dict, ui_base: str, dpi: int = 220, upright: bool = False) -> bytes:
     """One label (the sheet's label size, grey outline) as a PNG for the
-    editor — the same drawing code as the sheets, rasterised by pymupdf."""
+    editor — the same drawing code as the sheets, rasterised by pymupdf.
+    ``upright`` turns a landscape label, drawn sideways as it lies on the
+    sheet, so that its text reads across."""
     tpl = template_for(layout)
     lw, lh = tpl["label"]
     buf = io.BytesIO()
@@ -605,7 +607,10 @@ def preview_png(layout: dict, data: dict, ui_base: str, dpi: int = 220) -> bytes
     cvs.save()
     doc = fitz.open(stream=buf.getvalue(), filetype="pdf")
     try:
-        return doc.load_page(0).get_pixmap(dpi=dpi, alpha=False).tobytes("png")
+        page = doc.load_page(0)
+        if upright and layout.get("orientation") == "landscape":
+            page.set_rotation(90)
+        return page.get_pixmap(dpi=dpi, alpha=False).tobytes("png")
     finally:
         doc.close()
 

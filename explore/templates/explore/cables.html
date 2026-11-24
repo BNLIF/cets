@@ -26,6 +26,9 @@
   .cc-lbl { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--rule-hard); border-radius: var(--r-md); background: #fff;
     font-family: var(--font-mono); font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
   .cc-lbl .cc-l2 { font-weight: 400; }
+  /* the Print dialog's preview: one label as the sheet will draw it */
+  .cc-prev { display: grid; place-items: center; min-height: 96px; padding: 10px; border-radius: var(--r-md); background: var(--surface); }
+  .cc-prev img { display: block; max-width: 100%; max-height: 220px; background: #fff; }
   .cc-page button.cc-link { font: inherit; font-size: 12.5px; padding: 0; border: 0; background: none; color: var(--accent-ink); cursor: pointer; }
   .cc-page button.cc-link:hover { text-decoration: underline; }
   .cc-dlg select { min-height: 44px; width: 100%; font: inherit; font-size: 14px; }
@@ -418,6 +421,11 @@
           <h3><label for="cc-p-sheet">Sheet</label></h3>
           <select id="cc-p-sheet" name="sheet">{% for key, text in label_sheets %}<option value="{{ key }}"{% if key == label_sheet %} selected{% endif %}>{{ text }}</option>{% endfor %}</select>
         </div>
+        <div class="cc-ends">
+          <h3>Preview</h3>
+          <div class="cc-prev"><img id="cc-p-img" alt="Label preview"></div>
+          <span class="cc-l2" id="cc-p-cap"></span>
+        </div>
       </div>
       <div class="cc-df">
         <button type="button" class="es-btn quiet" data-close>Cancel</button>
@@ -733,8 +741,30 @@
       byId("cc-p-type").textContent = all ? "" : " · " + b.getAttribute("data-type");
       Array.prototype.forEach.call(pf.show, function (r) { r.disabled = !labelled && r.value !== "pid"; });
       pf.show.value = labelled ? "both" : "pid";
+      asked = b;
+      preview();
       pd.showModal();
     });
+    // the preview: the label asked for — of every row's, the first — drawn by the server from what the page shows, on each change
+    var asked = null, img = byId("cc-p-img"), cap = byId("cc-p-cap");
+    function preview() {
+      var b = asked, show = pf.show.value, n = 0;
+      if (b && b.getAttribute("data-print") === "all") {
+        var rows = Array.prototype.filter.call(
+          document.querySelectorAll(".cc-table tr.cc-connected .cc-act [data-print], .cc-table tr.cc-installed .cc-act [data-print]"),
+          function (x) { return show !== "label" || x.getAttribute("data-l1"); });
+        n = rows.length; b = rows[0];
+      }
+      if (!b) { img.hidden = true; cap.textContent = "Nothing to print."; return; }
+      var q = new URLSearchParams({ preview: 1, pid: b.getAttribute("data-pid"), type: b.getAttribute("data-type") || "",
+        l1: b.getAttribute("data-l1") || "", l2: b.getAttribute("data-l2") || "", show: show, code: pf.code.value, sheet: pf.sheet.value });
+      if (pf.elements.name.checked) q.set("name", "1");
+      cap.textContent = n > 1 ? "The first of " + n + " labels" : "";
+      img.hidden = false;
+      img.src = location.pathname + "?" + q;
+    }
+    img.addEventListener("error", function () { img.hidden = true; cap.textContent = "No preview."; });
+    pf.addEventListener("change", preview);
     pf.addEventListener("submit", function () {
       try { localStorage.setItem(KEY, JSON.stringify({ sheet: pf.sheet.value, code: pf.code.value, name: pf.elements.name.checked })); } catch (e) { /* not kept */ }
       pd.close();

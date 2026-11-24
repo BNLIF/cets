@@ -1866,6 +1866,36 @@ def _cables_write(request, api, inst, part_id) -> None:
     messages.success(request, done)
 
 
+def _label_options(g) -> tuple[str, str, str]:
+    """The Print dialog's ``show``, ``code`` and ``sheet``, each a known value."""
+    return (g.get("show") if g.get("show") in ("label", "pid") else "both",
+            "bar" if g.get("code") == "bar" else "qr",
+            g.get("sheet") if g.get("sheet") in labels.TEMPLATES else cabling.LABEL_SHEET)
+
+
+def _cable_label_preview(request, api, inst) -> HttpResponse:
+    """The Print dialog's preview: one label as a PNG, drawn by the label
+    generator as the sheet will draw it, turned to read across where the
+    sheet has it sideways. ``?preview=`` with the item as the
+    page already shows it — ``pid``, ``type`` (its type's name), ``l1`` and
+    ``l2`` (the label's lines) — and the dialog's ``show``, ``code``, ``name``
+    and ``sheet``. The page's connections are not read again; a bar code
+    reads the item's record for its external ID, as the sheet does."""
+    g = request.GET
+    show, code, sheet = _label_options(g)
+    pid = scanning.extract_pid((g.get("pid") or "").upper())
+    lines = [t for t in ((g.get(k) or "").strip()[:80] for k in ("l1", "l2")) if t]
+    job = pid and cabling.label_job(pid, (g.get("type") or "")[:120], lines, show, code, bool(g.get("name")), sheet)
+    if not job:
+        return HttpResponseBadRequest("Nothing to preview.")
+    layout, data = job
+    if code == "bar" and show != "label":
+        record = parts.fetch_map(api, lambda c, p: labels.item_data(c.get_component(p).get("data") or {}), [pid]).get(pid)
+        data["external_id"] = (record or {}).get("external_id") or pid
+    return HttpResponse(labels.preview_png(layout, data, settings.HWDB_PROFILES[inst]["ui"], upright=True),
+                        content_type="image/png")
+
+
 def _cable_labels_pdf(request, api, inst, device) -> HttpResponse | None:
     """#229: the Print dialog's sheet — ``?print=`` ``all``, a row's number or
     ``b<n>`` (row n's bundle / tray), ``show`` (``both``, ``label``, ``pid``),
@@ -1877,9 +1907,7 @@ def _cable_labels_pdf(request, api, inst, device) -> HttpResponse | None:
     external ID (``PID-CC###``), read off each item's record — the bare PID
     where that read fails."""
     g = request.GET
-    sheet = g.get("sheet") if g.get("sheet") in labels.TEMPLATES else cabling.LABEL_SHEET
-    show = g.get("show") if g.get("show") in ("label", "pid") else "both"
-    code = "bar" if g.get("code") == "bar" else "qr"
+    show, code, sheet = _label_options(g)
     jobs = cabling.label_jobs(device, g.get("print") or "", show, code, bool(g.get("name")), sheet)
     if not jobs:
         return None
@@ -1920,7 +1948,8 @@ def explore_cables_view(request, part_id=None):
     Item Specs (a POST, so only where writes are open; the field only for an
     account holding one of the type's roles); cable and bundle labels are
     worked out from the connections and the saved locations; ``?print=``
-    answers the label sheet as a PDF, on any instance."""
+    answers the label sheet as a PDF, on any instance, and ``?preview=`` one
+    label of it as a PNG for the Print dialog."""
     inst = instance_of(request)
     ctx = {"active_nav": "hardware", "typed": part_id or ""}
     if part_id is None:
@@ -1951,6 +1980,8 @@ def explore_cables_view(request, part_id=None):
     if request.method == "POST":
         _cables_write(request, api, inst, part_id)
         return redirect(page_url)
+    if "preview" in request.GET:
+        return _cable_label_preview(request, api, inst)
     if "slots" in request.GET:
         return JsonResponse(_cable_choices(api, inst, part_id, request.GET.get("slots"),
                                            (request.GET.get("pos") or "").strip()))

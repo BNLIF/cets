@@ -1077,6 +1077,30 @@ class CableLabelsTest(TestCase):
         self.assertIn("Nothing to print.", r.content.decode())
 
 
+    def test_the_print_dialog_previews_one_label_without_reading_the_device(self):
+        """#238: one label as a PNG, drawn by the label generator from what
+        the page already shows — no read, but the record for a bar code."""
+        import fitz
+        api = _api()
+        asked = {"preview": 1, "pid": INSTALLED, "type": "Top CRP bias warm cable", "l1": "SEDM07.S04.CH01.2", "l2": "FCP_201NE.ISH",
+                 "show": "both", "code": "qr", "name": "1", "sheet": "Letter-2x5-Avery"}
+        r = self._call(api, data=asked)
+        self.assertEqual((r.status_code, r["Content-Type"]), (200, "image/png"))
+        png = fitz.open(stream=r.content, filetype="png").load_page(0).get_pixmap()
+        self.assertGreater(png.width, png.height)                             # the 4” × 2” label, not the sheet
+        api.get_subcomponents.assert_not_called()
+        api.get_component.assert_not_called()
+        tall = fitz.open(stream=self._call(api, data={**asked, "sheet": "Letter-2x2-Avery"}).content, filetype="png")
+        tall = tall.load_page(0).get_pixmap()
+        self.assertGreater(tall.width, tall.height)                           # 3.5” × 5” on the sheet: turned to read across
+        r = self._call(api, data={**asked, "show": "pid", "code": "bar", "sheet": "nonsense"})
+        self.assertEqual((r.status_code, [c.args[0] for c in api.get_component.call_args_list]), (200, [INSTALLED]))
+        self.assertEqual(self._call(api, data={**asked, "show": "label", "l1": "", "l2": ""}).status_code, 400)   # no label to show
+        self.assertEqual(self._call(api, data={**asked, "pid": "nonsense"}).status_code, 400)
+        html = self._call(_located(_api(), self.BOTH)).content.decode()
+        self.assertIn('<div class="cc-prev"><img id="cc-p-img" alt="Label preview"></div>', html)
+
+
 DASH = "/hw/dev/cables/dashboard/"
 LOOSE = f"{WARM}-00030"
 

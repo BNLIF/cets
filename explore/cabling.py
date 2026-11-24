@@ -427,15 +427,20 @@ def label_jobs(device: dict, what: str, show: str, code: str, type_name: bool, s
         picked = [(r["cable"], r["cable_type"], (r["label"] or {}).get("lines") or [])]
     else:
         picked = []
-    jobs = []
-    for pid, name, lines in picked:
-        lines = [] if show == "pid" else lines
-        if show == "label" and not lines:
-            continue
-        with_code = code if show != "label" else None
-        jobs.append((label_layout(sheet, lines, with_code, type_name),
-                     {"part_id": pid, "part_name": name or "", "lines": lines}))
-    return jobs
+    jobs = (label_job(pid, name, lines, show, code, type_name, sheet) for pid, name, lines in picked)
+    return [j for j in jobs if j]
+
+
+def label_job(pid: str, name: str, lines: list[str], show: str, code: str, type_name: bool,
+              sheet: str) -> tuple[dict, dict] | None:
+    """One label as the label generator's (layout, item) pair — what
+    ``label_jobs`` makes of a row and what the Print dialog previews; None
+    when only labels are asked for and the item has none."""
+    lines = [] if show == "pid" else lines
+    if show == "label" and not lines:
+        return None
+    return (label_layout(sheet, lines, code if show != "label" else None, type_name),
+            {"part_id": pid, "part_name": name or "", "lines": lines})
 
 
 def cable_links(subs) -> list[dict]:

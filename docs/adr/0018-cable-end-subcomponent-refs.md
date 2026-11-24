@@ -488,8 +488,17 @@ Hajime's test with a bundle of six cables of six cable types
   A box typed into the page's "Bundle / tray" box still offers its cables.
 - **Not changed**: "Edit cabling guide" stays on the item's page (Hajime
   would keep it to the type's page; it is shown to the type's role holders
-  only — Chao asks him). Cable label sizes and a preview in the Print
-  dialog wait for the label stock.
+  only — Chao asks him). Cable label sizes in the Print dialog wait for
+  what Hajime means to print on.
+- **The Print dialog previews the label** (Chao, same day, for the sheets
+  there are): under "Sheet", one label as a PNG — the row's, the bundle's,
+  or the first of "Print labels" — drawn by the label generator's own
+  preview from what the page already shows (`?preview=` with the PID, the
+  type's name and the label's lines), so the page's connections are not
+  read again; a bar code reads the item's record for its external ID, as
+  the sheet does. It is drawn again on each change in the dialog. A label
+  the sheet has sideways (text along a tall label's longer side) is turned
+  to read across.
 
 ## Consequences
 
