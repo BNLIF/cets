@@ -448,6 +448,49 @@ the source.
   Component Status filter; a search opens the bundles of its hits.
 - **Left out**: Donato's device-pair table, "QC done", a per-cable refresh.
 
+## Update 2026-11-24: a bundle of several cable types (#238)
+
+Hajime's test with a bundle of six cables of six cable types
+(`Z00100300100-00001` on dev).
+
+- **Cable connections page**: with a bundle listed, a free row names the
+  bundle's cables still open for it ("From the bundle <PID>", three at
+  most, then "+ n more") under "Not connected". They were offered inside
+  the Connect dialog only. Nothing is read for it, and Connect still asks
+  for the END : connector.
+- **Cable dashboard**: a bundle's row lists, after the chosen type's
+  cables, the mirrored cables of other cable types the bundle holds — the
+  mirror rows with that parent whose type is a cable type — each with its
+  type's name, a link to that type's page. They are not filtered by the
+  tab, the search or the Component Status, and not counted in the tabs;
+  the bundle's own count and tally cover all it lists. One shows once its
+  own type is synced, its connections after that type's Re-sync.
+- **The dashboard's two sync buttons go on to the bundles' other cable
+  types** (Chao, same day), so that one press fills a bundle's row: after
+  the chosen type's sync, the record of each bundle type among its
+  mirrored cables' parents is read — one read per bundle type — and every
+  cable type its positions take, by the mirror's category, is synced in
+  turn in the same mode, the log naming them with their HWDB counts first.
+  A bundle type that cannot be read is said and skipped. Re-sync therefore
+  reads every cable of each of those types. The type's own page and the
+  Connect dialog sync one type as before (`bundles` is posted by the
+  dashboard alone).
+- **A shipping box is no bundle** (Chao, same day). A packed cable has the
+  box as its mirrored parent, held by plain PID as a bundle holds it, and
+  the dashboard of #230 listed the box as a bundle. A parent of a shipping
+  type (the curation's word, no read) is now left out: the cable is a row
+  of its own, still found by the box's PID, and the sync does not go on to
+  what a box type takes. The Cable connections page leaves a box out of
+  its "Bundle / tray" column the same way: unpacking is easily left
+  unrecorded in HWDB, and the box would then stand as the bundle of a
+  connected cable. The cable's own page already made the distinction
+  ("Inside" reads "Bundle / tray" only where the container is no box).
+  A box typed into the page's "Bundle / tray" box still offers its cables.
+- **Not changed**: "Edit cabling guide" stays on the item's page (Hajime
+  would keep it to the type's page; it is shown to the type's role holders
+  only — Chao asks him). Cable label sizes and a preview in the Print
+  dialog wait for the label stock.
+
 ## Consequences
 
 - `receive_box` now posts arrival locations to base PIDs (previously a

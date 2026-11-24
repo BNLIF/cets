@@ -38,7 +38,7 @@ from reportlab.pdfbase.pdfmetrics import stringWidth
 
 from django.core.paginator import Paginator
 
-from . import labels, parts, production
+from . import curation, labels, parts, production
 from .models import HierarchyNode, HwdbComponentEvent
 from .shipments import current_manifest
 
@@ -141,9 +141,12 @@ def takes_cables(inst: str, connectors: dict) -> bool:
         part_type_id__in=parts.child_types(connectors)).exists()
 
 
-def _tray(container, device) -> dict | None:
-    """A cable's bundle / tray from its current container; not the device itself."""
-    if not container or container["part_id"] == device:
+def _tray(inst: str, container, device) -> dict | None:
+    """A cable's bundle / tray from its current container; not the device
+    itself, and not a shipping box — a cable still recorded in the box it
+    came in is in no bundle."""
+    if (not container or container["part_id"] == device
+            or curation.is_shipping_type(inst, _type_id(container["part_id"]))):
         return None
     return {"part_id": container["part_id"], "type_name": container["type_name"], "also": [], "label": ""}
 
@@ -261,7 +264,7 @@ def device_connections(api, inst: str, part_id: str) -> dict:
                 cable_type=m["type_name"] or facts.get(_type_id(pid), ("", ""))[0] or _type_id(pid),
                 others=list(sides.values()), links=links, label=None,
                 connected=len(links), connectors=total, unread=pid in cables and mine is None,
-                bundle=_tray(trays.get(pid), part_id),
+                bundle=_tray(inst, trays.get(pid), part_id),
                 status=("noend" if not m["connection"]
                         else "installed" if total and len(links) >= total else "connected"))
             for o in row["others"]:
@@ -324,7 +327,8 @@ def offer_bundle(api, inst: str, device: dict, bundle_id: str) -> dict:
     ``connectors`` and ``here`` (the device's row numbers it is connected at).
     Each free row of ``device`` gets ``candidates`` (the bundle's cables of a
     type the position takes, with ``open``: not connected here and with a
-    connector free) and ``prefill`` — the PID when exactly one is open.
+    connector free), ``offered`` — the PIDs of the open ones, shown in the
+    row — and ``prefill`` — the PID when exactly one is open.
 
     Reads: the bundle's positions once, each of its cables' rows once, a cable
     type's record once."""
@@ -352,8 +356,8 @@ def offer_bundle(api, inst: str, device: dict, bundle_id: str) -> dict:
     for r in device["rows"]:
         if not r["cable"]:
             r["candidates"] = [c for c in cables if c["part_type_id"] in r["accepts"]]
-            open_ = [c["part_id"] for c in r["candidates"] if c["open"]]
-            r["prefill"] = open_[0] if len(open_) == 1 else ""
+            r["offered"] = [c["part_id"] for c in r["candidates"] if c["open"]]
+            r["prefill"] = r["offered"][0] if len(r["offered"]) == 1 else ""
     return {"part_id": bundle_id, "type_name": facts.get(_type_id(bundle_id), ("", ""))[0] or _type_id(bundle_id),
             "cables": cables, "offered": any(r.get("candidates") for r in device["rows"])}
 
@@ -528,6 +532,28 @@ def overview(inst: str, leaves) -> list[dict]:
     return list(groups.values())
 
 
+def bundle_cable_types(api, inst: str, part_type_id: str) -> tuple[list, list[str]]:
+    """The other cable types the bundles of this type's mirrored cables take
+    (#238), for the dashboard's sync to go on with: the type nodes in id
+    order, and the bundle types whose record could not be read. A bundle is a
+    mirrored cable's parent, a shipping box left out; what its type takes is its record's positions —
+    one read per bundle type — kept where the mirror knows a cable type."""
+    parents = (HwdbComponentEvent.for_instance(inst).filter(part_type_id=part_type_id)
+               .exclude(parent_part_id="").values_list("parent_part_id", flat=True))
+    bundle_types = sorted(t for t in {_type_id(p) for p in parents} if not curation.is_shipping_type(inst, t))
+    taken = parts.fetch_map(
+        api, lambda c, t: parts.child_types((c.get_component_type(t).get("data") or {}).get("connectors")), bundle_types)
+    wanted = {t for types in taken.values() for t in types or ()} - {part_type_id}
+    nodes = list(HierarchyNode.for_instance(inst).filter(
+        level=HierarchyNode.LEVEL_TYPE, category="cable", part_type_id__in=wanted).order_by("part_type_id"))
+    return nodes, [t for t in bundle_types if taken.get(t) is None]
+
+
+def _connector_names(leaf) -> list[str]:
+    """A cable type's END : connectors in order, from its mirrored ENDs."""
+    return [f"{e['name']}:{i}" for e in leaf.cable_ends or [] for i in range(1, e["connectors"] + 1)]
+
+
 def _dash_cable(row, names: list[str]) -> dict:
     """One cable of the dashboard from its mirror row: ``slots`` — every
     END : connector of the type, in its order, each with its ``link`` or None,
@@ -565,10 +591,19 @@ def dashboard(inst: str, leaf, *, state: str = "", q: str = "", status: str = ""
       mirror has the item, its ``cables``, how many are ``installed``,
       ``connected``, ``none`` and ``unread``, and the ``places`` they go
       to), then one per cable in no bundle (``cable``). A cable's bundle is
-      its mirrored parent, the item that holds it by plain PID."""
-    names = [f"{e['name']}:{i}" for e in leaf.cable_ends or [] for i in range(1, e["connectors"] + 1)]
+      its mirrored parent, the item that holds it by plain PID — a
+      shipping box, which holds it the same way, is not one. A bundle's
+      ``cables`` are the type's cables that pass the filters, then the
+      mirrored cables of other cable types it holds (#238), each with its
+      ``type_name`` and ``part_type_id`` — these are not filtered and not in
+      ``counts``, and the bundle's own tally covers all it lists."""
+    names = _connector_names(leaf)
     rows = HwdbComponentEvent.for_instance(inst).filter(part_type_id=leaf.part_type_id).order_by("part_id")
     cables = [_dash_cable(r, names) for r in rows]
+    boxes = {t for t in {_type_id(c["bundle"]) for c in cables if c["bundle"]} if curation.is_shipping_type(inst, t)}
+    for c in cables:
+        if _type_id(c["bundle"]) in boxes:       # packed in a shipping box: in no bundle
+            c["bundle"] = ""
     statuses = sorted({c["status"] for c in cables if c["status"]})
     needle = q.lower()
     cables = [c for c in cables if (not needle or needle in c["hay"]) and (not status or c["status"] == status)]
@@ -585,6 +620,15 @@ def dashboard(inst: str, leaf, *, state: str = "", q: str = "", status: str = ""
         by_bundle[c["bundle"]]["cables"].append(c)
     page_obj = Paginator(groups, DASH_PER).get_page(page)
     held = [g["bundle"] for g in page_obj if "bundle" in g]
+    kin = list(HwdbComponentEvent.for_instance(inst).filter(parent_part_id__in=[b["part_id"] for b in held])
+               .exclude(part_type_id=leaf.part_type_id).order_by("part_id"))
+    kin_types = {n.part_type_id: n for n in HierarchyNode.for_instance(inst).filter(
+        level=HierarchyNode.LEVEL_TYPE, category="cable", part_type_id__in={r.part_type_id for r in kin})}
+    for r in kin:
+        node = kin_types.get(r.part_type_id)
+        if node:
+            by_bundle[r.parent_part_id]["cables"].append(
+                {**_dash_cable(r, _connector_names(node)), "type_name": node.name, "part_type_id": node.part_type_id})
     type_names = dict(HierarchyNode.for_instance(inst)
                       .filter(level=HierarchyNode.LEVEL_TYPE, part_type_id__in={_type_id(b["part_id"]) for b in held})
                       .values_list("part_type_id", "name"))

@@ -146,8 +146,8 @@
     <span class="cd-sync" id="cd-sync" data-sync-url="{% url 'explore:node_sync' part_type_id=leaf.part_type_id %}">
       {% csrf_token %}
       <span>{% if leaf.tests_synced_at %}Synced {{ leaf.tests_synced_at|date:"Y-m-d H:i" }}{% else %}Not synced yet{% endif %}</span>
-      <button type="button" class="es-btn quiet" data-mode="incremental" title="Reads the cables HWDB has and the mirror lacks">Sync new items</button>
-      <button type="button" class="es-btn quiet" data-mode="components" title="Reads every cable of this type again: status, QC flags and connections">Re-sync</button>
+      <button type="button" class="es-btn quiet" data-mode="incremental" title="Reads the cables HWDB has and the mirror lacks — of this type, then of the other cable types its bundles take">Sync new items</button>
+      <button type="button" class="es-btn quiet" data-mode="components" title="Reads every cable again: status, QC flags and connections — of this type, then of the other cable types its bundles take">Re-sync</button>
     </span>
     <span class="cd-grow"></span>
     {% if dash.connectors %}<span class="cd-none">{{ dash.connected }} of {{ dash.connectors }} END : connectors connected</span>{% endif %}
@@ -220,7 +220,7 @@
       all.textContent = open ? "Close all" : "Open all";
     });
   }
-  // the mirror may be behind HWDB: the type's own sync, its log shown while it runs, then the page again
+  // the mirror may be behind HWDB: the type's sync and that of its bundles' other cable types, the log shown while it runs, then the page again
   var sync = document.getElementById("cd-sync"), log = document.getElementById("cd-log");
   sync.addEventListener("click", async function (e) {
     var b = e.target.closest("button"), btns = sync.querySelectorAll("button");
@@ -231,6 +231,7 @@
     var fd = new FormData(), resp;
     fd.append("csrfmiddlewaretoken", sync.querySelector("[name=csrfmiddlewaretoken]").value);
     fd.append("mode", b.getAttribute("data-mode"));
+    fd.append("bundles", "1");     // the other cable types of this type's bundles follow it
     try { resp = await fetch(sync.getAttribute("data-sync-url"), { method: "POST", body: fd, credentials: "same-origin" }); }
     catch (err) { log.textContent += "network error: " + err + "\n"; btns.forEach(function (x) { x.disabled = false; }); return; }
     if (resp.redirected) { window.location = resp.url; return; }     // the FNAL link has to be renewed

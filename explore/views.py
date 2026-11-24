@@ -2623,7 +2623,9 @@ def explore_node_sync_view(request, part_type_id):
 
     Lazy per-type sync behind the explorer's plot panel. FNAL-gated; reads the
     URL's instance (#47). The browser fires this automatically on first visit
-    to an unsynced leaf, and on the manual sync-mode buttons.
+    to an unsynced leaf, and on the manual sync-mode buttons. With
+    ``bundles`` posted (the Cable dashboard, #238) the cable types its
+    cables' bundles also take are synced after it, in the same mode.
     """
     inst = instance_of(request)
     try:
@@ -2644,6 +2646,15 @@ def explore_node_sync_view(request, part_type_id):
         try:
             yield from sync_test_events(base_url, bearer, part_type_id,
                                         instance=inst, mode=mode)
+            if request.POST.get("bundles"):      # #238, the Cable dashboard: the bundles' other cable types too
+                kin, unread = cabling.bundle_cable_types(FnalDbApiClient(base_url, bearer), inst, part_type_id)
+                for t in unread:
+                    yield f"sync tests: bundle type {t} could not be read — its other cable types are left\n"
+                if kin:
+                    yield "sync tests: the bundles take %d other cable type(s) — %s\n" % (len(kin), ", ".join(
+                        f"{n.part_type_id} {n.name} ({n.n_components or 0} in HWDB)" for n in kin))
+                for n in kin:
+                    yield from sync_test_events(base_url, bearer, n.part_type_id, instance=inst, mode=mode)
         except Exception as e:
             logger.exception("explore_node_sync_view(%s) crashed", part_type_id)
             yield f"test sync: CRASH · {e}\n"

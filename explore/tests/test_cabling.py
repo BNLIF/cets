@@ -231,6 +231,14 @@ class DeviceConnectionsTest(TestCase):
         self.assertEqual(sorted(c.args[0] for c in self.api.get_container.call_args_list),
                          sorted([INSTALLED, ONE_END, MANY]))              # each connected cable once
 
+    def test_a_cable_still_recorded_in_its_shipping_box_is_in_no_bundle(self):
+        """A box holds a cable by plain PID as a bundle does, and unpacking is
+        easily left unrecorded — the box is not shown as the cable's bundle."""
+        from explore.models import ShippingTypeOverride
+        ShippingTypeOverride.objects.create(instance="dev", part_type_id=TRAY.rsplit("-", 1)[0])
+        device = cabling.device_connections(_api(), "dev", FLANGE)
+        self.assertEqual({r["position"]: r["bundle"] for r in device["rows"]}, dict.fromkeys(["ISH", "OSH", "FCT.T", "ICO"]))
+
     def test_a_cable_this_device_holds_as_its_tray_has_no_bundle_column(self):
         api = _api()
         rows = [{"part_id": ONE_END, "type_name": "Top CRP bias warm cable", "functional_position": "ICO", "operation": "mount"}]
@@ -249,6 +257,7 @@ class DeviceConnectionsTest(TestCase):
         free = self.rows["ICO"]
         self.assertEqual([c["part_id"] for c in free["candidates"]], [INSTALLED, ONE_END, FREE])
         self.assertEqual(free["prefill"], FREE)                           # the one cable still open
+        self.assertEqual(free["offered"], [FREE])                         # … and the one the row names (#238)
         self.assertNotIn("candidates", self.rows["ISH"])                  # a connected row is offered nothing
 
     def test_a_bundle_with_several_open_cables_prefills_none(self):
@@ -257,6 +266,7 @@ class DeviceConnectionsTest(TestCase):
         device = cabling.device_connections(api, "dev", FLANGE)
         self.assertTrue(cabling.offer_bundle(api, "dev", device, TRAY)["offered"])
         self.assertEqual({r["prefill"] for r in device["rows"] if r["accepts"] == [WARM]}, {""})
+        self.assertEqual({tuple(r["offered"]) for r in device["rows"] if r["accepts"] == [WARM]}, {(INSTALLED, ONE_END, FREE)})
         self.assertEqual([r.get("candidates") for r in device["rows"] if r["position"] == "FCT.T"], [[]])   # another type
 
     def test_a_stored_picture_is_read_as_slots_in_percent(self):
@@ -558,6 +568,9 @@ class CableWritesTest(TestCase):
         self.assertIn(f'id="cc-bundle" name="bundle" value="{TRAY.lower()}"', html)
         self.assertIn("3 cables, offered at the free positions", html)
         self.assertIn(f'data-prefill="{FREE}"', html)
+        offer = f'<span class="cc-l2">From the bundle <a class="mono" href="/hw/dev/part/{FREE}/">{FREE}</a></span>'
+        self.assertIn(offer, html)                                        # #238: the row itself names the open cable
+        self.assertNotIn("From the bundle", self._get(PAGE).content.decode())
         cands = html.split('<template id="cc-cands-4">', 1)[1].split("</template>", 1)[0]
         self.assertEqual(cands.count("<button"), 3)
         self.assertIn(f'<button type="button" data-pid="{INSTALLED}" class="done">', cands)
@@ -1237,6 +1250,82 @@ class CableDashboardTest(TestCase):
         self.assertEqual(html.count('<tr class="cd-c cd-in" data-in="1">'), 1)             # a search opens the bundle of its hit
         self.assertIn("No match.", self.client.get(DASH, {"type": WARM, "q": "zzz"}).content.decode())
         self.assertIn("No cables in the mirror — sync new items.", self.client.get(DASH, {"type": BUNDLE4}).content.decode())
+
+    def test_a_bundle_lists_its_cables_of_other_cable_types(self):
+        """#238: a bundle of several cable types — the mirror knows each
+        item's parent, so the bundle's row lists them all, on any type's page."""
+        self._mirror()
+        other = f"{BUNDLE4}-00009"
+        self.C.objects.create(instance="dev", part_type_id=BUNDLE4, part_id=other, status="Available",
+                              parent_part_id=TRAY, cable_links=None)
+        self.C.objects.create(instance="dev", part_type_id="Z00100300064", part_id="Z00100300064-00077",
+                              parent_part_id=TRAY)                         # held too, but no cable
+        d = cabling.dashboard("dev", self.leaf)
+        b = list(d["page"])[0]["bundle"]
+        self.assertEqual([c["part_id"] for c in b["cables"]], [INSTALLED, ONE_END, FREE, other])
+        self.assertEqual((b["cables"][3]["type_name"], b["cables"][3]["part_type_id"], b["cables"][3]["state"]),
+                         ("HVS Test Bundle 4 Ends", BUNDLE4, "unread"))
+        self.assertNotIn("type_name", b["cables"][0])
+        self.assertEqual((b["installed"], b["connected"], b["none"], b["unread"]), (1, 1, 1, 1))   # the tally: all it lists
+        self.assertEqual((d["counts"]["all"], d["n_unread"]), (4, 1))      # the tabs stay the type's
+        shown = list(cabling.dashboard("dev", self.leaf, state="installed")["page"])[0]["bundle"]["cables"]
+        self.assertEqual([c["part_id"] for c in shown], [INSTALLED, other])                        # not filtered
+        self.assertEqual(len(cabling.dashboard("dev", self.leaf, q="nothing")["page"]), 0)         # … and no row of its own
+        with mock.patch("explore.views.mint_for", side_effect=AssertionError("no HWDB read")):
+            html = self.client.get(DASH, {"type": WARM}).content.decode()
+        self.assertIn("Top CRP bias warm cable bundle · 4 cables", html)
+        self.assertIn(f'<span class="cd-l2"><a href="?type={BUNDLE4}">HVS Test Bundle 4 Ends</a></span>', html)
+        self.assertEqual(html.count('<tr class="cd-c cd-in" data-in="1" hidden>'), 4)
+        mine = list(cabling.dashboard("dev", H.objects.get(part_type_id=BUNDLE4))["page"])[0]["bundle"]["cables"]
+        self.assertEqual([(c["part_id"], c.get("type_name")) for c in mine],
+                         [(other, None), (INSTALLED, "Top CRP bias warm cable"), (ONE_END, "Top CRP bias warm cable"),
+                          (FREE, "Top CRP bias warm cable")])
+
+    def test_a_shipping_box_is_no_bundle(self):
+        """A cable packed in a shipping box has the box as its parent, held by
+        plain PID as a bundle holds it — the dashboard lists it in no bundle,
+        and the sync does not go on to what the box type takes."""
+        from explore.models import ShippingTypeOverride
+        self._mirror()
+        ShippingTypeOverride.objects.create(instance="dev", part_type_id="Z00100300090")
+        self.C.objects.filter(part_id=LOOSE).update(parent_part_id="Z00100300090-00001")
+        groups = list(cabling.dashboard("dev", self.leaf)["page"])
+        self.assertEqual([g["bundle"]["part_id"] for g in groups if "bundle" in g], [TRAY])
+        self.assertEqual([(g["cable"]["part_id"], g["cable"]["bundle"]) for g in groups if "cable" in g], [(LOOSE, "")])
+        self.assertEqual(cabling.dashboard("dev", self.leaf, q="z00100300090-00001")["counts"]["all"], 1)   # still found by it
+        api = _api()
+        api.get_component_type.side_effect = lambda t: {"data": {"connectors": {"A": BUNDLE4}}}
+        self.C.objects.filter(parent_part_id=TRAY).update(parent_part_id="Z00100300090-00001")
+        self.assertEqual(cabling.bundle_cable_types(api, "dev", WARM), ([], []))
+        api.get_component_type.assert_not_called()
+
+    def test_the_dashboards_sync_goes_on_to_the_bundles_other_cable_types(self):
+        """#238: one press brings in every cable type the type's bundles take
+        — the bundle type's record says which, one read per bundle type."""
+        self._mirror()
+        api, calls = _api(), []
+        types = {"Z00100300072": {"connectors": {"A": WARM, "B": BUNDLE4, "C": "Z00100300064", "D": "Z00100399999"}}}
+        api.get_component_type.side_effect = lambda t: {"data": types[t]}
+
+        def fake(base, bearer, ptid, *, instance, mode):
+            calls.append((ptid, instance, mode))
+            yield f"synced {ptid}\n"
+        url = f"/hw/dev/sync-tests/{WARM}/"
+        with mock.patch("explore.views.mint_for", return_value="b"), mock.patch("explore.views.sync_test_events", fake), \
+             mock.patch("explore.views.FnalDbApiClient", return_value=api):
+            log = b"".join(self.client.post(url, {"mode": "components", "bundles": "1"}).streaming_content).decode()
+            self.assertEqual(calls, [(WARM, "dev", "components"), (BUNDLE4, "dev", "components")])   # cable types only
+            self.assertEqual(api.get_component_type.call_count, 1)
+            self.assertIn(f"the bundles take 1 other cable type(s) — {BUNDLE4} HVS Test Bundle 4 Ends (0 in HWDB)", log)
+            del calls[:]
+            b"".join(self.client.post(url, {"mode": "incremental"}).streaming_content)             # a type's own page: as before
+            self.assertEqual(calls, [(WARM, "dev", "incremental")])
+            del calls[:]
+            api.get_component_type.side_effect = RuntimeError("502")
+            log = b"".join(self.client.post(url, {"bundles": "1"}).streaming_content).decode()
+            self.assertEqual(calls, [(WARM, "dev", "incremental")])
+            self.assertIn("bundle type Z00100300072 could not be read", log)
+        self.assertIn('fd.append("bundles", "1")', self.client.get(DASH, {"type": WARM}).content.decode())
 
     def test_a_connect_on_the_cable_connections_page_refreshes_the_cables_mirror_row(self):
         self._mirror()
