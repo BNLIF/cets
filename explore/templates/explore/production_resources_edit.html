@@ -1,8 +1,8 @@
 {% extends 'explore/base.html' %}
-{% block title %}{% if existing %}{{ title }}{% else %}New table organizer{% endif %} · {{ part_type_id }} · HWDB Explorer{% endblock %}
+{% block title %}Edit table · Resources · {{ type_name }} · HWDB Explorer{% endblock %}
 
 {% block content %}
-{# #231 (Hajime 2026-11-20): an organizer written as a table of links — the rows the type's component list (changed in the list's editor, not here), the columns the author's, a cell a list of label + URL. Saved as an organizer checklist on the type; nothing is saved before Save. #}
+{# #231 (Hajime 2026-11-20; 2026-11-25: one table, the Resources page's): the consortium's own part of its Resources table — the rows the type's component list (changed in the list's editor, not here), each with the type's QA/QC checklists and procedures and a tick to leave one out of its column; then the columns the consortium adds, a cell a list of label + URL. Saved as a checklist file on the type; nothing is saved before Save. #}
 <style>
   .es-page { padding: 22px 30px 56px; max-width: 1280px; }
   .es-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
@@ -23,8 +23,6 @@
   .es-btn.quiet { color: var(--dim); background: var(--page); border: 1px solid var(--rule); }
   .es-btn.quiet:hover { border-color: var(--rule-hard); color: var(--ink); }
   .ot-in { font: inherit; font-size: 13px; color: var(--ink); padding: 4px 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper, #fff); }
-  .ot-name { display: flex; gap: 8px; align-items: center; margin: 0 0 12px; font-size: 13px; color: var(--dim); }
-  .ot-name .ot-in { width: 300px; max-width: 100%; }
   .ot-scroll { overflow-x: auto; }
   .ot-ed { width: 100%; border-collapse: collapse; font-size: 13px; }
   .ot-ed th { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; text-align: left; padding: 2px 10px 6px 0; border-bottom: 1px solid var(--rule); vertical-align: bottom; }
@@ -36,6 +34,8 @@
   .ot-ed tr.ot-folder td { background: var(--surface); font-weight: 600; }
   .ot-ed td.ot-cell a { display: block; color: var(--accent-ink); text-decoration: none; overflow-wrap: anywhere; line-height: 1.5; }
   .ot-ed td.ot-cell a:hover { text-decoration: underline; }
+  .ot-ed td.ot-qc label { display: block; line-height: 1.6; white-space: nowrap; }
+  .ot-ed td.ot-qc label.off { color: var(--faint); }
   .ot-ib { font: inherit; font-size: 12px; line-height: 1; padding: 3px 6px; border-radius: 6px; cursor: pointer; color: var(--dim); background: var(--page); border: 1px solid var(--rule); }
   .ot-ib:hover:not(:disabled) { border-color: var(--rule-hard); color: var(--ink); }
   .ot-ib:disabled { opacity: .35; cursor: default; }
@@ -59,36 +59,33 @@
 
 <div class="es-page">
   <div class="es-crumbs">
-    <a href="{% url 'explore:home' %}">Explorer</a>
-    <span class="sep">›</span>{% if type_url %}<a href="{{ type_url }}">{{ type_name }}</a>{% else %}{{ type_name }}{% endif %}
-    {% if existing %}<span class="sep">›</span><a href="{{ page_url }}">{{ title }}</a>{% endif %}
-    <span class="sep">›</span>{% if existing %}Edit table{% else %}New table organizer{% endif %}
+    <a href="{% url 'explore:production_overview' %}">Production</a>
+    <span class="sep">›</span><a href="{{ status_url }}">{{ type_name }}</a>
+    <span class="sep">›</span><a href="{{ resources_url }}">Resources</a>
+    <span class="sep">›</span>Edit table
   </div>
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
-  <h1>{% if existing %}{{ title }}{% else %}New table organizer{% endif %} <span class="mono" style="font-size:.75em; font-weight:400; color:var(--dim);">{{ part_type_id }}</span></h1>
-  <p class="es-sub">{{ type_name }} · a table of links over the <a href="{{ list_url }}?next={{ request.get_full_path|urlencode }}" style="color:var(--accent-ink); text-decoration:none;">component list</a>: its rows, your columns; a cell holds links.</p>
-  {% if role_gate %}<div class="banner banner-warn" style="margin: 0 0 14px;">&#9888; {% if role_gate.required %}Saving onto this type needs one of its HWDB roles <b>{{ role_gate.required|join:", " }}</b>. Your account holds {% if role_gate.mine %}<b>{{ role_gate.mine|join:", " }}</b>{% else %}no roles{% endif %}, so the organizer cannot be edited here. <a href="{% url 'explore:docs_permissions' %}" target="_blank" rel="noopener">Who may write what &#x2197;</a>{% else %}This type lists no HWDB roles, so HWDB refuses every write onto it. An HWDB administrator must add roles to the type first. <a href="{% url 'explore:docs_permissions' %}" target="_blank" rel="noopener">Who may write what &#x2197;</a>{% endif %}</div>
+  <h1>Resources <span class="mono" style="font-size:.75em; font-weight:400; color:var(--dim);">{{ part_type_id }}</span></h1>
+  <p class="es-sub">{{ type_name }} · rows from the <a href="{{ list_url }}?next={{ request.get_full_path|urlencode }}" style="color:var(--accent-ink); text-decoration:none;">component list</a>; untick a checklist or procedure to leave it out of its column; your columns hold links.</p>
+  {% if role_gate %}<div class="banner banner-warn" style="margin: 0 0 14px;">&#9888; {% if role_gate.required %}Saving onto this type needs one of its HWDB roles <b>{{ role_gate.required|join:", " }}</b>. Your account holds {% if role_gate.mine %}<b>{{ role_gate.mine|join:", " }}</b>{% else %}no roles{% endif %}, so the table cannot be edited here. <a href="{% url 'explore:docs_permissions' %}" target="_blank" rel="noopener">Who may write what &#x2197;</a>{% else %}This type lists no HWDB roles, so HWDB refuses every write onto it. An HWDB administrator must add roles to the type first. <a href="{% url 'explore:docs_permissions' %}" target="_blank" rel="noopener">Who may write what &#x2197;</a>{% endif %}</div>
   {% elif not n_rows %}
   <div class="es-card"><p class="ot-none">No component list on this type yet — <a href="{{ list_url }}?next={{ request.get_full_path|urlencode }}" style="color:var(--accent-ink);">add the component types</a>; they are this table’s rows.</p></div>
   {% else %}
   <div class="es-card">
     <form method="post" id="ot-form">
       {% csrf_token %}
-      {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
-      <input type="hidden" name="orig" value="{{ cl_name }}">
       <input type="hidden" name="table_json" id="ot-json">
-      {% if not existing %}<label class="ot-name">Name <input type="text" class="ot-in" name="cl_name" value="{{ cl_name }}" required pattern="[^/]+" autocomplete="off" title="The organizer’s name and its address; no slashes"></label>{% endif %}
       <div class="ot-scroll"><table class="ot-ed"><thead id="ot-head"></thead><tbody id="ot-body"></tbody></table></div>
       <div class="ot-add">
         <button type="button" class="ot-ib" id="ot-col">+ column</button>
       </div>
       <input type="text" class="ot-in ot-reason" name="reason" placeholder="reason — kept with this version">
       <div class="ot-actions">
-        <button type="submit" class="es-btn primary">Save organizer to HWDB</button>
-        <a class="es-btn quiet" href="{% if next %}{{ next }}{% elif existing %}{{ page_url }}{% else %}{{ type_url|default:'/' }}{% endif %}">Cancel</a>
+        <button type="submit" class="es-btn primary">Save to HWDB</button>
+        <a class="es-btn quiet" href="{{ resources_url }}">Cancel</a>
       </div>
     </form>
-    {% if existing %}<p class="ot-file"><span class="mono">{{ file_name }}</span> on the type in HWDB</p>{% endif %}
+    {% if file_name %}<p class="ot-file"><span class="mono">{{ file_name }}</span> on the type in HWDB</p>{% endif %}
   </div>
 
   <dialog class="ot-dlg" id="ot-dlg">
@@ -104,13 +101,15 @@
   {{ editor|json_script:"ot-data" }}
   <script>
   (function () {
-    // The rows are the component list's and are not edited here. The table is `cols` (the column names) and `cells`
-    // (type id → one list of {label, url} per column); a type listed twice shows the same cells in both rows. The
-    // form's value is written from them on submit, for the listed types alone. Typing changes them without a redraw.
+    // The rows are the component list's and are not edited here. The table is `cols` (the column names), `cells`
+    // (type id → one list of {label, url} per column) and `hidden` (type id → the names left out of the QA/QC and
+    // Procedures columns); a type listed twice shows the same cells and ticks in both rows. The form's value is written
+    // from them on submit, for the listed types and their present checklists alone. Typing changes them without a redraw.
     var D = JSON.parse(document.getElementById("ot-data").textContent);
-    var cols = D.columns.slice(), rows = D.rows, cells = {};
+    var cols = D.columns.slice(), rows = D.rows, cells = {}, hidden = {};
     rows.forEach(function (r) {
       if (r.folder || cells[r.type]) return;
+      hidden[r.type] = r.checklists.concat(r.procedures).filter(function (n) { return (D.hidden[r.type] || []).indexOf(n) >= 0; });
       var have = D.cells[r.type] || [];
       cells[r.type] = cols.map(function (_, i) { return (have[i] || []).map(function (k) { return {label: k.label, url: k.url}; }); });
     });
@@ -121,7 +120,7 @@
     function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]; }); }
     function each(f) { Object.keys(cells).forEach(function (t) { f(cells[t]); }); }
     function draw() {
-      head.innerHTML = "<tr><th>Component</th>" + cols.map(function (c, i) {
+      head.innerHTML = "<tr><th>Component</th><th>QA/QC checklists</th><th>Procedures</th>" + cols.map(function (c, i) {
         return '<th class="ot-col" data-c="' + i + '"><input type="text" class="ot-in" value="' + esc(c) + '" placeholder="column name" aria-label="Column name"> ' +
           '<button type="button" class="ot-ib" data-col="left" title="Move left"' + (i ? "" : " disabled") + ">&#9664;</button> " +
           '<button type="button" class="ot-ib" data-col="right" title="Move right"' + (i < cols.length - 1 ? "" : " disabled") + ">&#9654;</button> " +
@@ -129,8 +128,14 @@
       }).join("") + "</tr>";
       body.innerHTML = rows.map(function (r, i) {
         var lab = '<td class="ot-lab" style="padding-left:' + (r.level * 18) + 'px">' + esc(r.label);
-        if (r.folder) return '<tr class="ot-folder">' + lab + "</td>" + (cols.length ? '<td colspan="' + cols.length + '"></td>' : "") + "</tr>";
+        if (r.folder) return '<tr class="ot-folder">' + lab + "</td>" + '<td colspan="' + (cols.length + 2) + '"></td></tr>';
         return '<tr data-i="' + i + '">' + lab + (r.label === r.type ? "" : '<span class="mono">' + r.type + "</span>") + "</td>" +
+          [r.checklists, r.procedures].map(function (names) {
+            return '<td class="ot-qc">' + names.map(function (n) {
+              var off = hidden[r.type].indexOf(n) >= 0;
+              return '<label' + (off ? ' class="off"' : "") + ' title="Shown in this column"><input type="checkbox" value="' + esc(n) + '"' + (off ? "" : " checked") + "> " + esc(n) + "</label>";
+            }).join("") + "</td>";
+          }).join("") +
           cells[r.type].map(function (c, j) {
             return '<td class="ot-cell" data-c="' + j + '">' + c.map(function (k) {
               return '<a href="' + esc(k.url) + '" target="_blank" rel="noopener">' + esc(k.label || k.url) + "</a>"; }).join("") +
@@ -152,6 +157,12 @@
         each(function (r) { r.splice(j, 0, r.splice(i, 1)[0]); });
       }
       draw();
+    });
+    body.addEventListener("change", function (e) {   // a checklist's or a procedure's tick: in its column or left out of it
+      var td = e.target.closest("td.ot-qc"); if (!td) return;
+      var h = hidden[rows[+td.closest("tr").dataset.i].type], at = h.indexOf(e.target.value);
+      if (e.target.checked) { if (at >= 0) h.splice(at, 1); } else if (at < 0) h.push(e.target.value);
+      draw();   // the type's other rows show the same
     });
     body.addEventListener("click", function (e) {
       var b = e.target.closest("button[data-do=cell]"); if (!b) return;
@@ -210,7 +221,7 @@
     lines.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); document.getElementById("ot-done").click(); } });
 
     document.getElementById("ot-form").addEventListener("submit", function () {
-      document.getElementById("ot-json").value = JSON.stringify({columns: cols, cells: cells});
+      document.getElementById("ot-json").value = JSON.stringify({columns: cols, cells: cells, hidden: hidden});
     });
     document.getElementById("ot-form").addEventListener("keydown", function (e) {   // Enter in a name box must not save
       if (e.key === "Enter" && e.target.closest(".ot-ed")) e.preventDefault();

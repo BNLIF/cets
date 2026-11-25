@@ -43,7 +43,7 @@ SPEC_CAPABLE = {"check", "number", "table", "text", "textarea", "datetime",
 
 RETIRED_MARK = "[retired]"   # in the image's HWDB comment, so a listing knows without loading the schema
 PROCEDURE_MARK = "[procedure]"   # likewise (#213 round 2): a static information page — procedure, drawings — not a form
-TABLE_MARK = "[table]"   # likewise (#231): an organizer holding a table of links — the Resources page lists these under its own table
+TABLE_MARK = "[table]"   # likewise (#231): the file holds a table of links — the columns the type's Resources page adds to its own
 
 
 def comment_marks(cfg: dict) -> str:
@@ -924,19 +924,22 @@ _VIEWER_URL = re.compile(r"/shipment-image/[^/?#]+/?(?:[?#]|$)")   # the Explore
 
 
 def clean_table(raw) -> dict | None:
-    """#231 (Hajime 2026-11-20): an organizer written as a table of links
-    over the type's component list, in the form it is stored —
-    ``{"columns": [names], "cells": {type id: [links per column]}}``, a
-    link ``{"label", "url"}``. The rows are not kept: they are the
-    component list's, read when the table is shown, so the table follows
-    the list. A link is http(s) only, as a Markdown link is; a type with
-    no link is left out. None when ``raw`` is no table."""
+    """#231 (Hajime 2026-11-20, 2026-11-25): the columns a consortium adds to
+    its Resources table, in the form they are stored —
+    ``{"columns": [names], "cells": {type id: [links per column]},
+    "hidden": {type id: [checklist names]}}``, a link ``{"label", "url"}``.
+    The rows are not kept: they are the component list's, read when the
+    table is shown, so the table follows the list. A link is http(s) only,
+    as a Markdown link is; a type with no link is left out. ``hidden``:
+    the type's checklists and procedures left out of the page's own two
+    columns. None when ``raw`` is no table."""
     if not isinstance(raw, dict) or not isinstance(raw.get("columns"), list):
         return None
     cols = [str(c or "").strip() for c in raw["columns"]]
+    tid_ok = lambda tid: isinstance(tid, str) and re.fullmatch(r"[A-Z]\d{11}", tid)   # noqa: E731
     cells = {}
     for tid, given in (raw.get("cells") if isinstance(raw.get("cells"), dict) else {}).items():
-        if not (isinstance(tid, str) and re.fullmatch(r"[A-Z]\d{11}", tid) and isinstance(given, list)):
+        if not (tid_ok(tid) and isinstance(given, list)):
             continue
         row = [[{"label": str(k.get("label") or "").strip(), "url": k["url"].strip()}
                 for k in (given[i] if i < len(given) and isinstance(given[i], list) else [])
@@ -944,7 +947,12 @@ def clean_table(raw) -> dict | None:
                for i in range(len(cols))]
         if any(row):
             cells[tid] = row
-    return {"columns": cols, "cells": cells}
+    hidden = {}
+    for tid, given in (raw.get("hidden") if isinstance(raw.get("hidden"), dict) else {}).items():
+        names = [n for n in (given if isinstance(given, list) else []) if isinstance(n, str) and n]
+        if tid_ok(tid) and names:
+            hidden[tid] = names
+    return {"columns": cols, "cells": cells, "hidden": hidden}
 
 
 def table_cells(table: dict, part_type_id: str) -> list[list[dict]]:
@@ -978,7 +986,7 @@ def normalize(cfg: dict, name: str) -> dict:
               "organizer": bool(cfg.get("organizer")),
               # #213 round 2 (Hajime): a procedure — static notes, links and
               # drawings about the type, nothing to submit; rendered like an
-              # organizer, listed under Procedures / Drawings
+              # organizer, listed under Procedures
               "procedure": bool(cfg.get("procedure")),
               # #231: an organizer's table of links over the component list, None when it has none
               "table": clean_table(cfg.get("table")),

@@ -23,6 +23,7 @@ urlpatterns = [
     path("installation/<str:part_type_id>/units/<str:group>/", views.explore_installation_units_view, name="installation_units_of"),   # #218: one component's items, a page at a time   # #218: the plan's components as groups of their items
     path("status/<str:part_type_id>/", views.explore_production_status_view, name="production_status"),   # #199: one consortium, live
     path("status/<str:part_type_id>/resources/", views.explore_production_resources_view, name="production_resources"),   # #213: the list as a table of resources, generated
+    path("status/<str:part_type_id>/resources/edit/", views.explore_production_resources_edit_view, name="production_resources_edit"),   # #231: its own columns of links, and the checklists left out
     path("exec-summary/<str:part_type_id>/", views.explore_type_es_view, name="type_es"),   # #213: the type's items, each with its ES
     path("plan/<str:part_type_id>/", views.explore_production_plan_view, name="production_plan"),   # #200: a type's production plan + history
     path("plan-list/groups/", views.explore_production_groups_view, name="production_groups"),   # #232: the mirror's systems and subsystems, for the list editor
@@ -70,7 +71,6 @@ urlpatterns = [
     path("checklist-config/<str:part_type_id>/",
          views.explore_checklist_config_view, name="checklist_config"),
     path("text-preview/", views.explore_text_preview_view, name="text_preview"),   # the cell text editor's live preview (Chao 2026-10-08)
-    path("organizer-table/<str:part_type_id>/", views.explore_organizer_table_view, name="organizer_table"),   # #231: an organizer written as a table of links
     path("checklist-config/<str:part_type_id>/preview/",
          views.explore_checklist_preview_view, name="checklist_preview"),
     path("checklist-config/<str:part_type_id>/asset/",

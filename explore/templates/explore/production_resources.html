@@ -3,7 +3,7 @@
 {% block title %}Resources · {{ type_name }} · HWDB Explorer{% endblock %}
 
 {% block content %}
-{# #213 (Chao 2026-11-05; round 2 Hajime 2026-11-10): the Resources page — a production table's nested component list as a tree table (the status table's indent and fold), generated on each visit, stored nowhere, read-only: a row per component with the type page, its QA/QC checklists (to the PID chooser), its procedures / drawings (checklists flagged Procedure) and its item count linking the Items page, where each item's executive summary is. A consortium's own organizer checklist (its ordering of the work) links this page rather than carrying a copy — the Markdown export and the draft hand-off went (Chao 2026-11-10). Not called Organizer: that is the saved checklist's line on the type page. #}
+{# #213 (Chao 2026-11-05; round 2 Hajime 2026-11-10): the Resources page — a production table's nested component list as a tree table (the status table's indent and fold): a row per component with the type page, its QA/QC checklists (to the PID chooser), its procedures (checklists ticked Procedure), the consortium's own columns of links and its item count linking the Items page, where each item's executive summary is. The rows, checklists and counts are read on each visit. #231 (Hajime 2026-11-25): the columns after Procedures are the type's saved table (Edit table) — until one is saved the template's, empty — and a checklist or procedure left out there is not in its column. A consortium's organizer checklist (its ordering of the work) links this page rather than carrying a copy (Chao 2026-11-10). Not called Organizer: that is the saved checklist's line on the type page. #}
 <style>
   .es-page { padding: 22px 30px 56px; max-width: 1280px; }
   .es-crumbs { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
@@ -26,14 +26,6 @@
   .rs-table .ps-none { color: var(--faint); }
   .rs-table .cl-rowlab .rs-sub { display: inline; }
   .rs-table .cl-rowlab .rs-arrow { color: var(--faint); margin-right: 4px; }
-  /* #231: the type's table organizers, under the generated table */
-  .rs-org { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 26px 0 8px; }
-  .rs-org h2 { font-size: 1.05rem; margin: 0; }
-  .rs-org a { color: var(--accent-ink); text-decoration: none; font-size: 13px; }
-  .rs-org h2 a { font-size: inherit; }
-  .rs-org a:hover { text-decoration: underline; }
-  .rs-new { margin: 22px 0 0; font-size: 13px; }
-  .rs-new a { color: var(--accent-ink); text-decoration: none; }
 </style>
 {% include "explore/_checklist_style.html" %}
 
@@ -46,7 +38,8 @@
   {% for m in messages %}<div class="es-flash {{ m.tags }}">{{ m }}</div>{% endfor %}
   <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:6px;">
     <h1>Resources <span class="mono" style="font-size:.7em; font-weight:400; color:var(--dim);">{{ part_type_id }}</span></h1>
-    <form method="post" action="{% url 'explore:checklist_bookmark' %}" style="margin:0 0 0 auto;">
+    {% if can_edit and n_rows %}<a class="es-btn quiet" style="margin-left:auto; text-decoration:none;" href="{{ edit_url }}" title="Its columns of links, and what is left out of the first two">&#9998; Edit table</a>{% endif %}
+    <form method="post" action="{% url 'explore:checklist_bookmark' %}" style="margin:0{% if not can_edit or not n_rows %} 0 0 auto{% endif %};">
       {% csrf_token %}
       <input type="hidden" name="part_type_id" value="{{ part_type_id }}">
       <input type="hidden" name="resources" value="1">
@@ -57,34 +50,29 @@
         {% if bookmarked %}&#9733; Bookmarked{% else %}&#9734; Bookmark{% endif %}</button>
     </form>
   </div>
-  <p class="es-sub">{{ type_name }} · built from the <a href="{{ list_url }}?next={{ request.get_full_path|urlencode }}">component list</a> on each visit, stored nowhere: each type’s checklists, procedures and items.</p>
+  <p class="es-sub">{{ type_name }} · built from the <a href="{{ list_url }}?next={{ request.get_full_path|urlencode }}">component list</a> on each visit: each type’s checklists, procedures and items, and the links chosen for it.</p>
 
   {% if not n_rows %}
   <p class="ps-empty">No component list on this type yet{% if can_edit %} — <a href="{{ list_url }}?next={{ request.get_full_path|urlencode }}">add the component types</a> it reports{% endif %}.</p>
   {% else %}
   <div class="ps-bar">{% if tree %}<button type="button" class="ps-fold-btn" data-fold="open">Expand all</button><button type="button" class="ps-fold-btn" data-fold="close">Collapse all</button>{% endif %}</div>
   <div class="tbl-scroll"><table class="cl-table cl-gridlines ps-table rs-table" data-table="rs:{{ part_type_id }}">
-    <thead><tr><th>Component</th><th>Type ID</th><th>QA/QC checklists</th><th>Procedures / Drawings</th><th>Items / Exec summaries</th></tr></thead>
+    <thead><tr><th>Component</th><th>Type ID</th><th>QA/QC checklists</th><th>Procedures</th>{% for c in columns %}<th>{{ c }}</th>{% endfor %}<th>Items / Exec summaries</th></tr></thead>
     <tbody>
     {% for r in rows %}{% if r.folder %}<tr data-level="{{ r.level }}" data-t="{{ r.key }}" class="ps-folder">
       <th scope="row" class="cl-rowlab"{% if r.level %} style="padding-left:{% widthratio r.level 1 18 %}px;"{% endif %}>{% if r.has_children %}<button type="button" class="ps-tog" aria-expanded="true" title="Fold its rows"></button>{% elif tree %}<span class="ps-tog ps-tog-none"></span>{% endif %}{{ r.label }}</th>
-      <td class="cl-const" colspan="4"></td>
+      <td class="cl-const" colspan="{{ columns|length|add:4 }}"></td>
     </tr>{% else %}<tr data-level="{{ r.level }}" data-t="{{ r.key }}">
       <th scope="row" class="cl-rowlab"{% if r.level %} style="padding-left:{% widthratio r.level 1 18 %}px;"{% endif %}>{% if r.has_children %}<button type="button" class="ps-tog" aria-expanded="true" title="Fold its rows"></button>{% elif tree %}<span class="ps-tog ps-tog-none"></span>{% endif %}{% if r.level %}<span class="rs-arrow" aria-hidden="true">&#8627;</span>{% endif %}<a href="{{ r.type_url }}" title="the type’s page">{{ r.label }}</a></th>
       <td class="cl-const ps-types"><a href="{{ r.type_url }}" class="mono">{{ r.type }}</a></td>
       <td class="cl-const rs-list{% if not r.checklists %} ps-none{% endif %}">{% for c in r.checklists %}<a href="{{ c.url }}" title="Pick the item to fill this checklist on">{{ c.name }}</a>{% empty %}—{% endfor %}</td>
       <td class="cl-const rs-list{% if not r.procedures %} ps-none{% endif %}">{% for c in r.procedures %}<a href="{{ c.url }}">{{ c.name }}</a>{% empty %}—{% endfor %}</td>
+      {% for cell in r.cells %}<td class="cl-const rs-list{% if not cell %} ps-none{% endif %}">{% for k in cell %}<a href="{{ k.url }}"{% if k.viewer %} data-lightbox{% else %} target="_blank" rel="noopener"{% endif %}>{{ k.label|default:k.url }}</a>{% empty %}—{% endfor %}</td>{% endfor %}
       <td class="cl-const ps-num"><a href="{{ r.items_url }}?from={{ part_type_id }}" title="The type’s items — each one’s checklists, executive summary and linked parts">{{ r.n }} item{{ r.n|pluralize }}</a></td>
     </tr>{% endif %}{% endfor %}
     </tbody>
   </table></div>
   {% include "explore/_production_tree_script.html" %}
-  {# #231 (Chao 2026-11-25): the type's table organizers — the same rows, each with the links chosen for it; each keeps its own page #}
-  {% for o in organizers %}
-  <div class="rs-org"><h2><a href="{{ o.url }}" title="Its own page — bookmark it there">{{ o.title }}</a></h2>{% if can_edit %}<a href="{{ o.edit_url }}">&#9998; Edit table</a>{% endif %}</div>
-  {% include "explore/_organizer_table.html" with rows=o.rows columns=o.columns key=o.key %}
-  {% endfor %}
-  {% if can_edit %}<p class="rs-new"><a href="{{ new_table_url }}" title="A table of links you choose — these rows, columns of your own">+ New table organizer</a></p>{% endif %}
   {% endif %}
 </div>
 {% include "explore/_lightbox.html" %}

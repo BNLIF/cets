@@ -5116,35 +5116,52 @@ class ExclusiveSelectTest(TestCase):
         self.assertIn("f.exclusive = true", html)
 
 
-# ---- #231: an organizer written as a table of links ---------------------------
+# ---- #231: the Resources table's own columns of links ---------------------------
 
 CRU, FEMB = "D05600300001", "D08100400001"
 TABLE = {"columns": ["Checklists", "Drawings"], "cells": {
     CRU: [[{"label": "Reception", "url": "https://x.io/hw/checklist/D05600300001/Reception/"}, {"label": "", "url": "https://edms.cern.ch/a"}],
           [{"label": "Frame", "url": "https://x.io/hw/shipment-image/abc-1/"}]],
-    "D09900000001": [[{"label": "gone", "url": "https://a.io/gone"}], []]}}   # a type no longer on the list
+    "D09900000001": [[{"label": "gone", "url": "https://a.io/gone"}], []]},   # a type no longer on the list
+    "hidden": {CRU: ["Shipping"]}}
 TABLE_ORGANIZER = {"name": "CRP work order", "organizer": True, "instructions": "Read **this** first.", "table": TABLE, "sections": []}
 LIST = {"rows": [{"folder": True, "type": "", "label": "Anode", "level": 0}, {"type": CRU, "label": "CRU", "level": 1},
                  {"type": FEMB, "label": "", "level": 0}, {"type": CRU, "label": "CRU again", "level": 1}]}
-TABLE_PAGE = f"/hw/dev/organizer-table/{PTID}/"
+RESOURCES = f"/hw/dev/status/{PTID}/resources/"
+TABLE_PAGE = f"{RESOURCES}edit/"
+CRU_FILES = [{"image_id": "q1", "image_name": f"Checklist_{CRU}_QC.json", "created": "2026-08-01T00:00:00"},
+             {"image_id": "q2", "image_name": f"Checklist_{CRU}_Shipping.json", "created": "2026-08-01T00:00:00"},
+             {"image_id": "q3", "image_name": f"Checklist_{CRU}_Assembly.json", "created": "2026-08-01T00:00:00", "comments": "[procedure]"}]
 
 
-def _table_api(cfg=TABLE_ORGANIZER, lst=LIST):
-    """The type carries the organizer (or any checklist) as ``Reception`` and its component list."""
+def _table_api(cfg=TABLE_ORGANIZER, lst=LIST, own=None):
+    """The consortium type carries ``cfg`` as the checklist ``Reception``
+    (marked as a table when it holds one) and its component list; the CRU
+    two checklists and a procedure. ``own`` replaces the type's checklist
+    rows."""
     api = _api(schema=cfg)
-    api.get_component_type_images.return_value = {"data": [
-        {"image_id": "cl1", "image_name": f"Checklist_{PTID}_{NAME}.json", "created": "2026-08-01T00:00:00"}]
-        + ([{"image_id": "pl1", "image_name": f"Production_list_{PTID}.json", "created": "2026-08-01T00:00:00"}] if lst else [])}
+    if own is None:
+        own = [{"image_id": "cl1", "image_name": f"Checklist_{PTID}_{NAME}.json", "created": "2026-08-01T00:00:00",
+                "comments": "first" + checklistforms.comment_marks(cfg)}] if cfg else []
+    listing = {PTID: own + ([{"image_id": "pl1", "image_name": f"Production_list_{PTID}.json", "created": "2026-08-01T00:00:00"}] if lst else []),
+               CRU: CRU_FILES}
+    api.get_component_type_images.return_value = None
+    api.get_component_type_images.side_effect = lambda t: {"data": listing.get(t, [])}
     api.get_image_response.side_effect = lambda iid: mock.Mock(content=json.dumps(lst if iid == "pl1" else cfg).encode())
     api.post_component_type_image.return_value = {"status": "OK"}
     return api
 
 
-class TableOrganizerTest(TestCase):
-    """#231 (Hajime 2026-11-20): the component list's rows, columns the
-    author names, a cell a list of label + URL — stored in an organizer
-    checklist without the rows, edited on a page of its own, shown as a
-    tree table on the organizer's address."""
+def _editor_data(html):
+    return json.loads(html.split('<script id="ot-data" type="application/json">')[1].split("</script>")[0])
+
+
+class ResourcesTableTest(TestCase):
+    """#231 (Hajime 2026-11-20, 2026-11-25): the Resources table's own
+    columns — the component list's rows, columns the consortium names, a
+    cell a list of label + URL, and the checklists and procedures left out
+    of the page's two columns — stored in a checklist file without the rows, edited on a page
+    of its own, shown in the Resources table."""
 
     URL = f"/hw/dev/checklist/{PTID}/{NAME}/"
 
@@ -5162,10 +5179,13 @@ class TableOrganizerTest(TestCase):
             FEMB: [[{"url": "javascript:alert(1)"}, {"url": "ftp://a"}, {"label": "ok", "url": "http://b.io"}], "junk", [{"url": 5}]],
             "D00000000002": [[], [{"label": "", "url": "https://c.io/a b"}], []],                                   # a URL with a space is no link: nothing left, dropped
             "f:Anode": [[{"label": "x", "url": "https://a.io"}]],                                                   # not a type id
-            "D00000000003": "junk"}})
+            "D00000000003": "junk"},
+            "hidden": {CRU: ["Shipping", "", 5], FEMB: [], "f:Anode": ["x"], "D00000000003": "junk"}})
         self.assertEqual(t, {"columns": ["A", "", "B"], "cells": {
             CRU: [[{"label": "x", "url": "https://a.io/1"}], [], []],
-            FEMB: [[{"label": "ok", "url": "http://b.io"}], [], []]}})
+            FEMB: [[{"label": "ok", "url": "http://b.io"}], [], []]},
+            "hidden": {CRU: ["Shipping"]}})                                                                        # a type with nothing left out is not kept
+        self.assertEqual(checklistforms.clean_table({"columns": []}), {"columns": [], "cells": {}, "hidden": {}})
 
     def test_the_schema_carries_the_table_and_a_types_cells(self):
         self.assertIsNone(checklistforms.normalize(ORGANIZER, NAME)["table"])
@@ -5174,167 +5194,198 @@ class TableOrganizerTest(TestCase):
         self.assertEqual([[k["viewer"] for k in c] for c in checklistforms.table_cells(t, CRU)], [[False, False], [True]])
         self.assertEqual(checklistforms.table_cells(t, FEMB), [[], []])     # nothing chosen for it
 
-    def test_the_organizer_page_shows_the_component_lists_rows_with_the_tables_links(self):
+    def test_a_listing_knows_a_table_by_its_mark(self):
+        rows = [{"image_id": "a", "image_name": f"Checklist_{PTID}_A.json", "created": "1", "comments": "why [table]"},
+                {"image_id": "b", "image_name": f"Checklist_{PTID}_B.json", "created": "1", "comments": "plain"}]
+        self.assertEqual([(r["name"], r["table"]) for r in checklistforms.available(None, PTID, rows=rows)], [("A", True), ("B", False)])
+
+    # ---- the Resources page ----
+
+    def test_the_resources_table_has_the_saved_columns_and_leaves_out_the_unticked_checklists(self):
         api = _table_api()
         m1, m2 = _mocked(api)
         with m1, m2:
-            r = self.client.get(self.URL)
-            html = r.content.decode()
-        self.assertTemplateUsed(r, "explore/checklist_organizer.html")
-        self.assertIn(f'<table class="cl-table cl-gridlines ps-table rs-table" data-table="org:{PTID}:{NAME}">', html)
-        self.assertIn("<thead><tr><th>Component</th><th>Checklists</th><th>Drawings</th></tr></thead>", html)
-        self.assertIn('<tr data-level="0" data-t="f:Anode" class="ps-folder">', html)             # the list's folder: a heading, no links
-        self.assertIn('<td class="cl-const" colspan="2"></td>', html)
-        self.assertIn(f'<tr data-level="1" data-t="{CRU}">', html)
-        self.assertIn(f'<a href="/hw/dev/?node={CRU}" title="{CRU}">CRU</a></th>', html)           # the list's label, to the type's page
-        self.assertIn(f'<a href="/hw/dev/?node={FEMB}" title="{FEMB}">FEMB FD1 SAMTEC version</a></th>', html)   # no label: the mirror's name
+            html = self.client.get(RESOURCES).content.decode()
+        self.assertEqual(html.count('data-table="'), 1)                                            # one table: no table organizer under it
+        self.assertIn("<thead><tr><th>Component</th><th>Type ID</th><th>QA/QC checklists</th><th>Procedures</th><th>Checklists</th><th>Drawings</th><th>Items / Exec summaries</th></tr></thead>", html)
+        self.assertIn('<td class="cl-const" colspan="6"></td>', html)                              # the list's folder: a heading across them all
+        self.assertIn(f'<td class="cl-const rs-list"><a href="/hw/dev/checklist/{CRU}/QC/" title="Pick the item to fill this checklist on">QC</a></td>', html)
+        self.assertNotIn(f"/hw/dev/checklist/{CRU}/Shipping/", html)                               # unticked in the editor: not in the QA/QC column
+        self.assertIn(f'<td class="cl-const rs-list"><a href="/hw/dev/checklist/{CRU}/Assembly/">Assembly</a></td>', html)   # Procedures: the page's own, whatever is saved (Chao 2026-11-25)
         self.assertIn('<a href="https://x.io/hw/checklist/D05600300001/Reception/" target="_blank" rel="noopener">Reception</a>', html)
         self.assertIn('<a href="https://edms.cern.ch/a" target="_blank" rel="noopener">https://edms.cern.ch/a</a>', html)   # no label: its URL
         self.assertIn('<a href="https://x.io/hw/shipment-image/abc-1/" data-lightbox>Frame</a>', html)                      # the image proxy: in the viewer, not a download
         self.assertEqual(html.count(">Reception</a>"), 2)                                          # the type is listed twice: the same links in both rows
-        self.assertIn('<td class="cl-const rs-list ps-none">—</td>', html)                         # FEMB: nothing chosen
+        self.assertEqual(html.count('<td class="cl-const rs-list ps-none">—</td>'), 4)             # FEMB: no checklist, no procedure, nothing chosen
         self.assertNotIn("https://a.io/gone", html)                                                # off the list: not shown
-        self.assertIn('data-fold="close">Collapse all</button>', html)
-        self.assertIn("window.psTree = {restore: restore", html)                                   # the Resources table's fold
-        self.assertIn(f'href="/hw/dev/organizer-table/{PTID}/?name={NAME}&amp;next=', html)
-        self.assertIn("&#9998; Edit table</a>", html)
-        self.assertNotIn("&#9998; Edit checklist</a>", html)
-        self.assertIn("&#9734; Bookmark", html)
-        self.assertIn("<strong>this</strong>", html)                                               # its note, as on any organizer
-        self.assertNotIn('id="cl-outline"', html)                                                  # no sections: no outline, the type tree folded away
-        self.assertNotIn("No sections yet", html)
-        self.assertIn('id="ex-layout" data-side-hidden', html)
-        self.assertEqual(api.get_component_type_images.call_count, 2)                              # the organizer's listing and the list's; nothing per listed type
+        self.assertIn(f'href="{TABLE_PAGE}" title="Its columns of links, and what is left out of the first two">&#9998; Edit table</a>', html)
+        self.assertNotIn("table organizer", html)
+        self.assertEqual([c.args[0] for c in api.get_component_type_images.call_args_list].count(PTID), 1)   # the type listed once
+        self.assertEqual(sorted(c.args[0] for c in api.get_image_response.call_args_list), ["cl1", "pl1"])   # the list and the table; nothing else opened
+
+    def test_with_no_table_saved_it_shows_the_templates_empty_columns(self):
+        api = _table_api(cfg=None)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(RESOURCES).content.decode()
+        self.assertIn("<th>QA/QC checklists</th><th>Procedures</th><th>Installation checklists</th><th>Shipping checklists</th><th>Items / Exec summaries</th>", html)
+        self.assertIn(f'<a href="/hw/dev/checklist/{CRU}/QC/" title="Pick the item to fill this checklist on">QC</a>'
+                      f'<a href="/hw/dev/checklist/{CRU}/Shipping/" title="Pick the item to fill this checklist on">Shipping</a></td>', html)   # nothing left out
+        self.assertIn(f'<td class="cl-const rs-list"><a href="/hw/dev/checklist/{CRU}/Assembly/">Assembly</a></td>', html)   # ticked Procedure
+        self.assertEqual(sorted(c.args[0] for c in api.get_image_response.call_args_list), ["pl1"])
+
+    def test_the_newest_table_is_the_types_and_a_retired_one_is_not(self):
+        api = _table_api(own=[
+            {"image_id": "old", "image_name": f"Checklist_{PTID}_Old.json", "created": "2026-08-01T00:00:00", "comments": "[table]"},
+            {"image_id": "new", "image_name": f"Checklist_{PTID}_New.json", "created": "2026-09-01T00:00:00", "comments": "[table]"},
+            {"image_id": "gone", "image_name": f"Checklist_{PTID}_Gone.json", "created": "2026-10-01T00:00:00", "comments": "[retired] [table]"},
+            {"image_id": "plain", "image_name": f"Checklist_{PTID}_Plain.json", "created": "2026-11-01T00:00:00", "comments": "an organizer of sections"}])
+        files = {"pl1": LIST, "new": {**TABLE_ORGANIZER, "table": {"columns": ["Newest"], "cells": {}, "hidden": {CRU: ["Assembly"]}}}}
+        api.get_image_response.side_effect = lambda iid: mock.Mock(content=json.dumps(files[iid]).encode())
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            html = self.client.get(RESOURCES).content.decode()
+            edit = self.client.get(TABLE_PAGE).content.decode()
+        self.assertIn("<th>QA/QC checklists</th><th>Procedures</th><th>Newest</th><th>Items / Exec summaries</th>", html)
+        self.assertIn(f"Checklist_{PTID}_New.json", edit)
+        self.assertNotIn(f"/hw/dev/checklist/{CRU}/Assembly/", html)                               # a procedure unticked in the editor: out of Procedures
 
     def test_the_page_follows_the_component_list(self):
         lst = {"rows": [{"type": FEMB, "label": "Boards", "level": 0}, {"type": CRU, "label": "", "level": 1}, {"type": "D00000000009", "label": "New part", "level": 0}]}
         m1, m2 = _mocked(_table_api(lst=lst))
         with m1, m2:
-            html = self.client.get(self.URL).content.decode()
+            html = self.client.get(RESOURCES).content.decode()
         self.assertLess(html.index(">Boards</a>"), html.index(f'data-t="{CRU}"'))                 # the list's new order and nesting
         self.assertIn(f'<tr data-level="1" data-t="{CRU}">', html)
         self.assertEqual(html.count(">Reception</a>"), 1)                                          # the links went with their type
         self.assertIn(">New part</a></th>", html)                                                  # a row added to the list: here, empty
-        m1, m2 = _mocked(_table_api(lst=None))
+
+    # ---- the file's own address ----
+
+    def test_a_tables_own_address_opens_the_resources_page(self):
+        m1, m2 = _mocked(_table_api())
         with m1, m2:
-            html = self.client.get(self.URL).content.decode()
-        self.assertIn("No component list on this type yet", html)
-        self.assertNotIn('data-table="org:', html)
+            r = self.client.get(self.URL)
+        self.assertRedirects(r, RESOURCES, fetch_redirect_response=False)
 
     def test_an_organizer_of_sections_is_as_before(self):
-        api = _api(schema=ORGANIZER)
-        m1, m2 = _mocked(api)
-        with m1, m2:
-            html = self.client.get(self.URL).content.decode()
-        self.assertIn("&#9998; Edit checklist</a>", html)
-        self.assertNotIn("Edit table", html)
-        self.assertNotIn('data-table="org:', html)
-        self.assertIn('id="cl-outline"', html)
-        self.assertNotIn('id="ex-layout" data-side-hidden', html)
-        self.assertEqual(api.get_component_type_images.call_count, 1)                              # the component list is not read for it
+        for cfg in (ORGANIZER, {**ORGANIZER, "table": TABLE}):                                     # a table riding with sections: the sections' page
+            api = _api(schema=cfg)
+            m1, m2 = _mocked(api)
+            with m1, m2:
+                html = self.client.get(self.URL).content.decode()
+            self.assertIn("&#9998; Edit checklist</a>", html)
+            self.assertNotIn("Edit table", html)
+            self.assertNotIn("rs-table", html)
+            self.assertIn('id="cl-outline"', html)
+            self.assertNotIn('id="ex-layout" data-side-hidden', html)
+            self.assertEqual(api.get_component_type_images.call_count, 1)                          # the component list is not read for it
 
-    def test_a_table_with_sections_shows_both_and_keeps_the_outline(self):
-        m1, m2 = _mocked(_table_api(cfg={**ORGANIZER, "table": TABLE}))
-        with m1, m2:
-            html = self.client.get(self.URL).content.decode()
-        self.assertLess(html.index('data-table="org:'), html.index('data-title="North planes"'))
-        self.assertIn('id="cl-outline"', html)
+    # ---- the editor ----
 
-    def test_a_new_table_has_the_lists_rows_two_columns_and_asks_for_a_name(self):
-        api = _table_api()
+    def test_a_first_table_opens_with_the_template_and_each_types_checklists(self):
+        api = _table_api(cfg=None)
         m1, m2 = _mocked(api)
         with m1, m2:
             r = self.client.get(TABLE_PAGE)
             html = r.content.decode()
         self.assertEqual(r.status_code, 200)
-        self.assertIn("<h1>New table organizer", html)
-        data = json.loads(html.split('<script id="ot-data" type="application/json">')[1].split("</script>")[0])
-        self.assertEqual((data["columns"], data["cells"]), (["Checklists", "Procedures / Drawings"], {}))
-        self.assertEqual(data["rows"], [{"type": "", "label": "Anode", "level": 0, "folder": True}, {"type": CRU, "label": "CRU", "level": 1, "folder": False},
-                                        {"type": FEMB, "label": "FEMB FD1 SAMTEC version", "level": 0, "folder": False}, {"type": CRU, "label": "CRU again", "level": 1, "folder": False}])
-        self.assertIn('name="cl_name" value="" required pattern="[^/]+"', html)
-        self.assertIn('<button type="submit" class="es-btn primary">Save organizer to HWDB</button>', html)
+        self.assertTemplateUsed(r, "explore/production_resources_edit.html")
+        data = _editor_data(html)
+        self.assertEqual((data["columns"], data["cells"], data["hidden"]), (["Installation checklists", "Shipping checklists"], {}, {}))
+        self.assertEqual(data["rows"], [
+            {"type": "", "label": "Anode", "level": 0, "folder": True, "checklists": [], "procedures": []},
+            {"type": CRU, "label": "CRU", "level": 1, "folder": False, "checklists": ["QC", "Shipping"], "procedures": ["Assembly"]},   # what the page fills, to tick
+            {"type": FEMB, "label": "FEMB FD1 SAMTEC version", "level": 0, "folder": False, "checklists": [], "procedures": []},
+            {"type": CRU, "label": "CRU again", "level": 1, "folder": False, "checklists": ["QC", "Shipping"], "procedures": ["Assembly"]}])
+        self.assertNotIn('name="cl_name"', html)                                                   # a type has one table: no name to give
+        self.assertIn('<button type="submit" class="es-btn primary">Save to HWDB</button>', html)
         self.assertIn('placeholder="reason — kept with this version"', html)
         self.assertIn(f'<a href="/hw/dev/plan-list/{PTID}/?next=', html)                           # the rows are changed in the list's editor
-        self.assertNotIn('id="ot-row"', html)                                                      # no rows of its own to add
+        self.assertIn(f'<a class="es-btn quiet" href="{RESOURCES}">Cancel</a>', html)
+        self.assertNotIn("on the type in HWDB", html)                                              # no file yet
 
-    def test_an_existing_table_opens_with_its_links(self):
+    def test_a_saved_table_opens_with_its_links_and_what_it_leaves_out(self):
         m1, m2 = _mocked(_table_api())
         with m1, m2:
-            html = self.client.get(f"{TABLE_PAGE}?name={NAME}&next=/hw/dev/x/").content.decode()
-        self.assertIn("<h1>CRP work order", html)
-        data = json.loads(html.split('<script id="ot-data" type="application/json">')[1].split("</script>")[0])
+            html = self.client.get(TABLE_PAGE).content.decode()
+        data = _editor_data(html)
         self.assertEqual(data["columns"], ["Checklists", "Drawings"])
         self.assertEqual(data["cells"][CRU][1], [{"label": "Frame", "url": "https://x.io/hw/shipment-image/abc-1/"}])   # the stored form: nothing the page worked out
-        self.assertNotIn('name="cl_name"', html)             # the name is its address: fixed
-        self.assertIn(f'<input type="hidden" name="orig" value="{NAME}">', html)
+        self.assertEqual(data["hidden"], {CRU: ["Shipping"]})
         self.assertIn(f"Checklist_{PTID}_{NAME}.json", html)
-        self.assertIn('<a class="es-btn quiet" href="/hw/dev/x/">Cancel</a>', html)
 
     def test_no_component_list_no_table_to_edit(self):
-        m1, m2 = _mocked(_table_api(lst=None))
+        m1, m2 = _mocked(_table_api(cfg=None, lst=None))
         with m1, m2:
             html = self.client.get(TABLE_PAGE).content.decode()
+            page = self.client.get(RESOURCES).content.decode()
         self.assertIn("No component list on this type yet", html)
         self.assertIn(f'<a href="/hw/dev/plan-list/{PTID}/?next=', html)
         self.assertNotIn('id="ot-form"', html)
+        self.assertNotIn("Edit table</a>", page)
 
-    def test_a_checklist_without_a_table_goes_to_the_checklist_editor(self):
-        m1, m2 = _mocked(_api(schema=ORGANIZER))
-        with m1, m2:
-            r = self.client.get(f"{TABLE_PAGE}?name={NAME}")
-        self.assertRedirects(r, f"/hw/dev/checklist-config/{PTID}/?name={NAME}&next=", fetch_redirect_response=False)
-
-    def test_save_posts_a_new_organizer_checklist_without_rows(self):
-        api = _table_api()
-        api.get_component_type_images.return_value = {"data": []}
+    def test_save_posts_a_first_table_as_resources_without_rows(self):
+        api = _table_api(cfg=None)
         m1, m2 = _mocked(api)
-        raw = {"columns": ["Checklists"], "rows": [{"label": "x"}], "cells": {CRU: [[{"label": "R", "url": "https://a.io/r"}, {"label": "bad", "url": "javascript:x"}]], FEMB: [[]]}}
+        raw = {"columns": ["Shipping checklists"], "rows": [{"label": "x"}], "hidden": {CRU: ["Shipping"], FEMB: []},
+               "cells": {CRU: [[{"label": "R", "url": "https://a.io/r"}, {"label": "bad", "url": "javascript:x"}]], FEMB: [[]]}}
         with m1, m2:
-            r = self.client.post(TABLE_PAGE, {"orig": "", "cl_name": "Work order", "table_json": json.dumps(raw), "reason": "first"})
-        self.assertRedirects(r, f"/hw/dev/checklist/{PTID}/Work%20order/", fetch_redirect_response=False)
+            r = self.client.post(TABLE_PAGE, {"table_json": json.dumps(raw), "reason": "first"})
+        self.assertRedirects(r, RESOURCES, fetch_redirect_response=False)
         args = api.post_component_type_image.call_args
-        self.assertEqual((args.args[0], args.args[2]), (PTID, f"Checklist_{PTID}_Work order.json"))
+        self.assertEqual((args.args[0], args.args[2]), (PTID, f"Checklist_{PTID}_Resources.json"))
         self.assertEqual(args.kwargs["comments"], "first [table]")            # the reason, and the mark the Resources page finds it by
         self.assertEqual(json.loads(args.args[1].getvalue()), {
-            "name": "Work order", "test_type_name": "", "item_fields": [], "sections": [], "organizer": True,
-            "table": {"columns": ["Checklists"], "cells": {CRU: [[{"label": "R", "url": "https://a.io/r"}]]}}})
+            "name": "Resources", "test_type_name": "", "item_fields": [], "sections": [], "organizer": True,
+            "table": {"columns": ["Shipping checklists"], "cells": {CRU: [[{"label": "R", "url": "https://a.io/r"}]]}, "hidden": {CRU: ["Shipping"]}}})
 
-    def test_save_keeps_the_rest_of_an_existing_organizer(self):
-        api = _table_api(cfg={**TABLE_ORGANIZER, "retired": True, "sections": ORGANIZER["sections"]})
+    def test_save_goes_into_the_types_table_and_keeps_the_rest_of_the_file(self):
+        api = _table_api(cfg={**TABLE_ORGANIZER, "procedure": True})
         m1, m2 = _mocked(api)
         with m1, m2:
-            r = self.client.post(TABLE_PAGE, {"orig": NAME, "cl_name": "ignored", "next": "/hw/dev/x/",
-                                              "table_json": json.dumps({"columns": ["Only"], "cells": {FEMB: [[{"label": "", "url": "https://a.io/f"}]]}})})
-        self.assertRedirects(r, "/hw/dev/x/", fetch_redirect_response=False)
+            r = self.client.post(TABLE_PAGE, {"table_json": json.dumps({"columns": ["Only"], "cells": {FEMB: [[{"label": "", "url": "https://a.io/f"}]]}})})
+        self.assertRedirects(r, RESOURCES, fetch_redirect_response=False)
         args = api.post_component_type_image.call_args
-        self.assertEqual(args.args[2], f"Checklist_{PTID}_{NAME}.json")
-        self.assertEqual(args.kwargs["comments"], "Table organizer (Explorer) [retired] [table]")
+        self.assertEqual(args.args[2], f"Checklist_{PTID}_{NAME}.json")       # a table organizer saved before: the same file
+        self.assertEqual(args.kwargs["comments"], "Resources table (Explorer) [procedure] [table]")
         saved = json.loads(args.args[1].getvalue())
-        self.assertEqual((saved["name"], saved["instructions"], saved["retired"]), ("CRP work order", "Read **this** first.", True))
-        self.assertEqual(saved["sections"], ORGANIZER["sections"])
-        self.assertEqual(saved["table"], {"columns": ["Only"], "cells": {FEMB: [[{"label": "", "url": "https://a.io/f"}]]}})
+        self.assertEqual((saved["name"], saved["instructions"], saved["procedure"]), ("CRP work order", "Read **this** first.", True))
+        self.assertEqual(saved["table"], {"columns": ["Only"], "cells": {FEMB: [[{"label": "", "url": "https://a.io/f"}]]}, "hidden": {}})
 
-    def test_save_refuses_a_taken_name_a_checklist_without_a_table_and_an_unreadable_table(self):
-        api = _api(schema=ORGANIZER)
+    def test_save_refuses_a_taken_name_and_an_unreadable_table(self):
+        api = _table_api(cfg=ORGANIZER, own=[{"image_id": "cl1", "image_name": f"Checklist_{PTID}_Resources.json", "created": "2026-08-01T00:00:00"}])
         m1, m2 = _mocked(api)
-        ok = json.dumps({"columns": [], "cells": {}})
         with m1, m2:
-            self.client.post(TABLE_PAGE, {"orig": "", "cl_name": NAME, "table_json": ok})             # a new one under an existing checklist's name
-            self.client.post(TABLE_PAGE, {"orig": NAME, "table_json": ok})                           # an organizer of sections
-            self.client.post(TABLE_PAGE, {"orig": "", "cl_name": "a/b", "table_json": ok})
-            self.client.post(TABLE_PAGE, {"orig": "", "cl_name": "New", "table_json": "{not json"})
-            r = self.client.post(TABLE_PAGE, {"orig": "", "cl_name": "New", "table_json": json.dumps({"cells": {}})}, follow=False)
+            r = self.client.post(TABLE_PAGE, {"table_json": json.dumps({"columns": [], "cells": {}})}, follow=False)   # a checklist of that name, holding no table
+        self.assertRedirects(r, TABLE_PAGE, fetch_redirect_response=False)
         api.post_component_type_image.assert_not_called()
-        self.assertRedirects(r, f"{TABLE_PAGE}", fetch_redirect_response=False)
+        api = _table_api(cfg=None)
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            self.client.post(TABLE_PAGE, {"table_json": "{not json"})
+            r = self.client.post(TABLE_PAGE, {"table_json": json.dumps({"cells": {}})}, follow=False)
+        self.assertRedirects(r, TABLE_PAGE, fetch_redirect_response=False)
+        api.post_component_type_image.assert_not_called()
+
+    def test_a_saved_table_that_cannot_be_read_is_not_written_over(self):
+        api = _table_api()
+        api.get_image_response.side_effect = lambda iid: mock.Mock(content=json.dumps(LIST).encode() if iid == "pl1" else b"<html>502")
+        m1, m2 = _mocked(api)
+        with m1, m2:
+            g = self.client.get(TABLE_PAGE)
+            r = self.client.post(TABLE_PAGE, {"table_json": json.dumps({"columns": [], "cells": {}})})
+        self.assertRedirects(g, RESOURCES, fetch_redirect_response=False)
+        self.assertRedirects(r, RESOURCES, fetch_redirect_response=False)
+        api.post_component_type_image.assert_not_called()
 
     def test_the_types_roles_gate_it(self):
         api = _table_api()
         api.get_component_type.return_value = {"data": {"roles": [{"id": 34, "name": "FC_test"}]}}
         m1, m2 = _mocked(api)
         with mock.patch("explore.views._my_roles", return_value=[{"id": 9, "name": "builder"}]), m1, m2:
-            html = self.client.get(f"{TABLE_PAGE}?name={NAME}").content.decode()
-            r = self.client.post(TABLE_PAGE, {"orig": NAME, "table_json": json.dumps(TABLE)})
+            html = self.client.get(TABLE_PAGE).content.decode()
+            r = self.client.post(TABLE_PAGE, {"table_json": json.dumps(TABLE)})
         self.assertIn("needs one of its HWDB roles <b>FC_test</b>", html)
         self.assertNotIn('id="ot-form"', html)
         self.assertEqual(r.status_code, 403)
@@ -5349,35 +5400,4 @@ class TableOrganizerTest(TestCase):
         self.assertEqual(api.post_component_type_image.call_args.kwargs["comments"], "Consortium checklist schema (Explorer editor) [table]")
         self.assertIn("keptTable = cfg.table || null;", html)                 # what the editor does not edit rides through it
         self.assertIn("if (keptTable) cfg.table = keptTable;", html)
-        self.assertIn(f'<a id="f-table" hidden href="/hw/dev/organizer-table/{PTID}/?name={NAME}"', html)
-
-    def test_a_listing_knows_a_table_by_its_mark(self):
-        rows = [{"image_id": "a", "image_name": f"Checklist_{PTID}_A.json", "created": "1", "comments": "why [table]"},
-                {"image_id": "b", "image_name": f"Checklist_{PTID}_B.json", "created": "1", "comments": "plain"}]
-        self.assertEqual([(r["name"], r["table"]) for r in checklistforms.available(None, PTID, rows=rows)], [("A", True), ("B", False)])
-
-    def test_the_resources_page_shows_the_types_tables_under_its_own(self):
-        # Chao 2026-11-25: the generated table lists every checklist and procedure; the tables of chosen links come after it, on the same rows
-        api = _table_api()
-        files = {"cl1": TABLE_ORGANIZER, "pl1": LIST, "old": {**TABLE_ORGANIZER, "name": "Old order"}, "plain": ORGANIZER}
-        api.get_image_response.side_effect = lambda iid: mock.Mock(content=json.dumps(files[iid]).encode())
-        listing = [{"image_id": "cl1", "image_name": f"Checklist_{PTID}_{NAME}.json", "created": "2026-08-01T00:00:00", "comments": "first [table]"},
-                   {"image_id": "old", "image_name": f"Checklist_{PTID}_Old.json", "created": "2026-08-01T00:00:00", "comments": "[retired] [table]"},
-                   {"image_id": "plain", "image_name": f"Checklist_{PTID}_Plain.json", "created": "2026-08-01T00:00:00", "comments": "an organizer of sections"},
-                   {"image_id": "pl1", "image_name": f"Production_list_{PTID}.json", "created": "2026-08-01T00:00:00"}]
-        api.get_component_type_images.side_effect = lambda t: {"data": listing if t == PTID else []}
-        m1, m2 = _mocked(api)
-        with m1, m2:
-            html = self.client.get(f"/hw/dev/status/{PTID}/resources/").content.decode()
-        own, tbl = html.index(f'data-table="rs:{PTID}"'), html.index(f'data-table="org:{PTID}:{NAME}"')
-        self.assertLess(own, tbl)                                                                  # under the generated table
-        self.assertIn(f'<h2><a href="/hw/dev/checklist/{PTID}/{NAME}/" title="Its own page — bookmark it there">CRP work order</a></h2>', html)
-        self.assertIn(f'<a href="/hw/dev/organizer-table/{PTID}/?name={NAME}&amp;next=%2Fhw%2Fdev%2Fstatus%2F{PTID}%2Fresources%2F">&#9998; Edit table</a>', html)
-        self.assertIn("<thead><tr><th>Component</th><th>Checklists</th><th>Drawings</th></tr></thead>", html[tbl:])
-        self.assertEqual(html[tbl:].count(">Reception</a>"), 2)                                    # the same rows, CRU listed twice
-        self.assertIn('<a href="https://x.io/hw/shipment-image/abc-1/" data-lightbox>Frame</a>', html[tbl:])
-        self.assertNotIn("Old order", html)                                                        # retired: left out
-        self.assertEqual(html.count('data-table="org:'), 1)                                        # the organizer of sections is not a table
-        self.assertIn(f'<a href="/hw/dev/organizer-table/{PTID}/?next=%2Fhw%2Fdev%2Fstatus%2F{PTID}%2Fresources%2F" title="A table of links you choose', html)
-        self.assertEqual([c.args[0] for c in api.get_component_type_images.call_args_list].count(PTID), 1)   # the type listed once
-        self.assertEqual(sorted(c.args[0] for c in api.get_image_response.call_args_list), ["cl1", "pl1"])   # the list and the one marked file; nothing else opened
+        self.assertIn(f'<a id="f-table" hidden href="{TABLE_PAGE}"', html)

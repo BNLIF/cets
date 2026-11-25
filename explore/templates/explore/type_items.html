@@ -48,7 +48,7 @@
   </div>
   {% endif %}
   <div class="tbl-scroll"><table class="cl-table cl-gridlines ps-table rs-table">
-    <thead><tr>{% include "explore/_sort_th.html" with key="pid" label="Part ID" %}{% include "explore/_sort_th.html" with key="serial" label="Serial number" %}{% include "explore/_sort_th.html" with key="status" label="Status" %}<th>QA/QC checklists</th><th>Procedures / Drawings</th><th>Exec summary</th><th>Linked parts</th></tr></thead>
+    <thead><tr>{% include "explore/_sort_th.html" with key="pid" label="Part ID" %}{% include "explore/_sort_th.html" with key="serial" label="Serial number" %}{% include "explore/_sort_th.html" with key="status" label="Status" %}<th>QA/QC checklists</th><th>Procedures</th><th>Exec summary</th><th>Linked parts</th></tr></thead>
     <tbody>
     {% for p in parts_page %}<tr>
       <th scope="row" class="cl-rowlab"><a href="{{ p.res.part_url }}" class="mono" title="The item’s page">{{ p.part_id }}</a></th>

@@ -830,6 +830,7 @@ class ResourcesPageTest(TestCase):
         # the columns: checklists to the chooser, procedures apart, ES only with a config, the live count to the items page
         self.assertIn(f'<a href="/hw/dev/checklist/{SIPM}/Burn-in/" title="Pick the item to fill this checklist on">Burn-in</a><a href="/hw/dev/checklist/{SIPM}/QC/" title="Pick the item to fill this checklist on">QC</a></td>', html)   # the listing's order: by name
         self.assertNotIn("Old", html.split("<tbody>")[1])   # retired: left out
+        self.assertIn("<th>QA/QC checklists</th><th>Procedures</th><th>Installation checklists</th><th>Shipping checklists</th><th>Items / Exec summaries</th>", html)   # #231: no table saved — the template's columns after the page's own
         self.assertIn(f'<td class="cl-const rs-list"><a href="/hw/dev/checklist/{SIPM}/Assembly/">Assembly</a></td>', html)
         self.assertNotIn(f'<a href="/hw/dev/checklist/{SIPM}/Assembly/" title="Pick', html)   # not among the QA/QC checklists
         self.assertNotIn(f"/hw/dev/exec-summary/{SIPM}/", html)   # one Items / Exec summaries column: the Items page carries each item's summary (Chao 2026-11-10)
@@ -847,7 +848,7 @@ class ResourcesPageTest(TestCase):
         with m1, m2:
             html = self.client.get(self.URL).content.decode()
         self.assertIn('<tr data-level="0" data-t="f:Boards" class="ps-folder">\n      <th scope="row" class="cl-rowlab"><button type="button" class="ps-tog" aria-expanded="true" title="Fold its rows"></button>Boards</th>\n'
-                      '      <td class="cl-const" colspan="4"></td>', html)
+                      '      <td class="cl-const" colspan="6"></td>', html)
         self.assertIn(f'<tr data-level="1" data-t="{SIPM}">', html)
         self.assertEqual(api.get_component_type_images.call_count, 2)   # the list's type and the one listed type
 
@@ -1142,7 +1143,7 @@ class ConsortiumTypeTest(TestCase):
             self.assertNotIn("ES config", html)
             self.assertNotIn("New item", html)
             self.assertIn("Edit checklists", html)
-            self.assertIn('<a href="/hw/organizer-table/D05700200099/?next=', html)   # #231: a new organizer as a table of links
+            self.assertNotIn("table organizer", html)   # #231: the table of links is the Resources page's, edited from there
             self.assertIn('id="cl-names-dd"', html)   # the organizer checklists still open from here
             self.client.post(url, {"next": self.leaf_url, "class": "shipping"})   # switching clears the other mark
             self.assertFalse(ConsortiumTypeOverride.objects.exists())

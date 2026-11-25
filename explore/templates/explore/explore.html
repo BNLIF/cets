@@ -231,7 +231,6 @@
         <dt>Manage</dt><dd class="span">
           {% if is_consortium %}{# only the organizer checklists make sense on a consortium type (Chao 2026-10-08) #}
           <a href="{% url 'explore:checklist_config' part_type_id=leaf.part_type_id %}?next={{ request.path|urlencode }}" target="_blank" rel="noopener" title="Create or edit the type’s organizer checklists (Checklist_{{ leaf.part_type_id }}_*.json in HWDB)">Edit checklists <span aria-hidden="true">&#x2197;</span></a>
-          <span class="sep">·</span><a href="{% url 'explore:organizer_table' part_type_id=leaf.part_type_id %}?next={{ request.path|urlencode }}" target="_blank" rel="noopener" title="A new organizer written as a table of links — the component list’s rows, columns of your own">New table organizer <span aria-hidden="true">&#x2197;</span></a>
           {% else %}
           <a href="{% url 'explore:es_config' part_type_id=leaf.part_type_id %}?next={{ request.path|urlencode }}" target="_blank" rel="noopener" title="Create or edit the type’s executive-summary config (ES_{{ leaf.part_type_id }}_*.json in HWDB)">ES config <span aria-hidden="true">&#x2197;</span></a>
           <span class="sep">·</span><a href="{% url 'explore:checklist_config' part_type_id=leaf.part_type_id %}?next={{ request.path|urlencode }}" target="_blank" rel="noopener" title="Create or edit the type’s consortium checklists (Checklist_{{ leaf.part_type_id }}_*.json in HWDB) — they render as fill-out forms on every item">Edit checklists <span aria-hidden="true">&#x2197;</span></a>

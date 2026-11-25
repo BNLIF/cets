@@ -875,13 +875,20 @@ def explore_production_resources_view(request, part_type_id):
     """#213 (Chao 2026-11-05; round 2 Hajime 2026-11-10): the Resources
     page — a table's nested component list as a tree table (the status
     table's indent and fold) with, per component, the type's QA/QC
-    checklists (each to its PID chooser), its procedures / drawings
-    (checklists flagged Procedure), its executive summaries when the type
-    has an ES config, and its item count linking the Items page. Built on
-    each visit from one image listing per listed type and the mirror's
-    counts, kept nowhere; read-only (Chao 2026-11-10: the Markdown export
-    and the organizer-draft hand-off went — a saved organizer links this
-    page instead of carrying a copy of it)."""
+    checklists (each to its PID chooser), its procedures (checklists
+    ticked Procedure), the consortium's own columns of links, and its item
+    count linking the Items page. The rows, the checklists, the procedures
+    and the counts are built on each visit from one image listing per
+    listed type and the mirror, kept nowhere (Chao 2026-11-10:
+    the Markdown export and the organizer-draft hand-off went — a saved
+    organizer links this page instead of carrying a copy of it).
+    Hajime 2026-11-25 (#231): one table, not this one and a table
+    organizer under it — the columns after Procedures are the type's
+    saved table (``_resources_table``; its editor is
+    ``explore_production_resources_edit_view``), which may also leave
+    checklists and procedures out of their columns; until one is saved
+    they are the template's, empty. Chao, the same day: Procedures stays a
+    column of the page's own, filled from the ticks whatever is saved."""
     inst = instance_of(request)
     page_url = _rev(request, "explore:production_resources", args=[part_type_id])
     try:
@@ -901,13 +908,16 @@ def explore_production_resources_view(request, part_type_id):
     ids = production.type_ids(rows)
     info = {tid: _resource_names(_type_resources(api, inst, tid)) for tid in set(ids)}   # one listing per distinct type
     table = production.resources_rows(rows, production.names(inst, ids), info, production.counts(inst, ids))
+    own = (_resources_table(api, part_type_id, listing)[2] if rows else None) or _resources_template()
     for r in table:
         if r["folder"]:
             continue
+        hidden = own["hidden"].get(r["type"]) or []
         r["type_url"] = _rev(request, "explore:home") + f"?node={r['type']}"
         r["items_url"] = _rev(request, "explore:type_items", args=[r["type"]])
-        r["checklists"] = [{"name": c, "url": _rev(request, "explore:type_checklist", args=[r["type"], c])} for c in r["checklists"]]
-        r["procedures"] = [{"name": c, "url": _rev(request, "explore:type_checklist", args=[r["type"], c])} for c in r["procedures"]]
+        for k in ("checklists", "procedures"):
+            r[k] = [{"name": c, "url": _rev(request, "explore:type_checklist", args=[r["type"], c])} for c in r[k] if c not in hidden]
+        r["cells"] = checklistforms.table_cells(own, r["type"])
     return render(request, "explore/production_resources.html", {
         "active_nav": "production",
         "sidebar": navigation.sidebar_tree(inst, {}),
@@ -917,8 +927,8 @@ def explore_production_resources_view(request, part_type_id):
         "rows": table,
         "tree": any(r["has_children"] for r in table),
         "n_rows": len(rows),
-        "organizers": _resources_tables(request, api, part_type_id, listing, table) if table else [],   # #231: the tables of chosen links, under the generated one
-        "new_table_url": _rev(request, "explore:organizer_table", args=[part_type_id]) + f"?{urlencode({'next': request.get_full_path()})}",
+        "columns": own["columns"],
+        "edit_url": _rev(request, "explore:production_resources_edit", args=[part_type_id]),
         "status_url": _rev(request, "explore:production_status", args=[part_type_id]),
         "list_url": _rev(request, "explore:production_list", args=[part_type_id]),
         "can_edit": inst in settings.HWDB_WRITE_INSTANCES,
@@ -6095,18 +6105,12 @@ def explore_type_checklist_view(request, part_type_id, name):
         # sections render right here; the bookmark, the type page's
         # Checklists row and Link-to-checklist fields all land on this URL.
         # #213 round 2: a procedure (static notes and drawings) the same way.
-        outline = bool(schema["sections"] or not schema["table"])   # #231: a table alone has no sections to outline — the type tree, folded away
-        table_rows = _organizer_table_rows(request, api, inst, part_type_id, schema["table"]) if schema["table"] else []
+        if schema["table"] and not schema["sections"]:   # #231 (Hajime 2026-11-25): a table of links is the Resources table's columns, shown there
+            return redirect(_rev(request, "explore:production_resources", args=[part_type_id]))
         return render(request, "explore/checklist_organizer.html", {
             "kind": "Procedure" if schema["procedure"] and not schema["organizer"] else "Organizer",
             "active_nav": "hardware",
-            "sidebar": True if outline else navigation.sidebar_tree(inst, {}),   # the aside shows the organizer's outline (the template's side block), not the type tree
-            "side_hidden": not outline,
-            "outline": outline,
-            "table_rows": table_rows,
-            "table_tree": any(r["has_children"] for r in table_rows),
-            "table_key": f"org:{part_type_id}:{name}",
-            "list_url": _rev(request, "explore:production_list", args=[part_type_id]),
+            "sidebar": True,   # the aside shows the organizer's outline (the template's side block), not the type tree
             "part_type_id": part_type_id,
             "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
             "cl_name": name,
@@ -6482,147 +6486,123 @@ def explore_checklist_config_view(request, part_type_id):
     })
 
 
-TABLE_ORGANIZER_COLUMNS = ["Checklists", "Procedures / Drawings"]   # what a new table starts with; the author renames them
+RESOURCES_COLUMNS = ["Installation checklists", "Shipping checklists"]   # what a type's table starts with (Hajime 2026-11-25); the consortium renames, moves and removes them
+RESOURCES_TABLE = "Resources"   # the checklist name a type's first table is saved under
 
 
-def _organizer_table_rows(request, api, inst, part_type_id, table) -> list[dict]:
-    """#231: a table organizer's rows — the type's component list as the
-    Resources page draws it (label, level, fold), read now, each component
-    with its ``cells`` of the table. One read of the list, nothing per
-    listed type."""
-    rows, _vs = production.read_list(api, part_type_id)
-    rows = rows or []
-    out = production.resources_rows(rows, production.names(inst, production.type_ids(rows)), {}, {})
-    for r in out:
-        if not r["folder"]:
-            r["type_url"] = _rev(request, "explore:home") + f"?node={r['type']}"
-    return _with_cells(out, table)
+def _resources_table(api, part_type_id, listing) -> tuple[str, dict | None, dict | None]:
+    """#231: the consortium type's own columns of its Resources table —
+    ``(name, file, table)`` of the newest active checklist file whose
+    comment carries the table mark, found in the type's one listing and
+    read once; ``("", None, None)`` when the type has none, the table None
+    when the file cannot be read. A table organizer saved before the
+    columns moved onto the Resources page (Hajime 2026-11-25) is such a
+    file, so it is the type's table as it stands."""
+    marked = [c for c in checklistforms.active(api, part_type_id, rows=listing) if c["table"]]
+    if not marked:
+        return "", None, None
+    c = max(marked, key=lambda c: c["created"] or "")
+    raw = production._load(api, c["image_id"])
+    return c["name"], raw, checklistforms.clean_table((raw or {}).get("table"))
 
 
-def _with_cells(rows: list[dict], table: dict) -> list[dict]:
-    """Component-list rows (``resources_rows``, with ``type_url``) as one table's: each component with its ``cells``."""
-    return [r if r["folder"] else {**r, "cells": checklistforms.table_cells(table, r["type"])} for r in rows]
-
-
-def _resources_tables(request, api, part_type_id, listing, rows) -> list[dict]:
-    """#231 (Chao 2026-11-25): the type's table organizers, for the foot of
-    its Resources page — found in the type's one listing by the mark in a
-    file's comment, each then read once; the rows are the page's own.
-    ``[{name, title, columns, rows, key, url, edit_url}]``."""
-    out = []
-    for c in checklistforms.active(api, part_type_id, rows=listing):
-        raw = production._load(api, c["image_id"]) if c["table"] else None
-        table = checklistforms.clean_table((raw or {}).get("table"))
-        if table is None:
-            continue
-        back = urlencode({"name": c["name"], "next": request.get_full_path()})
-        out.append({"name": c["name"], "title": str(raw.get("name") or "").strip() or c["name"],
-                    "columns": table["columns"], "rows": _with_cells(rows, table), "key": f"org:{part_type_id}:{c['name']}",
-                    "url": _rev(request, "explore:type_checklist", args=[part_type_id, c["name"]]),
-                    "edit_url": _rev(request, "explore:organizer_table", args=[part_type_id]) + f"?{back}"})
-    return out
+def _resources_template() -> dict:
+    """A type with no table saved: the columns it starts with, empty — what the page shows and the editor opens with."""
+    return {"columns": list(RESOURCES_COLUMNS), "cells": {}, "hidden": {}}
 
 
 @login_not_required
 @fnal_login_required
-def explore_organizer_table_view(request, part_type_id):
-    """#231 (Hajime 2026-11-20): an organizer written as a table of links —
-    the rows the type's component list, the columns the author's, a cell a
-    list of label + URL — in place of Markdown typed into the checklist
-    editor. Unlike the generated Resources table it shows what was chosen
-    for it. It is an organizer checklist like any other
-    (``Checklist_<type>_<name>.json``, ``organizer`` set, the columns and
-    links under ``table``), so its address, the bookmark and the kept
-    versions are the checklist's; whatever else the file holds is saved
-    back as it was. The rows are not saved: the list's editor changes
-    them. ``?name=X`` edits one, without it a new one starts. The type's
-    roles gate it, as they gate the component list."""
+def explore_production_resources_edit_view(request, part_type_id):
+    """#231 (Hajime 2026-11-20; 2026-11-25: one table, the Resources
+    page's): the editor of a consortium's own part of its Resources table
+    — the rows the type's component list, each with the type's QA/QC
+    checklists and procedures and a tick to leave one out of its column;
+    then the columns the consortium adds, renames, moves and removes, a
+    cell a list of label + URL. Stored as a checklist file on the type
+    (``Checklist_<type>_<name>.json``, ``organizer`` set, the columns,
+    links and left-out checklists under ``table``), so the kept versions
+    are the checklist's; whatever else the file holds is saved back as it
+    was. The rows are not saved: the list's editor changes them. A type
+    has one table: the one found is edited, without one the template is
+    saved as ``Resources``. The type's roles gate it, as they gate the
+    component list."""
     inst = instance_of(request)
     if inst not in settings.HWDB_WRITE_INSTANCES:
-        return HttpResponseForbidden("Organizers can only be edited on a write instance.")
-    nxt = request.POST.get("next") or request.GET.get("next") or ""
-    if not url_has_allowed_host_and_scheme(nxt, allowed_hosts={request.get_host()}):
-        nxt = ""
+        return HttpResponseForbidden("The Resources table can only be edited on a write instance.")
+    resources_url = _rev(request, "explore:production_resources", args=[part_type_id])
+    page_url = _rev(request, "explore:production_resources_edit", args=[part_type_id])
     try:
         bearer = mint_for(request)
     except FnalLinkRequired:
         link = reverse("hwdb:link")
-        return redirect(f"{link}?{urlencode({'next': request.get_full_path(), 'reason': 'expired'})}")
+        return redirect(f"{link}?{urlencode({'next': page_url, 'reason': 'expired'})}")
     except FnalUnavailable:
         messages.error(request, FNAL_UNAVAILABLE)
-        return redirect(nxt or _rev(request, "explore:home"))
+        return redirect(_rev(request, "explore:home"))
     api = FnalDbApiClient(settings.HWDB_PROFILES[inst]["api"], bearer)
-    page_url = _rev(request, "explore:organizer_table", args=[part_type_id])
     role_gate = _type_role_gate(request, inst, api, part_type_id)
-    name = (request.POST.get("orig") or request.GET.get("name") or "").strip()   # the organizer being edited, "" for a new one
-    raw, _ = checklistforms.raw_load(api, part_type_id, name) if name else (None, None)
-    table = checklistforms.clean_table(raw.get("table")) if raw is not None else None
-    here = f"{page_url}?{urlencode({k: v for k, v in (('name', name), ('next', nxt)) if v})}"
+    listing = production._listing(api, part_type_id)
+    name, raw, table = _resources_table(api, part_type_id, listing)
+    if name and table is None:   # not the template over a table that is there
+        messages.error(request, f"The saved table ({name}) could not be read — try again.")
+        return redirect(resources_url)
 
     if request.method == "POST":
         if role_gate is not None:
-            return HttpResponseForbidden("Editing an organizer needs one of the type’s HWDB roles.")
-        new_name = name or (request.POST.get("cl_name") or "").strip()
-        if not new_name or "/" in new_name:
-            messages.error(request, "Give the organizer a name (no slashes).")
-            return redirect(here)
-        if raw is not None and table is None or not name and any(
-                c["name"] == new_name for c in checklistforms.available(api, part_type_id)):
-            messages.error(request, f"“{new_name}” is already a checklist on this type, and not a table organizer.")
-            return redirect(here)
+            return HttpResponseForbidden("Editing the Resources table needs one of the type’s HWDB roles.")
+        if not name and any(c["name"] == RESOURCES_TABLE for c in checklistforms.available(api, part_type_id, rows=listing)):
+            messages.error(request, f"“{RESOURCES_TABLE}” is already a checklist on this type, and holds no table.")
+            return redirect(page_url)
         try:
             new = checklistforms.clean_table(json.loads(request.POST.get("table_json") or ""))
         except ValueError:
             new = None
         if new is None:
             messages.error(request, "The table could not be read — nothing was saved.")
-            return redirect(here)
-        cfg = {**(raw or {"name": new_name, "test_type_name": "", "item_fields": [], "sections": []}),
+            return redirect(page_url)
+        name = name or RESOURCES_TABLE
+        cfg = {**(raw or {"name": name, "test_type_name": "", "item_fields": [], "sections": []}),
                "organizer": True, "table": new}
-        fname = f"Checklist_{part_type_id}_{new_name}.json"
+        fname = f"Checklist_{part_type_id}_{name}.json"
         try:
             body = api.post_component_type_image(
                 part_type_id, io.BytesIO(json.dumps(cfg, indent=2).encode()), fname,
-                comments=((request.POST.get("reason") or "").strip() or "Table organizer (Explorer)")
+                comments=((request.POST.get("reason") or "").strip() or "Resources table (Explorer)")
                          + checklistforms.comment_marks(cfg))
         except requests.RequestException as e:
-            messages.error(request, f"HWDB rejected the organizer — {_hwdb_error_detail(e)}")
-            return redirect(here)
+            messages.error(request, f"HWDB rejected the table — {_hwdb_error_detail(e)}")
+            return redirect(page_url)
         if body.get("status") != "OK":
-            messages.error(request, f"HWDB rejected the organizer — {body.get('data') or body}")
-            return redirect(here)
-        activity.log(inst, ActivityEvent.KIND_ES, f"Organizer “{new_name}” updated for type {part_type_id}",
+            messages.error(request, f"HWDB rejected the table — {body.get('data') or body}")
+            return redirect(page_url)
+        activity.log(inst, ActivityEvent.KIND_ES, f"Resources table updated for type {part_type_id}",
                      part_type_id=part_type_id, actor=activity.actor_of(request))
-        messages.success(request, f"Organizer saved as {fname}.")
-        return redirect(nxt or _rev(request, "explore:type_checklist", args=[part_type_id, new_name]))
+        messages.success(request, f"Table saved as {fname}.")
+        return redirect(resources_url)
 
-    if raw is not None and table is None:   # a checklist, or an organizer of sections: the checklist editor's
-        messages.info(request, f"“{name}” is not a table organizer — it is edited here.")
-        return redirect(_rev(request, "explore:checklist_config", args=[part_type_id])
-                        + f"?{urlencode({'name': name, 'next': nxt})}")
     node = HierarchyNode.for_instance(inst).filter(
         level=HierarchyNode.LEVEL_TYPE, part_type_id=part_type_id).first()
-    existing = raw is not None
-    table = table or {"columns": TABLE_ORGANIZER_COLUMNS, "cells": {}}
-    rows = _organizer_table_rows(request, api, inst, part_type_id, table)
-    return render(request, "explore/organizer_table.html", {
-        "active_nav": "hardware",
+    rows, _vs = production.read_list(api, part_type_id, rows=listing)
+    rows = rows or []
+    ids = production.type_ids(rows)
+    info = {tid: _resource_names(_type_resources(api, inst, tid)) for tid in set(ids)}   # one listing per distinct type, as the page makes
+    table = table or _resources_template()
+    return render(request, "explore/production_resources_edit.html", {
+        "active_nav": "production",
         "sidebar": navigation.sidebar_tree(inst, {}),
         "side_hidden": True,   # the table wants the width, as the component list's editor does
         "part_type_id": part_type_id,
         "type_name": (node.name if node else "") or part_type_id,
-        "type_url": navigation.leaf_path_for(inst, part_type_id) or "",
-        "cl_name": name,
-        "existing": existing,
-        "title": (raw or {}).get("name") or name,
-        "editor": {"columns": table["columns"], "cells": table["cells"],
-                   "rows": [{"type": r["type"], "label": r["label"], "level": r["level"], "folder": r["folder"]} for r in rows]},
+        "editor": {"columns": table["columns"], "cells": table["cells"], "hidden": table["hidden"],
+                   "rows": [{"type": r["type"], "label": r["label"], "level": r["level"], "folder": r["folder"], "checklists": r["checklists"], "procedures": r["procedures"]}
+                            for r in production.resources_rows(rows, production.names(inst, ids), info, {})]},
         "n_rows": len(rows),
         "list_url": _rev(request, "explore:production_list", args=[part_type_id]),
+        "status_url": _rev(request, "explore:production_status", args=[part_type_id]),
+        "resources_url": resources_url,
         "role_gate": role_gate,
-        "next": nxt,
-        "page_url": _rev(request, "explore:type_checklist", args=[part_type_id, name]) if existing else "",
-        "file_name": f"Checklist_{part_type_id}_{name}.json" if existing else "",
+        "file_name": f"Checklist_{part_type_id}_{name}.json" if name else "",
     })
 
 
