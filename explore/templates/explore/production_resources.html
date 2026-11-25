@@ -17,6 +17,7 @@
   .es-flash { border-radius: var(--r-lg); padding: 10px 15px; font-size: 13px; margin-bottom: 14px; }
   .es-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
     border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+  .es-flash.success { color: var(--good); background: var(--good-bg); border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule)); }   /* a table saved from here comes back here */
   .ps-empty { color: var(--dim); font-size: 13.5px; margin: 16px 0; }
   .rs-table td a { color: var(--accent-ink); text-decoration: none; }
   .rs-table td a:hover { text-decoration: underline; }
@@ -25,6 +26,14 @@
   .rs-table .ps-none { color: var(--faint); }
   .rs-table .cl-rowlab .rs-sub { display: inline; }
   .rs-table .cl-rowlab .rs-arrow { color: var(--faint); margin-right: 4px; }
+  /* #231: the type's table organizers, under the generated table */
+  .rs-org { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 26px 0 8px; }
+  .rs-org h2 { font-size: 1.05rem; margin: 0; }
+  .rs-org a { color: var(--accent-ink); text-decoration: none; font-size: 13px; }
+  .rs-org h2 a { font-size: inherit; }
+  .rs-org a:hover { text-decoration: underline; }
+  .rs-new { margin: 22px 0 0; font-size: 13px; }
+  .rs-new a { color: var(--accent-ink); text-decoration: none; }
 </style>
 {% include "explore/_checklist_style.html" %}
 
@@ -70,6 +79,12 @@
     </tbody>
   </table></div>
   {% include "explore/_production_tree_script.html" %}
+  {# #231 (Chao 2026-11-25): the type's table organizers — the same rows, each with the links chosen for it; each keeps its own page #}
+  {% for o in organizers %}
+  <div class="rs-org"><h2><a href="{{ o.url }}" title="Its own page — bookmark it there">{{ o.title }}</a></h2>{% if can_edit %}<a href="{{ o.edit_url }}">&#9998; Edit table</a>{% endif %}</div>
+  {% include "explore/_organizer_table.html" with rows=o.rows columns=o.columns key=o.key %}
+  {% endfor %}
+  {% if can_edit %}<p class="rs-new"><a href="{{ new_table_url }}" title="A table of links you choose — these rows, columns of your own">+ New table organizer</a></p>{% endif %}
   {% endif %}
 </div>
 {% include "explore/_lightbox.html" %}

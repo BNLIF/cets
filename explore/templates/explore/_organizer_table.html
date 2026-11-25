@@ -1,0 +1,13 @@
+{# #231: a table organizer's tree table — rows (the component list's, each component with its cells), columns, tree, key (what the fold is remembered by). The page includes _checklist_style.html and _lightbox.html and carries the rs-table rules. #}
+<div class="ps-bar">{% if tree %}<button type="button" class="ps-fold-btn" data-fold="open">Expand all</button><button type="button" class="ps-fold-btn" data-fold="close">Collapse all</button>{% endif %}</div>
+<div class="tbl-scroll"><table class="cl-table cl-gridlines ps-table rs-table" data-table="{{ key }}">
+  <thead><tr><th>Component</th>{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+  <tbody>
+  {% for r in rows %}<tr data-level="{{ r.level }}" data-t="{{ r.key }}"{% if r.folder %} class="ps-folder"{% endif %}>
+    <th scope="row" class="cl-rowlab"{% if r.level %} style="padding-left:{% widthratio r.level 1 18 %}px;"{% endif %}>{% if r.has_children %}<button type="button" class="ps-tog" aria-expanded="true" title="Fold its rows"></button>{% elif tree %}<span class="ps-tog ps-tog-none"></span>{% endif %}{% if r.folder %}{{ r.label }}{% else %}{% if r.level %}<span class="rs-arrow" aria-hidden="true">&#8627;</span>{% endif %}<a href="{{ r.type_url }}" title="{{ r.type }}">{{ r.label }}</a>{% endif %}</th>
+    {% if r.folder %}{% if columns %}<td class="cl-const" colspan="{{ columns|length }}"></td>{% endif %}
+    {% else %}{% for cell in r.cells %}<td class="cl-const rs-list{% if not cell %} ps-none{% endif %}">{% for k in cell %}<a href="{{ k.url }}"{% if k.viewer %} data-lightbox{% else %} target="_blank" rel="noopener"{% endif %}>{{ k.label|default:k.url }}</a>{% empty %}—{% endfor %}</td>{% endfor %}{% endif %}
+  </tr>{% endfor %}
+  </tbody>
+</table></div>
+{% include "explore/_production_tree_script.html" %}

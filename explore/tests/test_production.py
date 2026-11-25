@@ -1142,6 +1142,7 @@ class ConsortiumTypeTest(TestCase):
             self.assertNotIn("ES config", html)
             self.assertNotIn("New item", html)
             self.assertIn("Edit checklists", html)
+            self.assertIn('<a href="/hw/organizer-table/D05700200099/?next=', html)   # #231: a new organizer as a table of links
             self.assertIn('id="cl-names-dd"', html)   # the organizer checklists still open from here
             self.client.post(url, {"next": self.leaf_url, "class": "shipping"})   # switching clears the other mark
             self.assertFalse(ConsortiumTypeOverride.objects.exists())

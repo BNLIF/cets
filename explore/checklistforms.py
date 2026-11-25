@@ -43,10 +43,16 @@ SPEC_CAPABLE = {"check", "number", "table", "text", "textarea", "datetime",
 
 RETIRED_MARK = "[retired]"   # in the image's HWDB comment, so a listing knows without loading the schema
 PROCEDURE_MARK = "[procedure]"   # likewise (#213 round 2): a static information page — procedure, drawings — not a form
+TABLE_MARK = "[table]"   # likewise (#231): an organizer holding a table of links — the Resources page lists these under its own table
 
+
+def comment_marks(cfg: dict) -> str:
+    """The marks a saved schema's HWDB comment ends with, each led by a space."""
+    return ((f" {RETIRED_MARK}" if cfg.get("retired") else "") + (f" {PROCEDURE_MARK}" if cfg.get("procedure") else "")
+            + (f" {TABLE_MARK}" if clean_table(cfg.get("table")) is not None else ""))
 
 def available(api, part_type_id: str, rows=None) -> list[dict]:
-    """``[{name, image_id, image_name, created, retired, procedure}]`` — the newest row
+    """``[{name, image_id, image_name, created, retired, procedure, table}]`` — the newest row
     per checklist name among the type's ``Checklist_{typeid}_{name}.json``
     images. ``rows`` lets a caller that already listed the type's images
     (the part page shares the ES config's listing) skip the fetch. Any
@@ -56,7 +62,8 @@ def available(api, part_type_id: str, rows=None) -> list[dict]:
     left off item pages and choosers (``active``), the editor still
     lists it. ``procedure`` (#213 round 2) the same way: the checklist is a
     static page of procedures / drawings, listed apart from the QA/QC
-    checklists on the resources pages."""
+    checklists on the resources pages. ``table`` (#231) likewise: it
+    holds a table of links."""
     try:
         if rows is None:
             rows = api.get_component_type_images(part_type_id).get("data") or []
@@ -74,7 +81,8 @@ def available(api, part_type_id: str, rows=None) -> list[dict]:
         return [{"name": k, "image_id": str(v["image_id"]),
                  "image_name": v.get("image_name"), "created": v.get("created"),
                  "retired": RETIRED_MARK in str(v.get("comments") or ""),
-                 "procedure": PROCEDURE_MARK in str(v.get("comments") or "")}
+                 "procedure": PROCEDURE_MARK in str(v.get("comments") or ""),
+                 "table": TABLE_MARK in str(v.get("comments") or "")}
                 for k, v in sorted(best.items())]
     except Exception as e:
         logger.warning("checklist listing for %s failed: %s", part_type_id, e)
@@ -911,6 +919,42 @@ def _grid_place(leaves: list, n: int) -> list:
     return leaves
 
 
+_HTTP_URL = re.compile(r"https?://\S+$", re.I)
+_VIEWER_URL = re.compile(r"/shipment-image/[^/?#]+/?(?:[?#]|$)")   # the Explorer's image proxy: a download unless opened in the viewer
+
+
+def clean_table(raw) -> dict | None:
+    """#231 (Hajime 2026-11-20): an organizer written as a table of links
+    over the type's component list, in the form it is stored —
+    ``{"columns": [names], "cells": {type id: [links per column]}}``, a
+    link ``{"label", "url"}``. The rows are not kept: they are the
+    component list's, read when the table is shown, so the table follows
+    the list. A link is http(s) only, as a Markdown link is; a type with
+    no link is left out. None when ``raw`` is no table."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("columns"), list):
+        return None
+    cols = [str(c or "").strip() for c in raw["columns"]]
+    cells = {}
+    for tid, given in (raw.get("cells") if isinstance(raw.get("cells"), dict) else {}).items():
+        if not (isinstance(tid, str) and re.fullmatch(r"[A-Z]\d{11}", tid) and isinstance(given, list)):
+            continue
+        row = [[{"label": str(k.get("label") or "").strip(), "url": k["url"].strip()}
+                for k in (given[i] if i < len(given) and isinstance(given[i], list) else [])
+                if isinstance(k, dict) and isinstance(k.get("url"), str) and _HTTP_URL.match(k["url"].strip())]
+               for i in range(len(cols))]
+        if any(row):
+            cells[tid] = row
+    return {"columns": cols, "cells": cells}
+
+
+def table_cells(table: dict, part_type_id: str) -> list[list[dict]]:
+    """A component type's cells of a cleaned table, one list of links per
+    column (empty where it has none), each link with ``viewer``: it opens
+    in the page's viewer."""
+    row = table["cells"].get(part_type_id) or [[] for _ in table["columns"]]
+    return [[{**k, "viewer": bool(_VIEWER_URL.search(k["url"]))} for k in cell] for cell in row]
+
+
 def normalize(cfg: dict, name: str) -> dict:
     """A tolerant read of the schema JSON. Unknown field types and malformed
     entries are dropped; a ``row`` groups its (non-row) children side by
@@ -936,6 +980,8 @@ def normalize(cfg: dict, name: str) -> dict:
               # drawings about the type, nothing to submit; rendered like an
               # organizer, listed under Procedures / Drawings
               "procedure": bool(cfg.get("procedure")),
+              # #231: an organizer's table of links over the component list, None when it has none
+              "table": clean_table(cfg.get("table")),
               # Chao 2026-10-08: a retired checklist stays in HWDB (type
               # images are never deleted) but is left off item pages
               "retired": bool(cfg.get("retired")),

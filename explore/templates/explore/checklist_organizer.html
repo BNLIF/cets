@@ -2,10 +2,10 @@
 {% load checklist %}
 {% block title %}{{ schema.name }} · {{ kind|default:"Organizer" }} · {{ part_type_id }} · HWDB Explorer{% endblock %}
 
-{% block side %}
+{% block side %}{% if outline %}
 <div class="ex-side-label" style="display:flex; align-items:baseline;">Outline <button type="button" class="clo-all" id="cl-outline-all">collapse all</button></div>
 <div id="cl-outline"></div>{# filled by _checklist_outline.html, included at the end of the page #}
-{% endblock %}
+{% else %}{{ block.super }}{% endif %}{% endblock %}
 
 {% block content %}
 {# #189 (Hajime, for the CPA group): an organizer — a checklist of checklists on a consortium's virtual type. Sections of Link-to-checklist fields, selects that show/hide sections; no item, nothing to submit. #}
@@ -23,10 +23,20 @@
     border: 1px solid color-mix(in oklch, var(--good) 35%, var(--rule)); }
   .es-flash.error { color: var(--bad, #a33); background: color-mix(in oklch, var(--bad, #a33) 8%, var(--page));
     border: 1px solid color-mix(in oklch, var(--bad, #a33) 35%, var(--rule)); overflow-wrap: anywhere; }
+  /* #231: an organizer's table of links — the Resources table's look */
+  #cl-org-table .es-sub a { color: var(--accent-ink); text-decoration: none; }
+  .es-page.es-wide { max-width: 1280px; }
+  .rs-table td a { color: var(--accent-ink); text-decoration: none; }
+  .rs-table td a:hover { text-decoration: underline; }
+  .rs-table td.rs-list { line-height: 1.5; }
+  .rs-table td.rs-list a { display: block; }
+  .rs-table .ps-none { color: var(--faint); }
+  .rs-table .cl-rowlab .rs-arrow { color: var(--faint); margin-right: 4px; }
+  #cl-org-table { margin-bottom: 18px; }
 </style>
 {% include "explore/_checklist_style.html" %}
 
-<div class="es-page">
+<div class="es-page{% if schema.table %} es-wide{% endif %}">
   <div class="es-crumbs">
     <a href="{% url 'explore:home' %}">Explorer</a>
     <span class="sep">›</span>{% if type_url %}<a href="{{ type_url }}">{{ part_type_id }}</a>{% else %}{{ part_type_id }}{% endif %}
@@ -36,7 +46,8 @@
 
   <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
     <h1>{{ schema.name }}{% if cl_name != schema.name %} <span class="mono" style="font-size:.7em; font-weight:400; color:var(--dim);">· {{ cl_name }}</span>{% endif %}</h1>
-    <a class="es-btn quiet" style="margin-left:auto; text-decoration:none;" href="{% url 'explore:checklist_config' part_type_id=part_type_id %}?name={{ cl_name|urlencode }}&amp;next={{ request.get_full_path|urlencode }}" title="Open this checklist in the editor">&#9998; Edit checklist</a>
+    {% if schema.table %}<a class="es-btn quiet" style="margin-left:auto; text-decoration:none;" href="{% url 'explore:organizer_table' part_type_id=part_type_id %}?name={{ cl_name|urlencode }}&amp;next={{ request.get_full_path|urlencode }}" title="Edit the table’s columns and links">&#9998; Edit table</a>
+    {% else %}<a class="es-btn quiet" style="margin-left:auto; text-decoration:none;" href="{% url 'explore:checklist_config' part_type_id=part_type_id %}?name={{ cl_name|urlencode }}&amp;next={{ request.get_full_path|urlencode }}" title="Open this checklist in the editor">&#9998; Edit checklist</a>{% endif %}
     <form method="post" action="{% url 'explore:checklist_bookmark' %}" style="margin:0;">
       {% csrf_token %}
       <input type="hidden" name="part_type_id" value="{{ part_type_id }}">
@@ -50,14 +61,22 @@
   </div>
   {% if schema.instructions %}<div class="es-sub cl-md">{{ schema.instructions|clmd_block }}</div>{% endif %}
 
+  {% if schema.table %}{# #231: the table of links — the component list's rows as the Resources table draws them, read on this visit; the columns and links are the organizer's #}
+  <div id="cl-org-table">
+  {% if not table_rows %}<p class="es-sub">No component list on this type yet — <a href="{{ list_url }}?next={{ request.get_full_path|urlencode }}">add the component types</a>; they are this table’s rows.</p>
+  {% else %}
+  {% include "explore/_organizer_table.html" with rows=table_rows columns=schema.table.columns tree=table_tree key=table_key %}
+  {% endif %}
+  </div>
+  {% endif %}
   <div id="cl-org">
-    {% include "explore/_checklist_sections.html" %}
+    {% if outline %}{% include "explore/_checklist_sections.html" %}{% endif %}
   </div>
 </div>
 
 {% include "explore/_checklist_behavior.html" %}
 {% include "explore/_lightbox.html" %}{# reference drawings open in the viewer here as on the fill page; without it a PDF link downloads (Hajime 2026-10-06) #}
-{% include "explore/_checklist_outline.html" with root="cl-org" %}
+{% if outline %}{% include "explore/_checklist_outline.html" with root="cl-org" %}{% endif %}
 <script>
 (function () {
   // the selects (north/south, module type) are remembered on this device per

@@ -70,6 +70,7 @@ urlpatterns = [
     path("checklist-config/<str:part_type_id>/",
          views.explore_checklist_config_view, name="checklist_config"),
     path("text-preview/", views.explore_text_preview_view, name="text_preview"),   # the cell text editor's live preview (Chao 2026-10-08)
+    path("organizer-table/<str:part_type_id>/", views.explore_organizer_table_view, name="organizer_table"),   # #231: an organizer written as a table of links
     path("checklist-config/<str:part_type_id>/preview/",
          views.explore_checklist_preview_view, name="checklist_preview"),
     path("checklist-config/<str:part_type_id>/asset/",
